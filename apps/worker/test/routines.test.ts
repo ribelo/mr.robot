@@ -50,9 +50,11 @@ describe('Routines on the Durable Object alarm', () => {
   it('the alarm runs a Turn with the Routine prompt and re-arms (robot-7j1a)', async () => {
     const id = await activeRobot(['routines'])
     await weeklyRoutine(id)
-    await testRobot(id).backdateRoutinesForTest(1000)
+    // The script must be in place before the alarm is armed in the past: workerd may fire it at once.
     scripts.set(id, [{ text: 'Queue worked.' }])
-    expect(await runDurableObjectAlarm(env.ROBOT.getByName(id))).toBe(true)
+    await testRobot(id).backdateRoutinesForTest(1000)
+    // Fire the alarm unless workerd already did.
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
     const last = requests.get(id)!.at(-1)!
     expect(JSON.stringify(last.messages.at(-1))).toContain('Routine \\"Overnight outbound\\"')
@@ -76,8 +78,8 @@ describe('Routines on the Durable Object alarm', () => {
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'check every 5 minutes' } })
     await settle(id)
-    await testRobot(id).backdateRoutinesForTest(16 * 60_000)
     scripts.set(id, [{ text: 'Checked once.' }, { text: 'unexpected second run' }])
+    await testRobot(id).backdateRoutinesForTest(16 * 60_000)
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
     const routineRuns = (await env.ROBOT.getByName(id).trajectory())
