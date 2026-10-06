@@ -40,7 +40,7 @@ const base = (provider: string): GenerateOptions => ({
 describe('Provider adapters', () => {
   it('OpenRouter: streams text and tool calls in chat-completions format', async () => {
     const { requests } = serve([
-      sse({ choices: [{ delta: { content: 'Look' } }] }),
+      sse({ choices: [{ delta: { content: 'Look' } }], usage: null }),
       sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'read', arguments: '{"pa' } }] } }] }),
       sse({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'th":"x"}' } }] }, finish_reason: 'tool_calls' }] }),
       sse({ usage: { prompt_tokens: 12, completion_tokens: 3 } }),

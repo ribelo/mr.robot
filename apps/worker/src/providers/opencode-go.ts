@@ -53,7 +53,8 @@ export async function keyFailure(response: Response): Promise<'quota' | 'auth' |
   const text = message?.trim()
   const quotaStatus = response.status === 401 || response.status === 402 || response.status === 429 || (response.status === 403 && isQuotaType(type))
   if (text && quotaStatus && (isQuotaType(type) || isQuotaText(text))) return 'quota'
-  if (response.status === 401 && type === 'AuthenticationError') return 'auth'
+  // OpenCode Go answers an invalid key with 401 AuthError (seen live 2026-10-06); others say AuthenticationError.
+  if (response.status === 401 && (type === 'AuthError' || type === 'AuthenticationError' || /invalid api key/i.test(text ?? ''))) return 'auth'
   if (response.status === 400 && /encrypted_content.*was not issued to this caller/i.test(text ?? '')) return 'mismatch'
   return undefined
 }

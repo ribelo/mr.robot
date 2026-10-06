@@ -11,11 +11,11 @@ Provider credential.
 
 **Blocked by:** 13 Providers, subscriptions and per-robot model
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Every OpenCode Go model is in the model list with its context window and price, on the right wire format (chat completions, Anthropic Messages, or Responses)
-- [ ] Requests carry `x-opencode-session` with the Robot's session id
-- [ ] A person adds, activates and removes OpenCode Go keys in the PWA; keys are encrypted and shown masked
-- [ ] On a quota or authentication failure the next key is tried and promoted to active; a manual choice made meanwhile wins
-- [ ] A session sticks to the key that last succeeded for it
-- [ ] Responses-API requests whose encrypted reasoning was issued to another key are retried without it
+- [x] Every OpenCode Go model is in the model list with its context window and price, on the right wire format (chat completions, Anthropic Messages, or Responses)
+- [x] Requests carry `x-opencode-session` with the Robot's session id
+- [x] A person adds, activates and removes OpenCode Go keys in the PWA; keys are encrypted and shown masked
+- [x] On a quota or authentication failure the next key is tried and promoted to active; a manual choice made meanwhile wins
+- [x] A session sticks to the key that last succeeded for it
+- [x] Responses-API requests whose encrypted reasoning was issued to another key are retried without it

@@ -93,7 +93,7 @@ export class ChatCompletionsAdapter extends LlmAdapter {
       if (event.data === '[DONE]') break
       const chunk = JSON.parse(event.data) as {
         choices?: Array<{ delta?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null; tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string | null }>
-        usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } }
+        usage?: null | { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } }
         error?: { message?: string }
       }
       if (chunk.error !== undefined) throw new LlmError(`${this.options.name}: ${chunk.error.message ?? 'error'}`, 'PROVIDER_ERROR')
@@ -110,7 +110,8 @@ export class ChatCompletionsAdapter extends LlmAdapter {
         if (call.function?.arguments !== undefined) yield* writer.toolArgs(call.function.arguments)
       }
       if (choice?.finish_reason) finish = choice.finish_reason
-      if (chunk.usage !== undefined) {
+      // Some servers send "usage": null on every chunk but the last.
+      if (chunk.usage !== undefined && chunk.usage !== null) {
         yield { type: 'usage', usage: { inputTokens: chunk.usage.prompt_tokens ?? 0, outputTokens: chunk.usage.completion_tokens ?? 0, cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens ?? 0 } }
       }
     }

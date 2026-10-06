@@ -23,7 +23,8 @@ function memoryPool(keys: OpencodeKey[]) {
 }
 
 const limited = () => Response.json({ error: { type: 'MonthlyLimitError', message: 'Monthly limit exceeded' } }, { status: 429 })
-const invalid = () => Response.json({ error: { type: 'AuthenticationError', message: 'Invalid API key' } }, { status: 401 })
+// The body OpenCode Go actually returns for an invalid key.
+const invalid = () => Response.json({ type: 'error', error: { type: 'AuthError', message: 'Invalid API key.' } }, { status: 401 })
 
 function upstream(byKey: Record<string, () => Response>) {
   const seen: Array<{ key: string; session: string | null; body: string }> = []
