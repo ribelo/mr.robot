@@ -1,0 +1,33 @@
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import events from './fixtures/session-events.json'
+import { RobotTrajectory, TrajectoryFeed } from '../src/dsh/RobotTrajectory.tsx'
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+// A real Robot session (names replaced): four Turns, the last one a code-mode program calling routine_create.
+const serve = () => vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sessionId: 's-1', hasMore: false, events })))
+
+describe('the DSH trajectory over Robot events (robot-3ioa, robot-s54i)', () => {
+  it('assembles Turns, requests and the code-mode program with its nested call', async () => {
+    serve()
+    const feed = new TrajectoryFeed('r-fixture')
+    await feed.open()
+    const snapshot = feed.getSnapshot()
+    expect(snapshot.eventNodes.length).toBeGreaterThan(5)
+    expect(snapshot.requests.length).toBe(5)
+    expect(snapshot.eventNodes.map((node) => node.kind)).toEqual(['context', 'assistant', 'context', 'assistant', 'context', 'assistant', 'context', 'assistant', 'tool-result', 'assistant'])
+    const result = snapshot.eventNodes.find((node) => node.kind === 'tool-result')
+    // The program's inner call is recorded with its result, as a nested Subtool record.
+    expect(JSON.stringify(result)).toContain('"name":"routine_create"')
+  })
+
+  it('renders the view with its toolbar', async () => {
+    serve()
+    render(<RobotTrajectory robotId="r-fixture" liveVersion={0} />)
+    expect(await screen.findByText('Duration')).toBeTruthy()
+  })
+})

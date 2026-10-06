@@ -59,7 +59,7 @@ interface Paging {
 }
 
 /** One Robot's event window, assembled the way DSH's session controller feeds ui-conversation. */
-class TrajectoryFeed {
+export class TrajectoryFeed {
   private readonly assembler: ConversationNodeAssembler
   private readonly listeners = new Set<() => void>()
   private snapshot: TrajectorySnapshot = EMPTY_TRAJECTORY_SNAPSHOT
