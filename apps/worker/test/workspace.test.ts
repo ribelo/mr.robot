@@ -97,7 +97,8 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
     await settle(id)
     expect(toolResults(id)[0]).toContain('1: Invoice 42: 99 PLN')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items[conversation.items.length - 2]).toMatchObject({ kind: 'message', text: 'what is this?', attachments: [{ name: 'invoice.txt' }] })
+    expect(conversation.items.at(-3)).toMatchObject({ kind: 'message', text: 'what is this?', attachments: [{ name: 'invoice.txt' }] })
+    expect(conversation.items.at(-2)).toMatchObject({ kind: 'activity', tools: ['read'] })
   })
 
   it('tells the owner when it changes SOUL.md (robot-h1nm)', async () => {

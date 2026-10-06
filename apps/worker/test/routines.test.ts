@@ -38,8 +38,9 @@ describe('Routines on the Durable Object alarm', () => {
     const id = await activeRobot(['routines'])
     await weeklyRoutine(id)
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.slice(-2)).toEqual([
+    expect(conversation.items.slice(-3)).toEqual([
       expect.objectContaining({ kind: 'message', text: 'Run this every week.', reaction: '👍' }),
+      expect.objectContaining({ kind: 'activity', tools: ['routine_create'] }),
       expect.objectContaining({ kind: 'routine', action: 'created', name: 'Overnight outbound' }),
     ])
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body

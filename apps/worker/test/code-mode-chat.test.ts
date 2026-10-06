@@ -32,5 +32,7 @@ describe('the chat in code mode (the default)', () => {
     expect(items.find((item) => item.kind === 'message')).toMatchObject({ reaction: '👍' })
     expect(items.find((item) => item.kind === 'routine')).toMatchObject({ action: 'created', name: 'Invoice check' })
     expect(items.find((item) => item.kind === 'question')).toMatchObject({ proposal: { kind: 'grants', purpose: 'Read the web for prices' } })
+    // One collapsed line for the program and the tools it called (react is shown as the 👍 instead).
+    expect(items.find((item) => item.kind === 'activity')).toMatchObject({ tools: ['code', 'routine_create', 'propose_grants'] })
   })
 })

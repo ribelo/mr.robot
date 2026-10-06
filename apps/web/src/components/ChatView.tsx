@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, type ReactNode , useState } from 'react'
 import type { ChatItem, ProposalView } from '@mr-robot/protocol'
 import { separatorTime } from '../time.ts'
 import { Avatar } from './Avatar.tsx'
@@ -7,6 +7,8 @@ export interface ChatViewProps {
   readonly items: readonly ChatItem[]
   readonly meId: string
   readonly working: boolean
+  /** The tool running now, while working. */
+  readonly activity?: string
   readonly canAnswer: boolean
   readonly onAnswer?: (proposal: ProposalView, approve: boolean) => void
   readonly now?: number
@@ -15,7 +17,7 @@ export interface ChatViewProps {
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, canAnswer, onAnswer, now }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -45,7 +47,11 @@ export function ChatView({ items, meId, working, canAnswer, onAnswer, now }: Cha
     }
     rows.push(<Item key={item.id} item={item} meId={meId} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />)
   }
-  if (working) rows.push(<div key="working" className="bubble bubble-robot typing" aria-label="working"><span /><span /><span /></div>)
+  if (working) {
+    rows.push(activity === undefined
+      ? <div key="working" className="bubble bubble-robot typing" aria-label="working"><span /><span /><span /></div>
+      : <div key="working" className="activity-now" aria-label="working"><span className="spinner" /> Using {toolLabel(activity)}…</div>)
+  }
   return <div className="chat">{rows}</div>
 }
 
@@ -84,6 +90,8 @@ function Item({ item, meId, canAnswer, onAnswer }: { item: ChatItem; meId: strin
       )
     case 'notice':
       return <div className="chat-separator notice">{item.text}</div>
+    case 'activity':
+      return <ActivityLine tools={item.tools} />
     case 'question':
       return <QuestionCard proposal={item.proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />
     case 'working':
@@ -167,5 +175,23 @@ export function ClockIcon() {
       <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
       <path d="M8 4.6V8l2.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
+  )
+}
+
+/** Tool names as people read them. */
+export function toolLabel(name: string): string {
+  return name === 'code' ? 'a code program' : name.replace(/_/g, ' ')
+}
+
+/** The tools of one step, collapsed to one line; tap to see them (robot-gr94). */
+function ActivityLine({ tools }: { tools: readonly string[] }) {
+  const [open, setOpen] = useState(false)
+  const unique = [...new Set(tools)]
+  const summary = unique.length <= 2 ? unique.map(toolLabel).join(', ') : `${toolLabel(unique[0]!)} and ${unique.length - 1} more`
+  return (
+    <div className="activity-line">
+      <button type="button" className="link" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '▾' : '▸'} Used {summary}</button>
+      {open ? <ul>{tools.map((tool, index) => <li key={index}>{toolLabel(tool)}</li>)}</ul> : null}
+    </div>
   )
 }

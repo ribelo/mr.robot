@@ -156,7 +156,7 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
       <section className="conversation-main">
         {header}
         <div className="chat-scroll">
-          <ChatView items={conversation.items} meId={me.id} working={conversation.working} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
+          <ChatView items={conversation.items} meId={me.id} working={conversation.working} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void api.retry(id).then(refresh)}>Try again</button>

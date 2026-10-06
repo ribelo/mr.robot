@@ -211,12 +211,16 @@ export type ChatItem =
   | { readonly kind: 'routine'; readonly id: string; readonly seq: number; readonly at: number; readonly action: 'created' | 'updated' | 'deleted' | 'ran'; readonly name: string }
   | { readonly kind: 'question'; readonly id: string; readonly seq: number; readonly at: number; readonly proposal: ProposalView }
   | { readonly kind: 'notice'; readonly id: string; readonly seq: number; readonly at: number; readonly text: string }
+  /** Tools the Robot used in one step, shown collapsed (robot-gr94). */
+  | { readonly kind: 'activity'; readonly id: string; readonly seq: number; readonly at: number; readonly tools: readonly string[] }
   | { readonly kind: 'working'; readonly id: string; readonly seq: number; readonly at: number }
 
 export interface Conversation {
   readonly robotId: string
   readonly items: readonly ChatItem[]
   readonly working: boolean
+  /** While working: the tool running now, if any (robot-gr94). */
+  readonly activity?: string
   /** The last Turn failed and can be run again. */
   readonly canRetry?: boolean
 }

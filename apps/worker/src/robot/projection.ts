@@ -9,6 +9,9 @@ import type { NoticeRow } from './store.ts'
 interface ContentBlock { readonly type: string; readonly text?: string }
 interface MessageLike { readonly id: string; readonly content: readonly ContentBlock[]; readonly source?: Record<string, unknown> }
 
+/** Tools whose use the chat already shows in their own way (a 👍 on the message). */
+const HIDDEN_TOOLS = new Set(['react'])
+
 const ROUTINE_TOOLS: Record<string, 'created' | 'updated' | 'deleted'> = {
   routine_create: 'created',
   routine_update: 'updated',
@@ -103,7 +106,16 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
       case 'tool/result': {
         const message = data['message'] as (MessageLike & { toolCallId?: string; isError?: boolean }) | undefined
         if (message === undefined || message.isError === true || data['error'] !== undefined) break
+        const call = calls.get(String(message.toolCallId))
+        if (call === undefined) break
         const inners = innerCalls.get(String(message.toolCallId)) ?? []
+        // Compact activity: the step's tools, merged into one collapsed line per step.
+        const used = [call.name === 'run_code' ? 'code' : call.name, ...inners.map((inner) => inner.name)].filter((name) => !HIDDEN_TOOLS.has(name))
+        if (used.length > 0) {
+          const previous = items.at(-1)
+          if (previous?.kind === 'activity') items[items.length - 1] = { ...previous, tools: [...previous.tools, ...used] }
+          else items.push({ kind: 'activity', id: 'activity-' + message.id, seq: event.seq, at: event.time, tools: used })
+        }
         inners.forEach((inner, index) => {
           const innerAction = ROUTINE_TOOLS[inner.name]
           if (innerAction !== undefined) {
@@ -113,8 +125,6 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
             if (target?.kind === 'message') items[lastMemberMessage] = { ...target, reaction: String(inner.args['emoji'] ?? '👍') }
           }
         })
-        const call = calls.get(String(message.toolCallId))
-        if (call === undefined) break
         const result = parseResult(message)
         const action = ROUTINE_TOOLS[call.name]
         if (action !== undefined) {

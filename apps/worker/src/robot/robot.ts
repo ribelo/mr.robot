@@ -1408,11 +1408,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
       items.splice(position, 0, { kind: 'question', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
     }
+    const working = this.store.activeTurn() !== undefined
+    const activity = working ? runningTool(events) : undefined
     return {
       canRetry: this.store.get('failed-wakeup') !== undefined,
       robotId: config.id,
-      working: this.store.activeTurn() !== undefined,
+      working,
       items,
+      ...(activity === undefined ? {} : { activity }),
     }
   }
 
@@ -1658,6 +1661,24 @@ async function forwardInput(cdp: { send(method: string, params?: Record<string, 
 }
 
 const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }
+
+/** The tool running now: the latest call without a result (a code program's latest inner call wins). */
+function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): string | undefined {
+  const open = new Map<string, string>()
+  let inner: string | undefined
+  for (const event of events) {
+    const data = event.data as Record<string, unknown>
+    if (event.type === 'tool/call') open.set(String(data['callId']), String(data['name']))
+    else if (event.type === 'tool/ptc-dispatch') inner = String(data['name'])
+    else if (event.type === 'tool/result') {
+      const message = data['message'] as { toolCallId?: string } | undefined
+      open.delete(String(message?.toolCallId))
+      inner = undefined
+    }
+  }
+  const last = [...open.values()].at(-1)
+  return last === undefined ? undefined : last === 'run_code' ? (inner ?? 'code') : last
+}
 
 function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
   return {
