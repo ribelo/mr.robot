@@ -240,6 +240,17 @@ export const api = new Router<ApiContext>()
   }))
   .on('GET', '/api/robots/:id/prompt', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).promptPreview()))))
   .on('POST', '/api/robots/:id/retry', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).retry())), Effect.map((retried) => ({ retried }))))
+  .on('GET', '/api/robots/:id/events', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const query = new URL(c.request.url).searchParams
+    const number = (name: string) => (query.get(name) === null ? undefined : Number(query.get(name)))
+    const page = yield* call(() => robot(c, id).sessionEvents({
+      ...(number('before') === undefined ? {} : { before: number('before')! }),
+      ...(number('after') === undefined ? {} : { after: number('after')! }),
+      ...(number('limit') === undefined ? {} : { limit: number('limit')! }),
+    }))
+    return new Response(`{"sessionId":${JSON.stringify(page.sessionId)},"hasMore":${page.hasMore},"events":${page.events}}`, { headers: { 'content-type': 'application/json' } })
+  }))
   .on('GET', '/api/robots/:id/panel', (c, { id }) => Effect.gen(function* () {
     const access = yield* reach(c, id)
     const entry = (yield* call(() => home(c.env).reachable(c.member.id))).find((summary) => summary.id === id)

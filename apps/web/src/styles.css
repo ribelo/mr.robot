@@ -260,3 +260,7 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .runs li { display: grid; grid-template-columns: 18px auto 1fr; gap: 10px; font-size: 13.5px; }
 .run-done { color: #3fb97a; } .run-failed { color: #ff7b72; } .run-running { color: var(--muted); }
 .link.danger { color: #ff7b72; }
+
+/* The DSH trajectory fills the page width. */
+.page.page-wide { max-width: none; }
+.dsh-trajectory { display: flex; flex-direction: column; min-height: 70vh; height: calc(100vh - 140px); font-size: 13px; }

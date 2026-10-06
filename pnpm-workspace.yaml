@@ -15,5 +15,9 @@ allowBuilds:
 
 minimumReleaseAge: 0
 
+# The PWA uses DSH client packages whose cordis peer resolves differently from the Worker's;
+# keep each app's copy instead of merging them (merging broke the Worker's cordis types).
+dedupePeerDependents: false
+
 patchedDependencies:
   '@deepseek-ai/dsh-llm@0.2.0-rc.2': patches/@deepseek-ai__dsh-llm@0.2.0-rc.2.patch

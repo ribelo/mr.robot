@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { Me, RobotPanel, RobotSummary, SettingsCatalog, Trajectory } from '@mr-robot/protocol'
 import { api, ApiError } from './api.ts'
 import { useLive } from './live.ts'
@@ -7,7 +7,10 @@ import { AdvancedSettings } from './components/AdvancedSettings.tsx'
 import { Profile } from './components/Profile.tsx'
 import { Admin } from './components/Admin.tsx'
 import { Takeover } from './components/Takeover.tsx'
-import { TrajectoryView } from './components/TrajectoryView.tsx'
+import { ConfirmButton } from './components/RobotSheets.tsx'
+
+// The DSH trajectory (with its code highlighter) loads only when its page opens.
+const RobotTrajectory = lazy(() => import('./dsh/RobotTrajectory.tsx').then((module) => ({ default: module.RobotTrajectory })))
 
 /** Full-page views reached from a Robot or the sidebar. */
 export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; robots: readonly RobotSummary[]; onChanged: () => void }) {
@@ -41,35 +44,78 @@ function PageHead({ title, back }: { title: string; back: Route }) {
 }
 
 function TrajectoryPage({ id, robot, me, onChanged }: { id: string; robot: RobotSummary | undefined; me: Me; onChanged: () => void }) {
-  const [trajectory, setTrajectory] = useState<Trajectory>()
-  const refresh = useCallback(() => api.trajectory(id).then(setTrajectory), [id])
-  useEffect(() => { void refresh() }, [refresh])
-  useLive(id, () => void refresh())
-  const act = async (run: () => Promise<unknown>) => {
-    try {
-      await run()
-    } catch (cause) {
-      alert(cause instanceof ApiError ? cause.message : 'failed')
-    }
-    await refresh()
-    onChanged()
-  }
+  const [liveVersion, setLiveVersion] = useState(0)
+  const [viewKey, setViewKey] = useState(0)
+  const [rewinding, setRewinding] = useState(false)
+  useLive(id, () => setLiveVersion((version) => version + 1))
+  const canRewind = robot?.ownerId === me.id
   return (
-    <div className="page">
+    <div className="page page-wide">
       <PageHead title={`${robot?.identity.name ?? 'Robot'} · Trajectory`} back={{ page: 'robot', id, panel: true }} />
-      {trajectory === undefined ? <div className="muted">Loading…</div> : (
-        <TrajectoryView
-          trajectory={trajectory}
-          canRewind={robot?.ownerId === me.id}
-          onRewind={(atSeq) => {
-            if (confirm('Rewind the Conversation to this point? The current log stays in the archive and you can undo.')) void act(() => api.rewind(id, atSeq))
-          }}
-          onUndo={(rewind) => void act(() => api.undoRewind(id, rewind.id))}
-        />
-      )}
+      {canRewind ? <div className="question-actions"><button type="button" className="button" onClick={() => setRewinding(true)}>Rewind…</button></div> : null}
+      <Suspense fallback={<div className="muted">Loading the trajectory…</div>}>
+        <RobotTrajectory key={viewKey} robotId={id} liveVersion={liveVersion} />
+      </Suspense>
+      {rewinding ? <RewindSheet id={id} onClose={() => setRewinding(false)} onDone={() => { setRewinding(false); setViewKey((key) => key + 1); onChanged() }} /> : null}
     </div>
   )
 }
+
+/** Rewind (robot-0q6a, robot-8v1t): back to before a Turn, or undo an earlier rewind. */
+function RewindSheet({ id, onClose, onDone }: { id: string; onClose: () => void; onDone: () => void }) {
+  const [trajectory, setTrajectory] = useState<Trajectory>()
+  const [error, setError] = useState<string>()
+  useEffect(() => { void api.trajectory(id).then(setTrajectory) }, [id])
+  const turns = useMemo(() => {
+    const events = trajectory?.events ?? []
+    return events.filter((event) => event.type === 'turn/start').map((start) => {
+      const message = events.find((event) => event.seq > start.seq && event.type === 'user/message')
+      let text = ''
+      try {
+        const data = JSON.parse(message?.data ?? '{}') as { content?: Array<{ type: string; text?: string }> }
+        text = (data.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join(' ')
+      } catch { /* not JSON */ }
+      return { seq: start.seq, turn: start.turn, at: start.time, text: text.replace(/^\[[^\]]*\]\s*/, '').slice(0, 120) }
+    }).reverse()
+  }, [trajectory])
+  const act = async (run: () => Promise<unknown>) => {
+    try {
+      await run()
+      onDone()
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'failed')
+    }
+  }
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal sheet form" role="dialog" aria-label="Rewind" onClick={(event) => event.stopPropagation()}>
+        <div className="sheet-head"><span /><span className="sheet-title">Rewind the Conversation</span><button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button></div>
+        <div className="sheet-body">
+          <div className="muted">The Robot forgets everything from that Turn on. The current log stays in the archive and you can undo. What it did outside (messages sent, orders placed) still stands.</div>
+          {trajectory === undefined ? <div className="muted">Loading…</div> : null}
+          {(trajectory?.rewinds ?? []).filter((rewind) => !rewind.undone).map((rewind) => (
+            <div key={rewind.id} className="detail-block">
+              Rewound to event {rewind.atSeq} on {new Date(rewind.at).toLocaleString()}. <button type="button" className="link" onClick={() => void act(() => api.undoRewind(id, rewind.id))}>Undo</button>
+            </div>
+          ))}
+          <ul className="routine-cards">
+            {turns.map((turn) => (
+              <li key={turn.seq} className="routine-card">
+                <span className="routine-card-text">
+                  <span className="routine-name">Turn {turn.turn ?? ''} · {new Date(turn.at).toLocaleString()}</span>
+                  <span className="muted">{turn.text || '(no message)'}</span>
+                </span>
+                <ConfirmButton label="Rewind to before" confirm="Rewind" onConfirm={() => void act(() => api.rewind(id, Math.max(0, turn.seq - 1)))} />
+              </li>
+            ))}
+          </ul>
+          {error === undefined ? null : <div className="muted">{error}</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AdvancedPage({ id, onChanged }: { id: string; onChanged: () => void }) {
   const [state, setState] = useState<{ panel: RobotPanel; catalog: SettingsCatalog }>()
   const [message, setMessage] = useState<string>()

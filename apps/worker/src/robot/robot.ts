@@ -1367,6 +1367,23 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { ...view, items: view.items.map((item) => maskItem(item, (text) => this.mask(text))) }
   }
 
+/**
+   * The live session's DSH events exactly as stored (every field, including surfaceOp), secrets
+   * masked, for the DSH trajectory view (ticket 22). Pages backwards with before, forwards with after.
+   */
+  async sessionEvents(input: { before?: number; after?: number; limit?: number }): Promise<{ events: string; hasMore: boolean; sessionId: string }> {
+    const config = this.store.requireConfig()
+    await this.loadSecretMasks()
+    const limit = Math.min(Math.max(input.limit ?? 400, 1), 2000)
+    const rows = input.after !== undefined
+      ? this.ctx.storage.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?', config.liveSessionId, input.after, limit).toArray()
+      : this.ctx.storage.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?', config.liveSessionId, input.before ?? Number.MAX_SAFE_INTEGER, limit).toArray().reverse()
+    const first = rows[0]?.seq
+    const hasMore = first !== undefined && first > 0 && input.after === undefined
+    // Events cross the RPC boundary as one JSON text (deep JSON types do not survive RPC typing).
+    return { events: `[${rows.map((row) => this.mask(row.event)).join(',')}]`, hasMore, sessionId: config.liveSessionId }
+  }
+
   async trajectoryMasked(): Promise<Trajectory> {
     await this.loadSecretMasks()
     return this.trajectoryView()
