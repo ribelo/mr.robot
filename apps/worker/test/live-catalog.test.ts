@@ -30,9 +30,10 @@ describe('live model lists (robot-82r5)', () => {
   })
 
   it('OpenCode Go: ids from the plan, known ones enriched, new ones kept', async () => {
-    const models = await liveModels('opencode-go', { key: 'k', fetch: fake })
+    const models = await liveModels('opencode-go', { key: 'k', fetch: fake }, { 'opencode-go': { 'deepseek-v4-flash': { name: 'DeepSeek V4 Flash', contextWindow: 1000000, wire: 'chat' } } })
     expect(models.map((model) => model.model)).toEqual(['deepseek-v4-flash', 'brand-new-model'])
     expect(models[0]!.label).toBe('DeepSeek V4 Flash')
+    expect(models[0]).toMatchObject({ contextWindow: 1000000, wire: 'chat' })
     expect(models[1]).toMatchObject({ label: 'brand-new-model', contextWindow: 128000 })
   })
 

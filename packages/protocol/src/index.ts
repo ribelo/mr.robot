@@ -352,6 +352,8 @@ export interface ModelOption {
   readonly contextWindow: number
   /** USD per million tokens; subscription models cost 0 here (the plan is paid flat). */
   readonly price?: { readonly input: number; readonly output: number; readonly cachedInput?: number }
+  /** OpenCode Go: the API format this model speaks (from models.dev). */
+  readonly wire?: 'chat' | 'anthropic' | 'responses'
 }
 
 export interface SettingsCatalog {

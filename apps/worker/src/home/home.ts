@@ -23,8 +23,8 @@ import type {
 } from '@mr-robot/protocol'
 import * as Effect from 'effect/Effect'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
-import { CATALOG } from '../providers/catalog.ts'
 import { liveModels, type ListingAccess } from '../providers/live-catalog.ts'
+import { fetchMetadata, type MetadataIndex } from '../providers/model-metadata.ts'
 import { PROVIDER_IDS } from '../agent/providers.ts'
 import { makeVault } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
@@ -36,8 +36,6 @@ export const MR_ROBOT_COLOR = '#5ec4b6'
 
 /** The Home's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
 /** Prices are the admin's to correct in the admin view; subscriptions are flat and count as 0. */
-/** Every Provider's models, from pi-ai's catalog (providers/catalog.ts). */
-export const DEFAULT_MODELS: readonly ModelOption[] = CATALOG
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
@@ -259,7 +257,8 @@ export class Home extends DurableObject<Env> {
     // Only a known Provider can be missing a connection; anything else (an admin's own entry) is kept.
     if (!(PROVIDER_IDS as readonly string[]).includes(pick.provider) || usable.some((option) => option.provider === pick.provider && option.model === pick.model)) return pick
     const fallback = usable.find((option) => option.provider === 'workers-ai') ?? usable[0]
-    return fallback === undefined ? pick : { provider: fallback.provider, model: fallback.model, effort: 'off' }
+    if (fallback === undefined) throw new Error('Connect a Provider first: open your name → Providers and add a key or a subscription.')
+    return { provider: fallback.provider, model: fallback.model, effort: 'off' }
   }
 
   async createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> {
@@ -306,7 +305,8 @@ export class Home extends DurableObject<Env> {
       identity: { name: 'Mr. Robot', title: '', description: `${member.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
       sharing: 'private',
       status: 'active',
-      model: await this.startingModel(member.id),
+      // Mr. Robot exists from the first sign-in; with nothing connected his first Turn points to Providers.
+      model: await this.startingModel(member.id).catch(() => this.settings().defaultModel),
       timeZone: 'Europe/Warsaw',
       spendLimitUsd: null,
     })
@@ -540,7 +540,7 @@ export class Home extends DurableObject<Env> {
     this.catalogTries.set(provider, Date.now())
     try {
       const access = await this.listingAccess(provider, memberId)
-      const models = await liveModels(provider, access)
+      const models = await liveModels(provider, access, () => this.metadata())
       this.sql.exec(
         'INSERT INTO model_catalog (provider, models, fetched_at, error) VALUES (?, ?, ?, NULL) ON CONFLICT (provider) DO UPDATE SET models = excluded.models, fetched_at = excluded.fetched_at, error = NULL',
         provider, JSON.stringify(models), Date.now(),
@@ -569,6 +569,20 @@ export class Home extends DurableObject<Env> {
     return credential.kind === 'api-key' ? { key: credential.key } : { oauth: { access: credential.access, ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }) } }
   }
 
+  /** models.dev metadata, refreshed daily; a failed refresh keeps the last copy (or none). */
+  private async metadata(): Promise<MetadataIndex> {
+    const stored = this.setting<{ data: MetadataIndex; fetchedAt: number }>('model-metadata')
+    if (stored !== undefined && Date.now() - stored.fetchedAt < CATALOG_TTL_MS) return stored.data
+    try {
+      const data = await fetchMetadata()
+      this.sql.exec("INSERT INTO setting (k, v) VALUES ('model-metadata', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify({ data, fetchedAt: Date.now() }))
+      return data
+    } catch (error) {
+      console.warn('models.dev metadata unavailable', error)
+      return stored?.data ?? {}
+    }
+  }
+
   /** Each Provider's list status, for the admin view. */
   catalogStatus(): Array<{ provider: string; count: number; fetchedAt: number | null; error: string | null }> {
     return this.sql.exec<{ provider: string; models: string | null; fetched_at: number | null; error: string | null }>('SELECT * FROM model_catalog ORDER BY provider').toArray()
@@ -587,14 +601,14 @@ export class Home extends DurableObject<Env> {
   }
 
   /**
-   * Every known model: each Provider's last live list (pi-ai's catalog only for a Provider never
-   * listed successfully), with the admin's entries on top: an entry for a listed model overrides
+   * Every known model: each Provider's last live list (nothing for a Provider never listed
+   * successfully), with the admin's entries on top: an entry for a listed model overrides
    * its label and price, any other entry adds a model.
    */
   modelList(): ModelOption[] {
     const stored = this.setting<ModelOption[]>('models') ?? []
     const same = (a: ModelOption, b: ModelOption) => a.provider === b.provider && a.model === b.model
-    const live = PROVIDER_IDS.flatMap((provider) => this.catalogRow(provider)?.models ?? CATALOG.filter((model) => model.provider === provider))
+    const live = PROVIDER_IDS.flatMap((provider) => this.catalogRow(provider)?.models ?? [])
     return [
       ...live.map((model) => stored.find((entry) => same(entry, model)) ?? model),
       ...stored.filter((entry) => !live.some((model) => same(entry, model))),

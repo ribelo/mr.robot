@@ -6,10 +6,10 @@
  * - DeepSeek: api.deepseek.com/models; OpenCode Go: opencode.ai/zen/go/v1/models (ids only)
  * - OpenRouter: openrouter.ai/api/v1/models (public; tool-capable models only)
  * - Workers AI: the AI binding's models() search, text generation with function calling
- * Missing context sizes and prices are filled from pi-ai's catalog (catalog.ts).
+ * Missing names, context sizes and prices are filled from models.dev (model-metadata.ts).
  */
 import type { ModelOption } from '@mr-robot/protocol'
-import { CATALOG } from './catalog.ts'
+import type { MetadataIndex } from './model-metadata.ts'
 
 export interface ListingAccess {
   readonly key?: string
@@ -42,7 +42,7 @@ async function listed(provider: string, access: ListingAccess): Promise<Listed[]
           headers: { authorization: `Bearer ${access.oauth.access}`, ...(access.oauth.accountId === undefined ? {} : { 'chatgpt-account-id': access.oauth.accountId }), originator: 'pi' },
         }), 'ChatGPT')
       return body.models.filter((model) => model.visibility === 'list').map((model) => ({
-        id: model.slug, ...(model.display_name === undefined ? {} : { name: model.display_name }), ...(model.context_window === undefined ? {} : { contextWindow: model.context_window }), price: { input: 0, output: 0 },
+        id: model.slug, ...(model.display_name === undefined ? {} : { name: model.display_name }), ...(model.context_window === undefined ? {} : { contextWindow: model.context_window }),
       }))
     }
     case 'anthropic': {
@@ -52,7 +52,7 @@ async function listed(provider: string, access: ListingAccess): Promise<Listed[]
           headers: { authorization: `Bearer ${access.oauth.access}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20' },
         }), 'Anthropic')
       return body.data.map((model) => ({
-        id: model.id, ...(model.display_name === undefined ? {} : { name: model.display_name }), ...(model.max_input_tokens === undefined ? {} : { contextWindow: model.max_input_tokens }), price: { input: 0, output: 0 },
+        id: model.id, ...(model.display_name === undefined ? {} : { name: model.display_name }), ...(model.max_input_tokens === undefined ? {} : { contextWindow: model.max_input_tokens }),
       }))
     }
     case 'deepseek':
@@ -108,19 +108,22 @@ function workersAiPrice(value: unknown): { price?: ModelOption['price'] } {
 
 const DEFAULT_CONTEXT = 128_000
 
-/** The Provider's live list, with names, context sizes and prices filled from pi-ai where missing. */
-export async function liveModels(provider: string, access: ListingAccess): Promise<ModelOption[]> {
-  const known = new Map(CATALOG.filter((model) => model.provider === provider).map((model) => [model.model, model]))
+/** The Provider's live list, with names, context sizes, prices and wire filled from models.dev where missing. */
+export async function liveModels(provider: string, access: ListingAccess, metadata: MetadataIndex | (() => Promise<MetadataIndex>) = {}): Promise<ModelOption[]> {
   const models = await listed(provider, access)
   if (models.length === 0) throw new Error(`${provider} listed no usable models`)
+  const known = (typeof metadata === 'function' ? await metadata() : metadata)[provider] ?? {}
+  const subscription = provider === 'openai' || provider === 'anthropic'
   return models.map((model) => {
-    const fallback = known.get(model.id)
+    // Dated ids ("claude-sonnet-4-5-20250929") are described under their undated name.
+    const meta = known[model.id] ?? known[model.id.replace(/-\d{8}$/, '')]
     return {
       provider,
       model: model.id,
-      label: model.name ?? fallback?.label ?? model.id,
-      contextWindow: model.contextWindow ?? fallback?.contextWindow ?? DEFAULT_CONTEXT,
-      price: model.price ?? fallback?.price ?? { input: 0, output: 0 },
+      label: model.name ?? meta?.name ?? model.id,
+      contextWindow: model.contextWindow ?? meta?.contextWindow ?? DEFAULT_CONTEXT,
+      price: subscription ? { input: 0, output: 0 } : model.price ?? meta?.price ?? { input: 0, output: 0 },
+      ...(meta?.wire === undefined ? {} : { wire: meta.wire }),
     }
   })
 }

@@ -130,8 +130,8 @@ describe('Provider adapters', () => {
       seen.push({ url: request.url, auth: request.headers.get('authorization'), apiKey: request.headers.get('x-api-key'), session: request.headers.get('x-opencode-session'), system: body.system })
       return new Response('', { status: 500 })
     }) as typeof fetch
-    for (const model of ['deepseek-v4-flash', 'minimax-m3', 'gpt-5.6-luna']) {
-      await collect(opencodeGoAdapter(model, pool).stream({ ...base('opencode-go'), model, sessionId: 'sess-1' } as never)).catch(() => undefined)
+    for (const [model, wire] of [['deepseek-v4-flash', 'chat'], ['minimax-m3', 'anthropic'], ['gpt-5.6-luna', 'responses']] as const) {
+      await collect(opencodeGoAdapter(model, pool, 1_000_000, wire).stream({ ...base('opencode-go'), model, sessionId: 'sess-1' } as never)).catch(() => undefined)
     }
     expect(seen.map((entry) => entry.url)).toEqual([
       'https://opencode.ai/zen/go/v1/chat/completions',

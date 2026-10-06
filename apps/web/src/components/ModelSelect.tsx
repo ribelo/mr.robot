@@ -24,6 +24,8 @@ export function ModelSelect({ value, models, unavailable, onChange }: {
 }) {
   const groups = (list: readonly ModelOption[]) => [...new Set(list.map((option) => option.provider))].map((provider) => [provider, list.filter((option) => option.provider === provider)] as const)
   const current = models.find((option) => key(option) === key(value))
+  // The Provider is connected (it offers other models) but no longer lists this one.
+  const gone = current === undefined && models.some((option) => option.provider === value.provider)
   return (
     <>
       <select
@@ -33,7 +35,7 @@ export function ModelSelect({ value, models, unavailable, onChange }: {
           if (option !== undefined) onChange(option)
         }}
       >
-        {current === undefined ? <option value={key(value)}>{providerName(value.provider)}: {value.model} (not connected)</option> : null}
+        {current === undefined ? <option value={key(value)}>{providerName(value.provider)}: {value.model} ({gone ? 'no longer offered' : 'not connected'})</option> : null}
         {groups(models).map(([provider, options]) => (
           <optgroup key={provider} label={providerName(provider)}>
             {options.map((option) => <option key={key(option)} value={key(option)}>{option.label.replace(/ \([^)]*\)$/, '')}</option>)}
@@ -45,7 +47,7 @@ export function ModelSelect({ value, models, unavailable, onChange }: {
           </optgroup>
         ))}
       </select>
-      {current === undefined ? <small className="muted">This model's Provider is not connected; the Robot cannot run until you connect it or pick another model.</small> : null}
+      {current === undefined ? <small className="muted">{gone ? `${providerName(value.provider)} no longer lists this model; pick another one.` : 'This model\'s Provider is not connected; the Robot cannot run until you connect it or pick another model.'}</small> : null}
     </>
   )
 }

@@ -97,13 +97,21 @@ describe('OpenCode Go in the Home', () => {
   })
   afterEach(() => undefined)
 
-  it('lists every OpenCode Go model for the Robot settings once a key is connected', async () => {
+  it('lists the OpenCode Go plan\'s live models for the Robot settings once a key is connected', async () => {
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url === 'https://opencode.ai/zen/go/v1/models') return Response.json({ data: ['deepseek-v4-flash', 'glm-5.3', 'kimi-k3', 'minimax-m3', 'gpt-5.6-luna'].map((id) => ({ id })) })
+      if (url === 'https://models.dev/api.json') return Response.json({ 'opencode-go': { models: { 'minimax-m3': { name: 'MiniMax-M3', limit: { context: 1000000 }, provider: { npm: '@ai-sdk/anthropic' } } } } })
+      return realFetch(input, init)
+    }) as typeof fetch
     await api(ANNA, '/api/providers/opencode-go/keys', { body: { key: 'sk-firstkey1111' } })
     const { body: robot } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     const catalog = (await api<SettingsCatalog>(ANNA, `/api/robots/${robot.id}/catalog`)).body
     const models = catalog.models.filter((model) => model.provider === 'opencode-go').map((model) => model.model)
-    expect(models).toEqual(expect.arrayContaining(['deepseek-v4-flash', 'glm-5.3', 'kimi-k3', 'minimax-m3', 'gpt-5.6-luna']))
-    expect(models.length).toBeGreaterThanOrEqual(30)
+    expect(models).toEqual(['deepseek-v4-flash', 'glm-5.3', 'kimi-k3', 'minimax-m3', 'gpt-5.6-luna'])
+    expect(catalog.models.find((model) => model.model === 'minimax-m3')).toMatchObject({ label: 'MiniMax-M3', wire: 'anthropic' })
+    globalThis.fetch = realFetch
   })
 
   it('keeps keys encrypted and masked; add, activate, remove; share with the Home', async () => {

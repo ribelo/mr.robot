@@ -10,7 +10,6 @@ import { LlmError, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { AnthropicAdapter } from './anthropic.ts'
 import { CodexAdapter } from './codex.ts'
 import { ChatCompletionsAdapter } from './openai-chat.ts'
-import { OPENCODE_GO_MODELS } from './catalog.ts'
 
 export const OPENCODE_GO_BASE = 'https://opencode.ai/zen/go/v1'
 
@@ -128,9 +127,9 @@ export function rotatingFetch(pool: OpencodePool, upstream: typeof fetch = fetch
 }
 
 /** The adapter for one OpenCode Go model, on the wire format that model speaks. */
-export function opencodeGoAdapter(model: string, pool: OpencodePool, contextWindow?: number): LlmAdapter {
-  // A model the live list has but pi-ai does not know yet speaks the OpenAI chat format, OpenCode Go's default.
-  const entry = OPENCODE_GO_MODELS.find((candidate) => candidate.id === model) ?? { id: model, wire: 'chat' as const, contextWindow: contextWindow ?? 128_000 }
+export function opencodeGoAdapter(model: string, pool: OpencodePool, contextWindow = 128_000, wire: 'chat' | 'anthropic' | 'responses' = 'chat'): LlmAdapter {
+  // The wire comes from models.dev with the model list; OpenCode Go's default is the OpenAI chat format.
+  const entry = { id: model, wire, contextWindow }
   const fetcher = rotatingFetch(pool)
   // The pool replaces this placeholder with the chosen key; the session header is required by OpenCode Go.
   const headers = (style: 'bearer' | 'x-api-key') => async (options: { sessionId?: unknown }) => ({

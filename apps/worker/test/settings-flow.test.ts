@@ -13,11 +13,24 @@ beforeEach(async () => {
 })
 
 describe('configuring a Robot', () => {
-  it('starts a new Robot on a model its owner can use when the Home default is not connected', async () => {
+  it('never creates a Robot on a model without a credential: refuses with nothing connected, else picks a connected one (robot-mx6s)', async () => {
     await env.HOME.getByName('home').updateSettings({ defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' } })
+    const refused = await api<{ error: string }>(ANNA, '/api/robots', { body: {} })
+    expect(refused.status).toBe(400)
+    expect(refused.body.error).toContain('Providers')
+
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url === 'https://openrouter.ai/api/v1/models') return Response.json({ data: [{ id: 'z/model-a', name: 'Z: Model A', context_length: 100000, supported_parameters: ['tools'], pricing: { prompt: '0.000001', completion: '0.000002' } }] })
+      if (url === 'https://models.dev/api.json') return Response.json({})
+      return realFetch(input, init)
+    }) as typeof fetch
+    await api(ANNA, '/api/providers/openrouter', { method: 'PUT', body: { key: 'sk-or-test', shared: false } })
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body
-    expect(panel.settings.model.provider).toBe('workers-ai')
+    expect(panel.settings.model).toMatchObject({ provider: 'openrouter', model: 'z/model-a' })
+    globalThis.fetch = realFetch
   })
 
   it('offers "Try again" after a failed Turn and runs the same wake-up once fixed', async () => {
@@ -26,7 +39,10 @@ describe('configuring a Robot', () => {
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
     await testRobot(body.id).activateForTest()
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' } } })
+    const refused = await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' } } })
+    expect(refused.status).toBe(400)
+    // A key removed after the choice: the Robot is on a model it can no longer reach.
+    await env.ROBOT.getByName(body.id).updateSettings({ model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' } })
     await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'find me a flat' } })
     await settle(body.id)
     let chat = (await api<Conversation>(ANNA, `/api/robots/${body.id}/conversation`)).body

@@ -34,6 +34,7 @@ export interface ProviderContext {
   readonly contextWindow?: number
   /** The model the Robot runs on (OpenCode Go picks its wire format per model). */
   readonly model?: string
+  readonly wire?: 'chat' | 'anthropic' | 'responses'
 }
 
 export function providerAdapter(provider: string, context: ProviderContext): LlmAdapter {
@@ -58,7 +59,7 @@ export function providerAdapter(provider: string, context: ProviderContext): Llm
     case 'opencode-go': {
       const pool = context.credentials.opencodePool?.()
       if (pool === undefined || context.model === undefined) throw new LlmError('OpenCode Go is not available here', 'MISSING_CREDENTIAL')
-      return opencodeGoAdapter(context.model, pool, context.contextWindow)
+      return opencodeGoAdapter(context.model, pool, context.contextWindow, context.wire)
     }
     default:
       throw new LlmError(`Provider "${provider}" is not available`, 'MISSING_CREDENTIAL')

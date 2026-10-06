@@ -172,7 +172,7 @@ export const api = new Router<ApiContext>()
       brief: Schema.optional(Schema.String),
       model: Schema.optional(Schema.Struct({ provider: Schema.String, model: Schema.String, effort: Schema.String })),
     }))
-    return yield* call(() => home(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined))
+    return yield* call(() => home(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
   }))
   .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).conversationView()))))
   .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))
@@ -229,6 +229,18 @@ export const api = new Router<ApiContext>()
   .on('PATCH', '/api/robots/:id/settings', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
     const patch = yield* decodeBody(c.request, SettingsPatch)
+    if (patch.model !== undefined) {
+      // A Robot is never switched to a model its owner has no credential for (robot-mx6s).
+      const chosen = patch.model
+      const current = yield* call(() => robot(c, id).settings())
+      const changed = current.model.provider !== chosen.provider || current.model.model !== chosen.model
+      if (changed && (PROVIDER_IDS as readonly string[]).includes(chosen.provider)) {
+        const offered = yield* call(() => home(c.env).models(c.member.id))
+        if (!offered.some((option) => option.provider === chosen.provider && option.model === chosen.model)) {
+          return yield* Effect.fail(badRequest(`${chosen.model} is not offered to you: connect its Provider under your name → Providers first`))
+        }
+      }
+    }
     return yield* call(() => robot(c, id).updateSettings(patch))
   }))
   .on('POST', '/api/robots/:id/proposals/:proposal', (c, { id, proposal }) => Effect.gen(function* () {

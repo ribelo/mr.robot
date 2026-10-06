@@ -532,7 +532,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config.status === 'setup') prompt.push({ name: 'setup', text: () => setupPrompt(owner.name, brief) })
     prompt.push({ name: 'workspace', text: () => personaText(this.persona) })
     const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
-    const contextWindow = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.contextWindow
+    const chosen = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)
+    const contextWindow = chosen?.contextWindow
     const scope = await Effect.runPromise(Scope.make())
     const value = await Effect.runPromise(Scope.provide(scope)(composeScoped({
       storage: this.ctx.storage,
@@ -543,7 +544,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       provider: config.model.provider,
       model: config.model.model,
       effort: config.model.effort,
-      adapter: this.adapter(config.model.provider, contextWindow, config.model.model),
+      adapter: this.adapter(config.model.provider, contextWindow, config.model.model, chosen?.wire),
       contextBudget: config.contextBudget,
       compactionInstruction: config.compactionInstruction,
       prompt,
@@ -560,13 +561,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The LLM adapter for a Provider; tests override it with a scripted stub. */
-  protected adapter(provider: string, contextWindow?: number, model?: string): LlmAdapter {
+  protected adapter(provider: string, contextWindow?: number, model?: string, wire?: 'chat' | 'anthropic' | 'responses'): LlmAdapter {
     return providerAdapter(provider, {
       robotId: this.store.requireConfig().id,
       credentials: this.credentials(),
       ai: this.env.AI,
       ...(contextWindow === undefined ? {} : { contextWindow }),
       ...(model === undefined ? {} : { model }),
+      ...(wire === undefined ? {} : { wire }),
     })
   }
 
