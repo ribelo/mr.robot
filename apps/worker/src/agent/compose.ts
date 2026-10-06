@@ -31,6 +31,8 @@ export interface CompositionInput {
   readonly effort: ThinkingEffort
   readonly adapter: LlmAdapter
   readonly contextBudget: number
+  /** The model's real context window (the budget may be smaller). */
+  readonly modelWindow?: number
   readonly compactionInstruction: string
   /** Prompt sections, in order; text is read at every request so persona edits apply immediately. */
   readonly prompt: ReadonlyArray<{ readonly name: string; readonly text: () => string }>
@@ -65,7 +67,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     await ctx.plugin(ToolRuntime, {})
     for (const plugin of input.plugins ?? []) await plugin(ctx)
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
-    await ctx.plugin(robotCompaction(input.compactionInstruction), compactionConfig(input.contextBudget))
+    await ctx.plugin(robotCompaction(input.compactionInstruction), compactionConfig(input.contextBudget, input.modelWindow))
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
 

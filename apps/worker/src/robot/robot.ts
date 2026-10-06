@@ -573,6 +573,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       effort: config.model.effort,
       adapter: this.adapter(config.model.provider, contextWindow, config.model.model, chosen?.wire),
       contextBudget: config.contextBudget,
+      ...(contextWindow === undefined ? {} : { modelWindow: contextWindow }),
       compactionInstruction: config.compactionInstruction,
       prompt,
       tools: this.tools(config),

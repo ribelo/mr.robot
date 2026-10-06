@@ -9,10 +9,13 @@ type SummarizeResult = Awaited<ReturnType<BasicCompactionEngine['summarize']>>
  * checkpoint's own output cap defaults to the headroom, which at small budgets (400 tokens at 8k)
  * truncates every summary, more so on reasoning models; give it its own cap.
  */
-export function compactionConfig(budget: number): { headroomTokens: number; maxTokens: number } {
+export function compactionConfig(budget: number, modelWindow?: number): { headroomTokens: number; maxTokens: number } {
+  // The checkpoint is written by the model with its full window, not the budget; reasoning models
+  // spend thousands of tokens thinking first (kimi-k2.6 used 4000 on reasoning alone, 2026-10-07).
+  const window = modelWindow ?? Math.max(budget, 128_000)
   return {
     headroomTokens: Math.min(65_536, Math.floor(budget * 0.05)),
-    maxTokens: Math.min(16_000, Math.max(4_000, Math.floor(budget * 0.25))),
+    maxTokens: Math.max(4_000, Math.min(32_000, Math.floor(window / 4))),
   }
 }
 
