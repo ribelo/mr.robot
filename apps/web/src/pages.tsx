@@ -5,6 +5,7 @@ import { useLive } from './live.ts'
 import { go, type Route } from './route.ts'
 import { AdvancedSettings } from './components/AdvancedSettings.tsx'
 import { Profile } from './components/Profile.tsx'
+import { Takeover } from './components/Takeover.tsx'
 import { TrajectoryView } from './components/TrajectoryView.tsx'
 
 /** Full-page views reached from a Robot or the sidebar. */
@@ -12,6 +13,7 @@ export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; 
   switch (route.page) {
     case 'trajectory': return <TrajectoryPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} me={me} onChanged={onChanged} />
     case 'advanced': return <AdvancedPage id={route.id} onChanged={onChanged} />
+    case 'takeover': return <TakeoverPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} />
     case 'profile': return (
       <div className="page">
         <PageHead title={me.name} back={{ page: 'home' }} />
@@ -97,5 +99,18 @@ function AdvancedPage({ id, onChanged }: { id: string; onChanged: () => void }) 
         />
       )}
     </div>
+  )
+}
+function TakeoverPage({ id, robot }: { id: string; robot: RobotSummary | undefined }) {
+  const [panel, setPanel] = useState<RobotPanel>()
+  useEffect(() => { void api.panel(id).then(setPanel) }, [id])
+  if (panel === undefined) return <div className="empty-main">Loading…</div>
+  return (
+    <Takeover
+      robotId={id}
+      robotName={robot?.identity.name ?? panel.summary.identity.name}
+      requested={panel.takeover === null || !panel.canEdit ? null : { reason: panel.takeover.reason }}
+      onClose={() => go({ page: 'robot', id, panel: true })}
+    />
   )
 }

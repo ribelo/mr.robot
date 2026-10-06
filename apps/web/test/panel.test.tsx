@@ -24,6 +24,7 @@ const panel: RobotPanel = {
   screen: { path: 'screens/last.png', url: '/api/robots/r-1/screen', at: 0 },
   usage: { month: '2026-10', inputTokens: 12000, outputTokens: 3000, costUsd: 0.42, limitUsd: 5 },
   canEdit: true,
+  takeover: null,
 }
 
 const handlers = () => ({

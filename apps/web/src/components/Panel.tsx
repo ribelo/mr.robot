@@ -29,7 +29,14 @@ export function Panel({ panel, onDeleteRoutine, onSave, onOpenScreen, onAdvanced
       </div>
       {view === 'overview' ? (
         <div className="panel-body">
-          <button type="button" className="screen" onClick={onOpenScreen} aria-label={`${name}'s screen`} disabled={panel.screen === null}>
+          {panel.takeover === null ? null : (
+            <div className="question">
+              <div className="question-title">Needs you in its browser</div>
+              <div className="question-purpose">{panel.takeover.reason}</div>
+              <div className="question-actions"><button type="button" className="button button-primary" onClick={onOpenScreen}>Take over</button></div>
+            </div>
+          )}
+          <button type="button" className="screen" onClick={onOpenScreen} aria-label={`${name}'s screen`} disabled={panel.screen === null && panel.takeover === null}>
             {panel.screen === null ? <span className="screen-empty">No screen yet</span> : <img src={panel.screen.url} alt="" />}
           </button>
           <div className="screen-caption">{name}’s screen</div>

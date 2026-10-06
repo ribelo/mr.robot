@@ -7,6 +7,27 @@ import { StaleRef } from '../src/browser/driver.ts'
 import type { Observation } from '../src/browser/observe.ts'
 
 export const browserLog: string[] = []
+export const cdpLog: Array<{ method: string; params?: Record<string, unknown> }> = []
+
+/** Enough of a CDP session for the live view: records input, emits one frame per screencast start. */
+class StubCdp {
+  private listeners = new Map<string, Array<(event: unknown) => void>>()
+  on(event: string, listener: (event: unknown) => void): void {
+    this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener])
+  }
+  off(event: string, listener: (event: unknown) => void): void {
+    this.listeners.set(event, (this.listeners.get(event) ?? []).filter((entry) => entry !== listener))
+  }
+  async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    cdpLog.push({ method, ...(params === undefined ? {} : { params }) })
+    if (method === 'Page.startScreencast') {
+      queueMicrotask(() => {
+        for (const listener of this.listeners.get('Page.screencastFrame') ?? []) listener({ data: 'AAAA', sessionId: 1, metadata: { deviceWidth: 1280, deviceHeight: 800 } })
+      })
+    }
+    return {}
+  }
+}
 
 export class StubDriver implements BrowserDriver {
   async open(state: BrowserState | null): Promise<BrowserPage> {
@@ -77,8 +98,10 @@ class StubPage implements BrowserPage {
     return { cookies: this.cookies, storage: {} }
   }
 
-  async cdp(): Promise<undefined> {
-    return undefined
+  private stubCdp = new StubCdp()
+
+  async cdp() {
+    return this.stubCdp as never
   }
 
   async close(): Promise<void> {

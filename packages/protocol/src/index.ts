@@ -134,6 +134,8 @@ export interface RobotPanel {
   readonly screen: ScreenView | null
   readonly usage: UsageView
   readonly canEdit: boolean
+  /** The Robot asked for a takeover of its browser (robot-doqx). */
+  readonly takeover: { readonly reason: string; readonly claimedBy: string | null } | null
 }
 
 export interface ScreenView {

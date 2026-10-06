@@ -55,6 +55,7 @@ import { ptcPlugin } from '../agent/ptc.ts'
 import { webPlugin } from '../agent/web.ts'
 import { skillProposalTools, skillsPlugin } from '../agent/skills.ts'
 import { browserTools, type BrowserHost } from '../agent/tools/browser.ts'
+import { takeoverTools, type TakeoverHost } from '../agent/tools/takeover.ts'
 import { RenderingDriver, type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
@@ -112,12 +113,13 @@ export type ReceiveResult = { readonly accepted: true } | { readonly accepted: f
 const MAX_CHAIN_HOPS = 8
 const MAX_QUEUED_WAKEUPS = 32
 
-export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost {
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
   private browserPage: Promise<BrowserPage> | undefined
+  private screencast: { stop: () => Promise<void> } | undefined
   /** Values of granted secrets, kept only in memory to mask views (never stored by the Robot). */
   private secretValues: Array<readonly [string, string]> = []
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
@@ -473,7 +475,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       case 'secrets': return secretTools(this, this.store.grants().secrets)
       case 'messaging': return messagingTools(this)
       case 'skills': return skillProposalTools(this)
-      case 'browser': return browserTools(this)
+      case 'browser': return [...browserTools(this), ...takeoverTools(this)]
       case 'robots': return config.kind === 'chief' ? robotsTools(this) : []
       default: return []
     }
@@ -766,17 +768,140 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket', { status: 426 })
     const pair = new WebSocketPair()
     const [client, server] = [pair[0], pair[1]]
-    this.ctx.acceptWebSocket(server, [request.headers.get('x-member-id') ?? 'viewer'])
+    const memberId = request.headers.get('x-member-id') ?? 'viewer'
+    this.ctx.acceptWebSocket(server, [memberId])
+    server.serializeAttachment({ memberId, live: false } satisfies ViewerState)
     server.send(JSON.stringify({ type: 'changed', working: this.store.activeTurn() !== undefined }))
     return new Response(null, { status: 101, webSocket: client })
   }
 
   override async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (message === 'ping') socket.send('pong')
+    if (message === 'ping') {
+      socket.send('pong')
+      return
+    }
+    if (typeof message !== 'string') return
+    const viewer = socket.deserializeAttachment() as ViewerState
+    let input: Record<string, unknown>
+    try {
+      input = JSON.parse(message) as Record<string, unknown>
+    } catch {
+      return
+    }
+    try {
+      await this.viewerMessage(socket, viewer, input)
+    } catch (error) {
+      socket.send(JSON.stringify({ type: 'error', message: error instanceof Error ? error.message : String(error) }))
+    }
   }
 
   override async webSocketClose(socket: WebSocket, code: number): Promise<void> {
     socket.close(code === 1005 ? 1000 : code)
+    await this.updateScreencast()
+  }
+
+  // ---------------------------------------------------------------- live view and takeover (robot-ksvy, robot-g6qb, robot-doqx, robot-j4ll)
+
+  private async viewerMessage(socket: WebSocket, viewer: ViewerState, input: Record<string, unknown>): Promise<void> {
+    switch (input['type']) {
+      case 'live':
+        socket.serializeAttachment({ ...viewer, live: input['on'] !== false } satisfies ViewerState)
+        await this.updateScreencast()
+        return
+      case 'claim': {
+        const takeover = this.store.get<TakeoverState>('takeover')
+        if (takeover === undefined) throw new Error('the Robot did not ask for a takeover')
+        if (takeover.claimedBy !== null && takeover.claimedBy !== viewer.memberId) {
+          socket.send(JSON.stringify({ type: 'claim-refused', heldBy: takeover.claimedBy }))
+          return
+        }
+        this.store.set('takeover', { ...takeover, claimedBy: viewer.memberId })
+        socket.serializeAttachment({ ...viewer, live: true } satisfies ViewerState)
+        socket.send(JSON.stringify({ type: 'claimed' }))
+        await this.updateScreencast()
+        return
+      }
+      case 'tap': case 'text': case 'key': case 'scroll': {
+        const takeover = this.store.get<TakeoverState>('takeover')
+        if (takeover?.claimedBy !== viewer.memberId) throw new Error('claim the browser first')
+        const cdp = await (await this.page()).cdp()
+        if (cdp === undefined) throw new Error('the browser cannot take input')
+        await forwardInput(cdp, input)
+        return
+      }
+      case 'handback': {
+        const takeover = this.store.get<TakeoverState>('takeover')
+        if (takeover === undefined) return
+        if (takeover.claimedBy !== null && takeover.claimedBy !== viewer.memberId) throw new Error('someone else holds the browser')
+        await this.handBack(viewer.memberId)
+        return
+      }
+    }
+  }
+
+  /** Relay a CDP screencast while anyone watches and the browser is open. */
+  private async updateScreencast(): Promise<void> {
+    const watchers = this.ctx.getWebSockets().filter((socket) => (socket.deserializeAttachment() as ViewerState | null)?.live === true)
+    if (watchers.length === 0 || this.browserPage === undefined) {
+      const running = this.screencast
+      this.screencast = undefined
+      await running?.stop()
+      return
+    }
+    if (this.screencast !== undefined) return
+    const cdp = await (await this.page()).cdp()
+    if (cdp === undefined) return
+    const onFrame = (frame: { data: string; sessionId: number; metadata: Record<string, number> }) => {
+      const text = JSON.stringify({ type: 'frame', data: frame.data, metadata: frame.metadata })
+      for (const socket of this.ctx.getWebSockets()) {
+        if ((socket.deserializeAttachment() as ViewerState | null)?.live === true) {
+          try { socket.send(text) } catch { /* closing */ }
+        }
+      }
+      void cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => undefined)
+    }
+    cdp.on('Page.screencastFrame', onFrame as never)
+    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 })
+    this.screencast = {
+      stop: async () => {
+        cdp.off('Page.screencastFrame', onFrame as never)
+        await cdp.send('Page.stopScreencast').catch(() => undefined)
+      },
+    }
+  }
+
+  async requestTakeover(reason: string): Promise<{ status: string }> {
+    const page = await this.page()
+    this.store.set('browser-state', await page.exportState())
+    await this.saveScreen(await page.screenshot())
+    this.store.set('takeover', { reason, url: page.url(), requestedAt: Date.now(), claimedBy: null } satisfies TakeoverState)
+    const config = this.store.requireConfig()
+    await this.notifyMembers('needs you', `${reason} Tap to take over the browser.`)
+    this.broadcast({ type: 'takeover', reason, url: `/#/r/${encodeURIComponent(config.id)}/takeover` })
+    return { status: 'Your owner was asked to take over. End your Turn now with one short line; you will be woken when they hand the browser back.' }
+  }
+
+  /** The owner is done: the Robot resumes with a note of where the browser is now. */
+  private async handBack(memberId: string): Promise<void> {
+    const page = await this.page()
+    this.store.set('browser-state', await page.exportState())
+    const { path } = await this.saveScreen(await page.screenshot())
+    const takeover = this.store.get<TakeoverState>('takeover')
+    this.store.delete('takeover')
+    const running = this.screencast
+    this.screencast = undefined
+    await running?.stop()
+    const member = await this.home().member(memberId)
+    await this.wake({
+      kind: 'takeover',
+      sender: { kind: 'platform' },
+      text: `${member?.name ?? 'Your owner'} handed the browser back after "${takeover?.reason ?? 'the takeover'}". The page is now ${page.url()}; a screenshot of it is at ${path}. Observe the page before you continue.`,
+    })
+    await this.changed()
+  }
+
+  takeoverState(): TakeoverState | null {
+    return this.store.get<TakeoverState>('takeover') ?? null
   }
 
   protected broadcast(event: Record<string, unknown> = { type: 'changed' }): void {
@@ -1187,6 +1312,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       screen: this.screen(),
       usage: this.usage(),
       canEdit,
+      takeover: (() => {
+        const takeover = this.store.get<TakeoverState>('takeover')
+        return takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy }
+      })(),
     }
   }
 
@@ -1245,6 +1374,44 @@ async function digest(text: string): Promise<string> {
 function undeliverable(reason: 'unavailable' | 'queue-full' | 'chain-limit'): string {
   return reason === 'unavailable' ? 'that Robot is not active' : reason === 'queue-full' ? 'that Robot has too much queued work; try later' : 'the chain of Robot messages is too long'
 }
+
+interface ViewerState {
+  readonly memberId: string
+  readonly live: boolean
+}
+
+export interface TakeoverState {
+  readonly reason: string
+  readonly url: string
+  readonly requestedAt: number
+  readonly claimedBy: string | null
+}
+
+/** Taps, text, keys and scrolls from the owner's device become CDP input (robot-g6qb). */
+async function forwardInput(cdp: { send(method: string, params?: Record<string, unknown>): Promise<unknown> }, input: Record<string, unknown>): Promise<void> {
+  const x = Number(input['x'] ?? 0)
+  const y = Number(input['y'] ?? 0)
+  switch (input['type']) {
+    case 'tap':
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+      return
+    case 'text':
+      await cdp.send('Input.insertText', { text: String(input['text'] ?? '') })
+      return
+    case 'key': {
+      const key = String(input['key'] ?? 'Enter')
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: KEY_CODES[key] ?? 0 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: KEY_CODES[key] ?? 0 })
+      return
+    }
+    case 'scroll':
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: Number(input['dy'] ?? 0) })
+      return
+  }
+}
+
+const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }
 
 function routineView(robotId: string, routine: RoutineRow): RoutineView {
   return { ...routine, robotId, summary: describeSchedule(routine.schedule, routine.timeZone) }
