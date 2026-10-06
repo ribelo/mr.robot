@@ -368,6 +368,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
     const failedTurn = this.rememberFailure(wakeup, startSeq)
+    const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
+    if (!failedTurn && wakeup.kind !== 'routine' && !this.conversation().items.some((item) => item.seq >= startSeq && shown(item))) {
+      // A Turn that ends with nothing to show (e.g. a reasoning model spent its output cap thinking) is not silent.
+      const config = this.store.requireConfig()
+      this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${config.identity.name} finished without a reply. If this repeats, raise its context budget in Advanced settings.`, Date.now())
+    }
     if (wakeup.kind === 'routine') {
       const reply = this.conversation().items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
       this.store.finishRoutineRun(wakeup.id, failedTurn ? 'failed' : 'done', failedTurn ? 'The Turn failed.' : (reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'))

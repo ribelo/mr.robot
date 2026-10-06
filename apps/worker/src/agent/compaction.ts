@@ -4,9 +4,16 @@ import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 type SummarizeInput = Parameters<BasicCompactionEngine['summarize']>[0]
 type SummarizeResult = Awaited<ReturnType<BasicCompactionEngine['summarize']>>
 
-/** DSH's default 65k headroom would exceed small budgets; keep 5% of the budget instead. */
-export function compactionConfig(budget: number): { headroomTokens: number } {
-  return { headroomTokens: Math.min(65_536, Math.floor(budget * 0.05)) }
+/**
+ * DSH's default 65k headroom would exceed small budgets; keep 5% of the budget instead. The
+ * checkpoint's own output cap defaults to the headroom, which at small budgets (400 tokens at 8k)
+ * truncates every summary, more so on reasoning models; give it its own cap.
+ */
+export function compactionConfig(budget: number): { headroomTokens: number; maxTokens: number } {
+  return {
+    headroomTokens: Math.min(65_536, Math.floor(budget * 0.05)),
+    maxTokens: Math.min(16_000, Math.max(4_000, Math.floor(budget * 0.25))),
+  }
 }
 
 /**

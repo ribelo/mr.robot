@@ -121,6 +121,8 @@ describe('compaction (robot-zzif, robot-sw54)', () => {
     const compaction = (requests.get(id) ?? []).find((request) => request.purpose === 'compaction')
     expect(compaction).toBeDefined()
     expect(JSON.stringify(compaction!.messages)).toContain('Keep every apartment price.')
+    // The checkpoint has room to be written (at 8k the headroom alone is 400 tokens).
+    expect(compaction!.maxTokens).toBeGreaterThanOrEqual(4000)
     expect((await robots(ANNA)).length).toBeGreaterThan(0)
   })
 })
