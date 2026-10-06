@@ -4,31 +4,46 @@
  * Every Wake-up is queued in SQLite and drained one Turn at a time (robot-makt). The Turn
  * is driven by the DO, not by the request that caused it, so a closed tab does not stop it
  * (robot-p9jm). The active Turn is recorded before it starts and a heartbeat alarm stays
- * armed while it runs; if the DO is evicted mid-Turn, the alarm brings it back and the
+ * armed while it runs; if the DO dies mid-Turn, the alarm brings it back and the
  * interrupted Turn resumes from the last persisted event.
  */
 import { DurableObject } from 'cloudflare:workers'
 import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
   Attachment,
+  ChatItem,
   Conversation,
+  FleetState,
+  GrantSet,
   Identity,
   ModelChoice,
+  ProposalKind,
+  ProposalView,
+  RobotPanel,
   RobotSettings,
+  RobotSummary,
+  RoutineView,
+  ScreenView,
   Sender,
+  UsageView,
+  SettingsPatch,
   Sharing,
   TrajectoryEvent,
 } from '@mr-robot/protocol'
+import { CHIEF_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
 import { compose, type Composition } from '../agent/compose.ts'
-import { platformPrompt } from '../agent/platform-prompt.ts'
+import type { RobotHost } from '../agent/host.ts'
+import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage } from '../agent/sources.ts'
 import { conversationTools } from '../agent/tools/conversation.ts'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { Env } from '../env.ts'
+import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
+import { HOME_ID, type Env } from '../env.ts'
+import type { RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
-import { RobotStore, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
+import { RobotStore, type ProposalRow, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
 
 const HEARTBEAT_MS = 30_000
 export const DEFAULT_CONTEXT_BUDGET = 128_000
@@ -44,6 +59,8 @@ export interface RobotInit {
   readonly model: ModelChoice
   readonly timeZone: string
   readonly spendLimitUsd: number | null
+  /** What the Robot was asked to become (setup only). */
+  readonly brief?: string
 }
 
 export interface WakeInput {
@@ -54,7 +71,11 @@ export interface WakeInput {
   readonly payload?: Record<string, unknown>
 }
 
-export class Robot extends DurableObject<Env> {
+export type AnswerResult =
+  | { readonly ok: true; readonly proposal: ProposalView }
+  | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
+
+export class Robot extends DurableObject<Env> implements RobotHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
@@ -64,11 +85,12 @@ export class Robot extends DurableObject<Env> {
     this.store = new RobotStore(ctx.storage)
   }
 
-  // ---------------------------------------------------------------- lifecycle
+  // ---------------------------------------------------------------- lifecycle (robot-qo06)
 
   async create(init: RobotInit): Promise<RobotConfig> {
     const existing = this.store.config()
     if (existing !== undefined) return existing
+    const now = Date.now()
     const config: RobotConfig = {
       id: init.id,
       ownerId: init.ownerId,
@@ -86,11 +108,46 @@ export class Robot extends DurableObject<Env> {
       timeZone: init.timeZone,
       liveSessionId: `s-${crypto.randomUUID()}`,
       revision: 1,
-      createdAt: Date.now(),
+      createdAt: now,
     }
-    this.store.saveConfig(config)
-    this.store.set('owner', { id: init.ownerId, name: init.ownerName })
+    this.store.transaction(() => {
+      this.store.saveConfig(config)
+      this.store.set('owner', { id: init.ownerId, name: init.ownerName })
+      if (init.brief !== undefined) this.store.set('brief', init.brief)
+      if (init.kind === 'chief') this.store.setGrants({ tools: [...CHIEF_TOOLS], skills: [], recipients: [], secrets: [] })
+    })
+    await this.report()
+    if (init.status === 'setup') {
+      await this.wake({
+        kind: 'platform',
+        sender: { kind: 'platform' },
+        text: 'Setup started. Greet your owner and begin the interview.',
+      })
+    }
     return config
+  }
+
+  async pause(): Promise<void> {
+    const config = this.store.requireConfig()
+    if (config.status === 'deleted' || config.status === 'paused') return
+    this.store.set('resumeStatus', config.status)
+    this.store.updateConfig(() => ({ status: 'paused' }), false)
+    await this.changed()
+  }
+
+  async resume(): Promise<void> {
+    const config = this.store.requireConfig()
+    if (config.status !== 'paused') return
+    this.store.updateConfig(() => ({ status: this.store.get<'active' | 'setup'>('resumeStatus') ?? 'active' }), false)
+    await this.changed()
+    this.drain()
+  }
+
+  /** Delete: no more Wake-ups and gone from every list; the log and Workspace are kept as the archive. */
+  async remove(): Promise<void> {
+    this.store.updateConfig(() => ({ status: 'deleted' }), false)
+    await this.ctx.storage.deleteAlarm()
+    await this.changed()
   }
 
   // ---------------------------------------------------------------- wake-ups
@@ -104,17 +161,13 @@ export class Robot extends DurableObject<Env> {
     return id
   }
 
-  /** Resolves once no Turn is running and nothing runnable is queued (tests and admin use it). */
+  /** Resolves once no Turn is running and nothing runnable is queued. */
   async settled(): Promise<void> {
     while (this.pumping !== undefined) await this.pumping
   }
 
   override async alarm(): Promise<void> {
-    const active = this.store.activeTurn()
-    if (active !== undefined && this.pumping === undefined) {
-      // The DO was evicted mid-Turn: resume it.
-      this.drain()
-    }
+    if (this.store.activeTurn() !== undefined && this.pumping === undefined) this.drain()
     await this.rearm()
   }
 
@@ -150,9 +203,9 @@ export class Robot extends DurableObject<Env> {
         sender: wakeup.sender,
         text: wakeup.text,
         attachments: (wakeup.payload['attachments'] as Attachment[] | undefined) ?? [],
-        ...(typeof wakeup.payload['requestId'] === 'string' ? { requestId: wakeup.payload['requestId'] } : {}),
-        ...(typeof wakeup.payload['replyTo'] === 'string' ? { replyTo: wakeup.payload['replyTo'] } : {}),
-        ...(typeof wakeup.payload['replyHandle'] === 'string' ? { replyHandle: wakeup.payload['replyHandle'] } : {}),
+        ...optionalString(wakeup.payload, 'requestId'),
+        ...optionalString(wakeup.payload, 'replyTo'),
+        ...optionalString(wakeup.payload, 'replyHandle'),
       }))
     } else {
       agent.followup(wakeupMessage({
@@ -161,10 +214,12 @@ export class Robot extends DurableObject<Env> {
       }))
     }
     await this.rearm()
+    await this.changed()
     await agent.whenIdle()
     await ctx.sessions.flush(agent.session)
     this.store.endTurn(wakeup.id)
     await this.rearm()
+    await this.changed()
   }
 
   /** A Turn that could not run is never silent: it becomes a notice and the Robot stays runnable. */
@@ -176,6 +231,7 @@ export class Robot extends DurableObject<Env> {
     if (active !== undefined) this.store.endTurn(active.wakeupId)
     const message = error instanceof Error ? error.message : String(error)
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `The Turn failed: ${message}`, Date.now())
+    this.broadcast()
   }
 
   // ---------------------------------------------------------------- the agent composition
@@ -185,17 +241,21 @@ export class Robot extends DurableObject<Env> {
     if (this.composition?.revision === config.revision) return this.composition.value
     await this.composition?.value.dispose()
     this.composition = undefined
-    const owner = this.store.get<{ id: string; name: string }>('owner') ?? { id: config.ownerId, name: 'your owner' }
+    const owner = this.owner()
+    const brief = this.store.get<string>('brief') ?? null
+    const prompt = [{ name: 'platform', text: () => platformPrompt(this.store.requireConfig(), owner.name) }]
+    if (config.status === 'setup') prompt.push({ name: 'setup', text: () => setupPrompt(owner.name, brief) })
     const value = await compose({
       storage: this.ctx.storage,
       sessionId: config.liveSessionId,
+      onAppend: () => this.broadcast(),
       provider: config.model.provider,
       model: config.model.model,
       effort: config.model.effort,
       adapter: this.adapter(config.model.provider),
       contextBudget: config.contextBudget,
       compactionInstruction: config.compactionInstruction,
-      prompt: [{ name: 'platform', text: () => platformPrompt(this.store.requireConfig(), owner.name) }],
+      prompt,
       tools: this.tools(config),
     })
     this.composition = { revision: config.revision, value }
@@ -210,29 +270,222 @@ export class Robot extends DurableObject<Env> {
   protected credentials(): CredentialSource {
     const config = this.store.requireConfig()
     return {
-      resolve: async (provider) => {
-        const home = this.env.HOME.getByName('home')
-        return (await home.providerCredential(config.ownerId, provider)) ?? undefined
-      },
+      resolve: async (provider) => (await this.home().providerCredential(config.ownerId, provider)) ?? undefined,
     }
   }
 
-  protected tools(_config: RobotConfig): ToolDefinition[] {
-    return [...conversationTools()]
+  /** Exactly the tools this Robot may call: the Conversation tools plus its granted groups. */
+  protected tools(config: RobotConfig): ToolDefinition[] {
+    const tools = [...conversationTools()]
+    if (config.status === 'setup') return [...tools, ...setupTools(this)]
+    tools.push(...grantProposalTools(this))
+    for (const group of this.store.grants().tools.filter(isToolGroup)) tools.push(...this.groupTools(group, config))
+    return tools
+  }
+
+  /** Tools of one granted group; filled in by the tickets that build each group. */
+  protected groupTools(_group: ToolGroup, _config: RobotConfig): ToolDefinition[] {
+    return []
+  }
+
+  // ---------------------------------------------------------------- RobotHost
+
+  config(): RobotConfig {
+    return this.store.requireConfig()
+  }
+
+  grants(): GrantSet {
+    return this.store.grants()
+  }
+
+  now(): number {
+    return Date.now()
+  }
+
+  propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView {
+    const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
+    this.ctx.waitUntil(this.changed())
+    return proposalView(row)
+  }
+
+  setIdentity(patch: Partial<Identity>): Identity {
+    const clean = Object.fromEntries(Object.entries(patch).filter(([, value]) => typeof value === 'string' && value.trim() !== '')) as Partial<Identity>
+    const next = this.store.updateConfig((config) => ({ identity: { ...config.identity, ...clean } }), false)
+    this.ctx.waitUntil(this.changed())
+    return next.identity
+  }
+
+  // ---------------------------------------------------------------- the owner's side
+
+  /**
+   * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
+   * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
+   */
+  async answer(proposalId: string, revision: number, approve: boolean): Promise<AnswerResult> {
+    const existing = this.store.proposal(proposalId)
+    if (existing === undefined) return { ok: false, reason: 'not-found' }
+    const answered = this.store.answerProposal(proposalId, revision, approve, Date.now())
+    if (answered === undefined) return { ok: false, reason: 'stale' }
+    if (approve) await this.apply(answered)
+    await this.changed()
+    await this.wake({
+      kind: 'platform',
+      sender: { kind: 'platform' },
+      text: approve ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
+    })
+    return { ok: true, proposal: proposalView(answered) }
+  }
+
+  private async apply(proposal: ProposalRow): Promise<void> {
+    switch (proposal.kind) {
+      case 'setup': {
+        const grants = proposal.grants ?? { tools: [], skills: [], recipients: [], secrets: [] }
+        this.store.transaction(() => {
+          this.store.setGrants(grants)
+          this.store.updateConfig(() => ({ status: 'active' }))
+        })
+        return
+      }
+      case 'grants': {
+        const current = this.store.grants()
+        const add = proposal.grants ?? { tools: [], skills: [], recipients: [], secrets: [] }
+        this.store.setGrants({
+          tools: [...current.tools, ...add.tools],
+          skills: [...current.skills, ...add.skills],
+          recipients: [...current.recipients, ...add.recipients],
+          secrets: [...current.secrets, ...add.secrets],
+        })
+        this.store.updateConfig(() => ({}))
+        return
+      }
+      default:
+        await this.applyProposal(proposal)
+    }
+  }
+
+  /** Proposal kinds owned by later tickets (Member files, skills). */
+  protected async applyProposal(_proposal: ProposalRow): Promise<void> {}
+
+  /** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
+  async setRecipients(robotIds: readonly string[]): Promise<void> {
+    const grants = this.store.grants()
+    if (sameSet(grants.recipients, robotIds)) return
+    this.store.setGrants({ ...grants, recipients: [...robotIds] })
+    this.store.updateConfig(() => ({}))
+  }
+
+  /** Advanced settings (robot-vqtw): every change takes effect on the next Turn. */
+  async updateSettings(patch: SettingsPatch): Promise<RobotSettings> {
+    this.store.transaction(() => {
+      if (patch.grants !== undefined) this.store.setGrants(patch.grants)
+      this.store.updateConfig((config) => ({
+        ...(patch.identity === undefined ? {} : { identity: patch.identity }),
+        ...(patch.sharing === undefined ? {} : { sharing: patch.sharing }),
+        ...(patch.model === undefined ? {} : { model: patch.model }),
+        ...(patch.contextBudget === undefined ? {} : { contextBudget: Math.max(8_000, Math.round(patch.contextBudget)) }),
+        ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
+        ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
+        ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels])] } }),
+        ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
+        ...(config.kind === 'chief' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
+      }))
+    })
+    await this.changed()
+    return this.settings()
+  }
+
+  // ---------------------------------------------------------------- reporting and live updates
+
+  protected owner(): { id: string; name: string } {
+    return this.store.get<{ id: string; name: string }>('owner') ?? { id: this.store.requireConfig().ownerId, name: 'your owner' }
+  }
+
+  protected home() {
+    return this.env.HOME.getByName(HOME_ID)
+  }
+
+  fleetState(): FleetState {
+    const config = this.store.requireConfig()
+    if (config.status === 'paused') return 'paused'
+    if (config.status === 'blocked') return 'blocked'
+    if (this.store.activeTurn() !== undefined) return 'working'
+    if (this.store.proposals('open').length > 0 || this.store.get('takeover') !== undefined) return 'waiting for you'
+    if (config.status === 'setup') return 'setup'
+    return 'sleeping'
+  }
+
+  /** Report the registry row to the Home and tell open views to refresh. */
+  protected async changed(): Promise<void> {
+    this.broadcast()
+    await this.report()
+  }
+
+  private async report(): Promise<void> {
+    const config = this.store.requireConfig()
+    const last = lastLine(this.conversation().items)
+    const entry: RegistryEntry = {
+      id: config.id,
+      ownerId: config.ownerId,
+      kind: config.kind,
+      identity: config.identity,
+      sharing: config.sharing,
+      status: config.status,
+      fleetState: this.fleetState(),
+      lastLine: last?.text ?? '',
+      lastAt: last?.at ?? config.createdAt,
+    }
+    await this.home().robotChanged(entry)
+  }
+
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket', { status: 426 })
+    const pair = new WebSocketPair()
+    const [client, server] = [pair[0], pair[1]]
+    this.ctx.acceptWebSocket(server, [request.headers.get('x-member-id') ?? 'viewer'])
+    server.send(JSON.stringify({ type: 'changed', working: this.store.activeTurn() !== undefined }))
+    return new Response(null, { status: 101, webSocket: client })
+  }
+
+  override async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (message === 'ping') socket.send('pong')
+  }
+
+  override async webSocketClose(socket: WebSocket, code: number): Promise<void> {
+    socket.close(code === 1005 ? 1000 : code)
+  }
+
+  protected broadcast(event: Record<string, unknown> = { type: 'changed' }): void {
+    const config = this.store.config()
+    if (config === undefined) return
+    const text = JSON.stringify({ ...event, working: this.store.activeTurn() !== undefined })
+    for (const socket of this.ctx.getWebSockets()) {
+      try { socket.send(text) } catch { /* a closing socket */ }
+    }
   }
 
   // ---------------------------------------------------------------- alarm
 
   private async rearm(): Promise<void> {
     const candidates: number[] = []
-    if (this.store.activeTurn() !== undefined || (this.store.pendingWakeups() > 0 && runnable(this.store.requireConfig()))) {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted') {
+      await this.ctx.storage.deleteAlarm()
+      return
+    }
+    if (this.store.activeTurn() !== undefined || (this.store.pendingWakeups() > 0 && runnable(config))) {
       candidates.push(Date.now() + HEARTBEAT_MS)
     }
+    candidates.push(...this.alarmCandidates())
     if (candidates.length === 0) {
       await this.ctx.storage.deleteAlarm()
       return
     }
     await this.ctx.storage.setAlarm(Math.min(...candidates))
+  }
+
+  /** Further alarm times (Routines, outbox retries) from later tickets. */
+  protected alarmCandidates(): number[] {
+    return []
   }
 
   // ---------------------------------------------------------------- views
@@ -248,9 +501,7 @@ export class Robot extends DurableObject<Env> {
         notices: this.store.notices(config.liveSessionId),
         proposal: (id) => {
           const row = this.store.proposal(id)
-          if (row === undefined) return undefined
-          const { createdAt: _c, answeredAt: _a, payload: _p, ...view } = row
-          return view
+          return row === undefined ? undefined : proposalView(row)
         },
       }),
     }
@@ -281,8 +532,77 @@ export class Robot extends DurableObject<Env> {
       spendLimitUsd: config.spendLimitUsd,
     }
   }
+
+  panel(canEdit: boolean, summary: RobotSummary): RobotPanel {
+    return {
+      summary,
+      settings: this.settings(),
+      routines: this.routineViews(),
+      screen: this.screen(),
+      usage: this.usage(),
+      canEdit,
+    }
+  }
+
+  /** Filled by the Routines, browser and usage tickets. */
+  protected routineViews(): RoutineView[] {
+    return []
+  }
+
+  protected screen(): ScreenView | null {
+    return null
+  }
+
+  protected usage(): UsageView {
+    return { month: new Date().toISOString().slice(0, 7), inputTokens: 0, outputTokens: 0, costUsd: 0, limitUsd: this.store.requireConfig().spendLimitUsd }
+  }
+
+  /** Names of the tools the current composition registers (what the model may call). */
+  toolNames(): string[] {
+    return this.tools(this.store.requireConfig()).map((tool) => tool.name)
+  }
+
+  openProposals(): ProposalView[] {
+    return this.store.proposals('open').map(proposalView)
+  }
+
+  status(): { status: RobotConfig['status']; fleetState: FleetState } {
+    return { status: this.store.requireConfig().status, fleetState: this.fleetState() }
+  }
 }
 
 function runnable(config: RobotConfig): boolean {
   return config.status === 'active' || config.status === 'setup'
+}
+
+function optionalString(payload: Record<string, unknown>, key: string): Record<string, string> {
+  const value = payload[key]
+  return typeof value === 'string' ? { [key]: value } : {}
+}
+
+function proposalView(row: ProposalRow): ProposalView {
+  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill }
+}
+
+function approvedNote(proposal: ProposalRow): string {
+  switch (proposal.kind) {
+    case 'setup': return 'Your owner approved your setup. You are active now with exactly the Grants you proposed. Say hello in one line and tell them what happens next.'
+    case 'grants': return `Your owner approved your Grant proposal (${proposal.purpose}). The new Grants are available from now on.`
+    default: return `Your owner approved your ${proposal.kind} proposal (${proposal.purpose}).`
+  }
+}
+
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((item) => b.includes(item))
+}
+
+function lastLine(items: readonly ChatItem[]): { text: string; at: number } | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!
+    if (item.kind === 'reply') return { text: item.text, at: item.at }
+    if (item.kind === 'message') return { text: item.text, at: item.at }
+    if (item.kind === 'notice') return { text: item.text, at: item.at }
+    if (item.kind === 'question') return { text: item.proposal.purpose, at: item.at }
+  }
+  return undefined
 }

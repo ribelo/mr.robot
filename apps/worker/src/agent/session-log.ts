@@ -68,17 +68,21 @@ interface StoredLog {
 
 export interface SessionLogConfig {
   readonly storage: DurableObjectStorage
+  /** Called after events are durably appended (live views subscribe through it). */
+  readonly onAppend?: (sessionId: string) => void
 }
 
 export class SqliteSessionLog extends SessionPersistence {
   static inject = ['sessions']
   private readonly storage: DurableObjectStorage
+  private readonly onAppend: ((sessionId: string) => void) | undefined
   private readonly sql: SqlStorage
   private readonly writers = new Map<string, SessionHandle>()
 
   constructor(ctx: Context, config: SessionLogConfig) {
     super(ctx)
     this.storage = config.storage
+    this.onAppend = config.onAppend
     this.sql = config.storage.sql
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
     ctx.on('session/event', (session: Session, event: SessionEvent) => {
@@ -147,6 +151,7 @@ export class SqliteSessionLog extends SessionPersistence {
       }
       this.sql.exec('UPDATE session_log SET length = ? WHERE id = ?', stored.length + batch.length, id)
     })
+    this.onAppend?.(id)
   }
 
   private claim(id: SessionId, access: SessionAccess): SessionHandle {

@@ -1,11 +1,7 @@
-import type { Home, Member, Robot } from '../src/index.ts'
+import type { Env as WorkerEnv } from '../src/env.ts'
 
 declare global {
   namespace Cloudflare {
-    interface Env {
-      ROBOT: DurableObjectNamespace<Robot>
-      MEMBER: DurableObjectNamespace<Member>
-      HOME: DurableObjectNamespace<Home>
-    }
+    interface Env extends WorkerEnv {}
   }
 }

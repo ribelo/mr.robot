@@ -3,6 +3,7 @@
  * single-writer, so the store is a plain object with synchronous methods; the
  * session log lives beside it (agent/session-log.ts).
  */
+import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import type {
   GrantKind,
   GrantSet,
@@ -114,6 +115,7 @@ const MIGRATIONS: Record<number, readonly string[]> = {
 export class RobotStore {
   constructor(private readonly storage: DurableObjectStorage) {
     this.migrate()
+    for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
   }
 
   get sql(): SqlStorage {

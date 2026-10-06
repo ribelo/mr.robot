@@ -20,6 +20,7 @@ import { SqliteSessionLog } from './session-log.ts'
 export interface CompositionInput {
   readonly storage: DurableObjectStorage
   readonly sessionId: string
+  readonly onAppend?: (sessionId: string) => void
   readonly provider: string
   readonly model: string
   readonly effort: ThinkingEffort
@@ -47,7 +48,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     ctx.llm.registerAdapter([input.provider], new BudgetedAdapter(input.adapter, input.contextBudget))
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjectionRegistry)
-    await ctx.plugin(SqliteSessionLog, { storage: input.storage })
+    await ctx.plugin(SqliteSessionLog, { storage: input.storage, ...(input.onAppend === undefined ? {} : { onAppend: input.onAppend }) })
     await ctx.plugin(TokenMeter)
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
     await ctx.plugin(ToolRuntime, {})

@@ -24,7 +24,7 @@ export class StubLlm extends LlmAdapter {
     const log = requests.get(this.robotId) ?? []
     log.push(options)
     requests.set(this.robotId, log)
-    const scripted = scripts.get(this.robotId)?.shift() ?? { text: 'ok' }
+    const scripted = scripts.get(this.robotId)?.shift() ?? scripts.get('*')?.[0] ?? { text: 'ok' }
     const reply = typeof scripted === 'function' ? scripted(options) : scripted
     if (typeof reply === 'function') throw new Error('StubLlm: a scripted reply function must return a reply')
     if ('hang' in reply) {
