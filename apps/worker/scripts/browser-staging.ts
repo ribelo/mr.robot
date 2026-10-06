@@ -33,6 +33,7 @@ try {
     ['streams screencast frames for the live view', Number(report['screencastFrames']) > 0],
     ['takeover typing reaches the page', report['takeoverTyped'] === 'Typed by a person'],
     ['takeover tap reaches the page', report['takeoverClicked'] === 'Signed in'],
+    ['web search without a key returns real results', Number(report['searchCount']) >= 3 && /^https?:\/\/(?!www\.bing\.com)/.test(String(report['searchFirst']))],
   ]
   for (const [name, ok] of checks) console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`)
   if (checks.some(([, ok]) => !ok)) process.exitCode = 1

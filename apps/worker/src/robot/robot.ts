@@ -643,7 +643,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Setup may write its own persona files; afterwards only a files Grant gives the file tools.
     if (config.status === 'setup' || this.store.hasGrant('tool', 'files')) plugins.push(filesPlugin(this.workspace, (name) => this.memberFile(name)))
     if (config.status !== 'setup' && this.store.hasGrant('tool', 'browser')) plugins.push(browserUsePlugin())
-    if (config.status !== 'setup' && this.store.hasGrant('tool', 'web')) plugins.push(webPlugin(this.credentials()))
+    if (config.status !== 'setup' && this.store.hasGrant('tool', 'web')) plugins.push(webPlugin(this.credentials(), this.env.BROWSER))
     if (config.status !== 'setup' && this.store.hasGrant('tool', 'skills')) {
       plugins.push(skillsPlugin({
         granted: () => this.home().loadableSkills(config.ownerId, this.store.grants().skills),
