@@ -422,4 +422,5 @@ export const SendMessage = Schema.Struct({
 })
 export type SendMessage = typeof SendMessage.Type
 
-export const RewindRequest = Schema.Struct({ atSeq: Schema.Number })
+/** Rewind to an event, or to before a Turn (its message included). */
+export const RewindRequest = Schema.Struct({ atSeq: Schema.optional(Schema.Number), beforeTurn: Schema.optional(Schema.Number) })

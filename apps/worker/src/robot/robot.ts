@@ -1568,6 +1568,20 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * stays in this Robot's SQLite as the archive, with a rewind record; nothing is rewritten.
    * The Robot is told that external effects after the point still stand.
    */
+/**
+   * Rewind to before Turn n: before the inbox events that delivered its message too, so the
+   * message is gone with the Turn (it is not delivered again).
+   */
+  async rewindBeforeTurn(turn: number): Promise<RewindView> {
+    const config = this.store.requireConfig()
+    const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
+    const start = events.findIndex((event) => event.type === 'turn/start' && (event.data as { turn?: number }).turn === turn)
+    if (start < 0) throw new Error(`no Turn ${turn} in this Conversation`)
+    let first = start
+    while (first > 0 && events[first - 1]!.type === 'agent/inbox/spliced') first -= 1
+    return this.rewind(Math.max(0, events[first]!.seq - 1))
+  }
+
   async rewind(atSeq: number): Promise<RewindView> {
     const config = this.store.requireConfig()
     if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw new Error('the Robot is working; rewind when it is done')

@@ -37,9 +37,7 @@ Effect owns: the edge API (router, errors, request decoding), the Workspace (R2)
 OAuth, Web Push, skill sync, and the scope of every Cordis composition (closing the scope disposes
 the agent and its plugins: `composeScoped` in apps/worker/src/agent/compose.ts).
 
-The three Durable Object classes stay plain classes with async RPC methods. Durable Object RPC and
-the Cordis plugin API are both promise-based; wrapping each method body in a runtime call added
-no checking. Their bodies call the Effect services above.
+The three Durable Object classes are still plain classes with async RPC methods. That contradicts the owner's instruction (Effect as much as possible on the Cloudflare side) and is open work: ticket 23.
 
 ## The one patch on a DSH package
 

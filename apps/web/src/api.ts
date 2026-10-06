@@ -60,6 +60,7 @@ export const api = {
   pauseRoutine: (id: string, routine: string, paused: boolean) => request<RoutineView>(`/api/robots/${id}/routines/${routine}/pause`, { body: { paused } }),
   deleteRoutine: (id: string, routine: string) => request(`/api/robots/${id}/routines/${routine}`, { method: 'DELETE' }),
   rewind: (id: string, atSeq: number) => request(`/api/robots/${id}/rewind`, { body: { atSeq } }),
+  rewindBeforeTurn: (id: string, turn: number) => request(`/api/robots/${id}/rewind`, { body: { beforeTurn: turn } }),
   undoRewind: (id: string, rewind: string) => request(`/api/robots/${id}/rewinds/${rewind}/undo`, { body: {} }),
   upload: async (id: string, file: File) => {
     const response = await fetch(`/api/robots/${id}/files?name=${encodeURIComponent(file.name)}`, {

@@ -105,7 +105,7 @@ function RewindSheet({ id, onClose, onDone }: { id: string; onClose: () => void;
                   <span className="routine-name">Turn {turn.turn ?? ''} · {new Date(turn.at).toLocaleString()}</span>
                   <span className="muted">{turn.text || '(no message)'}</span>
                 </span>
-                <ConfirmButton label="Rewind to before" confirm="Rewind" onConfirm={() => void act(() => api.rewind(id, Math.max(0, turn.seq - 1)))} />
+                <ConfirmButton label="Rewind to before" confirm="Rewind" onConfirm={() => void act(() => api.rewindBeforeTurn(id, turn.turn ?? 0))} />
               </li>
             ))}
           </ul>

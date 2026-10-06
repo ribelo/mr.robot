@@ -200,8 +200,9 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))
   .on('POST', '/api/robots/:id/rewind', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
-    const { atSeq } = yield* decodeBody(c.request, RewindRequest)
-    return yield* call(() => robot(c, id).rewind(atSeq)).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))
+    const input = yield* decodeBody(c.request, RewindRequest)
+    if (input.beforeTurn === undefined && input.atSeq === undefined) return yield* Effect.fail(badRequest('give atSeq or beforeTurn'))
+    return yield* call(() => (input.beforeTurn !== undefined ? robot(c, id).rewindBeforeTurn(input.beforeTurn) : robot(c, id).rewind(input.atSeq!))).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))
   }))
   .on('POST', '/api/robots/:id/rewinds/:rewind/undo', (c, { id, rewind }) => owner(c, id).pipe(
     Effect.andThen(call(() => robot(c, id).undoRewind(rewind)).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))),

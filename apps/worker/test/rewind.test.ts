@@ -88,4 +88,27 @@ describe('the Trajectory and rewind', () => {
     expect(texts).toContain('Actually order the red one.')
     expect((await api(ANNA, `/api/robots/${id}/rewinds/${rewound.id}/undo`, { body: {} })).status).toBe(409)
   })
+
+  it('rewinding to before a Turn removes its message too; it is not delivered again', async () => {
+    scripts.set('*', [{ text: 'Hello.' }])
+    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+    const id = body.id
+    await settle(id)
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
+    await testRobot(id).activateForTest()
+    scripts.set(id, [{ text: 'First answer.' }, { text: 'Second answer.' }, { text: 'Answer after the rewind.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'first question' } })
+    await settle(id)
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'second question' } })
+    await settle(id)
+    const turns = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body.events.filter((event) => event.type === 'turn/start')
+    const last = turns.at(-1)!.turn!
+    expect((await api(ANNA, `/api/robots/${id}/rewind`, { body: { beforeTurn: last } })).status).toBe(200)
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'third question' } })
+    await settle(id)
+    const sent = JSON.stringify(requests.get(id)!.at(-1)!.messages)
+    expect(sent).toContain('first question')
+    expect(sent).not.toContain('second question')
+    expect(sent).toContain('third question')
+  })
 })
