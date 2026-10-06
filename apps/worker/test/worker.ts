@@ -43,8 +43,8 @@ export class Member extends ProductionMember {
 
 /** The production Robot with the scripted stub model on the "stub" Provider. */
 export class Robot extends ProductionRobot {
-  protected override adapter(provider: string, contextWindow?: number): LlmAdapter {
-    return provider === 'stub' ? new StubLlm(this.store.requireConfig().id) : super.adapter(provider, contextWindow)
+  protected override adapter(provider: string, contextWindow?: number, model?: string, wire?: 'chat' | 'anthropic' | 'responses'): LlmAdapter {
+    return provider === 'stub' ? new StubLlm(this.store.requireConfig().id) : super.adapter(provider, contextWindow, model, wire)
   }
 
   /** The credential this Robot's Turns would use for a Provider. */

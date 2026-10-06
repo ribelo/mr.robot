@@ -67,7 +67,7 @@ export class CodexAdapter extends LlmAdapter {
       provider, id: model, name: model,
       context: { contextWindow: this.contextWindow },
       defaultMaxTokens: 32_000,
-      reasoning: { efforts: ['low', 'medium', 'high'].map((id) => ({ id, label: id })) },
+      reasoning: { efforts: ['low', 'medium', 'high'].map((id) => ({ id, name: id })) },
     } as never)
   }
 

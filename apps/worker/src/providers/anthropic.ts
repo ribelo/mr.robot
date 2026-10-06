@@ -85,7 +85,7 @@ export class AnthropicAdapter extends LlmAdapter {
       provider, id: model, name: model,
       context: { contextWindow: this.contextWindow },
       defaultMaxTokens: 32_000,
-      reasoning: { efforts: ['off', 'low', 'medium', 'high', 'max'].map((id) => ({ id, label: id })) },
+      reasoning: { efforts: ['off', 'low', 'medium', 'high', 'max'].map((id) => ({ id, name: id })) },
     } as never)
   }
 

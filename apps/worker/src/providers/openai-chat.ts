@@ -46,7 +46,7 @@ export function chatTools(options: GenerateOptions) {
   return (options.tools ?? []).map((tool) => ({ type: 'function' as const, function: { name: tool.name, description: tool.description, parameters: tool.parameters } }))
 }
 
-const EFFORTS = [{ id: 'off', label: 'off' }, { id: 'low', label: 'low' }, { id: 'medium', label: 'medium' }, { id: 'high', label: 'high' }]
+const EFFORTS = [{ id: 'off', name: 'off' }, { id: 'low', name: 'low' }, { id: 'medium', name: 'medium' }, { id: 'high', name: 'high' }]
 
 export interface ChatAdapterOptions {
   readonly name: string
