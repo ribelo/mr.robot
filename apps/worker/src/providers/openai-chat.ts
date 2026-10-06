@@ -7,7 +7,7 @@ import { httpFailure, sse, StreamWriter, systemText, textOf } from './stream.ts'
 
 type ChatMessage =
   | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> }
+  | { role: 'assistant'; content: string | null; reasoning_content?: string; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> }
   | { role: 'tool'; tool_call_id: string; content: string }
 
 export function chatMessages(options: GenerateOptions): ChatMessage[] {
@@ -22,7 +22,14 @@ export function chatMessages(options: GenerateOptions): ChatMessage[] {
       case 'assistant': {
         const calls = message.content.flatMap((block) => block.type === 'tool-call' ? [{ id: block.id, type: 'function' as const, function: { name: block.name, arguments: block.arguments } }] : [])
         const text = textOf(message.content)
-        out.push({ role: 'assistant', content: text === '' ? null : text, ...(calls.length === 0 ? {} : { tool_calls: calls }) })
+        // DeepSeek-style thinking models require their reasoning back on tool turns.
+        const reasoning = message.content.flatMap((block) => (block.type === 'reasoning' ? [block.text] : [])).join('')
+        out.push({
+          role: 'assistant',
+          content: text === '' ? null : text,
+          ...(reasoning === '' ? {} : { reasoning_content: reasoning }),
+          ...(calls.length === 0 ? {} : { tool_calls: calls }),
+        })
         break
       }
       case 'tool':
@@ -44,8 +51,9 @@ const EFFORTS = [{ id: 'off', label: 'off' }, { id: 'low', label: 'low' }, { id:
 export interface ChatAdapterOptions {
   readonly name: string
   readonly url: string
-  readonly headers: () => Promise<Record<string, string>>
+  readonly headers: (options: GenerateOptions) => Promise<Record<string, string>>
   readonly contextWindow: number
+  readonly fetch?: typeof fetch
 }
 
 /** Streaming chat completions over HTTP (OpenRouter). */
@@ -60,9 +68,9 @@ export class ChatCompletionsAdapter extends LlmAdapter {
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const effort = options.reasoningEffort === undefined || String(options.reasoningEffort) === 'off' ? undefined : String(options.reasoningEffort)
-    const response = await fetch(this.options.url, {
+    const response = await (this.options.fetch ?? fetch)(this.options.url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(await this.options.headers()) },
+      headers: { 'content-type': 'application/json', ...(await this.options.headers(options)) },
       body: JSON.stringify({
         model: options.model,
         messages: chatMessages(options),

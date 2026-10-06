@@ -23,6 +23,7 @@ import type {
 } from '@mr-robot/protocol'
 import * as Effect from 'effect/Effect'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
+import { OPENCODE_GO_MODELS } from '../providers/opencode-go-models.ts'
 import { makeVault } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
@@ -40,6 +41,7 @@ export const DEFAULT_MODELS: ModelOption[] = [
   { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Claude subscription)', contextWindow: 200_000, price: { input: 0, output: 0 } },
   { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash (OpenRouter)', contextWindow: 1_000_000, price: { input: 0.3, output: 1.2 } },
   { provider: 'workers-ai', model: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6 (Workers AI)', contextWindow: 262_144, price: { input: 0.95, output: 4, cachedInput: 0.16 } },
+  ...OPENCODE_GO_MODELS.map((model) => ({ provider: 'opencode-go', model: model.id, label: `${model.name} (OpenCode Go)`, contextWindow: model.contextWindow, price: model.price })),
 ]
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
@@ -499,8 +501,12 @@ export class Home extends DurableObject<Env> {
     return this.modelList().filter((option) => usable.has(option.provider))
   }
 
+  /** The admin's list, plus every OpenCode Go model it does not mention (the offer changes over time). */
   modelList(): ModelOption[] {
-    return this.setting<ModelOption[]>('models') ?? DEFAULT_MODELS
+    const stored = this.setting<ModelOption[]>('models')
+    if (stored === undefined) return DEFAULT_MODELS
+    const missing = DEFAULT_MODELS.filter((model) => model.provider === 'opencode-go' && !stored.some((entry) => entry.provider === model.provider && entry.model === model.model))
+    return [...stored, ...missing]
   }
 
   // ---------------------------------------------------------------- Providers (robot-dic7)
@@ -521,6 +527,15 @@ export class Home extends DurableObject<Env> {
       if (shared !== null) return shared
     }
     return null
+  }
+
+  /** Whose OpenCode Go pool a Member's Robots use: their own, else the first one shared with the Home. */
+  async opencodePoolOwner(memberId: string): Promise<{ ownerId: string; forHome: boolean } | null> {
+    const own = await this.env.MEMBER.getByName(memberId).opencodeKeys()
+    if (own.keys.length > 0) return { ownerId: memberId, forHome: false }
+    const sharer = this.sql.exec<{ member_id: string }>("SELECT member_id FROM shared_credential WHERE provider = 'opencode-go' AND member_id != ?", memberId).toArray()
+      .find(({ member_id }) => this.member(member_id)?.status === 'active')
+    return sharer === undefined ? null : { ownerId: sharer.member_id, forHome: true }
   }
 
   async providersView(memberId: string): Promise<ProvidersView> {

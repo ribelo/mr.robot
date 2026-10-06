@@ -113,6 +113,20 @@ export const api = new Router<ApiContext>()
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
   .on('GET', '/api/providers', (c) => call(() => home(c.env).providersView(c.member.id)))
+  // OpenCode Go key pool (ticket 19)
+  .on('GET', '/api/providers/opencode-go/keys', (c) => call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys()))
+  .on('POST', '/api/providers/opencode-go/keys', (c) => Effect.gen(function* () {
+    const input = yield* decodeBody(c.request, Schema.Struct({ key: Schema.String, shared: Schema.optional(Schema.Boolean) }))
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).addOpencodeKey(input.key, input.shared)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys())
+  }))
+  .on('POST', '/api/providers/opencode-go/keys/:key/activate', (c, { key }) => call(() => c.env.MEMBER.getByName(c.member.id).activateOpencodeKey(key)).pipe(
+    Effect.mapError((error) => badRequest(error.detail ?? error.message)),
+    Effect.andThen(call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys())),
+  ))
+  .on('DELETE', '/api/providers/opencode-go/keys/:key', (c, { key }) => call(() => c.env.MEMBER.getByName(c.member.id).removeOpencodeKey(key)).pipe(
+    Effect.andThen(call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys())),
+  ))
   .on('PUT', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
     const name = yield* providerName(provider, API_KEY_PROVIDERS)
     const input = yield* decodeBody(c.request, ApiKeyInput)

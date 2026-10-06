@@ -91,6 +91,47 @@ function Providers() {
           <tr><td>Workers AI</td><td><span className="state">always available</span></td></tr>
         </tbody>
       </table>
+      <OpencodeKeys shared={view.mine.find((entry) => entry.provider === 'opencode-go')?.shared ?? false} sharedBy={view.shared.filter((entry) => entry.provider === 'opencode-go').map((entry) => entry.ownerName)} onShare={(on) => run(() => api.shareProvider('opencode-go', on))} onChanged={refresh} />
+    </>
+  )
+}
+
+/** OpenCode Go keys (ticket 19): when one runs out, the next takes over and becomes active. */
+function OpencodeKeys({ shared, sharedBy, onShare, onChanged }: { shared: boolean; sharedBy: string[]; onShare: (on: boolean) => Promise<void>; onChanged: () => Promise<unknown> }) {
+  const [view, setView] = useState<Awaited<ReturnType<typeof api.opencodeKeys>>>()
+  const [key, setKey] = useState('')
+  const [error, setError] = useState<string>()
+  useEffect(() => { void api.opencodeKeys().then(setView) }, [])
+  const change = async (action: () => Promise<Awaited<ReturnType<typeof api.opencodeKeys>>>) => {
+    try {
+      setView(await action())
+      setError(undefined)
+      await onChanged()
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'failed')
+    }
+  }
+  return (
+    <>
+      <h2>OpenCode Go</h2>
+      <div className="muted">Every model of the OpenCode Go plan. Add several keys: when one hits its limit or stops working, your Robots move to the next and it becomes the active one.{sharedBy.length > 0 ? ` Shared with the Home by ${sharedBy.join(', ')}.` : ''}</div>
+      <table className="grid">
+        <tbody>
+          {(view?.keys ?? []).map((entry) => (
+            <tr key={entry.id}>
+              <td>{entry.masked}</td>
+              <td>{entry.id === view?.activeId ? <span className="state">active</span> : <button type="button" className="link" onClick={() => void change(() => api.activateOpencodeKey(entry.id))}>Make active</button>}</td>
+              <td><button type="button" className="link" onClick={() => void change(() => api.removeOpencodeKey(entry.id))}>Remove</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="form inline">
+        <input type="password" value={key} placeholder="OpenCode API key (sk-…)" onChange={(event) => setKey(event.target.value)} />
+        <button type="button" className="button" disabled={key.trim() === ''} onClick={() => void change(async () => { const next = await api.addOpencodeKey(key); setKey(''); return next })}>Add key</button>
+        {(view?.keys.length ?? 0) > 0 ? <label className="check"><input type="checkbox" checked={shared} onChange={(event) => void onShare(event.target.checked)} /> shared with the Home</label> : null}
+      </div>
+      {error === undefined ? null : <div className="muted">{error}</div>}
     </>
   )
 }

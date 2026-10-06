@@ -260,7 +260,7 @@ export const ProposalAnswer = Schema.Struct({
 
 // ---------------------------------------------------------------- Providers (robot-dic7, robot-lzu3, robot-7v9s)
 
-export type ProviderName = 'deepseek' | 'openrouter' | 'workers-ai' | 'openai' | 'anthropic'
+export type ProviderName = 'deepseek' | 'openrouter' | 'workers-ai' | 'openai' | 'anthropic' | 'opencode-go'
 
 export interface ProviderView {
   readonly provider: ProviderName
@@ -278,6 +278,13 @@ export interface ProvidersView {
   readonly shared: readonly ProviderView[]
   readonly models: readonly ModelOption[]
   readonly defaultModel: ModelChoice
+}
+
+/** An OpenCode Go key pool, keys masked (ticket 19). */
+export interface OpencodeKeysView {
+  readonly keys: ReadonlyArray<{ readonly id: string; readonly masked: string }>
+  readonly activeId: string | null
+  readonly shared: boolean
 }
 
 export const ApiKeyInput = Schema.Struct({ key: Schema.String, shared: Schema.Boolean })

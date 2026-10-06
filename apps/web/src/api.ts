@@ -1,5 +1,6 @@
 import type {
   AdminView,
+  OpencodeKeysView,
   Conversation,
   Me,
   MemberView,
@@ -75,6 +76,10 @@ export const api = {
   finishOAuth: (provider: string, shared: boolean, pasted?: string) =>
     request<{ connected: boolean }>(`/api/providers/${provider}/oauth/finish`, { body: pasted === undefined ? { shared } : { shared, pasted } }),
   shareProvider: (provider: string, shared: boolean) => request(`/api/providers/${provider}`, { method: 'PATCH', body: { shared } }),
+  opencodeKeys: () => request<OpencodeKeysView>('/api/providers/opencode-go/keys'),
+  addOpencodeKey: (key: string) => request<OpencodeKeysView>('/api/providers/opencode-go/keys', { body: { key } }),
+  activateOpencodeKey: (id: string) => request<OpencodeKeysView>(`/api/providers/opencode-go/keys/${encodeURIComponent(id)}/activate`, { body: {} }),
+  removeOpencodeKey: (id: string) => request<OpencodeKeysView>(`/api/providers/opencode-go/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   removeProvider: (provider: string) => request(`/api/providers/${provider}`, { method: 'DELETE' }),
   homeSettings: () => request<{ defaultModel: ModelChoice; robotSpendLimitUsd: number | null; memberSpendLimitUsd: number | null; models: ModelOption[] }>('/api/admin/settings'),
   updateHomeSettings: (patch: Record<string, unknown>) => request('/api/admin/settings', { method: 'PATCH', body: patch }),

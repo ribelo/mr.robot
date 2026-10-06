@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { AnthropicAdapter } from '../src/providers/anthropic.ts'
-import { CodexAdapter } from '../src/providers/codex.ts'
+import { AnthropicAdapter, claudeSubscription } from '../src/providers/anthropic.ts'
+import { chatgptSubscription, CodexAdapter } from '../src/providers/codex.ts'
 import { ChatCompletionsAdapter } from '../src/providers/openai-chat.ts'
+import { opencodeGoAdapter } from '../src/providers/opencode-go.ts'
 
 const realFetch = globalThis.fetch
 afterEach(() => {
@@ -68,7 +69,7 @@ describe('Provider adapters', () => {
       sse({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }),
       sse({ type: 'message_stop' }),
     ])
-    const adapter = new AnthropicAdapter(async () => 'oauth-token', 200_000)
+    const adapter = new AnthropicAdapter(claudeSubscription(async () => 'oauth-token'), 200_000)
     const chunks = await collect(adapter.stream({ ...base('anthropic'), reasoningEffort: 'high' as never }))
     const request = requests[0]!
     expect(request.headers.get('authorization')).toBe('Bearer oauth-token')
@@ -103,7 +104,7 @@ describe('Provider adapters', () => {
       sse({ type: 'response.output_item.done', item: { type: 'function_call' } }),
       sse({ type: 'response.completed', response: { usage: { input_tokens: 30, output_tokens: 4 } } }),
     ])
-    const adapter = new CodexAdapter(async () => ({ access: 'tok', accountId: 'acct' }), 272_000)
+    const adapter = new CodexAdapter(chatgptSubscription(async () => ({ access: 'tok', accountId: 'acct' })), 272_000)
     const chunks = await collect(adapter.stream(base('openai')))
     const request = requests[0]!
     expect(request.url).toBe('https://chatgpt.com/backend-api/codex/responses')
@@ -114,5 +115,31 @@ describe('Provider adapters', () => {
     const finish = chunks.at(-1) as unknown as { reason: unknown; replayState: { blocks: readonly unknown[] } }
     expect(finish.reason).toEqual({ kind: 'tool-calls' })
     expect(finish.replayState.blocks).toEqual([{ encrypted: 'enc-1' }, null])
+  })
+
+  it('OpenCode Go: each model on its wire format, with the session header and a pool key (ticket 19)', async () => {
+    const pool = {
+      candidates: async () => ({ keys: [{ id: 'a', key: 'sk-pool' }], activeId: 'a' }),
+      promote: async () => undefined,
+      stick: async () => undefined,
+    }
+    const seen: Array<{ url: string; auth: string | null; apiKey: string | null; session: string | null; system: unknown }> = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      const body = (await request.json()) as { system?: unknown }
+      seen.push({ url: request.url, auth: request.headers.get('authorization'), apiKey: request.headers.get('x-api-key'), session: request.headers.get('x-opencode-session'), system: body.system })
+      return new Response('', { status: 500 })
+    }) as typeof fetch
+    for (const model of ['deepseek-v4-flash', 'minimax-m3', 'gpt-5.6-luna']) {
+      await collect(opencodeGoAdapter(model, pool).stream({ ...base('opencode-go'), model, sessionId: 'sess-1' } as never)).catch(() => undefined)
+    }
+    expect(seen.map((entry) => entry.url)).toEqual([
+      'https://opencode.ai/zen/go/v1/chat/completions',
+      'https://opencode.ai/zen/go/v1/messages',
+      'https://opencode.ai/zen/go/v1/responses',
+    ])
+    expect(seen.map((entry) => entry.session)).toEqual(['sess-1', 'sess-1', 'sess-1'])
+    expect([seen[0]!.auth, seen[1]!.apiKey, seen[2]!.auth]).toEqual(['Bearer sk-pool', 'sk-pool', 'Bearer sk-pool'])
+    expect(JSON.stringify(seen[1]!.system)).not.toContain('Claude Code')
   })
 })

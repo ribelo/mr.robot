@@ -5,12 +5,13 @@
  */
 import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 import { DeepSeekAdapter, resolveAdapterOptions } from '@deepseek-ai/dsh-llm-deepseek'
-import { AnthropicAdapter } from '../providers/anthropic.ts'
-import { CodexAdapter } from '../providers/codex.ts'
+import { AnthropicAdapter, claudeSubscription } from '../providers/anthropic.ts'
+import { chatgptSubscription, CodexAdapter } from '../providers/codex.ts'
 import { ChatCompletionsAdapter, WorkersAiAdapter } from '../providers/openai-chat.ts'
+import { opencodeGoAdapter, type OpencodePool } from '../providers/opencode-go.ts'
 
-export type ProviderId = 'deepseek' | 'openrouter' | 'workers-ai' | 'openai' | 'anthropic'
-export const PROVIDER_IDS: readonly ProviderId[] = ['deepseek', 'openrouter', 'workers-ai', 'openai', 'anthropic']
+export type ProviderId = 'deepseek' | 'openrouter' | 'workers-ai' | 'openai' | 'anthropic' | 'opencode-go'
+export const PROVIDER_IDS: readonly ProviderId[] = ['deepseek', 'openrouter', 'workers-ai', 'openai', 'anthropic', 'opencode-go']
 export const API_KEY_PROVIDERS: readonly ProviderId[] = ['deepseek', 'openrouter']
 export const OAUTH_PROVIDERS: readonly ProviderId[] = ['openai', 'anthropic']
 
@@ -21,6 +22,8 @@ export type ProviderCredential =
 export interface CredentialSource {
   /** Current credential for a Provider, or undefined when the owner has none usable. */
   resolve(provider: ProviderId): Promise<ProviderCredential | undefined>
+  /** The OpenCode Go key pool the owner can use (their own, else one shared with the Home). */
+  opencodePool?(): OpencodePool
 }
 
 export interface ProviderContext {
@@ -29,6 +32,8 @@ export interface ProviderContext {
   readonly ai?: Ai
   /** From the Home's model list; unknown models assume 128k. */
   readonly contextWindow?: number
+  /** The model the Robot runs on (OpenCode Go picks its wire format per model). */
+  readonly model?: string
 }
 
 export function providerAdapter(provider: string, context: ProviderContext): LlmAdapter {
@@ -47,9 +52,14 @@ export function providerAdapter(provider: string, context: ProviderContext): Llm
       if (context.ai === undefined) throw new LlmError('Workers AI is not bound in this deployment', 'MISSING_CREDENTIAL')
       return new WorkersAiAdapter(context.ai, window)
     case 'anthropic':
-      return new AnthropicAdapter(async () => (await oauth(context, 'anthropic')).access, window)
+      return new AnthropicAdapter(claudeSubscription(async () => (await oauth(context, 'anthropic')).access), window)
     case 'openai':
-      return new CodexAdapter(() => oauth(context, 'openai'), window)
+      return new CodexAdapter(chatgptSubscription(() => oauth(context, 'openai')), window)
+    case 'opencode-go': {
+      const pool = context.credentials.opencodePool?.()
+      if (pool === undefined || context.model === undefined) throw new LlmError('OpenCode Go is not available here', 'MISSING_CREDENTIAL')
+      return opencodeGoAdapter(context.model, pool)
+    }
     default:
       throw new LlmError(`Provider "${provider}" is not available`, 'MISSING_CREDENTIAL')
   }

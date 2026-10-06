@@ -9,7 +9,8 @@
  */
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
-import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { LlmError, type LlmAdapter } from '@deepseek-ai/dsh-llm'
+import type { OpencodePool } from '../providers/opencode-go.ts'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
@@ -495,7 +496,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       provider: config.model.provider,
       model: config.model.model,
       effort: config.model.effort,
-      adapter: this.adapter(config.model.provider, contextWindow),
+      adapter: this.adapter(config.model.provider, contextWindow, config.model.model),
       contextBudget: config.contextBudget,
       compactionInstruction: config.compactionInstruction,
       prompt,
@@ -512,12 +513,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The LLM adapter for a Provider; tests override it with a scripted stub. */
-  protected adapter(provider: string, contextWindow?: number): LlmAdapter {
+  protected adapter(provider: string, contextWindow?: number, model?: string): LlmAdapter {
     return providerAdapter(provider, {
       robotId: this.store.requireConfig().id,
       credentials: this.credentials(),
       ai: this.env.AI,
       ...(contextWindow === undefined ? {} : { contextWindow }),
+      ...(model === undefined ? {} : { model }),
     })
   }
 
@@ -525,6 +527,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     return {
       resolve: async (provider) => (await this.home().providerCredential(config.ownerId, provider)) ?? undefined,
+      opencodePool: () => this.opencodePool(config.ownerId),
+    }
+  }
+
+  /** The owner's OpenCode Go pool (or the Home's), resolved per request so rotation and sharing apply at once. */
+  private opencodePool(ownerId: string): OpencodePool {
+    const owner = async () => {
+      const found = await this.home().opencodePoolOwner(ownerId)
+      if (found === null) throw new LlmError('Add an OpenCode Go API key under Providers, or use one shared with the Home', 'MISSING_CREDENTIAL')
+      return found
+    }
+    return {
+      candidates: async (sessionId) => {
+        const { ownerId: holder, forHome } = await owner()
+        return this.env.MEMBER.getByName(holder).opencodeCandidates(sessionId, forHome)
+      },
+      promote: async (expected, id) => this.env.MEMBER.getByName((await owner()).ownerId).opencodePromote(expected, id),
+      stick: async (sessionId, id) => this.env.MEMBER.getByName((await owner()).ownerId).opencodeStick(sessionId, id),
     }
   }
 

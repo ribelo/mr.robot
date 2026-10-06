@@ -33,8 +33,32 @@ function inputItems(options: GenerateOptions): Item[] {
   return items
 }
 
+/** Where and how a Responses request goes. */
+export interface ResponsesEndpoint {
+  readonly url: string
+  readonly headers: (options: GenerateOptions) => Promise<Record<string, string>>
+  readonly fetch?: typeof fetch
+}
+
+/** The ChatGPT subscription's Codex backend (OAuth access token and account id). */
+export function chatgptSubscription(credential: () => Promise<{ access: string; accountId?: string }>): ResponsesEndpoint {
+  return {
+    url: URL_,
+    headers: async (options) => {
+      const { access, accountId } = await credential()
+      return {
+        authorization: `Bearer ${access}`,
+        ...(accountId === undefined ? {} : { 'chatgpt-account-id': accountId }),
+        originator: 'pi',
+        'OpenAI-Beta': 'responses=experimental',
+        ...(options.sessionId === undefined ? {} : { 'session-id': String(options.sessionId) }),
+      }
+    },
+  }
+}
+
 export class CodexAdapter extends LlmAdapter {
-  constructor(private readonly credential: () => Promise<{ access: string; accountId?: string }>, private readonly contextWindow: number) {
+  constructor(private readonly endpoint: ResponsesEndpoint, private readonly contextWindow: number) {
     super()
   }
 
@@ -48,19 +72,10 @@ export class CodexAdapter extends LlmAdapter {
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    const { access, accountId } = await this.credential()
     const effort = options.reasoningEffort === undefined ? 'medium' : String(options.reasoningEffort)
-    const response = await fetch(URL_, {
+    const response = await (this.endpoint.fetch ?? fetch)(this.endpoint.url, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'text/event-stream',
-        authorization: `Bearer ${access}`,
-        ...(accountId === undefined ? {} : { 'chatgpt-account-id': accountId }),
-        originator: 'pi',
-        'OpenAI-Beta': 'responses=experimental',
-        ...(options.sessionId === undefined ? {} : { 'session-id': String(options.sessionId) }),
-      },
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...(await this.endpoint.headers(options)) },
       body: JSON.stringify({
         model: options.model,
         store: false,

@@ -11,6 +11,7 @@ import { localDate, zonedTime } from '../robot/schedule.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { makeVault, type VaultShape } from '../platform/vault.ts'
+import type { OpencodeKey } from '../providers/opencode-go.ts'
 import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
 
@@ -158,6 +159,7 @@ export class Member extends DurableObject<Env> {
    * behalf of another Member's Robot (`forHome`) gets only a credential shared with the Home.
    */
   async credential(provider: ProviderId, forHome: boolean): Promise<ProviderCredential | null> {
+    if (provider === 'opencode-go') return null
     const row = this.sql.exec<{ kind: 'api-key' | 'oauth'; sealed: string; shared: number }>(
       'SELECT kind, sealed, shared FROM credential WHERE provider = ?', provider,
     ).toArray()[0]
@@ -260,6 +262,101 @@ export class Member extends DurableObject<Env> {
       costUsd: rows.reduce((sum, row) => sum + row.costUsd, 0),
       byRobot: rows,
     }
+  }
+
+  // ---------------------------------------------------------------- OpenCode Go key pool (ticket 19)
+
+  private async readPool(): Promise<{ keys: OpencodeKey[]; activeId: string | null }> {
+    const row = this.sql.exec<{ sealed: string }>("SELECT sealed FROM credential WHERE provider = 'opencode-go'").toArray()[0]
+    if (row === undefined) return { keys: [], activeId: null }
+    return JSON.parse(await Effect.runPromise(this.credentialVault().open(row.sealed))) as { keys: OpencodeKey[]; activeId: string | null }
+  }
+
+  private async writePool(pool: { keys: OpencodeKey[]; activeId: string | null }, shared?: boolean): Promise<void> {
+    const current = this.sql.exec<{ shared: number }>("SELECT shared FROM credential WHERE provider = 'opencode-go'").toArray()[0]
+    const share = shared ?? current?.shared === 1
+    if (pool.keys.length === 0) {
+      this.sql.exec("DELETE FROM credential WHERE provider = 'opencode-go'")
+      await this.publishSharing('opencode-go', false)
+      return
+    }
+    const sealed = await Effect.runPromise(this.credentialVault().seal(JSON.stringify(pool)))
+    this.saveCredential('opencode-go', 'api-key', sealed, share, null)
+    if (current === undefined || shared !== undefined) await this.publishSharing('opencode-go', share)
+  }
+
+  /** Keys shown masked: never the value. */
+  async opencodeKeys(): Promise<{ keys: Array<{ id: string; masked: string }>; activeId: string | null; shared: boolean }> {
+    const pool = await this.readPool()
+    const shared = this.sql.exec<{ shared: number }>("SELECT shared FROM credential WHERE provider = 'opencode-go'").toArray()[0]?.shared === 1
+    return { keys: pool.keys.map(({ id, key }) => ({ id, masked: `••••${key.length > 8 ? key.slice(-4) : ''}` })), activeId: pool.activeId, shared }
+  }
+
+  async addOpencodeKey(raw: string, shared?: boolean): Promise<void> {
+    const key = raw.trim().replace(/,+$/, '')
+    if (!/^(?:sk-|oc_sk_)[A-Za-z0-9_-]+$/.test(key)) throw new Error('Enter an OpenCode API key without a Bearer prefix or spaces')
+    await this.poolLock(async () => {
+      const pool = await this.readPool()
+      if (pool.keys.some((entry) => entry.key === key)) throw new Error('This key is already saved')
+      const id = crypto.randomUUID()
+      pool.keys.push({ id, key })
+      pool.activeId ??= id
+      await this.writePool(pool, shared)
+    })
+  }
+
+  async activateOpencodeKey(id: string): Promise<void> {
+    await this.poolLock(async () => {
+      const pool = await this.readPool()
+      if (!pool.keys.some((entry) => entry.id === id)) throw new Error('That key no longer exists')
+      pool.activeId = id
+      await this.writePool(pool)
+    })
+  }
+
+  async removeOpencodeKey(id: string): Promise<void> {
+    await this.poolLock(async () => {
+      const pool = await this.readPool()
+      pool.keys = pool.keys.filter((entry) => entry.id !== id)
+      if (pool.activeId === id) pool.activeId = pool.keys[0]?.id ?? null
+      await this.writePool(pool)
+    })
+  }
+
+  /** Keys in the order a request should try them: the session's sticky key or the active one first. */
+  async opencodeCandidates(sessionId: string | null, forHome: boolean): Promise<{ keys: OpencodeKey[]; activeId: string | null }> {
+    const shared = this.sql.exec<{ shared: number }>("SELECT shared FROM credential WHERE provider = 'opencode-go'").toArray()[0]?.shared === 1
+    if (forHome && !shared) return { keys: [], activeId: null }
+    const pool = await this.readPool()
+    const sticky = sessionId === null ? undefined : this.get<Record<string, string>>('opencode-sticky')?.[sessionId]
+    const first = pool.keys.findIndex((entry) => entry.id === (sticky !== undefined && pool.keys.some((key) => key.id === sticky) ? sticky : pool.activeId))
+    const keys = first < 0 ? pool.keys : [...pool.keys.slice(first), ...pool.keys.slice(0, first)]
+    return { keys, activeId: pool.activeId }
+  }
+
+  async opencodePromote(expectedActiveId: string, id: string): Promise<void> {
+    await this.poolLock(async () => {
+      const pool = await this.readPool()
+      if (pool.activeId !== expectedActiveId || !pool.keys.some((entry) => entry.id === id)) return
+      pool.activeId = id
+      await this.writePool(pool)
+    })
+  }
+
+  opencodeStick(sessionId: string, id: string): void {
+    const sticky = this.get<Record<string, string>>('opencode-sticky') ?? {}
+    if (sticky[sessionId] === id) return
+    const entries = Object.entries({ ...sticky, [sessionId]: id }).slice(-500)
+    this.set('opencode-sticky', Object.fromEntries(entries))
+  }
+
+  private poolQueue: Promise<unknown> = Promise.resolve()
+
+  /** Pool changes are read-modify-write across awaits: run them one at a time. */
+  private poolLock<T>(change: () => Promise<T>): Promise<T> {
+    const next = this.poolQueue.then(change, change)
+    this.poolQueue = next.catch(() => undefined)
+    return next
   }
 
   // ---------------------------------------------------------------- Web Push (robot-ajrp, robot-9xoj, robot-bden)
