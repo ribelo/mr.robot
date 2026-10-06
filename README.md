@@ -24,6 +24,8 @@ Self-hosted robots on Cloudflare: persistent agents with one endless conversatio
 - `pnpm dev`: local server on http://127.0.0.1:8787, signed in as owner@example.com
 - `pnpm cloudflare-login`: one-time Cloudflare login for deploying (Alchemy profile `mr-robot` in ~/.alchemy-mr-robot)
 - `pnpm deploy`: build the PWA and deploy every resource; prints the URL
-- `pnpm --filter @mr-robot/worker test:integration`: real Browser Rendering (needs Cloudflare credentials)
+- `pnpm --filter @mr-robot/worker test:integration`: deploys a staging Worker, checks real Browser Rendering (actions, screenshot, cookies, screencast), deletes it; needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
+
+Deployed: https://mrrobot-edge-live-ribelo-ffe667mhzh4ttltx.r-krzywaznia-2c4.workers.dev
 
 After the first deploy, open the URL, sign in with the e-mail code, and add a DeepSeek key (or a subscription) on your profile page; the first person to sign in is the Home admin.

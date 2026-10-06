@@ -1,6 +1,6 @@
 # 0001: Code mode runs on Worker Loaders
 
-Status: accepted (deployed measurements pending; see below)
+Status: accepted
 Date: 2026-10-06
 Ticket: docs/issues/mr-robot-v1/02-ptc-isolate-prototype.md (story robot-5ewr)
 
@@ -36,9 +36,16 @@ Speed is not the deciding factor: both are far below one model call. What decide
 Constraints accepted: Worker Loaders are open beta and need Workers Paid; a Durable Object may have
 at most 10 dynamic Workers in flight, which one Turn at a time per Robot never approaches.
 
-## Pending
+## Measured on Cloudflare
 
-The ticket asks for the numbers on a real deployment. Deploy the prototype with
-`cd prototypes/ptc && pnpm dev` replaced by `wrangler deploy` once the account is logged in, run
-`/bench?candidate=loader&iterations=20` and `candidate=quickjs`, add the table here, then delete
-`prototypes/` (nothing throwaway stays).
+2026-10-06, Workers Paid account, the same program from inside a Durable Object, 20 runs per request
+(23 tool calls per run), two requests per candidate:
+
+| | Worker Loader | QuickJS |
+|---|---|---|
+| whole request, 20 runs | 825 ms, 711 ms | 471 ms, 623 ms |
+| per run, end to end | about 36–41 ms | about 24–31 ms |
+| per run, in-Worker clock | 7–19 ms (one 130 ms outlier) | 0 ms (the Workers clock does not advance during synchronous Wasm) |
+
+QuickJS is about 10 ms faster per program. One model call takes seconds, so this does not change
+the decision; isolation, fidelity and bundle size do. The prototype was deleted from the account and the repo.

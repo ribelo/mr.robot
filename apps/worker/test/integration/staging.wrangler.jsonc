@@ -1,0 +1,8 @@
+// Staging Worker for scripts/browser-staging.ts; deployed for one run and deleted.
+{
+  "name": "mr-robot-browser-staging",
+  "main": "./staging-worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "browser": { "binding": "BROWSER" }
+}

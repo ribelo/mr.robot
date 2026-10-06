@@ -5,7 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:integration": "vitest run -c vitest.integration.config.ts"
+    "test:integration": "node scripts/browser-staging.ts"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "2.0.0",

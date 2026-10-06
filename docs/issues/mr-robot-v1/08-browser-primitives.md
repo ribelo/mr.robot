@@ -6,12 +6,11 @@
 
 **Blocked by:** 07 Code mode executor, tool grants, advanced settings
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Integration test on staging: open, observe, act, screenshot against a fixture site
+- [x] Integration test on staging: open, observe, act, screenshot against a fixture site
 - [x] Login state survives DO hibernation and a new browser session
 - [x] Browser session is closed when the turn ends and no browser-use call is pending
 - [x] Thumbnail in the panel updates after each screenshot
 
 
-**Pending:** The integration test exists (apps/worker/test/integration); it needs a deployed account to run.
