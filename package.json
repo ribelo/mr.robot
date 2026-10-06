@@ -1,0 +1,28 @@
+{
+  "name": "mr-robot",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.27.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm --filter @mr-robot/web build",
+    "deploy": "pnpm build && alchemy deploy --yes",
+    "destroy": "alchemy destroy",
+    "plan": "alchemy plan",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "lint:deps": "node scripts/dependency-lint.ts",
+    "check": "pnpm lint:deps && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261006.1",
+    "@effect/platform-node": "4.0.1",
+    "@types/node": "^24.19.1",
+    "alchemy": "2.0.0-beta.81",
+    "effect": "4.0.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

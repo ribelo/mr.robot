@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false
+  koffi: false
+  node-pty: false
+  '@mongodb-js/zstd': false
+  node-liblzma: false
+  protobufjs: false
+  '@google/genai': false
+
+minimumReleaseAge: 0

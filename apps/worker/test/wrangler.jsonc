@@ -1,0 +1,11 @@
+// Test-only configuration for @cloudflare/vitest-plugin. Deployment is declared in alchemy.run.ts.
+{
+  "name": "mr-robot-test",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "ROBOT", "class_name": "Robot" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Robot"] }]
+}
