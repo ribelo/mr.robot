@@ -8,14 +8,15 @@
   },
   "scripts": {
     "build": "pnpm --filter @mr-robot/web build",
-    "deploy": "pnpm build && alchemy deploy --yes",
-    "destroy": "alchemy destroy",
-    "plan": "alchemy plan",
+    "deploy": "pnpm build && ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy deploy --yes",
+    "destroy": "ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy destroy",
+    "plan": "ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy plan",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p apps/worker && tsc --noEmit -p apps/web && tsc --noEmit -p infra",
     "lint:deps": "node scripts/dependency-lint.ts",
     "check": "pnpm lint:deps && pnpm typecheck && pnpm test",
-    "dev": "pnpm --filter @mr-robot/web build && pnpm --filter @mr-robot/worker exec wrangler dev -c wrangler.dev.jsonc --ip 127.0.0.1 --port 8787 --persist-to ../../.wrangler/state"
+    "dev": "pnpm --filter @mr-robot/web build && pnpm --filter @mr-robot/worker exec wrangler dev -c wrangler.dev.jsonc --ip 127.0.0.1 --port 8787 --persist-to ../../.wrangler/state",
+    "login": "ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy profile edit --profile mr-robot --add Cloudflare"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261006.1",

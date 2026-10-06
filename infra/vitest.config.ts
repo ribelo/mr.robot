@@ -6,7 +6,8 @@ export default defineConfig({
     include: ['**/*.test.ts'],
     environment: 'node',
     testTimeout: 60_000,
-    // The plan test never reaches Cloudflare; placeholder credentials keep it off the owner's profile.
-    env: { CLOUDFLARE_API_TOKEN: 'plan-test', CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000', ALCHEMY_PROFILE: 'plan-test' },
+    // The plan test never reaches Cloudflare: a throwaway Alchemy home and placeholder credentials
+    // keep it away from the owner's profiles (Alchemy migrates whatever home it opens).
+    env: { ALCHEMY_HOME: '/tmp/mr-robot-plan-test-alchemy', CLOUDFLARE_API_TOKEN: 'plan-test', CLOUDFLARE_ACCOUNT_ID: '00000000000000000000000000000000', ALCHEMY_PROFILE: 'plan-test' },
   },
 })
