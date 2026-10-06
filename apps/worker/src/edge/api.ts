@@ -114,6 +114,7 @@ export const api = new Router<ApiContext>()
     const panel: RobotPanel = yield* call(() => robot(c, id).panel(access === 'owner', entry))
     return panel
   }))
+  .on('GET', '/api/robots/:id/catalog', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => home(c.env).catalog(c.member.id, id)))))
   .on('PATCH', '/api/robots/:id/settings', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
     const patch = yield* decodeBody(c.request, SettingsPatch)

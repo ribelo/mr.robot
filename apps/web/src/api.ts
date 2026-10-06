@@ -7,6 +7,7 @@ import type {
   RobotSettings,
   RobotSummary,
   SendMessage,
+  SettingsCatalog,
   SettingsPatch,
   Trajectory,
 } from '@mr-robot/protocol'
@@ -40,6 +41,7 @@ export const api = {
   trajectory: (id: string) => request<Trajectory>(`/api/robots/${id}/trajectory`),
   send: (id: string, message: SendMessage) => request(`/api/robots/${id}/messages`, { body: message }),
   panel: (id: string) => request<RobotPanel>(`/api/robots/${id}/panel`),
+  catalog: (id: string) => request<SettingsCatalog>(`/api/robots/${id}/catalog`),
   updateSettings: (id: string, patch: SettingsPatch) => request<RobotSettings>(`/api/robots/${id}/settings`, { method: 'PATCH', body: patch }),
   answer: (id: string, proposal: ProposalView, approve: boolean) =>
     request<ProposalView>(`/api/robots/${id}/proposals/${proposal.id}`, { body: { revision: proposal.revision, approve } }),

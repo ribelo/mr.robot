@@ -47,6 +47,7 @@ import { wakeupMessage } from '../agent/sources.ts'
 import { conversationTools } from '../agent/tools/conversation.ts'
 import { fileTools, memberFileTools } from '../agent/tools/files.ts'
 import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
+import { ptcPlugin } from '../agent/ptc.ts'
 import { webPlugin } from '../agent/web.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
@@ -311,6 +312,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       prompt,
       tools: this.tools(config),
       plugins: this.plugins(config),
+      ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
     })
     this.composition = { revision: config.revision, value }
     this.pendingSeed = undefined

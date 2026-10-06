@@ -256,6 +256,23 @@ export const ProposalAnswer = Schema.Struct({
   approve: Schema.Boolean,
 })
 
+// ---------------------------------------------------------------- What a Robot's settings can choose from
+
+export interface ModelOption {
+  readonly provider: string
+  readonly model: string
+  readonly label: string
+  readonly contextWindow: number
+}
+
+export interface SettingsCatalog {
+  readonly toolGroups: ReadonlyArray<{ readonly name: string; readonly description: string }>
+  readonly skills: ReadonlyArray<{ readonly name: string; readonly description: string }>
+  readonly robots: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  readonly secrets: ReadonlyArray<{ readonly name: string; readonly scope: 'member' | 'home' }>
+  readonly models: readonly ModelOption[]
+}
+
 // ---------------------------------------------------------------- Usage
 
 export interface UsageView {

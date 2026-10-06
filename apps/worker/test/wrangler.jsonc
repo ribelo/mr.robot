@@ -13,6 +13,7 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Robot", "Member", "Home"] }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "files" }],
+  "worker_loaders": [{ "binding": "LOADER" }],
   "vars": {
     "HOME_NAME": "Test Home",
     "DATA_KEY": "0000000000000000000000000000000000000000000000000000000000000001",

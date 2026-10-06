@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { Me, RobotSummary, Trajectory } from '@mr-robot/protocol'
+import type { Me, RobotPanel, RobotSummary, SettingsCatalog, Trajectory } from '@mr-robot/protocol'
 import { api, ApiError } from './api.ts'
 import { useLive } from './live.ts'
 import { go, type Route } from './route.ts'
+import { AdvancedSettings } from './components/AdvancedSettings.tsx'
 import { TrajectoryView } from './components/TrajectoryView.tsx'
 
 /** Full-page views reached from a Robot or the sidebar. */
 export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; robots: readonly RobotSummary[]; onChanged: () => void }) {
   switch (route.page) {
     case 'trajectory': return <TrajectoryPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} me={me} onChanged={onChanged} />
+    case 'advanced': return <AdvancedPage id={route.id} onChanged={onChanged} />
     default: return <div className="empty-main">{route.page}</div>
   }
 }
@@ -47,6 +49,44 @@ function TrajectoryPage({ id, robot, me, onChanged }: { id: string; robot: Robot
             if (confirm('Rewind the Conversation to this point? The current log stays in the archive and you can undo.')) void act(() => api.rewind(id, atSeq))
           }}
           onUndo={(rewind) => void act(() => api.undoRewind(id, rewind.id))}
+        />
+      )}
+    </div>
+  )
+}
+function AdvancedPage({ id, onChanged }: { id: string; onChanged: () => void }) {
+  const [state, setState] = useState<{ panel: RobotPanel; catalog: SettingsCatalog }>()
+  const [message, setMessage] = useState<string>()
+  const refresh = useCallback(async () => {
+    const [panel, catalog] = await Promise.all([api.panel(id), api.catalog(id)])
+    setState({ panel, catalog })
+  }, [id])
+  useEffect(() => { void refresh() }, [refresh])
+  const act = async (run: () => Promise<unknown>, done?: string) => {
+    try {
+      await run()
+      setMessage(done)
+    } catch (cause) {
+      setMessage(cause instanceof ApiError ? cause.message : 'failed')
+    }
+    await refresh().catch(() => undefined)
+    onChanged()
+  }
+  return (
+    <div className="page">
+      <PageHead title={`${state?.panel.summary.identity.name ?? 'Robot'} · Advanced settings`} back={{ page: 'robot', id, panel: true }} />
+      {message === undefined ? null : <div className="muted">{message}</div>}
+      {state === undefined ? <div className="muted">Loading…</div> : (
+        <AdvancedSettings
+          key={JSON.stringify(state.panel.settings)}
+          panel={state.panel}
+          catalog={state.catalog}
+          onSave={(patch) => act(() => api.updateSettings(id, patch), 'Saved. Changes apply from the next Turn.')}
+          onPause={() => void act(() => api.pause(id), 'Paused.')}
+          onResume={() => void act(() => api.resume(id), 'Resumed.')}
+          onDelete={() => {
+            if (confirm('Delete this Robot? Its Conversation and Workspace stay in the archive.')) void act(() => api.remove(id)).then(() => go({ page: 'home' }))
+          }}
         />
       )}
     </div>

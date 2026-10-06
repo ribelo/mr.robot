@@ -5,3 +5,4 @@ dist/
 .reference/
 .env
 *.tsbuildinfo
+prototypes/ptc/src/quickjs.wasm

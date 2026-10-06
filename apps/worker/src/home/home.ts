@@ -11,10 +11,13 @@ import type {
   MemberStatus,
   MemberView,
   ModelChoice,
+  ModelOption,
   RobotStatus,
   RobotSummary,
+  SettingsCatalog,
   Sharing,
 } from '@mr-robot/protocol'
+import { TOOL_GROUPS } from '../agent/catalog.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 
@@ -265,6 +268,35 @@ export class Home extends DurableObject<Env> {
   private summary(row: RobotSql): RobotSummary {
     const entry = entryFromSql(row)
     return { ...entry, ownerName: this.member(entry.ownerId)?.name ?? '', unread: false }
+  }
+
+  // ---------------------------------------------------------------- settings catalog (robot-vqtw)
+
+  /** What a Member can grant a Robot and which models it can run on. */
+  async catalog(memberId: string, robotId: string): Promise<SettingsCatalog> {
+    return {
+      toolGroups: Object.entries(TOOL_GROUPS).filter(([name]) => name !== 'robots').map(([name, description]) => ({ name, description })),
+      skills: await this.grantableSkills(memberId),
+      robots: this.reachable(memberId).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
+      secrets: await this.grantableSecrets(memberId),
+      models: await this.models(memberId),
+    }
+  }
+
+  /** Filled by the skill library (16), secrets (12) and providers (13) tickets. */
+  protected async grantableSkills(_memberId: string): Promise<SettingsCatalog['skills']> {
+    return []
+  }
+
+  protected async grantableSecrets(_memberId: string): Promise<SettingsCatalog['secrets']> {
+    return []
+  }
+
+  async models(_memberId: string): Promise<ModelOption[]> {
+    return [
+      { provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 1_000_000 },
+      { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', contextWindow: 1_000_000 },
+    ]
   }
 
   // ---------------------------------------------------------------- Providers
