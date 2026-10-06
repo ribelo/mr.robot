@@ -43,6 +43,7 @@ import type { RobotHost, RoutineHost, WorkspaceHost } from '../agent/host.ts'
 import { routineTools } from '../agent/tools/routines.ts'
 import { notifyTools, type NotifyHost } from '../agent/tools/notify.ts'
 import { maskSecrets, secretTools, type SecretHost } from '../agent/tools/secrets.ts'
+import { messagingTools, replyTools, robotsTools, type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
@@ -92,7 +93,22 @@ export type AnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
   | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
 
-export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost {
+/** A message between Robots, as the platform carries it (robot-mv15). */
+export interface RobotMessage {
+  readonly id: string
+  readonly kind: 'request' | 'reply'
+  readonly from: { readonly robotId: string; readonly ownerId: string; readonly name: string; readonly avatarColor: string }
+  readonly text: string
+  readonly requestId: string
+  readonly chain: { readonly id: string; readonly hops: number }
+}
+
+export type ReceiveResult = { readonly accepted: true } | { readonly accepted: false; readonly reason: 'unavailable' | 'queue-full' | 'chain-limit' }
+
+const MAX_CHAIN_HOPS = 8
+const MAX_QUEUED_WAKEUPS = 32
+
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
@@ -191,6 +207,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   override async alarm(): Promise<void> {
     const config = this.store.config()
     if (config !== undefined && config.status !== 'deleted') this.fireRoutines(Date.now())
+    if (config !== undefined) await this.deliverOutbox()
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
   }
@@ -436,7 +453,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected tools(config: RobotConfig): ToolDefinition[] {
     const tools = [...conversationTools()]
     if (config.status === 'setup') return [...tools, ...setupTools(this), ...fileTools(this)]
-    tools.push(...grantProposalTools(this), ...memberFileTools(this))
+    tools.push(...grantProposalTools(this), ...memberFileTools(this), ...replyTools(this))
     for (const group of this.store.grants().tools.filter(isToolGroup)) tools.push(...this.groupTools(group, config))
     return tools
   }
@@ -448,6 +465,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       case 'routines': return routineTools(this, config.timeZone)
       case 'notify': return notifyTools(this)
       case 'secrets': return secretTools(this, this.store.grants().secrets)
+      case 'messaging': return messagingTools(this)
+      case 'robots': return config.kind === 'chief' ? robotsTools(this) : []
       default: return []
     }
   }
@@ -693,11 +712,152 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.ctx.storage.setAlarm(Math.min(...candidates))
   }
 
-  /** Further alarm times: the earliest Routine here, outbox retries in ticket 15. */
+  /** Further alarm times: the earliest Routine and the next outbox retry. */
   protected alarmCandidates(): number[] {
     const config = this.store.config()
     if (config === undefined || config.status === 'deleted') return []
-    return this.store.routines().flatMap((routine) => routine.nextRun === null ? [] : [routine.nextRun])
+    const outbox = this.store.sql.exec<{ at: number | null }>("SELECT MIN(next_attempt) AS at FROM outbox WHERE status = 'pending'").one().at
+    return [...this.store.routines().flatMap((routine) => routine.nextRun === null ? [] : [routine.nextRun]), ...(outbox === null ? [] : [outbox])]
+  }
+
+  // ---------------------------------------------------------------- Robot messages (robot-bsvs, robot-mv15, robot-ppzu, robot-bjq5)
+
+  /** The causal chain of the current Turn: inherited from a Robot message, or a new root. */
+  private currentChain(): { id: string; hops: number } {
+    const active = this.store.activeTurn()
+    const wakeup = active === undefined ? undefined : this.store.wakeup(active.wakeupId)
+    const chain = wakeup?.payload['chain'] as { id: string; hops: number } | undefined
+    return chain ?? { id: `chain-${active?.wakeupId ?? 'none'}-${this.store.requireConfig().id}`, hops: 0 }
+  }
+
+  /** Recipients the Robot holds a Grant for, that its owner can still reach, and that are active. */
+  async directory(): Promise<DirectoryEntry[]> {
+    const config = this.store.requireConfig()
+    const granted = new Set(this.store.grants().recipients)
+    return (await this.home().reachable(config.ownerId))
+      .filter((robot) => granted.has(robot.id) && robot.id !== config.id && robot.status === 'active')
+      .map((robot) => ({ id: robot.id, name: robot.identity.name, description: robot.identity.description, availability: robot.fleetState }))
+  }
+
+  async sendRobotMessage(to: string, text: string, idempotencyKey: string): Promise<{ requestId: string; status: string }> {
+    const config = this.store.requireConfig()
+    if (!this.store.hasGrant('recipient', to)) throw new Error(`You have no Grant to message ${to}. Ask your owner with propose_grants (recipients).`)
+    if (!(await this.directory()).some((entry) => entry.id === to)) throw new Error(`${to} is not available to you now`)
+    const chain = this.currentChain()
+    if (chain.hops + 1 > MAX_CHAIN_HOPS) throw new Error(`This chain of Robot messages is already ${chain.hops} hops long; finish it without delegating further.`)
+    const id = `msg-${await digest(`${config.id}:${idempotencyKey}`)}`
+    const existing = this.store.sql.exec<{ status: string }>('SELECT status FROM outbox WHERE id = ?', id).toArray()[0]
+    if (existing !== undefined) return { requestId: id, status: existing.status === 'failed' ? 'failed earlier' : 'already sent' }
+    await this.loadSecretMasks()
+    const message: RobotMessage = {
+      id,
+      kind: 'request',
+      from: { robotId: config.id, ownerId: config.ownerId, name: config.identity.name, avatarColor: config.identity.avatarColor },
+      text: this.mask(text),
+      requestId: id,
+      chain: { id: chain.id, hops: chain.hops + 1 },
+    }
+    this.enqueueOutbox(to, message)
+    this.ctx.waitUntil(this.deliverOutbox())
+    return { requestId: id, status: 'sent; the reply will arrive as a message' }
+  }
+
+  async replyRobotMessage(handle: string, text: string): Promise<{ status: string }> {
+    const config = this.store.requireConfig()
+    const row = this.store.sql.exec<{ sender_robot: string; request_id: string; chain: number; used_at: number | null }>('SELECT * FROM reply_handle WHERE id = ?', handle).toArray()[0]
+    if (row === undefined) throw new Error('unknown reply handle')
+    if (row.used_at !== null) throw new Error('this request was already answered')
+    await this.loadSecretMasks()
+    this.store.sql.exec('UPDATE reply_handle SET used_at = ? WHERE id = ?', Date.now(), handle)
+    this.enqueueOutbox(row.sender_robot, {
+      id: `reply-${handle}`,
+      kind: 'reply',
+      from: { robotId: config.id, ownerId: config.ownerId, name: config.identity.name, avatarColor: config.identity.avatarColor },
+      text: this.mask(text),
+      requestId: row.request_id,
+      chain: { id: this.currentChain().id, hops: row.chain },
+    })
+    this.ctx.waitUntil(this.deliverOutbox())
+    return { status: 'reply sent' }
+  }
+
+  private enqueueOutbox(recipient: string, message: RobotMessage): void {
+    this.store.sql.exec(
+      "INSERT INTO outbox (id, recipient, payload, status, attempts, next_attempt, created_at) VALUES (?, ?, ?, 'pending', 0, ?, ?) ON CONFLICT (id) DO NOTHING",
+      message.id, recipient, JSON.stringify(message), Date.now(), Date.now(),
+    )
+  }
+
+  /** Deliver pending outbox rows; a lost RPC is retried on the alarm, the recipient dedupes. */
+  private async deliverOutbox(): Promise<void> {
+    const pending = this.store.sql.exec<{ id: string; recipient: string; payload: string; attempts: number }>(
+      "SELECT id, recipient, payload, attempts FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY created_at", Date.now(),
+    ).toArray()
+    for (const row of pending) {
+      const message = JSON.parse(row.payload) as RobotMessage
+      try {
+        const result: ReceiveResult = await this.env.ROBOT.getByName(row.recipient).receive(message)
+        this.store.sql.exec('UPDATE outbox SET status = ?, attempts = attempts + 1 WHERE id = ?', result.accepted ? 'delivered' : 'failed', row.id)
+        if (!result.accepted) {
+          await this.wake({ kind: 'platform', sender: { kind: 'platform' }, text: `Your ${message.kind} to robot ${row.recipient} was not delivered: ${undeliverable(result.reason)}` })
+        }
+      } catch {
+        const attempts = row.attempts + 1
+        if (attempts >= 8) {
+          this.store.sql.exec("UPDATE outbox SET status = 'failed', attempts = ? WHERE id = ?", attempts, row.id)
+          await this.wake({ kind: 'platform', sender: { kind: 'platform' }, text: `Your ${message.kind} to robot ${row.recipient} could not be delivered after ${attempts} attempts.` })
+        } else {
+          this.store.sql.exec('UPDATE outbox SET attempts = ?, next_attempt = ? WHERE id = ?', attempts, Date.now() + 2 ** attempts * 1000, row.id)
+        }
+      }
+    }
+    await this.rearm()
+  }
+
+  /** A message from another Robot arrives (robot-ppzu): deduped, capped, and queued as a Wake-up. */
+  async receive(message: RobotMessage): Promise<ReceiveResult> {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted' || config.status === 'setup') return { accepted: false, reason: 'unavailable' }
+    if (this.store.sql.exec('SELECT 1 FROM intake WHERE key = ?', message.id).toArray().length > 0) return { accepted: true }
+    if (message.kind === 'request' && message.chain.hops > MAX_CHAIN_HOPS) return { accepted: false, reason: 'chain-limit' }
+    if (this.store.pendingWakeups() >= MAX_QUEUED_WAKEUPS) return { accepted: false, reason: 'queue-full' }
+    const handle = message.kind === 'request' ? `rh-${crypto.randomUUID()}` : undefined
+    this.store.transaction(() => {
+      this.store.sql.exec('INSERT INTO intake (key, sender, received_at) VALUES (?, ?, ?)', message.id, message.from.robotId, Date.now())
+      if (handle !== undefined) {
+        this.store.sql.exec('INSERT INTO reply_handle (id, sender_robot, request_id, chain) VALUES (?, ?, ?, ?)', handle, message.from.robotId, message.requestId, message.chain.hops)
+      }
+      this.store.enqueue(
+        'robot',
+        { kind: 'robot', robotId: message.from.robotId, name: message.from.name, avatarColor: message.from.avatarColor },
+        message.text,
+        message.kind === 'request'
+          ? { requestId: message.requestId, replyHandle: handle, chain: message.chain }
+          : { replyTo: message.requestId, chain: message.chain },
+        Date.now(),
+      )
+    })
+    this.drain()
+    return { accepted: true }
+  }
+
+  // ---------------------------------------------------------------- Mr. Robot (robot-hk2s)
+
+  async createRobot(brief: string): Promise<{ id: string; status: string }> {
+    const config = this.store.requireConfig()
+    if (config.kind !== 'chief') throw new Error('only Mr. Robot creates Robots')
+    const entry = await this.home().createRobot(config.ownerId, brief)
+    return { id: entry.id, status: 'created; it is interviewing your owner in its own Conversation and will propose its Grants there' }
+  }
+
+  async configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }> {
+    const config = this.store.requireConfig()
+    if (config.kind !== 'chief') throw new Error('only Mr. Robot configures Robots')
+    const entry = await this.home().entry(id)
+    if (entry === undefined || entry.ownerId !== config.ownerId || entry.kind !== 'robot' || entry.status === 'deleted') throw new Error(`${id} is not one of your owner's Robots`)
+    const identity = { ...entry.identity, ...Object.fromEntries(Object.entries(change).filter(([, value]) => typeof value === 'string' && value.trim() !== '')) }
+    const settings = await this.env.ROBOT.getByName(id).updateSettings({ identity })
+    return { id, identity: settings.identity }
   }
 
   // ---------------------------------------------------------------- Routines (robot-gbbt, robot-qyd5)
@@ -971,6 +1131,15 @@ function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
     case 'notice': return { ...item, text: mask(item.text) }
     default: return item
   }
+}
+
+async function digest(text: string): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
+  return [...bytes.slice(0, 12)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function undeliverable(reason: 'unavailable' | 'queue-full' | 'chain-limit'): string {
+  return reason === 'unavailable' ? 'that Robot is not active' : reason === 'queue-full' ? 'that Robot has too much queued work; try later' : 'the chain of Robot messages is too long'
 }
 
 function routineView(robotId: string, routine: RoutineRow): RoutineView {

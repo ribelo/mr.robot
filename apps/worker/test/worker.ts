@@ -51,6 +51,7 @@ export class Robot extends ProductionRobot {
   /** Skip the setup interview: the Robot becomes active with its current Grants. */
   async activateForTest(): Promise<void> {
     this.store.updateConfig(() => ({ status: 'active' }))
+    await this.changed()
   }
 
   /** Pretend the Robot was down: every Routine's next run moves into the past by `ms`. */
@@ -59,6 +60,22 @@ export class Robot extends ProductionRobot {
       if (routine.nextRun !== null) this.store.saveRoutine({ ...routine, nextRun: Date.now() - ms, createdAt: routine.createdAt - ms })
     }
     await this.ctx.storage.setAlarm(Date.now() - ms)
+  }
+
+  /** Put a message in the outbox without delivering it (as if the DO died right after writing). */
+  async outboxOnlyForTest(to: string, text: string, key: string): Promise<string> {
+    const config = this.store.requireConfig()
+    const id = `msg-test-${key}`
+    this.store.sql.exec(
+      "INSERT INTO outbox (id, recipient, payload, status, attempts, next_attempt, created_at) VALUES (?, ?, ?, 'pending', 0, 0, ?)",
+      id, to, JSON.stringify({ id, kind: 'request', from: { robotId: config.id, ownerId: config.ownerId, name: config.identity.name, avatarColor: config.identity.avatarColor }, text, requestId: id, chain: { id: 'c', hops: 1 } }), Date.now(),
+    )
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
+    return id
+  }
+
+  async outboxForTest(): Promise<Array<{ id: string; status: string }>> {
+    return this.store.sql.exec<{ id: string; status: string }>('SELECT id, status FROM outbox').toArray()
   }
 
   async alarmForTest(): Promise<number | null> {
