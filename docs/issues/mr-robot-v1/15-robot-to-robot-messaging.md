@@ -6,10 +6,10 @@
 
 **Blocked by:** 07 Code mode executor, tool grants, advanced settings
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Directory shows only granted, reachable, active robots
-- [ ] Request without recipient grant is refused; reply needs no reverse grant
-- [ ] Outbox survives DO hibernation and delivers once (idempotency key)
-- [ ] Chain cap and queue cap enforced
-- [ ] Robot messages render with sender avatar and name
+- [x] Directory shows only granted, reachable, active robots
+- [x] Request without recipient grant is refused; reply needs no reverse grant
+- [x] Outbox survives DO hibernation and delivers once (idempotency key)
+- [x] Chain cap and queue cap enforced
+- [x] Robot messages render with sender avatar and name

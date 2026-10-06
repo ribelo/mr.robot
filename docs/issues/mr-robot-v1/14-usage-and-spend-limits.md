@@ -6,9 +6,9 @@
 
 **Blocked by:** 13 Providers, subscriptions and per-robot model
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Token meter per turn sums to the robot and Member counters
-- [ ] Crossing the limit mid-turn finishes the turn and blocks the next wake-up
-- [ ] Raising the limit unblocks and queued wake-ups run
-- [ ] Usage view shows the current month per robot
+- [x] Token meter per turn sums to the robot and Member counters
+- [x] Crossing the limit mid-turn finishes the turn and blocks the next wake-up
+- [x] Raising the limit unblocks and queued wake-ups run
+- [x] Usage view shows the current month per robot

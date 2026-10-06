@@ -6,9 +6,9 @@
 
 **Blocked by:** 03 A Robot Durable Object runs one turn
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Trajectory lists events in order with masked secrets
-- [ ] Rewind to point X: new live session has exactly the events up to X plus the rewind note
-- [ ] Undo restores the archived log as live
-- [ ] Chat view after rewind shows only the kept messages
+- [x] Trajectory lists events in order with masked secrets
+- [x] Rewind to point X: new live session has exactly the events up to X plus the rewind note
+- [x] Undo restores the archived log as live
+- [x] Chat view after rewind shows only the kept messages

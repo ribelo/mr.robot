@@ -6,8 +6,11 @@
 
 **Blocked by:** 01 Repository skeleton and first Cloudflare deploy
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Both candidates execute the same sample program calling three stub tools from inside a DO on a real deployment
 - [ ] An ADR in docs/adr records the choice and the measurements
 - [ ] The prototype code is deleted or moved under the chosen executor package; nothing throwaway stays
+
+
+**Pending:** Decision recorded in docs/adr/0001 with local workerd measurements; the deployed run, the table and deleting prototypes/ wait on the first deploy.

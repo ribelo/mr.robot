@@ -6,9 +6,9 @@
 
 **Blocked by:** 06 Routines on Durable Object alarms; 13 Providers, subscriptions and per-robot model; 14 Usage accounting and spend limits; 16 Home skill library and per-robot skill grants
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Fleet list reflects live DO state
-- [ ] Cross-robot routine list with next runs
-- [ ] Invite creates a pending Member accepted on first sign-in; remove revokes access and pauses their robots
-- [ ] Cost table matches the Member and robot counters
+- [x] Fleet list reflects live DO state
+- [x] Cross-robot routine list with next runs
+- [x] Invite creates a pending Member accepted on first sign-in; remove revokes access and pauses their robots
+- [x] Cost table matches the Member and robot counters

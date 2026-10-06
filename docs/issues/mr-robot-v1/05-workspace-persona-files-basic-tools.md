@@ -6,10 +6,10 @@
 
 **Blocked by:** 03 A Robot Durable Object runs one turn
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A new robot's workspace contains the seeded files; USER.md edits by the robot are refused and surface as a proposal
-- [ ] File tools operate only inside the robot's R2 prefix
-- [ ] Attachment sent in chat is readable by the robot
-- [ ] Compaction uses the robot's instruction and triggers at the robot's budget
-- [ ] SOUL.md change produces a message to the Member
+- [x] A new robot's workspace contains the seeded files; USER.md edits by the robot are refused and surface as a proposal
+- [x] File tools operate only inside the robot's R2 prefix
+- [x] Attachment sent in chat is readable by the robot
+- [x] Compaction uses the robot's instruction and triggers at the robot's budget
+- [x] SOUL.md change produces a message to the Member

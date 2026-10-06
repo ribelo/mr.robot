@@ -6,9 +6,9 @@
 
 **Blocked by:** 01 Repository skeleton and first Cloudflare deploy
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Robot DO API test: message in, turn runs against a stub LLM, reply and event log readable from SQLite
-- [ ] Closing the WebSocket mid-turn leaves the turn running; reopening shows the finished reply
-- [ ] A DO eviction between two tool results resumes the turn from the last persisted event
-- [ ] Session log is append-only; a second turn appends after the first
+- [x] Robot DO API test: message in, turn runs against a stub LLM, reply and event log readable from SQLite
+- [x] Closing the WebSocket mid-turn leaves the turn running; reopening shows the finished reply
+- [x] A DO eviction between two tool results resumes the turn from the last persisted event
+- [x] Session log is append-only; a second turn appends after the first

@@ -6,10 +6,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Alchemy deploy from a clean checkout creates every declared resource and prints the URL
 - [ ] Signing in with e-mail OTP creates the Member and the Home on first visit; a second sign-in reuses them
 - [ ] The PWA shell is installable on Android and shows an empty robot list
-- [ ] An Alchemy plan test asserts the declared resources
-- [ ] A dependency lint forbids Node-bound DSH packages and Effect imports inside DSH packages
+- [x] An Alchemy plan test asserts the declared resources
+- [x] A dependency lint forbids Node-bound DSH packages and Effect imports inside DSH packages
+
+
+**Pending:** Waiting on the first deploy: `pnpm login` (owner, once), then `pnpm deploy`.

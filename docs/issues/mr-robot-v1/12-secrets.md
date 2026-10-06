@@ -6,9 +6,9 @@
 
 **Blocked by:** 07 Code mode executor, tool grants, advanced settings
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Secrets encrypted at rest with the deploy key; plaintext only inside a turn
-- [ ] secret.get for an ungranted name fails
-- [ ] Trajectory and outbound robot messages show a mask where the value appeared
-- [ ] Home-shared secret is usable by another Member's robot once granted
+- [x] Secrets encrypted at rest with the deploy key; plaintext only inside a turn
+- [x] secret.get for an ungranted name fails
+- [x] Trajectory and outbound robot messages show a mask where the value appeared
+- [x] Home-shared secret is usable by another Member's robot once granted

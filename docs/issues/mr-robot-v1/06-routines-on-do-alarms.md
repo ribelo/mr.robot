@@ -6,10 +6,10 @@
 
 **Blocked by:** 03 A Robot Durable Object runs one turn
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Routine created from chat sets the DO alarm to the next occurrence and shows a card
-- [ ] Firing the alarm in the DO test runs a turn with the routine prompt and re-arms
-- [ ] Two wake-ups arriving together produce two sequential turns, never interleaved events
-- [ ] Three missed occurrences after downtime produce one run
-- [ ] Deleting from the panel clears the alarm when no routine remains
+- [x] Routine created from chat sets the DO alarm to the next occurrence and shows a card
+- [x] Firing the alarm in the DO test runs a turn with the routine prompt and re-arms
+- [x] Two wake-ups arriving together produce two sequential turns, never interleaved events
+- [x] Three missed occurrences after downtime produce one run
+- [x] Deleting from the panel clears the alarm when no routine remains

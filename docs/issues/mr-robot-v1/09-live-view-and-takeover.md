@@ -6,9 +6,12 @@
 
 **Blocked by:** 08 Browser Rendering provider with Leash primitives; 11 Web Push and notification settings
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Screencast frames reach the PWA through the Robot DO WebSocket
-- [ ] Takeover forwards taps and keys; another Member cannot claim the same tab
-- [ ] Turn state is 'waiting for takeover' until handed back; the resumed turn sees the return note
-- [ ] Push 'needs you' is sent on takeover request
+- [x] Takeover forwards taps and keys; another Member cannot claim the same tab
+- [x] Turn state is 'waiting for takeover' until handed back; the resumed turn sees the return note
+- [x] Push 'needs you' is sent on takeover request
+
+
+**Pending:** Frames over the real Browser Rendering CDP session are unverified until the first deploy (Page.startScreencast is not documented for the binding).

@@ -6,9 +6,9 @@
 
 **Blocked by:** 04 Robot creation interview, grant approval, Mr. Robot bootstrap
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] OAuth flows complete from the PWA and refresh without the Member
-- [ ] A robot of another Member runs on a Home-shared subscription
-- [ ] Changing a robot's model applies on the next turn
-- [ ] Default model applies to newly created robots
+- [x] OAuth flows complete from the PWA and refresh without the Member
+- [x] A robot of another Member runs on a Home-shared subscription
+- [x] Changing a robot's model applies on the next turn
+- [x] Default model applies to newly created robots

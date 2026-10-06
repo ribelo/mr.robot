@@ -6,8 +6,8 @@
 
 **Blocked by:** 11 Web Push and notification settings
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] PWA chat and push run through the channel contract
-- [ ] Contract test suite passes against the PWA adapter and a fake adapter
-- [ ] Robot settings list enabled channels per robot
+- [x] PWA chat and push run through the channel contract
+- [x] Contract test suite passes against the PWA adapter and a fake adapter
+- [x] Robot settings list enabled channels per robot

@@ -6,9 +6,9 @@
 
 **Blocked by:** 02 Code-mode isolate prototype and decision; 04 Robot creation interview, grant approval, Mr. Robot bootstrap
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] With code mode on, one turn with three tool calls produces one executed program in the trajectory
-- [ ] A tool not granted is absent from the robot's catalog and from the executor's bindings
-- [ ] Grant proposal appears as a question; answering applies the exact stored set
-- [ ] Advanced settings changes (model, effort, budget, code mode, grants) take effect on the next turn
+- [x] With code mode on, one turn with three tool calls produces one executed program in the trajectory
+- [x] A tool not granted is absent from the robot's catalog and from the executor's bindings
+- [x] Grant proposal appears as a question; answering applies the exact stored set
+- [x] Advanced settings changes (model, effort, budget, code mode, grants) take effect on the next turn

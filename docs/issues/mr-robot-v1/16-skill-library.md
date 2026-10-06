@@ -6,9 +6,9 @@
 
 **Blocked by:** 07 Code mode executor, tool grants, advanced settings
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Sync pulls the configured repository and lists its skills
-- [ ] Robot proposal shows as a question; approval publishes the skill
-- [ ] Ungranted skill is absent from the robot's skill catalog
-- [ ] Private skill is visible only to its author's owner
+- [x] Sync pulls the configured repository and lists its skills
+- [x] Robot proposal shows as a question; approval publishes the skill
+- [x] Ungranted skill is absent from the robot's skill catalog
+- [x] Private skill is visible only to its author's owner

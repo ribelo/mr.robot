@@ -6,9 +6,9 @@
 
 **Blocked by:** 04 Robot creation interview, grant approval, Mr. Robot bootstrap
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Subscription stored per device; removal on unsubscribe
-- [ ] Each event kind produces one push with a deep link to the conversation
-- [ ] Robot with notifications off sends none
-- [ ] An event inside quiet hours is delivered at their end
+- [x] Subscription stored per device; removal on unsubscribe
+- [x] Each event kind produces one push with a deep link to the conversation
+- [x] Robot with notifications off sends none
+- [x] An event inside quiet hours is delivered at their end

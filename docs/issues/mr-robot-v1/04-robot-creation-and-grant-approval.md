@@ -6,11 +6,11 @@
 
 **Blocked by:** 03 A Robot Durable Object runs one turn
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] New robot creates a Robot DO in setup state and opens its conversation with the kickoff turn
-- [ ] Setup may only ask questions and propose; approval is a compare-and-swap on the proposal revision
-- [ ] Only grants are approved; persona drafts are not shown for approval
-- [ ] Shared robot appears for the other Member; private does not
-- [ ] Pause stops wake-ups, resume restores them, delete keeps the archive
-- [ ] Mr. Robot recipient grants update when a robot is created or shared
+- [x] New robot creates a Robot DO in setup state and opens its conversation with the kickoff turn
+- [x] Setup may only ask questions and propose; approval is a compare-and-swap on the proposal revision
+- [x] Only grants are approved; persona drafts are not shown for approval
+- [x] Shared robot appears for the other Member; private does not
+- [x] Pause stops wake-ups, resume restores them, delete keeps the archive
+- [x] Mr. Robot recipient grants update when a robot is created or shared
