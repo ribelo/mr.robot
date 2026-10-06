@@ -25,7 +25,7 @@ export interface WorkspaceShape {
   read(path: string): Effect.Effect<WorkspaceFile | undefined, WorkspaceError>
   readText(path: string): Effect.Effect<string | undefined, WorkspaceError>
   stat(path: string): Effect.Effect<WorkspaceEntry | undefined, WorkspaceError>
-  write(path: string, body: string | ArrayBuffer | ReadableStream, contentType?: string): Effect.Effect<WorkspaceEntry, WorkspaceError>
+  write(path: string, body: string | ArrayBuffer | Uint8Array | ReadableStream, contentType?: string): Effect.Effect<WorkspaceEntry, WorkspaceError>
   remove(path: string): Effect.Effect<void, WorkspaceError>
   /** Every file under a relative directory ('' for all). */
   list(directory?: string): Effect.Effect<WorkspaceEntry[], WorkspaceError>

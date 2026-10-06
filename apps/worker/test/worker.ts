@@ -2,6 +2,8 @@ import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { Robot as ProductionRobot } from '../src/robot/robot.ts'
 import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { StubLlm } from './stub-llm.ts'
+import { StubDriver } from './stub-browser.ts'
+import type { BrowserDriver } from '../src/browser/driver.ts'
 
 import { Member as ProductionMember } from '../src/member/member.ts'
 import type { PushNotification } from '../src/platform/push.ts'
@@ -46,6 +48,10 @@ export class Robot extends ProductionRobot {
   /** The credential this Robot's Turns would use for a Provider. */
   async credentialForTest(provider: ProviderId): Promise<ProviderCredential | null> {
     return (await this.credentials().resolve(provider)) ?? null
+  }
+
+  protected override browserDriver(): BrowserDriver {
+    return new StubDriver()
   }
 
   /** Skip the setup interview: the Robot becomes active with its current Grants. */

@@ -1,0 +1,23 @@
+// Integration tests against real Cloudflare services (run with `pnpm test:integration` after `pnpm login`).
+{
+  "name": "mr-robot-integration",
+  "main": "../worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "browser": { "binding": "BROWSER", "remote": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROBOT", "class_name": "Robot" },
+      { "name": "MEMBER", "class_name": "Member" },
+      { "name": "HOME", "class_name": "Home" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Robot", "Member", "Home"] }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "files" }],
+  "vars": {
+    "HOME_NAME": "Integration",
+    "DATA_KEY": "0000000000000000000000000000000000000000000000000000000000000001",
+    "VAPID_PRIVATE_KEY": "0000000000000000000000000000000000000000000000000000000000000002",
+    "VAPID_PUBLIC_KEY": "BHzyexiNA09-ilI4AwS1GsPAiWnid_IbNaYLSPxHZpl4B3dVENuO0EApPZrGn3Qw27p9reY86YIpngS3nSJ4c9E"
+  }
+}

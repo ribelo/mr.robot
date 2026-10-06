@@ -187,6 +187,14 @@ export const api = new Router<ApiContext>()
     const attachment: Attachment = { name: safe, path: entry.path, size: entry.size, contentType }
     return attachment
   }))
+  .on('GET', '/api/robots/:id/screen', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const path = yield* call(() => robot(c, id).screenPath())
+    if (path === null) return yield* Effect.fail(notFound('no screen yet'))
+    const file = yield* makeWorkspace(c.env.FILES, id).read(path).pipe(Effect.mapError(() => notFound('no screen yet')))
+    if (file === undefined) return yield* Effect.fail(notFound('no screen yet'))
+    return new Response(file.body, { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=31536000, immutable' } })
+  }))
   .on('GET', '/api/robots/:id/panel', (c, { id }) => Effect.gen(function* () {
     const access = yield* reach(c, id)
     const entry = (yield* call(() => home(c.env).reachable(c.member.id))).find((summary) => summary.id === id)

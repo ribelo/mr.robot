@@ -54,6 +54,9 @@ import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { webPlugin } from '../agent/web.ts'
 import { skillProposalTools, skillsPlugin } from '../agent/skills.ts'
+import { browserTools, type BrowserHost } from '../agent/tools/browser.ts'
+import { RenderingDriver, type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
+import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { ROBOT_FILES } from '../workspace/templates.ts'
@@ -109,11 +112,12 @@ export type ReceiveResult = { readonly accepted: true } | { readonly accepted: f
 const MAX_CHAIN_HOPS = 8
 const MAX_QUEUED_WAKEUPS = 32
 
-export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost {
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
+  private browserPage: Promise<BrowserPage> | undefined
   /** Values of granted secrets, kept only in memory to mask views (never stored by the Robot). */
   private secretValues: Array<readonly [string, string]> = []
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
@@ -287,6 +291,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
   protected async afterTurn(wakeup: Wakeup): Promise<void> {
+    if (this.store.get('takeover') === undefined) await this.closeBrowser()
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
@@ -468,6 +473,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       case 'secrets': return secretTools(this, this.store.grants().secrets)
       case 'messaging': return messagingTools(this)
       case 'skills': return skillProposalTools(this)
+      case 'browser': return browserTools(this)
       case 'robots': return config.kind === 'chief' ? robotsTools(this) : []
       default: return []
     }
@@ -484,6 +490,83 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       }))
     }
     return plugins
+  }
+
+  // ---------------------------------------------------------------- browser (robot-l9te, robot-t0vc, robot-0eew)
+
+  /** Browser Rendering in production; tests substitute a stub browser. */
+  protected browserDriver(): BrowserDriver {
+    return new RenderingDriver(this.env.BROWSER)
+  }
+
+  /** The Robot's one browser session, opened on first use with its saved cookies and storage. */
+  protected page(): Promise<BrowserPage> {
+    this.browserPage ??= this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null).catch((error: unknown) => {
+      this.browserPage = undefined
+      throw error
+    })
+    return this.browserPage
+  }
+
+  async browserOpen(url: string): Promise<Observation> {
+    if (!/^https?:\/\//.test(url)) throw new Error('only http and https URLs')
+    const page = await this.page()
+    await page.goto(url)
+    return this.observed(page)
+  }
+
+  async browserObserve(): Promise<Observation> {
+    return this.observed(await this.page())
+  }
+
+  async browserAct(action: BrowserAction): Promise<Observation> {
+    const page = await this.page()
+    await page.act(action)
+    return this.observed(page)
+  }
+
+  async browserWait(input: { text?: string; ms?: number }): Promise<Observation> {
+    const page = await this.page()
+    await page.waitFor(input)
+    return this.observed(page)
+  }
+
+  async browserScreenshot(): Promise<{ path: string }> {
+    const page = await this.page()
+    return this.saveScreen(await page.screenshot())
+  }
+
+  private async observed(page: BrowserPage): Promise<Observation> {
+    const observation = await page.observe()
+    await this.loadSecretMasks()
+    return { ...observation, text: this.mask(observation.text) }
+  }
+
+  /** A screenshot becomes the panel's screen thumbnail (robot-ksvy). */
+  protected async saveScreen(png: Uint8Array): Promise<{ path: string }> {
+    const at = Date.now()
+    const path = `screens/${new Date(at).toISOString().replace(/[:.]/g, '-')}.png`
+    await this.run(this.workspace.write(path, png, 'image/png'))
+    this.store.set('screen', { path, at })
+    this.broadcast({ type: 'screen' })
+    return { path }
+  }
+
+  /** End of the Turn: save the login state and the last picture, then free the browser. */
+  protected async closeBrowser(): Promise<void> {
+    const opening = this.browserPage
+    if (opening === undefined) return
+    this.browserPage = undefined
+    const page = await opening.catch(() => undefined)
+    if (page === undefined) return
+    try {
+      this.store.set('browser-state', await page.exportState())
+      await this.saveScreen(await page.screenshot())
+    } catch (error) {
+      console.warn('browser state was not saved', error)
+    } finally {
+      await page.close()
+    }
   }
 
   // ---------------------------------------------------------------- Workspace
@@ -1115,7 +1198,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Filled by the browser and usage tickets. */
 
   protected screen(): ScreenView | null {
-    return null
+    const screen = this.store.get<{ path: string; at: number }>('screen')
+    if (screen === undefined) return null
+    const id = this.store.requireConfig().id
+    return { path: screen.path, at: screen.at, url: `/api/robots/${encodeURIComponent(id)}/screen?at=${screen.at}` }
+  }
+
+  /** The latest screenshot's Workspace path (the thumbnail). */
+  screenPath(): string | null {
+    return this.store.get<{ path: string }>('screen')?.path ?? null
   }
 
   protected usage(): UsageView {
