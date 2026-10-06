@@ -55,6 +55,15 @@ class StubPage implements BrowserPage {
   }
 
   async observe(): Promise<Observation> {
+    if (this.current.endsWith('/checkout')) {
+      return {
+        url: this.current, title: 'Shop: checkout', text: 'Cart: 1 item, 49 PLN', canScrollUp: false, canScrollDown: false, challenge: null,
+        elements: [
+          { index: 1, role: 'button', label: 'Change address', value: '', operations: ['CLICK'] },
+          { index: 2, role: 'button', label: 'Kupuję i płacę', value: '', operations: ['CLICK'] },
+        ],
+      }
+    }
     if (this.current.endsWith('/login') && !this.loggedIn) {
       return {
         url: this.current, title: 'Shop: sign in', text: 'Sign in to the shop', canScrollUp: false, canScrollDown: false, challenge: null,

@@ -26,3 +26,5 @@ Tracker: Markdown files in this directory. Work the frontier: any ticket whose b
 | 20 | [Live model catalogs from configured providers](20-live-model-catalogs.md) | 13 |
 | 21 | [Robot list menu, Edit profile sheet, routine detail](21-robot-profile-and-routine-detail.md) | 06, 11 |
 | 22 | [Trajectory view with DeepSeek Harness parity](22-trajectory-parity-with-dsh.md) | 10 |
+
+Story-by-story status: [verification.md](verification.md).

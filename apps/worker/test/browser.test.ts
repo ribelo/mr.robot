@@ -71,6 +71,20 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
     expect(browserLog.filter((entry) => entry === 'close')).toHaveLength(2)
   })
 
+  it('never clicks the final payment step (robot-ueh0)', async () => {
+    const id = await shopper()
+    await say(id, 'buy it', [
+      { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/checkout' } }] },
+      { calls: [{ name: 'browser_act', args: { action: 'click', index: 1 } }] },
+      { calls: [{ name: 'browser_act', args: { action: 'click', index: 2 } }] },
+      { text: 'Ready for you to pay.' },
+    ])
+    const [, other, pay] = toolResults(id)
+    expect(other).toContain('Cart: 1 item')
+    expect(pay).toContain('looks like the payment or final order step')
+    expect(browserLog.filter((entry) => entry === 'act:click')).toHaveLength(1)
+  })
+
   it('updates the screen thumbnail after each screenshot (robot-ksvy)', async () => {
     const id = await shopper()
     expect((await panel(id)).screen).toBeNull()

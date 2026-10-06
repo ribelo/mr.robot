@@ -6,13 +6,15 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** done
+**Status:** in-progress
 
 - [x] Alchemy deploy from a clean checkout creates every declared resource and prints the URL
 - [x] Signing in with e-mail OTP creates the Member and the Home on first visit; a second sign-in reuses them
-- [x] The PWA shell is installable on Android and shows an empty robot list
+- [ ] The PWA shell is installable on Android and shows an empty robot list
 - [x] An Alchemy plan test asserts the declared resources
 - [x] A dependency lint forbids Node-bound DSH packages and Effect imports inside DSH packages
 
 
 Deployed at https://mrrobot-edge-live-ribelo-ffe667mhzh4ttltx.r-krzywaznia-2c4.workers.dev behind Access (team withered-snow-6eaa); e-mail-code sign-in verified end to end on 2026-10-06.
+
+Open 2026-10-07: installing on an Android phone has not been tried; manifest, service worker and icons are served.

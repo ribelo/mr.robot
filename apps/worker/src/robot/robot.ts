@@ -682,6 +682,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   async browserAct(action: BrowserAction): Promise<Observation> {
     const page = await this.page()
+    if (action.action === 'click' || (action.action === 'type' && action.submit === true)) {
+      // Payment stays with the owner (robot-ueh0): the final pay/order step is never clicked by a Robot.
+      const target = (await page.observe()).elements.find((element) => element.index === action.index)
+      if (target !== undefined && PAYMENT_STEP.test(target.label)) {
+        throw new Error(`"${target.label}" looks like the payment or final order step. Stop here: tell your owner what is ready, or call browser_request_takeover so they pay themselves.`)
+      }
+    }
     await page.act(action)
     return this.observed(page)
   }
@@ -1685,6 +1692,9 @@ function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): st
   const last = [...open.values()].at(-1)
   return last === undefined ? undefined : last === 'run_code' ? (inner ?? 'code') : last
 }
+
+/** Labels of the final payment or order step, in English and Polish. */
+const PAYMENT_STEP = /\b(pay( now)?|place (your )?order|buy now|complete (purchase|order)|confirm (and pay|payment|purchase)|submit order)\b|zapłać|płacę|kupuję|kupuj i płać|zamawiam|złóż zamówienie|potwierdzam (zakup|płatność)|przejdź do płatności/i
 
 function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
   return {
