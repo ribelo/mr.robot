@@ -37,7 +37,6 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
           </button>
           <div className="screen-caption">{name}’s screen</div>
           <h3 className="panel-section">Routines</h3>
-          {panel.routines.length === 0 ? <div className="muted">No routines.</div> : null}
           <RoutineList routines={panel.routines} onOpen={(routine) => onOpenRoutine(routine.id)} />
           <div className="panel-links">
             <button type="button" className="link" onClick={onTrajectory}>Trajectory</button>
