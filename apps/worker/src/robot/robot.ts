@@ -24,6 +24,7 @@ import type {
   RobotPanel,
   RobotSettings,
   RobotSummary,
+  RoutineSchedule,
   RoutineView,
   ScreenView,
   Sender,
@@ -34,7 +35,8 @@ import type {
 } from '@mr-robot/protocol'
 import { CHIEF_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
 import { compose, type Composition } from '../agent/compose.ts'
-import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
+import type { RobotHost, RoutineHost, WorkspaceHost } from '../agent/host.ts'
+import { routineTools } from '../agent/tools/routines.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
@@ -50,7 +52,8 @@ import { makeWorkspace, type WorkspaceShape } from '../workspace/workspace.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import type { RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
-import { RobotStore, type ProposalRow, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
+import { describeSchedule, nextRun, validateSchedule } from './schedule.ts'
+import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
 const HEARTBEAT_MS = 30_000
 export const DEFAULT_CONTEXT_BUDGET = 128_000
@@ -82,7 +85,7 @@ export type AnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
   | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
 
-export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost {
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
@@ -176,8 +179,26 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   override async alarm(): Promise<void> {
-    if (this.store.activeTurn() !== undefined && this.pumping === undefined) this.drain()
+    const config = this.store.config()
+    if (config !== undefined && config.status !== 'deleted') this.fireRoutines(Date.now())
+    if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
+  }
+
+  /**
+   * Due Routines become Wake-ups. However many occurrences were missed while the Robot was
+   * down, each due Routine runs once (robot-v1gb), and its next run is computed from now.
+   */
+  private fireRoutines(now: number): void {
+    for (const routine of this.store.routines()) {
+      if (routine.nextRun === null || routine.nextRun > now) continue
+      this.store.transaction(() => {
+        this.store.enqueue('routine', { kind: 'routine', routineId: routine.id, name: routine.name }, routine.prompt, { routineId: routine.id, due: routine.nextRun }, now)
+        const next = nextRun(routine.schedule, routine.timeZone, now, routine.createdAt)
+        if (next === null) this.store.deleteRoutine(routine.id)
+        else this.store.saveRoutine({ ...routine, lastRun: now, nextRun: next })
+      })
+    }
   }
 
   protected drain(): void {
@@ -311,9 +332,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** Tools of one granted group. Groups whose tools come from a DSH plugin are mounted in plugins(). */
-  protected groupTools(group: ToolGroup, _config: RobotConfig): ToolDefinition[] {
+  protected groupTools(group: ToolGroup, config: RobotConfig): ToolDefinition[] {
     switch (group) {
       case 'files': return fileTools(this)
+      case 'routines': return routineTools(this, config.timeZone)
       default: return []
     }
   }
@@ -557,9 +579,76 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.ctx.storage.setAlarm(Math.min(...candidates))
   }
 
-  /** Further alarm times (Routines, outbox retries) from later tickets. */
+  /** Further alarm times: the earliest Routine here, outbox retries in ticket 15. */
   protected alarmCandidates(): number[] {
-    return []
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted') return []
+    return this.store.routines().flatMap((routine) => routine.nextRun === null ? [] : [routine.nextRun])
+  }
+
+  // ---------------------------------------------------------------- Routines (robot-gbbt, robot-qyd5)
+
+  createRoutine(input: { name: string; prompt: string; schedule: RoutineSchedule }): RoutineView {
+    const config = this.store.requireConfig()
+    const now = Date.now()
+    const schedule = validateSchedule(input.schedule, config.timeZone, now)
+    if (input.name.trim() === '' || input.prompt.trim() === '') throw new Error('a Routine needs a name and a prompt')
+    const routine: RoutineRow = {
+      id: `rt-${crypto.randomUUID().slice(0, 8)}`,
+      name: input.name.trim(),
+      prompt: input.prompt.trim(),
+      schedule,
+      timeZone: config.timeZone,
+      nextRun: nextRun(schedule, config.timeZone, now, now),
+      lastRun: null,
+      createdAt: now,
+    }
+    this.store.saveRoutine(routine)
+    this.routinesChanged()
+    return routineView(config.id, routine)
+  }
+
+  updateRoutine(id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }): RoutineView {
+    const config = this.store.requireConfig()
+    const existing = this.store.routine(id)
+    if (existing === undefined) throw new Error(`no Routine ${id}`)
+    const now = Date.now()
+    const schedule = input.schedule === undefined ? existing.schedule : validateSchedule(input.schedule, existing.timeZone, now)
+    const routine: RoutineRow = {
+      ...existing,
+      ...(input.name === undefined ? {} : { name: input.name.trim() }),
+      ...(input.prompt === undefined ? {} : { prompt: input.prompt.trim() }),
+      schedule,
+      nextRun: input.schedule === undefined ? existing.nextRun : nextRun(schedule, existing.timeZone, now, now),
+      ...(input.schedule === undefined ? {} : { createdAt: now }),
+    }
+    this.store.saveRoutine(routine)
+    this.routinesChanged()
+    return routineView(config.id, routine)
+  }
+
+  deleteRoutine(id: string): RoutineView {
+    const config = this.store.requireConfig()
+    const existing = this.store.routine(id)
+    if (existing === undefined) throw new Error(`no Routine ${id}`)
+    this.store.deleteRoutine(id)
+    this.routinesChanged()
+    return routineView(config.id, existing)
+  }
+
+  listRoutines(): RoutineView[] {
+    return this.routineViews()
+  }
+
+  /** The owner deletes a Routine from the panel (robot-qyd5). */
+  async removeRoutine(id: string): Promise<void> {
+    this.deleteRoutine(id)
+    await this.rearm()
+    await this.changed()
+  }
+
+  private routinesChanged(): void {
+    this.ctx.waitUntil(this.rearm())
   }
 
   // ---------------------------------------------------------------- views
@@ -618,10 +707,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** Filled by the Routines, browser and usage tickets. */
   protected routineViews(): RoutineView[] {
-    return []
+    const id = this.store.requireConfig().id
+    return this.store.routines().map((routine) => routineView(id, routine))
   }
+
+  /** Filled by the browser and usage tickets. */
 
   protected screen(): ScreenView | null {
     return null
@@ -643,6 +734,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   status(): { status: RobotConfig['status']; fleetState: FleetState } {
     return { status: this.store.requireConfig().status, fleetState: this.fleetState() }
   }
+}
+
+function routineView(robotId: string, routine: RoutineRow): RoutineView {
+  return { ...routine, robotId, summary: describeSchedule(routine.schedule, routine.timeZone) }
 }
 
 function runnable(config: RobotConfig): boolean {
