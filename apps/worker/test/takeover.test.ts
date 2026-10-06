@@ -1,4 +1,4 @@
-import { env, reset, SELF } from 'cloudflare:test'
+import { abortAllDurableObjects, env, reset, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -70,6 +70,15 @@ describe('live view and takeover', () => {
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'are you done?' } })
     await settle(id)
     expect((requests.get(id) ?? []).length).toBe(before)
+  })
+
+  it('reattaches the waiting browser after the Robot restarts', async () => {
+    const id = await shopperAtLogin()
+    await abortAllDurableObjects()
+    const viewer = await connect(ANNA, id)
+    await viewer.send({ type: 'live', on: true })
+    expect(browserLog).toContain('attach')
+    expect(viewer.received.some((message) => message['type'] === 'frame')).toBe(true)
   })
 
   it('streams the screen to a watcher without taking it over (robot-ksvy)', async () => {

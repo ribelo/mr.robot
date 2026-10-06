@@ -684,15 +684,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   private async resumeBrowser(): Promise<BrowserPage> {
+    const takeover = this.store.get<TakeoverState>('takeover')
     const watch = this.store.get<WatchState>('watch')
-    if (watch !== undefined) {
-      const attached = await this.browserDriver().attach(watch.sessionId)
-      if (attached !== undefined) return attached
-      const reopened = await this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
-      if (watch.url.startsWith('http')) await reopened.goto(watch.url).catch(() => undefined)
-      return reopened
-    }
-    return this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
+    const sessionId = watch?.sessionId ?? takeover?.sessionId
+    const attached = sessionId === undefined ? undefined : await this.browserDriver().attach(sessionId)
+    if (attached !== undefined) return attached
+    // The session ended: a new one with the saved cookies, back on the page the Robot was on.
+    const reopened = await this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
+    const url = watch?.url ?? takeover?.url
+    if (url?.startsWith('http') === true) await reopened.goto(url).catch(() => undefined)
+    return reopened
   }
 
   // ---------------------------------------------------------------- wake on screen notifications (robot-lulc)
@@ -1095,6 +1096,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     switch (input['type']) {
       case 'live':
         socket.serializeAttachment({ ...viewer, live: input['on'] !== false } satisfies ViewerState)
+        // After a restart the waiting browser is reattached for the watcher.
+        if (input['on'] !== false && this.store.get('takeover') !== undefined) await this.page()
         await this.updateScreencast()
         return
       case 'claim': {
@@ -1107,6 +1110,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         this.store.set('takeover', { ...takeover, claimedBy: viewer.memberId })
         socket.serializeAttachment({ ...viewer, live: true } satisfies ViewerState)
         socket.send(JSON.stringify({ type: 'claimed' }))
+        await this.page()
         await this.updateScreencast()
         return
       }
@@ -1163,7 +1167,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const page = await this.page()
     this.store.set('browser-state', await page.exportState())
     await this.saveScreen(await page.screenshot())
-    this.store.set('takeover', { reason, url: page.url(), requestedAt: Date.now(), claimedBy: null } satisfies TakeoverState)
+    this.store.set('takeover', { reason, url: page.url(), requestedAt: Date.now(), claimedBy: null, sessionId: page.sessionId() } satisfies TakeoverState)
     const config = this.store.requireConfig()
     await this.notifyMembers('needs you', `${reason} Tap to take over the browser.`)
     this.broadcast({ type: 'takeover', reason, url: `/#/r/${encodeURIComponent(config.id)}/takeover` })
@@ -1755,6 +1759,8 @@ export interface TakeoverState {
   readonly url: string
   readonly requestedAt: number
   readonly claimedBy: string | null
+  /** The Browser Rendering session to reattach after the Robot's DO restarts. */
+  readonly sessionId?: string
 }
 
 /** Taps, text, keys and scrolls from the owner's device become CDP input (robot-g6qb). */
