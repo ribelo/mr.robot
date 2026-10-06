@@ -54,6 +54,23 @@ export default {
       await new Promise((resolve) => setTimeout(resolve, 3000))
       await cdp.send('Page.stopScreencast')
       report.screencastFrames = frames
+      // Takeover input (ticket 09): a tap on the name field, typed text, then a tap on Sign in.
+      const box = async (selector: string) => {
+        const { result } = await cdp.send('Runtime.evaluate', { expression: `JSON.stringify(document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect())`, returnByValue: true }) as { result: { value: string } }
+        const rect = JSON.parse(result.value) as { x: number; y: number; width: number; height: number }
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+      }
+      const tap = async (point: { x: number; y: number }) => {
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+      }
+      await tap(await box('input[name=customer]'))
+      await cdp.send('Input.insertText', { text: 'Typed by a person' })
+      await tap(await box('button'))
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const taken = await second.observe()
+      report.takeoverTyped = taken.elements.find((element) => element.label.includes('Customer name'))?.value
+      report.takeoverClicked = taken.text.split('\n')[0]
       await second.close()
     } catch (error) {
       report.error = error instanceof Error ? error.message : String(error)

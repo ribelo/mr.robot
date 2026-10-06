@@ -10,7 +10,11 @@ const output = execFileSync('pnpm', ['exec', 'wrangler', 'deploy', '-c', config]
 const url = /https:\/\/[^\s]+workers\.dev/.exec(output)?.[0]
 if (url === undefined) throw new Error(`no URL in wrangler output:\n${output}`)
 try {
-  await new Promise((resolve) => setTimeout(resolve, 8000))
+  // A fresh workers.dev address takes a while to answer; wait for the fixture page (up to a minute).
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if ((await fetch(`${url}/fixture`).catch(() => undefined))?.ok === true) break
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+  }
   const body = await (await fetch(`${url}/run`)).text()
   let report: Record<string, unknown>
   try {
@@ -27,6 +31,8 @@ try {
     ['takes a PNG screenshot', JSON.stringify(report['png']) === '[137,80,78,71]'],
     ['carries cookies into a new session', String(report['cookieInNewSession']).includes('session=ok')],
     ['streams screencast frames for the live view', Number(report['screencastFrames']) > 0],
+    ['takeover typing reaches the page', report['takeoverTyped'] === 'Typed by a person'],
+    ['takeover tap reaches the page', report['takeoverClicked'] === 'Signed in'],
   ]
   for (const [name, ok] of checks) console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`)
   if (checks.some(([, ok]) => !ok)) process.exitCode = 1
