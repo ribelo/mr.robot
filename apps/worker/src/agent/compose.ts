@@ -4,6 +4,8 @@
  * so settings and Grant changes take effect on the next Turn.
  */
 import { Context } from '@deepseek-ai/cordis'
+import * as Effect from 'effect/Effect'
+import type * as Scope from 'effect/Scope'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, { ReasoningEffortId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -23,6 +25,7 @@ export interface CompositionInput {
   /** A new session seeded from another one's prefix (rewind). Used only when the session does not exist yet. */
   readonly seed?: { readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string }
   readonly onAppend?: (sessionId: string) => void
+  readonly redact?: (json: string) => string
   readonly provider: string
   readonly model: string
   readonly effort: ThinkingEffort
@@ -52,7 +55,11 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     ctx.llm.registerAdapter([input.provider], new BudgetedAdapter(input.adapter, input.contextBudget))
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjectionRegistry)
-    await ctx.plugin(SqliteSessionLog, { storage: input.storage, ...(input.onAppend === undefined ? {} : { onAppend: input.onAppend }) })
+    await ctx.plugin(SqliteSessionLog, {
+      storage: input.storage,
+      ...(input.onAppend === undefined ? {} : { onAppend: input.onAppend }),
+      ...(input.redact === undefined ? {} : { redact: input.redact }),
+    })
     await ctx.plugin(TokenMeter)
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
     await ctx.plugin(ToolRuntime, {})
@@ -109,4 +116,14 @@ function reasoning(effort: ThinkingEffort, supported: readonly string[]): { reas
     .filter((id) => ladder.includes(id as ThinkingEffort))
     .sort((a, b) => Math.abs(ladder.indexOf(a as ThinkingEffort) - wanted) - Math.abs(ladder.indexOf(b as ThinkingEffort) - wanted))[0]
   return best === undefined ? {} : { reasoningEffort: ReasoningEffortId(best) }
+}
+/**
+ * The composition owned by an Effect scope (spec: the Cordis root follows the DO lifecycle):
+ * closing the scope disposes the agent and every plugin.
+ */
+export function composeScoped(input: CompositionInput): Effect.Effect<Composition, Error, Scope.Scope> {
+  return Effect.acquireRelease(
+    Effect.tryPromise({ try: () => compose(input), catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))) }),
+    (composition) => Effect.promise(() => composition.dispose()),
+  )
 }

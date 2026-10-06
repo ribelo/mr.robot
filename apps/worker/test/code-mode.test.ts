@@ -36,8 +36,8 @@ describe('code mode (robot-5ewr, robot-ax7s)', () => {
   it('runs three tool calls as one executed program', async () => {
     const id = await activeRobot(['files'], true)
     const program = [
-      "await tools.write_file({ path: 'notes/a.md', content: 'alpha' })",
-      "const text = await tools.read_file({ path: 'notes/a.md' })",
+      "await tools.write({ file_path: 'notes/a.md', content: 'alpha' })",
+      "const text = await tools.read({ file_path: 'notes/a.md' })",
       "const listing = await tools.glob({ pattern: 'notes/**' })",
       'return { text, listing }',
     ].join('\n')
@@ -54,7 +54,7 @@ describe('code mode (robot-5ewr, robot-ax7s)', () => {
   it('switches to direct tool calls per Robot', async () => {
     const id = await activeRobot(['files'], false)
     await say(id, 'hi', [{ text: 'hi' }])
-    expect(toolNames(id)).toContain('read_file')
+    expect(toolNames(id)).toContain('read')
     expect(toolNames(id)).not.toContain('run_code')
   })
 })
@@ -63,14 +63,14 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
   it('keeps an ungranted tool out of the catalog and out of the executor', async () => {
     const id = await activeRobot([], true)
     await say(id, 'try files', [
-      { calls: [{ name: 'run_code', args: { code: "return await tools.read_file({ path: 'SOUL.md' })", description: 'read soul' } }] },
+      { calls: [{ name: 'run_code', args: { code: "return await tools.read({ file_path: 'SOUL.md' })", description: 'read soul' } }] },
       { text: 'I cannot.' },
     ])
     const system = JSON.stringify(lastRequest(id).messages.filter((message) => message.role === 'system'))
-    expect(system).not.toContain('read_file')
+    expect(system).not.toContain('file_path')
     const { events } = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body
     const result = events.find((event) => event.type === 'tool/result')!
-    expect(result.data).toContain('tools.read_file is not a function')
+    expect(result.data).toContain('tools.read is not a function')
     expect(result.data).not.toContain("You're not a chatbot")
 
     const direct = await activeRobot([], false)
@@ -99,7 +99,7 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
     await settle(id)
     const settings = await testRobot(id).settings()
     expect([...settings.grants.tools].sort()).toEqual(['files', 'web'])
-    expect(toolNames(id)).toEqual(expect.arrayContaining(['read_file', 'web_fetch', 'web_search']))
+    expect(toolNames(id)).toEqual(expect.arrayContaining(['read', 'web_fetch', 'web_search']))
   })
 })
 
@@ -115,7 +115,7 @@ describe('advanced settings (robot-vqtw)', () => {
     })
     await say(id, 'two', [{ text: 'two' }])
     expect(lastRequest(id).model).toBe('stub-large')
-    expect(toolNames(id)).toContain('read_file')
+    expect(toolNames(id)).toContain('read')
     expect(toolNames(id)).not.toContain('run_code')
   })
 })

@@ -33,14 +33,14 @@ const base = (provider: string): GenerateOptions => ({
     { id: 's', role: 'system', source: { kind: 'system-prompt' }, content: [{ type: 'text', text: 'Be a Robot.' }] } as never,
     createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }),
   ],
-  tools: [{ name: 'read_file', description: 'read', parameters: { type: 'object' } }],
+  tools: [{ name: 'read', description: 'read', parameters: { type: 'object' } }],
 })
 
 describe('Provider adapters', () => {
   it('OpenRouter: streams text and tool calls in chat-completions format', async () => {
     const { requests } = serve([
       sse({ choices: [{ delta: { content: 'Look' } }] }),
-      sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'read_file', arguments: '{"pa' } }] } }] }),
+      sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'read', arguments: '{"pa' } }] } }] }),
       sse({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'th":"x"}' } }] }, finish_reason: 'tool_calls' }] }),
       sse({ usage: { prompt_tokens: 12, completion_tokens: 3 } }),
       'data: [DONE]\n\n',
@@ -48,9 +48,9 @@ describe('Provider adapters', () => {
     const adapter = new ChatCompletionsAdapter({ name: 'OpenRouter', url: 'https://openrouter.test', contextWindow: 1000, headers: async () => ({ authorization: 'Bearer k' }) })
     const chunks = await collect(adapter.stream(base('openrouter')))
     expect(requests[0]!.body.messages[0]).toEqual({ role: 'system', content: 'Be a Robot.' })
-    expect(requests[0]!.body.tools[0].function.name).toBe('read_file')
+    expect(requests[0]!.body.tools[0].function.name).toBe('read')
     const ends = chunks.filter((chunk) => chunk.type === 'block-end').map((chunk) => (chunk as { block: unknown }).block)
-    expect(ends).toEqual([{ type: 'text', text: 'Look' }, { type: 'tool-call', id: 'c1', name: 'read_file', arguments: '{"path":"x"}' }])
+    expect(ends).toEqual([{ type: 'text', text: 'Look' }, { type: 'tool-call', id: 'c1', name: 'read', arguments: '{"path":"x"}' }])
     expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'tool-calls' } })
     expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 0 } })
   })
@@ -83,12 +83,12 @@ describe('Provider adapters', () => {
       ...base('anthropic'),
       messages: [
         ...base('anthropic').messages,
-        { id: 'a', role: 'assistant', source: { kind: 'model', provider: 'anthropic', model: 'm', replayState: finish.replayState }, content: [{ type: 'reasoning', text: 'hmm' }, { type: 'tool-call', id: 't1', name: 'read_file', arguments: '{}' }] } as never,
+        { id: 'a', role: 'assistant', source: { kind: 'model', provider: 'anthropic', model: 'm', replayState: finish.replayState }, content: [{ type: 'reasoning', text: 'hmm' }, { type: 'tool-call', id: 't1', name: 'read', arguments: '{}' }] } as never,
         { id: 't', role: 'tool', toolCallId: 't1', source: { kind: 'tool', callId: 't1' }, content: [{ type: 'text', text: 'file' }] } as never,
       ],
     }))
     expect(second.requests[0]!.body.messages.slice(1)).toEqual([
-      { role: 'assistant', content: [{ type: 'thinking', thinking: 'hmm', signature: 'sig-1' }, { type: 'tool_use', id: 't1', name: 'read_file', input: {} }] },
+      { role: 'assistant', content: [{ type: 'thinking', thinking: 'hmm', signature: 'sig-1' }, { type: 'tool_use', id: 't1', name: 'read', input: {} }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'file' }] },
     ])
   })
@@ -98,7 +98,7 @@ describe('Provider adapters', () => {
       sse({ type: 'response.output_item.added', item: { type: 'reasoning' } }),
       sse({ type: 'response.reasoning_summary_text.delta', delta: 'thinking' }),
       sse({ type: 'response.output_item.done', item: { type: 'reasoning', encrypted_content: 'enc-1' } }),
-      sse({ type: 'response.output_item.added', item: { type: 'function_call', call_id: 'call-1', name: 'read_file' } }),
+      sse({ type: 'response.output_item.added', item: { type: 'function_call', call_id: 'call-1', name: 'read' } }),
       sse({ type: 'response.function_call_arguments.delta', delta: '{"path":"a"}' }),
       sse({ type: 'response.output_item.done', item: { type: 'function_call' } }),
       sse({ type: 'response.completed', response: { usage: { input_tokens: 30, output_tokens: 4 } } }),

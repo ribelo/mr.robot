@@ -69,6 +69,20 @@ describe('secrets', () => {
     const chat = JSON.stringify((await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body)
     expect(chat).not.toContain(PASSWORD)
     expect(chat).toContain('Logged in with [secret:allegro].')
+
+    // Revoking the Grant and deleting the secret never brings the value back.
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: ['secrets'], skills: [], recipients: [], secrets: [] } } })
+    await api(ANNA, '/api/secrets/allegro', { method: 'DELETE' })
+    expect(JSON.stringify((await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body)).not.toContain(PASSWORD)
+    expect(JSON.stringify((await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body)).not.toContain(PASSWORD)
+  })
+
+  it('keeps plaintext out of later Turns: the model sees the mask after the Turn ends', async () => {
+    await api(ANNA, '/api/secrets/allegro', { method: 'PUT', body: { value: PASSWORD, shared: false } })
+    const id = await robotOf(ANNA, ['allegro'])
+    await say(ANNA, id, 'log in', [{ calls: [{ name: 'secret_get', args: { name: 'allegro' } }] }, { text: 'Logged in.' }])
+    await say(ANNA, id, 'again?', [{ text: 'Yes.' }])
+    expect(JSON.stringify(requests.get(id)!.at(-1)!.messages)).not.toContain(PASSWORD)
   })
 
   it("lets another Member's Robot use a Home-shared secret once granted", async () => {

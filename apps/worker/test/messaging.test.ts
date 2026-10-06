@@ -117,16 +117,16 @@ describe('Robot-to-Robot messaging', () => {
   })
 
   it('lets Mr. Robot create a Robot that he can then message (robot-hk2s, robot-70kf)', async () => {
-    const chief = (await robots(ANNA)).find((entry) => entry.kind === 'chief') as RobotSummary
-    await api(ANNA, `/api/robots/${chief.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
+    const mrRobot = (await robots(ANNA)).find((entry) => entry.kind === 'mr-robot') as RobotSummary
+    await api(ANNA, `/api/robots/${mrRobot.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set('*', [{ text: 'Hi, I am new. What should I watch?' }])
-    await say(chief.id, 'I need someone to watch flat prices', [
+    await say(mrRobot.id, 'I need someone to watch flat prices', [
       { calls: [{ name: 'robot_create', args: { brief: 'Watch flat prices in Warsaw' } }] },
       { text: 'Created it; it will ask you a few questions.' },
     ])
     const created = (await robots(ANNA)).find((entry) => entry.kind === 'robot')!
     expect(created.status).toBe('setup')
-    expect((await env.ROBOT.getByName(chief.id).settings()).grants.recipients).toEqual([created.id])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([created.id])
     await settle(created.id)
     expect((await chat(created.id)).at(-1)).toMatchObject({ kind: 'reply', text: 'Hi, I am new. What should I watch?' })
   })

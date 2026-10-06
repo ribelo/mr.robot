@@ -15,6 +15,9 @@ export interface Env {
   readonly DATA_KEY: string
   readonly VAPID_PRIVATE_KEY: string
   readonly VAPID_PUBLIC_KEY: string
+  /** Subscription OAuth client ids (the providers' public CLI clients by default). */
+  readonly OPENAI_OAUTH_CLIENT_ID: string
+  readonly ANTHROPIC_OAUTH_CLIENT_ID: string
   /** Local development and tests only: the e-mail to sign in as when Access is absent. */
   readonly DEV_IDENTITY?: string
 }

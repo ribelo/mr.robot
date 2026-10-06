@@ -37,8 +37,11 @@ import type {
   Trajectory,
   TrajectoryEvent,
 } from '@mr-robot/protocol'
-import { CHIEF_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
-import { compose, type Composition } from '../agent/compose.ts'
+import { MR_ROBOT_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
+import { composeScoped, type Composition } from '../agent/compose.ts'
+import { browserUsePlugin, credentialsPlugin, filesPlugin } from '../agent/seams.ts'
+import * as Exit from 'effect/Exit'
+import * as Scope from 'effect/Scope'
 import type { RobotHost, RoutineHost, WorkspaceHost } from '../agent/host.ts'
 import { routineTools } from '../agent/tools/routines.ts'
 import { notifyTools, type NotifyHost } from '../agent/tools/notify.ts'
@@ -77,7 +80,7 @@ export interface RobotInit {
   readonly id: string
   readonly ownerId: string
   readonly ownerName: string
-  readonly kind: 'chief' | 'robot'
+  readonly kind: 'mr-robot' | 'robot'
   readonly identity: Identity
   readonly sharing: Sharing
   readonly status: 'setup' | 'active'
@@ -117,13 +120,16 @@ const MAX_QUEUED_WAKEUPS = 32
 
 export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost {
   protected readonly store: RobotStore
-  private composition: { readonly revision: number; readonly value: Composition } | undefined
+  private composition: { readonly revision: number; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
   private browserPage: Promise<BrowserPage> | undefined
   private screencast: { stop: () => Promise<void> } | undefined
+  private handingBack = false
   /** Values of granted secrets, kept only in memory to mask views (never stored by the Robot). */
   private secretValues: Array<readonly [string, string]> = []
+  /** Secret values fetched during the running Turn; redacted from everything stored. */
+  private turnSecrets: Array<readonly [string, string]> = []
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -160,7 +166,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.saveConfig(config)
       this.store.set('owner', { id: init.ownerId, name: init.ownerName })
       if (init.brief !== undefined) this.store.set('brief', init.brief)
-      if (init.kind === 'chief') this.store.setGrants({ tools: [...CHIEF_TOOLS], skills: [], recipients: [], secrets: [] })
+      if (init.kind === 'mr-robot') this.store.setGrants({ tools: [...MR_ROBOT_TOOLS], skills: [], recipients: [], secrets: [] })
     })
     await this.seedWorkspace()
     await this.report()
@@ -287,6 +293,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.changed()
     await agent.whenIdle()
     await ctx.sessions.flush(agent.session)
+    if (this.turnSecrets.length > 0) {
+      // The in-memory session still holds plaintext; the next Turn starts from the redacted log.
+      await this.releaseComposition()
+      this.turnSecrets = []
+    }
     this.store.endTurn(wakeup.id)
     await this.afterTurn(wakeup)
     await this.rearm()
@@ -456,11 +467,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- the agent composition
 
+  /** Close the composition's scope: the agent and every plugin are disposed. */
+  private async releaseComposition(): Promise<void> {
+    const current = this.composition
+    this.composition = undefined
+    if (current !== undefined) await Effect.runPromise(Scope.close(current.scope, Exit.void))
+  }
+
   private async agent(): Promise<Composition> {
     const config = this.store.requireConfig()
     if (this.composition?.revision === config.revision) return this.composition.value
-    await this.composition?.value.dispose()
-    this.composition = undefined
+    await this.releaseComposition()
     const owner = this.owner()
     const brief = this.store.get<string>('brief') ?? null
     const prompt = [{ name: 'platform', text: () => platformPrompt(this.store.requireConfig(), owner.name) }]
@@ -468,11 +485,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     prompt.push({ name: 'workspace', text: () => personaText(this.persona) })
     const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
     const contextWindow = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.contextWindow
-    const value = await compose({
+    const scope = await Effect.runPromise(Scope.make())
+    const value = await Effect.runPromise(Scope.provide(scope)(composeScoped({
       storage: this.ctx.storage,
       sessionId: config.liveSessionId,
       ...(seed === undefined ? {} : { seed }),
       onAppend: () => this.broadcast(),
+      redact: (json) => maskSecrets(json, this.turnSecrets),
       provider: config.model.provider,
       model: config.model.model,
       effort: config.model.effort,
@@ -483,8 +502,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       tools: this.tools(config),
       plugins: this.plugins(config),
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
+    }))).catch(async (error: unknown) => {
+      await Effect.runPromise(Scope.close(scope, Exit.void))
+      throw error
     })
-    this.composition = { revision: config.revision, value }
+    this.composition = { revision: config.revision, value, scope }
     this.pendingSeed = undefined
     return value
   }
@@ -525,14 +547,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       case 'messaging': return messagingTools(this)
       case 'skills': return skillProposalTools(this)
       case 'browser': return [...browserTools(this), ...takeoverTools(this)]
-      case 'robots': return config.kind === 'chief' ? robotsTools(this) : []
+      case 'robots': return config.kind === 'mr-robot' ? robotsTools(this) : []
       default: return []
     }
   }
 
   /** Seam plugins for granted groups (DSH web, skills). */
   protected plugins(config: RobotConfig): Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> {
-    const plugins: Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> = []
+    const plugins: Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> = [credentialsPlugin(this.credentials())]
+    // Setup may write its own persona files; afterwards only a files Grant gives the file tools.
+    if (config.status === 'setup' || this.store.hasGrant('tool', 'files')) plugins.push(filesPlugin(this.workspace, (name) => this.memberFile(name)))
+    if (config.status !== 'setup' && this.store.hasGrant('tool', 'browser')) plugins.push(browserUsePlugin())
     if (config.status !== 'setup' && this.store.hasGrant('tool', 'web')) plugins.push(webPlugin(this.credentials()))
     if (config.status !== 'setup' && this.store.hasGrant('tool', 'skills')) {
       plugins.push(skillsPlugin({
@@ -762,7 +787,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
         ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels])] } }),
         ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
-        ...(config.kind === 'chief' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
+        ...(config.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
       }))
     })
     await this.changed()
@@ -817,7 +842,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket', { status: 426 })
     const pair = new WebSocketPair()
     const [client, server] = [pair[0], pair[1]]
-    const memberId = request.headers.get('x-member-id') ?? 'viewer'
+    const memberId = request.headers.get('x-member-id')
+    if (memberId === null) return new Response('a viewer must be a Member', { status: 400 })
     this.ctx.acceptWebSocket(server, [memberId])
     server.serializeAttachment({ memberId, live: false } satisfies ViewerState)
     server.send(JSON.stringify({ type: 'changed', working: this.store.activeTurn() !== undefined }))
@@ -846,12 +872,36 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   override async webSocketClose(socket: WebSocket, code: number): Promise<void> {
     socket.close(code === 1005 ? 1000 : code)
+    // A Member who leaves without handing back releases the claim (another can take over).
+    const viewer = socket.deserializeAttachment() as ViewerState | null
+    const takeover = this.store.get<TakeoverState>('takeover')
+    if (viewer !== null && takeover?.claimedBy === viewer.memberId && this.ctx.getWebSockets(viewer.memberId).length === 0) {
+      this.store.set('takeover', { ...takeover, claimedBy: null })
+    }
+    await this.updateScreencast()
+  }
+
+  /** A removed Member's open views end now, not when they next reconnect. */
+  async disconnectMember(memberId: string): Promise<void> {
+    for (const socket of this.ctx.getWebSockets(memberId)) {
+      try { socket.close(1008, 'access removed') } catch { /* already closing */ }
+    }
+    const takeover = this.store.get<TakeoverState>('takeover')
+    if (takeover?.claimedBy === memberId) this.store.set('takeover', { ...takeover, claimedBy: null })
     await this.updateScreencast()
   }
 
   // ---------------------------------------------------------------- live view and takeover (robot-ksvy, robot-g6qb, robot-doqx, robot-j4ll)
 
   private async viewerMessage(socket: WebSocket, viewer: ViewerState, input: Record<string, unknown>): Promise<void> {
+    // Access is checked on every message: sharing, removal and deletion apply to open sockets too.
+    const access = await this.home().access(viewer.memberId, this.store.requireConfig().id)
+    if (access === null) {
+      socket.close(1008, 'access removed')
+      return
+    }
+    const controlling = input['type'] !== 'live'
+    if (controlling && access !== 'owner') throw new Error('only the owner takes over this browser')
     switch (input['type']) {
       case 'live':
         socket.serializeAttachment({ ...viewer, live: input['on'] !== false } satisfies ViewerState)
@@ -932,6 +982,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** The owner is done: the Robot resumes with a note of where the browser is now. */
   private async handBack(memberId: string): Promise<void> {
+    // Claimed synchronously so a second hand-back arriving during the awaits below is a no-op.
+    if (this.handingBack) return
+    this.handingBack = true
+    try {
+      await this.completeHandBack(memberId)
+    } finally {
+      this.handingBack = false
+    }
+  }
+
+  private async completeHandBack(memberId: string): Promise<void> {
     const page = await this.page()
     this.store.set('browser-state', await page.exportState())
     const { path } = await this.saveScreen(await page.screenshot())
@@ -1115,14 +1176,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   async createRobot(brief: string): Promise<{ id: string; status: string }> {
     const config = this.store.requireConfig()
-    if (config.kind !== 'chief') throw new Error('only Mr. Robot creates Robots')
+    if (config.kind !== 'mr-robot') throw new Error('only Mr. Robot creates Robots')
     const entry = await this.home().createRobot(config.ownerId, brief)
     return { id: entry.id, status: 'created; it is interviewing your owner in its own Conversation and will propose its Grants there' }
   }
 
   async configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }> {
     const config = this.store.requireConfig()
-    if (config.kind !== 'chief') throw new Error('only Mr. Robot configures Robots')
+    if (config.kind !== 'mr-robot') throw new Error('only Mr. Robot configures Robots')
     const entry = await this.home().entry(id)
     if (entry === undefined || entry.ownerId !== config.ownerId || entry.kind !== 'robot' || entry.status === 'deleted') throw new Error(`${id} is not one of your owner's Robots`)
     const identity = { ...entry.identity, ...Object.fromEntries(Object.entries(change).filter(([, value]) => typeof value === 'string' && value.trim() !== '')) }
@@ -1242,9 +1303,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { robotId: config.id, sessionId: config.liveSessionId, events: this.trajectory(), rewinds: this.store.rewinds() }
   }
 
-  /** Replace granted secret values with a mask (robot-4zi6). */
+  /** Replace secret values with a mask (robot-4zi6); stored history is already redacted at write. */
   protected mask(text: string): string {
-    return maskSecrets(text, this.secretValues)
+    return maskSecrets(text, [...this.secretValues, ...this.turnSecrets])
   }
 
   /** secret.get: a granted name only, resolved from the owner or the Home (robot-0bde). */
@@ -1260,6 +1321,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private remember(name: string, value: string): void {
     this.secretValues = [...this.secretValues.filter(([known]) => known !== name), [name, value]]
+    this.turnSecrets = [...this.turnSecrets.filter(([known]) => known !== name), [name, value]]
   }
 
   /** Load every granted secret's value so views can mask them, also after a restart. */
@@ -1290,8 +1352,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const now = Date.now()
     const rewind = { id: `rw-${crypto.randomUUID().slice(0, 8)}`, atSeq, archivedSessionId: config.liveSessionId, liveSessionId: sessionId, at: now }
 
-    await this.composition?.value.dispose()
-    this.composition = undefined
+    await this.releaseComposition()
     this.pendingSeed = { sessionId, events: seed, inheritedEventCount: atSeq + 1, parentSession: config.liveSessionId }
     this.store.transaction(() => {
       this.store.addRewind(rewind)
@@ -1318,8 +1379,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const rewind = this.store.rewinds().find((entry) => entry.id === id)
     if (rewind === undefined || rewind.undone) throw new Error('no such rewind')
     if (rewind.liveSessionId !== config.liveSessionId) throw new Error('only the latest rewind can be undone')
-    await this.composition?.value.dispose()
-    this.composition = undefined
+    await this.releaseComposition()
     this.store.transaction(() => {
       this.store.markRewindUndone(id, Date.now())
       this.store.updateConfig(() => ({ liveSessionId: rewind.archivedSessionId }))

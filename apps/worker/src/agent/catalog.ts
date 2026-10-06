@@ -23,4 +23,4 @@ export function isToolGroup(name: string): name is ToolGroup {
 }
 
 /** What Mr. Robot holds from the start; his recipient Grants follow reachability. */
-export const CHIEF_TOOLS: readonly ToolGroup[] = ['files', 'web', 'routines', 'messaging', 'notify', 'robots']
+export const MR_ROBOT_TOOLS: readonly ToolGroup[] = ['files', 'web', 'routines', 'messaging', 'notify', 'robots']

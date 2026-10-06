@@ -1,6 +1,7 @@
 /**
- * File tools over the Robot's Workspace in R2 (robot-8pqy). The owner's Member files
- * appear at the Workspace root read-only; editing them is a proposal (robot-jpzp).
+ * File tools DSH does not provide on R2 (robot-8pqy): delete, glob and grep. read, write and edit
+ * come from DSH's tool-fs over the R2 fs seam (workspace/r2-filesystem.ts). Paths here are
+ * Workspace-relative or under /workspace; the owner's Member files are read-only (robot-jpzp).
  */
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { MEMBER_FILE_NAMES, type MemberFileName } from '../../member/member.ts'
@@ -12,76 +13,21 @@ const MAX_READ_CHARS = 200_000
 const MAX_GREP_MATCHES = 200
 
 function memberFileName(path: string): MemberFileName | undefined {
-  const normalized = normalizePath(path)
+  const normalized = normalizePath(path.replace(/^\/workspace\/?/, ''))
   return MEMBER_FILE_NAMES.find((name) => name === normalized)
 }
 
 const READ_ONLY = (name: string) => `${name} belongs to your owner and is read-only to you. To change it, call propose_member_file_edit with the full new content; your owner approves or rejects it.`
 
-function isText(contentType: string, path: string): boolean {
-  return contentType.startsWith('text/') || contentType.includes('json') || /\.(md|txt|csv|json|html|xml|ya?ml|ts|js|log)$/i.test(path)
-}
-
 export function fileTools(host: WorkspaceHost): ToolDefinition[] {
   const ws = host.workspace
+  const relative = (path: string) => path.replace(/^\/workspace\/?/, '')
   const readText = async (path: string): Promise<string | undefined> => {
     const member = memberFileName(path)
     if (member !== undefined) return host.memberFile(member)
     return host.run(ws.readText(path))
   }
   return [
-    tool<{ path: string; offset?: number; limit?: number }>({
-      name: 'read_file',
-      description: 'Read a file from your Workspace. Text files return their content (optionally a line range); other files return their size and type.',
-      parameters: {
-        properties: {
-          path: { type: 'string', description: 'Workspace path, e.g. MEMORY.md or memory/2026-10-06.md' },
-          offset: { type: 'integer', description: 'First line, 1-based' },
-          limit: { type: 'integer', description: 'Number of lines' },
-        },
-        required: ['path'],
-      },
-      concurrencySafe: true,
-      execute: async ({ path, offset, limit }) => {
-        const member = memberFileName(path)
-        if (member !== undefined) return slice(await host.memberFile(member), offset, limit)
-        const file = await host.run(ws.read(path))
-        if (file === undefined) throw new Error(`${path} does not exist`)
-        if (!isText(file.contentType, path)) return { path: file.path, size: file.size, contentType: file.contentType, note: 'binary file; not shown as text' }
-        return slice(new TextDecoder().decode(file.body), offset, limit)
-      },
-    }),
-    tool<{ path: string; content: string }>({
-      name: 'write_file',
-      description: 'Create or replace a text file in your Workspace.',
-      parameters: { properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] },
-      execute: async ({ path, content }) => {
-        const member = memberFileName(path)
-        if (member !== undefined) throw new Error(READ_ONLY(member))
-        const entry = await host.run(ws.write(path, content))
-        return { written: entry.path, bytes: entry.size }
-      },
-    }),
-    tool<{ path: string; old_string: string; new_string: string; replace_all?: boolean }>({
-      name: 'edit_file',
-      description: 'Replace exact text in a Workspace file. old_string must match exactly once unless replace_all is true.',
-      parameters: {
-        properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } },
-        required: ['path', 'old_string', 'new_string'],
-      },
-      execute: async ({ path, old_string, new_string, replace_all }) => {
-        const member = memberFileName(path)
-        if (member !== undefined) throw new Error(READ_ONLY(member))
-        const text = await host.run(ws.readText(path))
-        if (text === undefined) throw new Error(`${path} does not exist`)
-        const count = old_string === '' ? 0 : text.split(old_string).length - 1
-        if (count === 0) throw new Error('old_string was not found')
-        if (count > 1 && replace_all !== true) throw new Error(`old_string occurs ${count} times; add context or set replace_all`)
-        const next = replace_all === true ? text.split(old_string).join(new_string) : text.replace(old_string, () => new_string)
-        await host.run(ws.write(path, next))
-        return { edited: normalizePath(path), replacements: replace_all === true ? count : 1 }
-      },
-    }),
     tool<{ path: string }>({
       name: 'delete_file',
       description: 'Delete a file from your Workspace.',
@@ -89,8 +35,8 @@ export function fileTools(host: WorkspaceHost): ToolDefinition[] {
       execute: async ({ path }) => {
         const member = memberFileName(path)
         if (member !== undefined) throw new Error(READ_ONLY(member))
-        await host.run(ws.remove(path))
-        return { deleted: normalizePath(path) }
+        await host.run(ws.remove(relative(path)))
+        return { deleted: normalizePath(relative(path)) }
       },
     }),
     tool<{ pattern: string }>({

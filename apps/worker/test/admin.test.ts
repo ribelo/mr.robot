@@ -37,7 +37,7 @@ describe('the admin view', () => {
     const row = (id: string) => view.fleet.find((entry) => entry.id === id)!
     expect(row(anna)).toMatchObject({ fleetState: 'sleeping', grants: { tools: ['web'] }, model: { provider: 'stub' }, ownerName: 'Anna' })
     expect(row(ben)).toMatchObject({ fleetState: 'paused', ownerName: 'Ben' })
-    expect(view.fleet.filter((entry) => entry.kind === 'chief')).toHaveLength(2)
+    expect(view.fleet.filter((entry) => entry.kind === 'mr-robot')).toHaveLength(2)
     expect((await api(BEN, '/api/admin')).status).toBe(403)
   })
 

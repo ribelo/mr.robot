@@ -22,7 +22,7 @@ import type {
 export interface RobotConfig {
   readonly id: string
   readonly ownerId: string
-  readonly kind: 'chief' | 'robot'
+  readonly kind: 'mr-robot' | 'robot'
   readonly identity: Identity
   readonly sharing: Sharing
   readonly status: RobotStatus

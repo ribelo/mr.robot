@@ -6,7 +6,7 @@ import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 
-export class ApiError extends Data.TaggedError('ApiError')<{ readonly status: number; readonly message: string }> {}
+export class ApiError extends Data.TaggedError('ApiError')<{ readonly status: number; readonly message: string; readonly detail?: string }> {}
 
 export const badRequest = (message: string) => new ApiError({ status: 400, message })
 export const unauthorized = (message = 'sign in through Cloudflare Access') => new ApiError({ status: 401, message })
@@ -14,11 +14,17 @@ export const forbidden = (message = 'not allowed') => new ApiError({ status: 403
 export const notFound = (message = 'not found') => new ApiError({ status: 404, message })
 export const conflict = (message: string) => new ApiError({ status: 409, message })
 
-/** Await a promise (usually a Durable Object RPC); a rejection becomes a 500. */
+/**
+ * Await a promise (usually a Durable Object RPC); a rejection becomes a 500 whose detail is
+ * logged, not sent. Routes that want the message shown map it with mapError first.
+ */
 export function call<A>(run: () => Promise<A>): Effect.Effect<A, ApiError> {
   return Effect.tryPromise({
     try: run,
-    catch: (cause) => new ApiError({ status: 500, message: cause instanceof Error ? cause.message : String(cause) }),
+    catch: (cause) => {
+      console.error('request failed', cause)
+      return new ApiError({ status: 500, message: 'something went wrong; try again', detail: cause instanceof Error ? cause.message : String(cause) })
+    },
   })
 }
 

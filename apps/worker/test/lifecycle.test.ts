@@ -53,7 +53,8 @@ describe('creating a Robot', () => {
   it('in setup may only ask, propose and write its own persona: no world-facing tools (robot-cobv)', async () => {
     const id = await newRobot(ANNA)
     const tools = await env.ROBOT.getByName(id).toolNames()
-    expect(tools.sort()).toEqual(['delete_file', 'edit_file', 'glob', 'grep', 'react', 'read_file', 'set_identity', 'setup_complete', 'write_file'])
+    // Plus DSH's read, write and edit from the fs seam over its own Workspace.
+    expect(tools.sort()).toEqual(['delete_file', 'glob', 'grep', 'react', 'set_identity', 'setup_complete'])
   })
 
   it('asks for Grants in one summary; approval is a compare-and-swap that applies exactly that set (robot-cobv)', async () => {
@@ -113,18 +114,18 @@ describe('sharing and lifecycle', () => {
   })
 
   it("keeps Mr. Robot's recipient Grants in step with what his Member can reach (robot-70kf)", async () => {
-    const chief = (await robots(ANNA)).find((robot) => robot.kind === 'chief')!
+    const mrRobot = (await robots(ANNA)).find((robot) => robot.kind === 'mr-robot')!
     const own = await newRobot(ANNA)
-    expect((await env.ROBOT.getByName(chief.id).settings()).grants.recipients).toEqual([own])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([own])
 
     const bens = await newRobot(BEN)
-    const bensChief = (await robots(BEN)).find((robot) => robot.kind === 'chief')!
-    expect((await env.ROBOT.getByName(chief.id).settings()).grants.recipients).toEqual([own])
+    const bensMrRobot = (await robots(BEN)).find((robot) => robot.kind === 'mr-robot')!
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([own])
     await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
-    expect([...(await env.ROBOT.getByName(chief.id).settings()).grants.recipients].sort()).toEqual([own, bens].sort())
-    expect((await env.ROBOT.getByName(bensChief.id).settings()).grants.recipients).toEqual([bens])
+    expect([...(await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients].sort()).toEqual([own, bens].sort())
+    expect((await env.ROBOT.getByName(bensMrRobot.id).settings()).grants.recipients).toEqual([bens])
 
     await api(ANNA, `/api/robots/${own}`, { method: 'DELETE' })
-    expect((await env.ROBOT.getByName(chief.id).settings()).grants.recipients).toEqual([bens])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([bens])
   })
 })

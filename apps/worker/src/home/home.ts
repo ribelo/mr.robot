@@ -29,7 +29,7 @@ import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
-export const CHIEF_COLOR = '#5ec4b6'
+export const MR_ROBOT_COLOR = '#5ec4b6'
 
 /** The Home's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
 /** Prices are the admin's to correct in the admin view; subscriptions are flat and count as 0. */
@@ -52,7 +52,7 @@ export interface HomeSettings {
 export interface RegistryEntry {
   readonly id: string
   readonly ownerId: string
-  readonly kind: 'chief' | 'robot'
+  readonly kind: 'mr-robot' | 'robot'
   readonly identity: Identity
   readonly sharing: Sharing
   readonly status: RobotStatus
@@ -67,7 +67,7 @@ export type SignIn =
 
 type MemberSql = { id: string; email: string; name: string; role: MemberRole; status: MemberStatus; created_at: number }
 type RobotSql = {
-  id: string; owner_id: string; kind: 'chief' | 'robot'; identity: string; sharing: Sharing; status: RobotStatus
+  id: string; owner_id: string; kind: 'mr-robot' | 'robot'; identity: string; sharing: Sharing; status: RobotStatus
   fleet_state: FleetState; last_line: string; last_at: number
 }
 
@@ -119,7 +119,7 @@ export class Home extends DurableObject<Env> {
       member.id, member.email, member.name, member.role, member.status, Date.now(),
     )
     await this.env.MEMBER.getByName(member.id).init({ id: member.id, email: member.email, name: member.name })
-    await this.bootstrapChief(member)
+    await this.bootstrapMrRobot(member)
     return { ok: true, member, created: true }
   }
 
@@ -153,6 +153,8 @@ export class Home extends DurableObject<Env> {
     this.sql.exec("UPDATE member SET status = 'removed' WHERE id = ?", memberId)
     const owned = this.sql.exec<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId).toArray()
     await Promise.all(owned.map(({ id }) => this.env.ROBOT.getByName(id).pause()))
+    const viewed = this.sql.exec<{ id: string }>("SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home')", memberId).toArray()
+    await Promise.all(viewed.map(({ id }) => this.env.ROBOT.getByName(id).disconnectMember(memberId)))
   }
 
   rename(memberId: string, name: string): void {
@@ -244,7 +246,7 @@ export class Home extends DurableObject<Env> {
       entry.fleetState, entry.lastLine, entry.lastAt,
     )
     const reach = (value: RegistryEntry | undefined) => value === undefined ? 'none' : `${value.sharing}:${value.status === 'deleted'}`
-    if (entry.kind === 'robot' && reach(before) !== reach(entry)) await this.syncChiefs()
+    if (entry.kind === 'robot' && reach(before) !== reach(entry)) await this.syncMrRobots()
   }
 
   /**
@@ -275,31 +277,31 @@ export class Home extends DurableObject<Env> {
   }
 
   /** Recipient Grants of every Mr. Robot: all Robots its Member can reach, except itself. */
-  async syncChiefs(): Promise<void> {
-    const chiefs = this.sql.exec<RobotSql>("SELECT * FROM robot WHERE kind = 'chief' AND status != 'deleted'").toArray()
-    await Promise.all(chiefs.map((chief) => {
-      const recipients = this.reachable(chief.owner_id).filter((robot) => robot.kind === 'robot').map((robot) => robot.id)
-      return this.env.ROBOT.getByName(chief.id).setRecipients(recipients)
+  async syncMrRobots(): Promise<void> {
+    const mrRobots = this.sql.exec<RobotSql>("SELECT * FROM robot WHERE kind = 'mr-robot' AND status != 'deleted'").toArray()
+    await Promise.all(mrRobots.map((mrRobot) => {
+      const recipients = this.reachable(mrRobot.owner_id).filter((robot) => robot.kind === 'robot').map((robot) => robot.id)
+      return this.env.ROBOT.getByName(mrRobot.id).setRecipients(recipients)
     }))
   }
 
-  private async bootstrapChief(member: MemberView): Promise<void> {
-    const id = `chief-${member.id}`
+  private async bootstrapMrRobot(member: MemberView): Promise<void> {
+    const id = `mr-robot-${member.id}`
     if (this.entry(id) !== undefined) return
     const robot = this.env.ROBOT.getByName(id)
     await robot.create({
       id,
       ownerId: member.id,
       ownerName: member.name,
-      kind: 'chief',
-      identity: { name: 'Mr. Robot', title: 'Chief', description: `${member.name}'s chief Robot: creates and coordinates the others.`, avatarColor: CHIEF_COLOR },
+      kind: 'mr-robot',
+      identity: { name: 'Mr. Robot', title: '', description: `${member.name}'s mrRobot Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
       sharing: 'private',
       status: 'active',
       model: this.settings().defaultModel,
       timeZone: 'Europe/Warsaw',
       spendLimitUsd: null,
     })
-    await this.syncChiefs()
+    await this.syncMrRobots()
   }
 
   private summary(row: RobotSql): RobotSummary {

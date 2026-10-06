@@ -32,8 +32,13 @@ export interface FlowStart {
   readonly userCode?: string
 }
 
+/** Client ids are deploy-level configuration (Workers Secrets), set in infra/stack.ts. */
+export interface OAuthClients {
+  readonly openai: string
+  readonly anthropic: string
+}
+
 const OPENAI = {
-  clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
   token: 'https://auth.openai.com/oauth/token',
   deviceUserCode: 'https://auth.openai.com/api/accounts/deviceauth/usercode',
   deviceToken: 'https://auth.openai.com/api/accounts/deviceauth/token',
@@ -42,7 +47,6 @@ const OPENAI = {
 }
 
 const ANTHROPIC = {
-  clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
   authorize: 'https://claude.ai/oauth/authorize',
   token: 'https://platform.claude.com/v1/oauth/token',
   redirect: 'http://localhost:53692/callback',
@@ -57,14 +61,14 @@ function base64url(bytes: Uint8Array): string {
 
 const fail = (fallback: string) => (cause: unknown) => new OAuthError({ message: cause instanceof Error ? cause.message : fallback, cause })
 
-export function startFlow(provider: SubscriptionProvider, now: number): Effect.Effect<FlowStart, OAuthError> {
+export function startFlow(clients: OAuthClients, provider: SubscriptionProvider, now: number): Effect.Effect<FlowStart, OAuthError> {
   return Effect.tryPromise({
     try: async (): Promise<FlowStart> => {
       if (provider === 'openai') {
         const response = await fetch(OPENAI.deviceUserCode, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ client_id: OPENAI.clientId }),
+          body: JSON.stringify({ client_id: clients.openai }),
         })
         if (!response.ok) throw new Error(`OpenAI device sign-in is unavailable (${response.status})`)
         const body = (await response.json()) as { device_auth_id?: string; user_code?: string }
@@ -80,7 +84,7 @@ export function startFlow(provider: SubscriptionProvider, now: number): Effect.E
       const url = new URL(ANTHROPIC.authorize)
       url.search = new URLSearchParams({
         code: 'true',
-        client_id: ANTHROPIC.clientId,
+        client_id: clients.anthropic,
         response_type: 'code',
         redirect_uri: ANTHROPIC.redirect,
         scope: ANTHROPIC.scope,
@@ -95,7 +99,7 @@ export function startFlow(provider: SubscriptionProvider, now: number): Effect.E
 }
 
 /** OpenAI device flow: one poll. Undefined while the Member has not finished. */
-export function pollDevice(flow: Extract<PendingFlow, { provider: 'openai' }>): Effect.Effect<OAuthTokens | undefined, OAuthError> {
+export function pollDevice(clients: OAuthClients, flow: Extract<PendingFlow, { provider: 'openai' }>): Effect.Effect<OAuthTokens | undefined, OAuthError> {
   return Effect.tryPromise({
     try: async () => {
       const response = await fetch(OPENAI.deviceToken, {
@@ -113,7 +117,7 @@ export function pollDevice(flow: Extract<PendingFlow, { provider: 'openai' }>): 
       if (typeof body.authorization_code !== 'string' || typeof body.code_verifier !== 'string') throw new Error('OpenAI returned a malformed device token')
       return tokenRequest('openai', {
         grant_type: 'authorization_code',
-        client_id: OPENAI.clientId,
+        client_id: clients.openai,
         code: body.authorization_code,
         code_verifier: body.code_verifier,
         redirect_uri: OPENAI.deviceRedirect,
@@ -124,14 +128,14 @@ export function pollDevice(flow: Extract<PendingFlow, { provider: 'openai' }>): 
 }
 
 /** Anthropic: finish with what the Member pasted (full URL, "code#state", or the bare code). */
-export function finishPasted(flow: Extract<PendingFlow, { provider: 'anthropic' }>, pasted: string): Effect.Effect<OAuthTokens, OAuthError> {
+export function finishPasted(clients: OAuthClients, flow: Extract<PendingFlow, { provider: 'anthropic' }>, pasted: string): Effect.Effect<OAuthTokens, OAuthError> {
   return Effect.suspend(() => {
     const { code, state } = readPasted(pasted)
     if (state !== undefined && state !== flow.verifier) return Effect.fail(new OAuthError({ message: 'this code belongs to a different sign-in; start again' }))
     return Effect.tryPromise({
       try: () => tokenRequest('anthropic', {
         grant_type: 'authorization_code',
-        client_id: ANTHROPIC.clientId,
+        client_id: clients.anthropic,
         code,
         state: flow.verifier,
         redirect_uri: ANTHROPIC.redirect,
@@ -166,11 +170,10 @@ export function readPasted(pasted: string): { code: string; state?: string } {
 }
 
 /** Refresh without the Member: providers rotate refresh tokens, so the new pair replaces the old. */
-export function refreshTokens(provider: SubscriptionProvider, tokens: OAuthTokens): Effect.Effect<OAuthTokens, OAuthError> {
+export function refreshTokens(clients: OAuthClients, provider: SubscriptionProvider, tokens: OAuthTokens): Effect.Effect<OAuthTokens, OAuthError> {
   return Effect.tryPromise({
     try: async () => {
-      const client = provider === 'openai' ? OPENAI : ANTHROPIC
-      const next = await tokenRequest(provider, { grant_type: 'refresh_token', client_id: client.clientId, refresh_token: tokens.refresh })
+      const next = await tokenRequest(provider, { grant_type: 'refresh_token', client_id: clients[provider], refresh_token: tokens.refresh })
       return next.accountId === undefined && tokens.accountId !== undefined ? { ...next, accountId: tokens.accountId } : next
     },
     catch: fail('refresh failed'),

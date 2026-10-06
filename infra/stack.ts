@@ -52,6 +52,9 @@ export const Edge = Effect.gen(function* () {
       DATA_KEY: dataKey.text,
       VAPID_PRIVATE_KEY: vapidKey.text,
       VAPID_PUBLIC_KEY: vapidKey.text.pipe(Output.map((key) => vapidPublicKey(Redacted.value(key)))),
+      // The providers' public CLI OAuth clients unless the deployment sets its own.
+      OPENAI_OAUTH_CLIENT_ID: Config.Redacted('MR_ROBOT_OPENAI_OAUTH_CLIENT_ID').pipe(Config.withDefault(Redacted.make('app_EMoamEEZ73f0CkXaXp7hrann'))),
+      ANTHROPIC_OAUTH_CLIENT_ID: Config.Redacted('MR_ROBOT_ANTHROPIC_OAUTH_CLIENT_ID').pipe(Config.withDefault(Redacted.make('9d1c250a-e61b-44d9-88ed-5944d1962f5e'))),
     },
   })
 })

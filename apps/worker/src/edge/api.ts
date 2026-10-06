@@ -95,7 +95,7 @@ export const api = new Router<ApiContext>()
   .on('PUT', '/api/secrets/:name', (c, { name }) => Effect.gen(function* () {
     if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) return yield* Effect.fail(badRequest('secret names use letters, digits, ".", "_" and "-"'))
     const input = yield* decodeBody(c.request, Schema.Struct({ value: Schema.optional(Schema.String), shared: Schema.Boolean }))
-    yield* call(() => home(c.env).putSecret(c.member.id, name, input.value, input.shared)).pipe(Effect.mapError((error) => badRequest(error.message)))
+    yield* call(() => home(c.env).putSecret(c.member.id, name, input.value, input.shared)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
   .on('DELETE', '/api/secrets/:name', (c, { name }) => call(() => home(c.env).deleteSecret(c.member.id, name)))
@@ -109,7 +109,7 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).setSkillRepository({ repo: input.repo, ref: input.ref || 'main', path: input.path }, input.token))
     return { ok: true }
   }))
-  .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.message))))))
+  .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message))))))
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
   .on('GET', '/api/providers', (c) => call(() => home(c.env).providersView(c.member.id)))
@@ -128,7 +128,7 @@ export const api = new Router<ApiContext>()
     const name = yield* providerName(provider, OAUTH_PROVIDERS)
     const input = yield* decodeBody(c.request, OAuthFinish)
     const connected = yield* call(() => c.env.MEMBER.getByName(c.member.id).finishOAuth(name as 'openai' | 'anthropic', input.pasted, input.shared)).pipe(
-      Effect.mapError((error) => badRequest(error.message)),
+      Effect.mapError((error) => badRequest(error.detail ?? error.message)),
     )
     return { connected }
   }))
@@ -161,10 +161,10 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/robots/:id/rewind', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
     const { atSeq } = yield* decodeBody(c.request, RewindRequest)
-    return yield* call(() => robot(c, id).rewind(atSeq)).pipe(Effect.mapError((error) => conflict(error.message)))
+    return yield* call(() => robot(c, id).rewind(atSeq)).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))
   }))
   .on('POST', '/api/robots/:id/rewinds/:rewind/undo', (c, { id, rewind }) => owner(c, id).pipe(
-    Effect.andThen(call(() => robot(c, id).undoRewind(rewind)).pipe(Effect.mapError((error) => conflict(error.message)))),
+    Effect.andThen(call(() => robot(c, id).undoRewind(rewind)).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))),
   ))
   .on('POST', '/api/robots/:id/messages', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
@@ -179,11 +179,14 @@ export const api = new Router<ApiContext>()
     const name = new URL(c.request.url).searchParams.get('name') ?? ''
     const safe = name.replace(/[\\/]/g, '_').replace(/^\.+/, '').slice(0, 200)
     if (safe === '' || c.request.body === null) return yield* Effect.fail(badRequest('a file name and body are required'))
-    const size = Number(c.request.headers.get('content-length') ?? '0')
+    const size = Number(c.request.headers.get('content-length'))
+    if (!Number.isSafeInteger(size) || size <= 0) return yield* Effect.fail(badRequest('send the file with its length'))
     if (size > MAX_ATTACHMENT_BYTES) return yield* Effect.fail(badRequest('files up to 50 MB'))
     const contentType = c.request.headers.get('content-type') ?? 'application/octet-stream'
     const path = `attachments/${new Date().toISOString().slice(0, 10)}/${Date.now().toString(36)}-${safe}`
-    const entry = yield* makeWorkspace(c.env.FILES, id).write(path, c.request.body, contentType).pipe(Effect.mapError((error) => badRequest(error.message)))
+    // The declared length is enforced while streaming: a body longer or shorter than it fails.
+    const body = c.request.body.pipeThrough(new FixedLengthStream(size))
+    const entry = yield* makeWorkspace(c.env.FILES, id).write(path, body, contentType).pipe(Effect.mapError((error) => badRequest(error.message)))
     const attachment: Attachment = { name: safe, path: entry.path, size: entry.size, contentType }
     return attachment
   }))

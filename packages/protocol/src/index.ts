@@ -117,7 +117,7 @@ export interface RobotSummary {
   readonly id: string
   readonly ownerId: string
   readonly ownerName: string
-  readonly kind: 'chief' | 'robot'
+  readonly kind: 'mr-robot' | 'robot'
   readonly identity: Identity
   readonly sharing: Sharing
   readonly status: RobotStatus

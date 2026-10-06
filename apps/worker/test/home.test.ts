@@ -20,7 +20,7 @@ describe('signing in to the Home', () => {
   it('starts with no Robots except the personal Mr. Robot (robot-mn09, robot-1xbe)', async () => {
     const list = await robots('anna@example.com')
     expect(list).toHaveLength(1)
-    expect(list[0]).toMatchObject({ kind: 'chief', identity: { name: 'Mr. Robot' }, sharing: 'private' })
+    expect(list[0]).toMatchObject({ kind: 'mr-robot', identity: { name: 'Mr. Robot' }, sharing: 'private' })
   })
 
   it('lets only invited people in; removing a Member revokes access and pauses their Robots (robot-d2uv)', async () => {
@@ -30,7 +30,7 @@ describe('signing in to the Home', () => {
     expect(invite.body.status).toBe('invited')
     const ben = await api<Me>('ben@example.com', '/api/me')
     expect(ben.body).toMatchObject({ role: 'member', status: 'active' })
-    expect((await robots('ben@example.com')).map((robot) => robot.kind)).toEqual(['chief'])
+    expect((await robots('ben@example.com')).map((robot) => robot.kind)).toEqual(['mr-robot'])
     expect((await api('ben@example.com', '/api/admin/members')).status).toBe(403)
 
     await api('anna@example.com', `/api/admin/members/${ben.body.id}`, { method: 'DELETE' })

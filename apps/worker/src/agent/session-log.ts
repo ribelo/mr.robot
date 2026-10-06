@@ -70,12 +70,15 @@ export interface SessionLogConfig {
   readonly storage: DurableObjectStorage
   /** Called after events are durably appended (live views subscribe through it). */
   readonly onAppend?: (sessionId: string) => void
+  /** Rewrites an event's JSON before it is stored: secret values never reach SQLite (robot-4zi6). */
+  readonly redact?: (json: string) => string
 }
 
 export class SqliteSessionLog extends SessionPersistence {
   static inject = ['sessions']
   private readonly storage: DurableObjectStorage
   private readonly onAppend: ((sessionId: string) => void) | undefined
+  private readonly redact: (json: string) => string
   private readonly sql: SqlStorage
   private readonly writers = new Map<string, SessionHandle>()
 
@@ -83,6 +86,7 @@ export class SqliteSessionLog extends SessionPersistence {
     super(ctx)
     this.storage = config.storage
     this.onAppend = config.onAppend
+    this.redact = config.redact ?? ((json) => json)
     this.sql = config.storage.sql
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
     ctx.on('session/event', (session: Session, event: SessionEvent) => {
@@ -147,7 +151,7 @@ export class SqliteSessionLog extends SessionPersistence {
       if (stored === undefined) throw new SessionPersistenceNotFoundError(id as SessionId)
       assertContiguous(stored.header.id, batch, stored.length)
       for (const event of batch) {
-        this.sql.exec('INSERT INTO session_event (session_id, seq, event) VALUES (?, ?, ?)', id, event.seq, JSON.stringify(event))
+        this.sql.exec('INSERT INTO session_event (session_id, seq, event) VALUES (?, ?, ?)', id, event.seq, this.redact(JSON.stringify(event)))
       }
       this.sql.exec('UPDATE session_log SET length = ? WHERE id = ?', stored.length + batch.length, id)
     })

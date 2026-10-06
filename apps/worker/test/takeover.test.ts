@@ -4,12 +4,14 @@ import type { Conversation, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { browserLog, cdpLog } from './stub-browser.ts'
 import { requests, scripts } from './stub-llm.ts'
+import { delivered } from './worker.ts'
 
 const ANNA = 'anna@example.com'
 const BEN = 'ben@example.com'
 
 beforeEach(async () => {
   await reset()
+  delivered.clear()
   scripts.clear()
   requests.clear()
   browserLog.length = 0
@@ -59,6 +61,9 @@ describe('live view and takeover', () => {
     expect(panel.takeover).toEqual({ reason: 'Please log in to the shop.', claimedBy: null })
     expect(panel.summary.fleetState).toBe('waiting for you')
     expect(browserLog).not.toContain('close')
+    const owner = (await api<{ id: string }>(ANNA, '/api/me')).body
+    const sent = await (env.MEMBER.getByName(owner.id) as unknown as DurableObjectStub<import('./worker.ts').Member>).deliveredForTest()
+    expect(sent.find((notification) => notification.tag === `${id}-needs you`)).toMatchObject({ body: 'Please log in to the shop. Tap to take over the browser.' })
     expect((await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.working).toBe(false)
   })
 
@@ -72,14 +77,16 @@ describe('live view and takeover', () => {
     expect(viewer.received.at(-1)).toMatchObject({ type: 'error', message: 'claim the browser first' })
   })
 
-  it('one Member at a time controls it; taps and keys reach the page; handing back resumes the Robot (robot-g6qb, robot-j4ll)', async () => {
+  it('only the owner controls it; taps and keys reach the page; handing back resumes the Robot (robot-g6qb, robot-j4ll)', async () => {
     const id = await shopperAtLogin()
     const anna = await connect(ANNA, id)
     const ben = await connect(BEN, id)
+    await ben.send({ type: 'claim' })
+    expect(ben.received.at(-1)).toMatchObject({ type: 'error', message: 'only the owner takes over this browser' })
     await anna.send({ type: 'claim' })
     expect(anna.received.some((message) => message['type'] === 'claimed')).toBe(true)
-    await ben.send({ type: 'claim' })
-    expect(ben.received.at(-1)).toMatchObject({ type: 'claim-refused' })
+    await ben.send({ type: 'tap', x: 1, y: 1 })
+    expect(ben.received.at(-1)).toMatchObject({ type: 'error' })
 
     await anna.send({ type: 'tap', x: 200, y: 300 })
     await anna.send({ type: 'text', text: 'right-password' })
@@ -99,5 +106,22 @@ describe('live view and takeover', () => {
     expect(panel.takeover).toBeNull()
     expect(browserLog.at(-1)).toBe('close')
     void env
+  })
+
+  it('releases a claim when its socket closes, and ends a removed Member\'s view', async () => {
+    const id = await shopperAtLogin()
+    const anna = await connect(ANNA, id)
+    await anna.send({ type: 'claim' })
+    anna.socket.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.takeover).toEqual({ reason: 'Please log in to the shop.', claimedBy: null })
+
+    const ben = await connect(BEN, id)
+    let closed = false
+    ben.socket.addEventListener('close', () => { closed = true })
+    const benId = (await api<{ id: string }>(BEN, '/api/me')).body.id
+    await api(ANNA, `/api/admin/members/${benId}`, { method: 'DELETE' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(closed).toBe(true)
   })
 })

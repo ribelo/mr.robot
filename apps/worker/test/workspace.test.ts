@@ -52,7 +52,7 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
   it('refuses edits to USER.md and turns them into a proposal the owner approves (robot-mj7v, robot-jpzp)', async () => {
     const id = await activeRobot(['files'])
     await turn(id, 'remember I like tea', [
-      { calls: [{ name: 'edit_file', args: { path: 'USER.md', old_string: '**Notes:**', new_string: '**Notes:** likes tea' } }] },
+      { calls: [{ name: 'edit', args: { file_path: 'USER.md', old_string: '**Notes:**', new_string: '**Notes:** likes tea' } }] },
       { calls: [{ name: 'propose_member_file_edit', args: { file: 'USER.md', content: '# USER.md\n- likes tea\n', purpose: 'You like tea' } }] },
       { text: 'Proposed.' },
     ])
@@ -71,9 +71,9 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
     const other = await activeRobot(['files'])
     const id = await activeRobot(['files'])
     await turn(id, 'escape', [
-      { calls: [{ name: 'read_file', args: { path: `../${other}/SOUL.md` } }] },
-      { calls: [{ name: 'write_file', args: { path: '../../evil.md', content: 'x' } }] },
-      { calls: [{ name: 'write_file', args: { path: 'notes/../notes/ok.md', content: 'fine' } }] },
+      { calls: [{ name: 'read', args: { file_path: `../${other}/SOUL.md` } }] },
+      { calls: [{ name: 'write', args: { file_path: '../../evil.md', content: 'x' } }] },
+      { calls: [{ name: 'write', args: { file_path: 'notes/../notes/ok.md', content: 'fine' } }] },
       { text: 'done' },
     ])
     const [read, escape, ok] = toolResults(id)
@@ -92,17 +92,17 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
     })
     const attachment = (await upload.json()) as Attachment
     expect(attachment.path).toMatch(/^attachments\/\d{4}-\d{2}-\d{2}\/.+invoice\.txt$/)
-    scripts.set(id, [{ calls: [{ name: 'read_file', args: { path: attachment.path } }] }, { text: 'It is invoice 42.' }])
+    scripts.set(id, [{ calls: [{ name: 'read', args: { file_path: attachment.path } }] }, { text: 'It is invoice 42.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'what is this?', attachments: [attachment] } })
     await settle(id)
-    expect(toolResults(id)[0]).toBe('Invoice 42: 99 PLN')
+    expect(toolResults(id)[0]).toContain('1: Invoice 42: 99 PLN')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items[conversation.items.length - 2]).toMatchObject({ kind: 'message', text: 'what is this?', attachments: [{ name: 'invoice.txt' }] })
   })
 
   it('tells the owner when it changes SOUL.md (robot-h1nm)', async () => {
     const id = await activeRobot(['files'])
-    await turn(id, 'be terse', [{ calls: [{ name: 'write_file', args: { path: 'SOUL.md', content: '# SOUL.md\nTerse.' } }] }, { text: 'I am terse now.' }])
+    await turn(id, 'be terse', [{ calls: [{ name: 'write', args: { file_path: 'SOUL.md', content: '# SOUL.md\nTerse.' } }] }, { text: 'I am terse now.' }])
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.some((item) => item.kind === 'notice' && item.text.endsWith('changed SOUL.md.'))).toBe(true)
   })

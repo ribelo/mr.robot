@@ -11,7 +11,7 @@ import { localDate, zonedTime } from '../robot/schedule.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { makeVault, type VaultShape } from '../platform/vault.ts'
-import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
+import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
 
 export type MemberFileName = 'USER.md' | 'PROACTIVE_PREFERENCES.md'
@@ -38,6 +38,10 @@ export class Member extends DurableObject<Env> {
     sql.exec(`CREATE TABLE IF NOT EXISTS credential (
       provider TEXT PRIMARY KEY, kind TEXT NOT NULL, sealed TEXT NOT NULL, shared INTEGER NOT NULL, expires INTEGER, updated_at INTEGER NOT NULL
     )`)
+  }
+
+  private oauthClients(): OAuthClients {
+    return { openai: this.env.OPENAI_OAUTH_CLIENT_ID, anthropic: this.env.ANTHROPIC_OAUTH_CLIENT_ID }
   }
 
   private credentialVault(): VaultShape {
@@ -116,7 +120,7 @@ export class Member extends DurableObject<Env> {
   }
 
   async startOAuth(provider: 'openai' | 'anthropic'): Promise<Omit<FlowStart, 'flow'>> {
-    const start = await Effect.runPromise(startFlow(provider, Date.now()))
+    const start = await Effect.runPromise(startFlow(this.oauthClients(), provider, Date.now()))
     this.set(`oauth-flow:${provider}`, start.flow)
     return { url: start.url, ...(start.userCode === undefined ? {} : { userCode: start.userCode }) }
   }
@@ -130,8 +134,8 @@ export class Member extends DurableObject<Env> {
     if (flow === undefined || flow.provider !== provider) throw new Error('start the sign-in first')
     if (Date.now() - flow.createdAt > 15 * 60_000) throw new Error('the sign-in expired; start again')
     const tokens = flow.provider === 'openai'
-      ? await Effect.runPromise(pollDevice(flow))
-      : await Effect.runPromise(finishPasted(flow, pasted ?? ''))
+      ? await Effect.runPromise(pollDevice(this.oauthClients(), flow))
+      : await Effect.runPromise(finishPasted(this.oauthClients(), flow, pasted ?? ''))
     if (tokens === undefined) return false
     await this.saveTokens(provider, tokens, shared)
     this.delete(`oauth-flow:${provider}`)
@@ -175,7 +179,7 @@ export class Member extends DurableObject<Env> {
     const running = this.refreshing.get(provider)
     if (running !== undefined) return running
     const shared = this.sql.exec<{ shared: number }>('SELECT shared FROM credential WHERE provider = ?', provider).toArray()[0]?.shared === 1
-    const next = Effect.runPromise(refreshTokens(provider, tokens))
+    const next = Effect.runPromise(refreshTokens(this.oauthClients(), provider, tokens))
       .then(async (fresh) => {
         await this.saveTokens(provider, fresh, shared)
         return fresh

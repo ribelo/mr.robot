@@ -44,7 +44,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       setSaving(false)
     }
   }
-  const chief = panel.summary.kind === 'chief'
+  const mrRobot = panel.summary.kind === 'mr-robot'
   return (
     <div className="form">
       <h2>Model</h2>
@@ -93,7 +93,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         </div>
       )}
       <h2>Recipients</h2>
-      {chief ? <div className="muted">Mr. Robot can message every Robot you can reach.</div> : catalog.robots.length === 0 ? <div className="muted">No other Robots to message.</div> : (
+      {mrRobot ? <div className="muted">Mr. Robot can message every Robot you can reach.</div> : catalog.robots.length === 0 ? <div className="muted">No other Robots to message.</div> : (
         <div className="check-grid">
           {catalog.robots.map((robot) => (
             <label key={robot.id} className="check"><input type="checkbox" checked={draft.grants.recipients.includes(robot.id)} onChange={() => toggle('recipients', robot.id)} /><span>{robot.name}</span></label>
@@ -119,7 +119,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </label>
 
       <h2>Sharing and limits</h2>
-      {chief ? null : (
+      {mrRobot ? null : (
         <label className="check"><input type="checkbox" checked={draft.sharing === 'home'} onChange={(event) => setDraft({ ...draft, sharing: event.target.checked ? 'home' : 'private' })} />
           <span>Shared with the Home<small>Other Members can talk to it and use it.</small></span>
         </label>
@@ -132,7 +132,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         {panel.summary.status === 'paused'
           ? <button type="button" className="button" onClick={onResume}>Resume</button>
           : <button type="button" className="button" onClick={onPause}>Pause</button>}
-        {chief ? null : <button type="button" className="button button-danger" onClick={onDelete}>Delete</button>}
+        {mrRobot ? null : <button type="button" className="button button-danger" onClick={onDelete}>Delete</button>}
         <span className="spacer" />
         <button type="button" className="button button-primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
       </div>

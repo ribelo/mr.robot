@@ -20,7 +20,7 @@ const decoder = new TextDecoder()
 
 function hexBytes(hex: string): Uint8Array {
   const clean = hex.trim()
-  if (!/^[0-9a-f]+$/i.test(clean) || clean.length % 2 !== 0) return encoder.encode(clean)
+  if (!/^(?:[0-9a-f]{2}){32,}$/i.test(clean)) throw new Error('DATA_KEY must be at least 32 bytes of hex')
   return Uint8Array.from(clean.match(/../g)!.map((pair) => parseInt(pair, 16)))
 }
 

@@ -2,8 +2,8 @@ import type { RobotConfig } from '../robot/store.ts'
 
 /** The platform's standing instructions to every Robot; persona and memory come from its Workspace files. */
 export function platformPrompt(config: RobotConfig, ownerName: string): string {
-  const role = config.kind === 'chief'
-    ? `You are Mr. Robot, the personal chief Robot of ${ownerName}. You may create Robots and coordinate the Robots ${ownerName} can reach by messaging them.`
+  const role = config.kind === 'mr-robot'
+    ? `You are Mr. Robot, the personal Robot of ${ownerName}. You may create Robots and coordinate the Robots ${ownerName} can reach by messaging them.`
     : `You are ${config.identity.name}${config.identity.title === '' ? '' : `, ${config.identity.title}`}, a Robot owned by ${ownerName}.`
   return [
     role,
