@@ -6,10 +6,12 @@
 
 **Blocked by:** 13 Providers, subscriptions and per-robot model
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Adding an OpenRouter key makes OpenRouter's current model list appear in the Model control; removing it removes them
-- [ ] Catalog refresh in admin updates the list and the fetched-at time
-- [ ] A Home with no credentials cannot create a robot; the creation flow links to provider setup
-- [ ] A robot's current model stays selected across a refresh; a model that disappeared is flagged, not silently replaced
-- [ ] No static model list remains in the bundle
+- [x] Adding an OpenRouter key makes OpenRouter's current model list appear in the Model control; removing it removes them
+- [x] Catalog refresh in admin updates the list and the fetched-at time
+- [x] A Home with no credentials cannot create a robot; the creation flow links to provider setup
+- [x] A robot's current model stays selected across a refresh; a model that disappeared is flagged, not silently replaced
+- [x] No static model list remains in the bundle
+
+Verified 2026-10-06 on the live deployment: Claude (13 models) and Workers AI (20) listed from the Providers themselves; Mr. Robot switched to Claude Sonnet 5.5 in Settings and answered a message on it. Tests: live-catalog.test.ts (response shapes captured from the live endpoints), real-adapters.test.ts (a Turn through each adapter and DSH), settings-flow.test.ts.
