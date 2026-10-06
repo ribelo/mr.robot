@@ -48,6 +48,8 @@ export const Edge = Effect.gen(function* () {
       BROWSER: Cloudflare.Browser('BROWSER'),
       AI: Cloudflare.Workers.AI('AI'),
       LOADER: Cloudflare.WorkerLoader('LOADER'),
+      // The account's Zero Trust team (created when Zero Trust was enabled on 2026-10-06).
+      ACCESS_TEAM_DOMAIN: Config.String('MR_ROBOT_ACCESS_TEAM_DOMAIN').pipe(Config.withDefault('withered-snow-6eaa.cloudflareaccess.com')),
       HOME_NAME: Config.String('MR_ROBOT_HOME').pipe(Config.withDefault('Home')),
       DATA_KEY: dataKey.text,
       VAPID_PRIVATE_KEY: vapidKey.text,

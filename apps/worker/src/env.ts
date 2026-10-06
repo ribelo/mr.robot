@@ -18,6 +18,8 @@ export interface Env {
   /** Subscription OAuth client ids (the providers' public CLI clients by default). */
   readonly OPENAI_OAUTH_CLIENT_ID: string
   readonly ANTHROPIC_OAUTH_CLIENT_ID: string
+  /** The Cloudflare Access team whose tokens are accepted, e.g. withered-snow-6eaa.cloudflareaccess.com. */
+  readonly ACCESS_TEAM_DOMAIN?: string
   /** Local development and tests only: the e-mail to sign in as when Access is absent. */
   readonly DEV_IDENTITY?: string
 }

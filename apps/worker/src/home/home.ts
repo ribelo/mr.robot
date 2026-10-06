@@ -294,7 +294,7 @@ export class Home extends DurableObject<Env> {
       ownerId: member.id,
       ownerName: member.name,
       kind: 'mr-robot',
-      identity: { name: 'Mr. Robot', title: '', description: `${member.name}'s mrRobot Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
+      identity: { name: 'Mr. Robot', title: '', description: `${member.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
       sharing: 'private',
       status: 'active',
       model: this.settings().defaultModel,

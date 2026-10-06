@@ -36,6 +36,7 @@
     "@deepseek-ai/schemastery": "3.18.4",
     "@mr-robot/protocol": "workspace:*",
     "effect": "4.0.1",
+    "jose": "^6.2.12",
     "sucrase": "3.35.1"
   },
   "devDependencies": {
