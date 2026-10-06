@@ -45,6 +45,11 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
     switch (event.type) {
       case 'user/message': {
         const message = data as unknown as MessageLike
+        if (message.source?.['kind'] === 'compact-checkpoint') {
+          // DSH's compaction checkpoint is for the model; the chat keeps the full history.
+          items.push({ kind: 'notice', id: message.id, seq: event.seq, at: event.time, text: 'Earlier conversation condensed to fit the context budget.' })
+          break
+        }
         const sender = senderOf(message.source)
         if (sender.kind === 'platform') {
           // Conversations started before the chat text was split from the setup instruction.

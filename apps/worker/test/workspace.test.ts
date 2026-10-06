@@ -123,6 +123,9 @@ describe('compaction (robot-zzif, robot-sw54)', () => {
     expect(JSON.stringify(compaction!.messages)).toContain('Keep every apartment price.')
     // The checkpoint has room to be written (at 8k the headroom alone is 400 tokens).
     expect(compaction!.maxTokens).toBeGreaterThanOrEqual(4000)
+    const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
+    expect(items).toContainEqual(expect.objectContaining({ kind: 'notice', text: 'Earlier conversation condensed to fit the context budget.' }))
+    expect(items.some((item) => item.kind === 'message' && item.text.includes('checkpoint'))).toBe(false)
     expect((await robots(ANNA)).length).toBeGreaterThan(0)
   })
 })
