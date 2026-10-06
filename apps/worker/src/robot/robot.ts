@@ -176,6 +176,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         kind: 'platform',
         sender: { kind: 'platform' },
         text: 'Setup started. Greet your owner and begin the interview.',
+        payload: { summary: 'Setup started' },
       })
     }
     return config
@@ -213,6 +214,45 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const id = this.store.enqueue(input.kind, input.sender, input.text, { ...input.payload, attachments: input.attachments ?? [] }, Date.now())
     this.drain()
     return id
+  }
+
+  /** A Turn that ended in an error keeps its wake-up for "Try again"; a good Turn clears it. */
+  private rememberFailure(wakeup: Wakeup, startSeq: number): void {
+    const config = this.store.requireConfig()
+    const failed = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
+      .some((event) => event.seq >= startSeq && event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')
+    if (failed) this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
+    else this.store.delete('failed-wakeup')
+  }
+
+  /** Run the wake-up whose Turn failed again (the chat's "Try again"). */
+  async retry(): Promise<boolean> {
+    const failed = this.store.get<{ kind: WakeInput['kind']; sender: WakeInput['sender']; text: string; payload: Record<string, unknown> }>('failed-wakeup')
+    if (failed === undefined) return false
+    this.store.delete('failed-wakeup')
+    const { attachments, ...payload } = failed.payload as { attachments?: Attachment[] } & Record<string, unknown>
+    await this.wake({ kind: failed.kind, sender: failed.sender, text: failed.text, payload, ...(attachments === undefined ? {} : { attachments }) })
+    await this.changed()
+    return true
+  }
+
+  /**
+   * What the model is given at the start of the next Turn (robot-vqtw): the system prompt sections,
+   * the tools it may call and the skills it may load, with secret values masked.
+   */
+  async promptPreview(): Promise<{ sections: Array<{ name: string; text: string }>; tools: string[]; skills: string[] }> {
+    const config = this.store.requireConfig()
+    const owner = this.owner()
+    await this.refreshPersona()
+    await this.loadSecretMasks()
+    const sections = [{ name: 'Platform', text: platformPrompt(config, owner.name) }]
+    if (config.status === 'setup') sections.push({ name: 'Setup interview', text: setupPrompt(owner.name, this.store.get<string>('brief') ?? null) })
+    sections.push({ name: 'Persona and memory files', text: personaText(this.persona) })
+    return {
+      sections: sections.map((section) => ({ ...section, text: this.mask(section.text) })),
+      tools: config.codeMode && config.status !== 'setup' ? ['run_code (code mode), calling:', ...this.toolNames()] : this.toolNames(),
+      skills: config.status === 'setup' ? [] : [...this.store.grants().skills],
+    }
   }
 
   /** Resolves once no Turn is running and nothing runnable is queued. */
@@ -283,6 +323,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         ...optionalString(wakeup.payload, 'requestId'),
         ...optionalString(wakeup.payload, 'replyTo'),
         ...optionalString(wakeup.payload, 'replyHandle'),
+        ...optionalString(wakeup.payload, 'summary'),
       }))
     } else {
       agent.followup(wakeupMessage({
@@ -311,6 +352,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
+    this.rememberFailure(wakeup, startSeq)
     await this.loadSecretMasks()
     await this.deliverReplies(wakeup, startSeq)
     await this.notifyFinished(wakeup, startSeq)
@@ -404,7 +446,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.config()
     if (config === undefined) return
     const active = this.store.activeTurn()
-    if (active !== undefined) this.store.endTurn(active.wakeupId)
+    if (active !== undefined) {
+      const wakeup = this.store.wakeup(active.wakeupId)
+      // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
+      if (wakeup !== undefined) this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
+      this.store.endTurn(active.wakeupId)
+    }
     const message = error instanceof Error ? error.message : String(error)
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `The Turn failed: ${message}`, Date.now())
     this.broadcast()
@@ -1293,7 +1340,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
     return {
-      robotId: config.id,
+      canRetry: this.store.get('failed-wakeup') !== undefined,
+            robotId: config.id,
       working: this.store.activeTurn() !== undefined,
       items: projectChat({
         events,

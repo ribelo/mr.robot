@@ -9,6 +9,7 @@ import { Composer } from './components/Composer.tsx'
 import { Panel } from './components/Panel.tsx'
 import { RobotList } from './components/RobotList.tsx'
 import { Pages } from './pages.tsx'
+import { NewRobot } from './components/NewRobot.tsx'
 
 export function App() {
   const route = useRoute()
@@ -28,15 +29,17 @@ export function App() {
   if (me === undefined) return <div className="fatal">Loading…</div>
 
   const selected = 'id' in route ? route.id : undefined
-  const create = async () => {
-    const brief = prompt('What should the new robot do? (optional)') ?? undefined
-    const created = await api.createRobot(brief === '' ? undefined : brief)
+  const [creating, setCreating] = useState(false)
+  const create = () => setCreating(true)
+  const created = async (id: string) => {
+    setCreating(false)
     await refreshRobots()
-    go({ page: 'robot', id: created.id, panel: false })
+    go({ page: 'robot', id, panel: false })
   }
 
   return (
     <div className={`app page-${route.page}`}>
+      {creating ? <NewRobot onCancel={() => setCreating(false)} onCreated={(id) => void created(id)} /> : null}
       <RobotList
         robots={robots}
         selected={selected}
@@ -109,6 +112,7 @@ function RobotView({ route, me, robot, onChanged }: { route: Extract<Route, { pa
       {panel.summary.status === 'paused' ? <span className="pill">paused</span> : null}
       {panel.summary.status === 'blocked' ? <span className="pill pill-warn">blocked</span> : null}
       <span className="spacer" />
+      {panel.canEdit ? <button type="button" className="head-button" onClick={() => go({ page: 'advanced', id })}>Settings</button> : null}
       <button
         type="button"
         className={route.panel ? 'icon-button active' : 'icon-button'}
@@ -126,6 +130,12 @@ function RobotView({ route, me, robot, onChanged }: { route: Extract<Route, { pa
         {header}
         <div className="chat-scroll">
           <ChatView items={conversation.items} meId={me.id} working={conversation.working} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
+          {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
+            <div className="retry">
+              <button type="button" className="button" onClick={() => void api.retry(id).then(refresh)}>Try again</button>
+              <button type="button" className="link" onClick={() => go({ page: 'advanced', id })}>Change the model</button>
+            </div>
+          ) : null}
         </div>
         <Composer
           placeholder={`Message ${identity.name}`}

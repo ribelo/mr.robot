@@ -23,6 +23,8 @@ export interface WakeupMessageInput {
   readonly requestId?: string
   readonly replyTo?: string
   readonly replyHandle?: string
+  /** What the chat shows for a platform message; defaults to its first line. */
+  readonly summary?: string
 }
 
 export function wakeupMessage(input: WakeupMessageInput): UserMessage {
@@ -63,7 +65,7 @@ export function wakeupMessage(input: WakeupMessageInput): UserMessage {
     case 'platform':
       return createUserMessage({
         content: [{ type: 'text', text: `[Mr. Robot platform]\n${input.text}` }],
-        source: { kind: 'platform', summary: input.text.split('\n')[0]?.slice(0, 120) ?? '', form: 'notice' },
+        source: { kind: 'platform', summary: input.summary ?? input.text.split('\n')[0]?.slice(0, 120) ?? '', form: 'notice' },
       })
   }
 }

@@ -167,8 +167,11 @@ export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ robots
   .on('GET', '/api/robots', (c) => call(() => home(c.env).reachable(c.member.id)))
   .on('POST', '/api/robots', (c) => Effect.gen(function* () {
-    const { brief } = yield* decodeBody(c.request, Schema.Struct({ brief: Schema.optional(Schema.String) }))
-    return yield* call(() => home(c.env).createRobot(c.member.id, brief))
+    const { brief, model } = yield* decodeBody(c.request, Schema.Struct({
+      brief: Schema.optional(Schema.String),
+      model: Schema.optional(Schema.Struct({ provider: Schema.String, model: Schema.String, effort: Schema.String })),
+    }))
+    return yield* call(() => home(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined))
   }))
   .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).conversationView()))))
   .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))
@@ -212,6 +215,8 @@ export const api = new Router<ApiContext>()
     if (file === undefined) return yield* Effect.fail(notFound('no screen yet'))
     return new Response(file.body, { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=31536000, immutable' } })
   }))
+  .on('GET', '/api/robots/:id/prompt', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).promptPreview()))))
+  .on('POST', '/api/robots/:id/retry', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).retry())), Effect.map((retried) => ({ retried }))))
   .on('GET', '/api/robots/:id/panel', (c, { id }) => Effect.gen(function* () {
     const access = yield* reach(c, id)
     const entry = (yield* call(() => home(c.env).reachable(c.member.id))).find((summary) => summary.id === id)

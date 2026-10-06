@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort } from '@mr-robot/protocol'
+import { ModelSelect } from './ModelSelect.tsx'
+import { api } from '../api.ts'
 
 export interface AdvancedSettingsProps {
   readonly panel: RobotPanel
@@ -49,16 +51,12 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
     <div className="form">
       <h2>Model</h2>
       <label>Model
-        <select
-          value={`${draft.model.provider}/${draft.model.model}`}
-          onChange={(event) => {
-            const option = catalog.models.find((entry) => `${entry.provider}/${entry.model}` === event.target.value)
-            if (option !== undefined) setDraft({ ...draft, model: { ...draft.model, provider: option.provider, model: option.model } })
-          }}
-        >
-          {model === undefined ? <option value={`${draft.model.provider}/${draft.model.model}`}>{draft.model.provider} / {draft.model.model}</option> : null}
-          {catalog.models.map((option) => <option key={`${option.provider}/${option.model}`} value={`${option.provider}/${option.model}`}>{option.label}</option>)}
-        </select>
+        <ModelSelect
+          value={draft.model}
+          models={catalog.models}
+          unavailable={catalog.unavailableModels ?? []}
+          onChange={(option) => setDraft({ ...draft, model: { ...draft.model, provider: option.provider, model: option.model } })}
+        />
       </label>
       <label>Thinking effort
         <select value={draft.model.effort} onChange={(event) => setDraft({ ...draft, model: { ...draft.model, effort: event.target.value as ThinkingEffort } })}>
@@ -118,6 +116,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         <span>Notifications<small>Push when it finishes, needs you, or is blocked.</small></span>
       </label>
 
+      <PromptPreview id={panel.summary.id} />
+
       <h2>Sharing and limits</h2>
       {mrRobot ? null : (
         <label className="check"><input type="checkbox" checked={draft.sharing === 'home'} onChange={(event) => setDraft({ ...draft, sharing: event.target.checked ? 'home' : 'private' })} />
@@ -137,5 +137,35 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         <button type="button" className="button button-primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
+  )
+}
+
+/** What the model receives at the start of the next Turn (saved settings, not the draft). */
+function PromptPreview({ id }: { id: string }) {
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof api.prompt>>>()
+  useEffect(() => { void api.prompt(id).then(setPreview) }, [id])
+  return (
+    <>
+      <h2>Prompt</h2>
+      <div className="muted">What the model is given at the start of each Turn, as saved. Secret values are masked.</div>
+      {preview === undefined ? <div className="muted">Loading…</div> : (
+        <>
+          {preview.sections.map((section) => (
+            <details key={section.name} className="prompt-section">
+              <summary>{section.name} <span className="muted">· {section.text.length.toLocaleString()} characters</span></summary>
+              <pre>{section.text}</pre>
+            </details>
+          ))}
+          <details className="prompt-section">
+            <summary>Tools <span className="muted">· {preview.tools.length}</span></summary>
+            <pre>{preview.tools.join('\n') || 'none'}</pre>
+          </details>
+          <details className="prompt-section">
+            <summary>Skills <span className="muted">· {preview.skills.length}</span></summary>
+            <pre>{preview.skills.join('\n') || 'none granted'}</pre>
+          </details>
+        </>
+      )}
+    </>
   )
 }

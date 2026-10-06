@@ -208,6 +208,8 @@ export interface Conversation {
   readonly robotId: string
   readonly items: readonly ChatItem[]
   readonly working: boolean
+  /** The last Turn failed and can be run again. */
+  readonly canRetry?: boolean
 }
 
 /** One raw event of the Trajectory, with secrets masked; data is JSON text. */
@@ -356,6 +358,8 @@ export interface SettingsCatalog {
   readonly robots: ReadonlyArray<{ readonly id: string; readonly name: string }>
   readonly secrets: ReadonlyArray<{ readonly name: string; readonly scope: 'member' | 'home' }>
   readonly models: readonly ModelOption[]
+  /** Models of Providers this Member has not connected; shown so the list explains itself. */
+  readonly unavailableModels?: readonly ModelOption[]
 }
 
 // ---------------------------------------------------------------- Notifications (robot-9xoj)

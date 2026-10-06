@@ -23,7 +23,8 @@ import type {
 } from '@mr-robot/protocol'
 import * as Effect from 'effect/Effect'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
-import { OPENCODE_GO_MODELS } from '../providers/opencode-go-models.ts'
+import { CATALOG } from '../providers/catalog.ts'
+import { PROVIDER_IDS } from '../agent/providers.ts'
 import { makeVault } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
@@ -34,15 +35,8 @@ export const MR_ROBOT_COLOR = '#5ec4b6'
 
 /** The Home's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
 /** Prices are the admin's to correct in the admin view; subscriptions are flat and count as 0. */
-export const DEFAULT_MODELS: ModelOption[] = [
-  { provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 1_000_000, price: { input: 0.28, output: 1.1, cachedInput: 0.03 } },
-  { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', contextWindow: 1_000_000, price: { input: 0.55, output: 2.2, cachedInput: 0.07 } },
-  { provider: 'openai', model: 'gpt-5.5', label: 'GPT-5.5 (ChatGPT subscription)', contextWindow: 272_000, price: { input: 0, output: 0 } },
-  { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Claude subscription)', contextWindow: 200_000, price: { input: 0, output: 0 } },
-  { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash (OpenRouter)', contextWindow: 1_000_000, price: { input: 0.3, output: 1.2 } },
-  { provider: 'workers-ai', model: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6 (Workers AI)', contextWindow: 262_144, price: { input: 0.95, output: 4, cachedInput: 0.16 } },
-  ...OPENCODE_GO_MODELS.map((model) => ({ provider: 'opencode-go', model: model.id, label: `${model.name} (OpenCode Go)`, contextWindow: model.contextWindow, price: model.price })),
-]
+/** Every Provider's models, from pi-ai's catalog (providers/catalog.ts). */
+export const DEFAULT_MODELS: readonly ModelOption[] = CATALOG
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
 export interface HomeSettings {
@@ -255,7 +249,17 @@ export class Home extends DurableObject<Env> {
    * Create a Robot in setup (robot-btct): its Conversation opens with the kickoff Turn in
    * which it interviews its owner. Used by "New robot" and by Mr. Robot (robot-hk2s).
    */
-  async createRobot(ownerId: string, brief?: string): Promise<RegistryEntry> {
+  /** The model a new Robot of this Member starts on: the Home default if they can use it, else one they can. */
+  async startingModel(memberId: string, wanted?: ModelChoice): Promise<ModelChoice> {
+    const usable = await this.models(memberId)
+    const pick = wanted ?? this.settings().defaultModel
+    // Only a known Provider can be missing a connection; anything else (an admin's own entry) is kept.
+    if (!(PROVIDER_IDS as readonly string[]).includes(pick.provider) || usable.some((option) => option.provider === pick.provider && option.model === pick.model)) return pick
+    const fallback = usable.find((option) => option.provider === 'workers-ai') ?? usable[0]
+    return fallback === undefined ? pick : { provider: fallback.provider, model: fallback.model, effort: 'off' }
+  }
+
+  async createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> {
     const owner = this.member(ownerId)
     if (owner === undefined || owner.status !== 'active') throw new Error('unknown member')
     const id = `r-${crypto.randomUUID()}`
@@ -268,7 +272,7 @@ export class Home extends DurableObject<Env> {
       identity: { name: 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]! },
       sharing: 'private',
       status: 'setup',
-      model: this.settings().defaultModel,
+      model: await this.startingModel(ownerId, model),
       timeZone: profile.timeZone,
       spendLimitUsd: null,
       ...(brief === undefined || brief.trim() === '' ? {} : { brief }),
@@ -299,7 +303,7 @@ export class Home extends DurableObject<Env> {
       identity: { name: 'Mr. Robot', title: '', description: `${member.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
       sharing: 'private',
       status: 'active',
-      model: this.settings().defaultModel,
+      model: await this.startingModel(member.id),
       timeZone: 'Europe/Warsaw',
       spendLimitUsd: null,
     })
@@ -349,6 +353,7 @@ export class Home extends DurableObject<Env> {
       robots: this.reachable(memberId).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
       secrets: await this.grantableSecrets(memberId),
       models: await this.models(memberId),
+      unavailableModels: await this.unavailableModels(memberId),
     }
   }
 
@@ -501,12 +506,22 @@ export class Home extends DurableObject<Env> {
     return this.modelList().filter((option) => usable.has(option.provider))
   }
 
-  /** The admin's list, plus every OpenCode Go model it does not mention (the offer changes over time). */
+  async unavailableModels(memberId: string): Promise<ModelOption[]> {
+    const usable = await this.models(memberId)
+    return this.modelList().filter((option) => !usable.some((entry) => entry.provider === option.provider && entry.model === option.model))
+  }
+
+  /**
+   * The catalog, with the admin's entries on top: an entry for a catalog model overrides its label
+   * and price, any other entry adds a model the catalog does not know.
+   */
   modelList(): ModelOption[] {
-    const stored = this.setting<ModelOption[]>('models')
-    if (stored === undefined) return DEFAULT_MODELS
-    const missing = DEFAULT_MODELS.filter((model) => model.provider === 'opencode-go' && !stored.some((entry) => entry.provider === model.provider && entry.model === model.model))
-    return [...stored, ...missing]
+    const stored = this.setting<ModelOption[]>('models') ?? []
+    const same = (a: ModelOption, b: ModelOption) => a.provider === b.provider && a.model === b.model
+    return [
+      ...CATALOG.map((model) => stored.find((entry) => same(entry, model)) ?? model),
+      ...stored.filter((entry) => !CATALOG.some((model) => same(entry, model))),
+    ]
   }
 
   // ---------------------------------------------------------------- Providers (robot-dic7)

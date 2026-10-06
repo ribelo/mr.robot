@@ -74,7 +74,7 @@ async function oauth(context: ProviderContext, provider: ProviderId): Promise<{ 
 async function apiKey(context: ProviderContext, provider: ProviderId): Promise<string> {
   const credential = await context.credentials.resolve(provider)
   if (credential?.kind === 'api-key' && credential.key.length > 0) return credential.key
-  throw new LlmError(`No ${provider} credential: add one in the admin view, or share one with the Home`, 'MISSING_CREDENTIAL')
+  throw new LlmError(`No ${provider} credential: connect it under your name → Providers, or pick another model in this Robot's settings`, 'MISSING_CREDENTIAL')
 }
 
 function deepSeek(context: ProviderContext): LlmAdapter {

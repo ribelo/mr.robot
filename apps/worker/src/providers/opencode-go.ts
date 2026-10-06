@@ -10,7 +10,7 @@ import { LlmError, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { AnthropicAdapter } from './anthropic.ts'
 import { CodexAdapter } from './codex.ts'
 import { ChatCompletionsAdapter } from './openai-chat.ts'
-import { OPENCODE_GO_MODELS } from './opencode-go-models.ts'
+import { OPENCODE_GO_MODELS } from './catalog.ts'
 
 export const OPENCODE_GO_BASE = 'https://opencode.ai/zen/go/v1'
 
