@@ -187,3 +187,18 @@ table.grid th { color: var(--faint); font-weight: 500; }
   .chat-scroll { padding: 12px; }
   .bubble { max-width: 88%; }
 }
+
+/* Providers: one list, name and a one-line note on the left, its state or action on the right. */
+.providers { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.provider { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; padding: 12px 2px; border-bottom: 1px solid var(--line); }
+.provider-name { min-width: 0; flex: 1; font-size: 14px; }
+.provider-name .muted { font-size: 12.5px; margin-top: 2px; }
+.provider-action { flex: 0 1 auto; display: flex; justify-content: flex-end; text-align: right; font-size: 13.5px; }
+.provider-action .form { align-items: flex-end; }
+.connected { color: #7fd1a8; font-size: 13px; }
+.key-row { gap: 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+@media (max-width: 640px) {
+  .provider { flex-direction: column; gap: 8px; }
+  .provider-action, .provider-action .form { justify-content: flex-start; align-items: flex-start; text-align: left; }
+}

@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { Me, ProvidersView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
 
 const PROVIDERS = [
-  { id: 'deepseek', name: 'DeepSeek', kind: 'api-key' },
-  { id: 'openrouter', name: 'OpenRouter', kind: 'api-key' },
-  { id: 'openai', name: 'ChatGPT subscription (OpenAI)', kind: 'oauth' },
-  { id: 'anthropic', name: 'Claude subscription (Anthropic)', kind: 'oauth' },
+  { id: 'deepseek', name: 'DeepSeek', note: 'DeepSeek models with your API key.', kind: 'api-key' },
+  { id: 'openrouter', name: 'OpenRouter', note: 'Hundreds of models with one API key.', kind: 'api-key' },
+  { id: 'openai', name: 'ChatGPT', note: 'Your ChatGPT plan, signed in with OpenAI.', kind: 'oauth' },
+  { id: 'anthropic', name: 'Claude', note: 'Your Claude plan, signed in with Anthropic.', kind: 'oauth' },
 ] as const
 
 /** A Member's own settings: profile, quiet hours, Provider credentials, Member files. */
@@ -61,44 +61,60 @@ function Providers() {
     await refresh()
   }
   if (view === undefined) return <div className="muted">Loading Providers…</div>
+  const sharedBy = (id: string) => view.shared.filter((entry) => entry.provider === id).map((entry) => entry.ownerName)
+  const shareToggle = (id: string) => {
+    const mine = view.mine.find((entry) => entry.provider === id)
+    return mine === undefined ? null : <label className="check"><input type="checkbox" checked={mine.shared} onChange={(event) => void run(() => api.shareProvider(id, event.target.checked))} /> shared with the Home</label>
+  }
   return (
     <>
       <h2>Providers</h2>
       <div className="muted">Your keys and subscriptions run your Robots. Share one with the Home and every Member's Robots can use it.</div>
       {message === undefined ? null : <div className="muted">{message}</div>}
-      <table className="grid">
-        <tbody>
-          {PROVIDERS.map((provider) => {
-            const mine = view.mine.find((entry) => entry.provider === provider.id)
-            const shared = view.shared.filter((entry) => entry.provider === provider.id)
-            return (
-              <tr key={provider.id}>
-                <td>{provider.name}{shared.length > 0 ? <div className="muted">shared by {shared.map((entry) => entry.ownerName).join(', ')}</div> : null}</td>
-                <td>
-                  {mine === undefined
-                    ? <Connect provider={provider} onDone={(text) => void run(async () => undefined, text)} />
-                    : (
-                      <span className="form inline">
-                        <span className="state">connected</span>
-                        <label className="check"><input type="checkbox" checked={mine.shared} onChange={(event) => void run(() => api.shareProvider(provider.id, event.target.checked))} /> shared with the Home</label>
-                        <button type="button" className="link" onClick={() => void run(() => api.removeProvider(provider.id), 'Removed.')}>Remove</button>
-                      </span>
-                    )}
-                </td>
-              </tr>
-            )
-          })}
-          <tr><td>Workers AI</td><td><span className="state">always available</span></td></tr>
-        </tbody>
-      </table>
-      <OpencodeKeys shared={view.mine.find((entry) => entry.provider === 'opencode-go')?.shared ?? false} sharedBy={view.shared.filter((entry) => entry.provider === 'opencode-go').map((entry) => entry.ownerName)} onShare={(on) => run(() => api.shareProvider('opencode-go', on))} onChanged={refresh} />
+      <div className="providers">
+        {PROVIDERS.map((provider) => {
+          const mine = view.mine.find((entry) => entry.provider === provider.id)
+          return (
+            <ProviderRow key={provider.id} name={provider.name} note={provider.note} sharedBy={sharedBy(provider.id)}>
+              {mine === undefined
+                ? <Connect provider={provider} onDone={(text) => void run(async () => undefined, text)} />
+                : (
+                  <span className="form inline">
+                    <span className="connected">Connected</span>
+                    {shareToggle(provider.id)}
+                    <button type="button" className="link" onClick={() => void run(() => api.removeProvider(provider.id), 'Removed.')}>Remove</button>
+                  </span>
+                )}
+            </ProviderRow>
+          )
+        })}
+        <ProviderRow name="OpenCode Go" note="Every model of the plan. With several keys, the next one takes over when a key runs out." sharedBy={sharedBy('opencode-go')}>
+          <OpencodeKeys share={shareToggle('opencode-go')} onChanged={refresh} />
+        </ProviderRow>
+        <ProviderRow name="Workers AI" note="Models on Cloudflare, billed to this Cloudflare account." sharedBy={[]}>
+          <span className="muted">Included</span>
+        </ProviderRow>
+      </div>
     </>
   )
 }
 
-/** OpenCode Go keys (ticket 19): when one runs out, the next takes over and becomes active. */
-function OpencodeKeys({ shared, sharedBy, onShare, onChanged }: { shared: boolean; sharedBy: string[]; onShare: (on: boolean) => Promise<void>; onChanged: () => Promise<unknown> }) {
+function ProviderRow({ name, note, sharedBy, children }: { name: string; note: string; sharedBy: string[]; children: ReactNode }) {
+  return (
+    <div className="provider">
+      <div className="provider-name">
+        <div>{name}</div>
+        <div className="muted">{note}{sharedBy.length > 0 ? ` Shared with the Home by ${sharedBy.join(', ')}.` : ''}</div>
+      </div>
+      <div className="provider-action">{children}</div>
+    </div>
+  )
+}
+
+/** OpenCode Go keys (ticket 19): a pool, so it is managed here rather than through Connect. */
+function OpencodeKeys({ share, onChanged }: { share: ReactNode; onChanged: () => Promise<unknown> }) {
   const [view, setView] = useState<Awaited<ReturnType<typeof api.opencodeKeys>>>()
+  const [adding, setAdding] = useState(false)
   const [key, setKey] = useState('')
   const [error, setError] = useState<string>()
   useEffect(() => { void api.opencodeKeys().then(setView) }, [])
@@ -107,32 +123,40 @@ function OpencodeKeys({ shared, sharedBy, onShare, onChanged }: { shared: boolea
       setView(await action())
       setError(undefined)
       await onChanged()
+      return true
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'failed')
+      return false
     }
   }
+  const keys = view?.keys ?? []
+  const form = (
+    <span className="form inline">
+      <input type="password" value={key} placeholder="OpenCode API key (sk-…)" onChange={(event) => setKey(event.target.value)} />
+      <button type="button" className="button" disabled={key.trim() === ''} onClick={() => void change(() => api.addOpencodeKey(key)).then((ok) => { if (ok) { setKey(''); setAdding(false) } })}>Add</button>
+    </span>
+  )
+  if (keys.length === 0) {
+    return (
+      <span className="form">
+        {adding ? form : <button type="button" className="button" onClick={() => setAdding(true)}>Connect</button>}
+        {error === undefined ? null : <span className="muted">{error}</span>}
+      </span>
+    )
+  }
   return (
-    <>
-      <h2>OpenCode Go</h2>
-      <div className="muted">Every model of the OpenCode Go plan. Add several keys: when one hits its limit or stops working, your Robots move to the next and it becomes the active one.{sharedBy.length > 0 ? ` Shared with the Home by ${sharedBy.join(', ')}.` : ''}</div>
-      <table className="grid">
-        <tbody>
-          {(view?.keys ?? []).map((entry) => (
-            <tr key={entry.id}>
-              <td>{entry.masked}</td>
-              <td>{entry.id === view?.activeId ? <span className="state">active</span> : <button type="button" className="link" onClick={() => void change(() => api.activateOpencodeKey(entry.id))}>Make active</button>}</td>
-              <td><button type="button" className="link" onClick={() => void change(() => api.removeOpencodeKey(entry.id))}>Remove</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="form inline">
-        <input type="password" value={key} placeholder="OpenCode API key (sk-…)" onChange={(event) => setKey(event.target.value)} />
-        <button type="button" className="button" disabled={key.trim() === ''} onClick={() => void change(async () => { const next = await api.addOpencodeKey(key); setKey(''); return next })}>Add key</button>
-        {(view?.keys.length ?? 0) > 0 ? <label className="check"><input type="checkbox" checked={shared} onChange={(event) => void onShare(event.target.checked)} /> shared with the Home</label> : null}
-      </div>
-      {error === undefined ? null : <div className="muted">{error}</div>}
-    </>
+    <span className="form">
+      <span className="form inline"><span className="connected">Connected</span>{share}</span>
+      {keys.map((entry) => (
+        <span key={entry.id} className="form inline key-row">
+          <span className="mono">{entry.masked}</span>
+          {entry.id === view?.activeId ? <span className="muted">in use</span> : <button type="button" className="link" onClick={() => void change(() => api.activateOpencodeKey(entry.id))}>Use this one</button>}
+          <button type="button" className="link" onClick={() => void change(() => api.removeOpencodeKey(entry.id))}>Remove</button>
+        </span>
+      ))}
+      {adding ? form : <button type="button" className="link" onClick={() => setAdding(true)}>+ Add another key</button>}
+      {error === undefined ? null : <span className="muted">{error}</span>}
+    </span>
   )
 }
 
