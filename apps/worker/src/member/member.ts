@@ -31,6 +31,7 @@ export class Member extends DurableObject<Env> {
     const sql = ctx.storage.sql
     sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS member_file (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS secret (name TEXT PRIMARY KEY, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS usage (month TEXT NOT NULL, robot_id TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, robot_id)) WITHOUT ROWID')
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
@@ -200,6 +201,38 @@ export class Member extends DurableObject<Env> {
 
   private async publishSharing(provider: ProviderId, shared: boolean): Promise<void> {
     await this.env.HOME.getByName(HOME_ID).credentialShared(this.profile().id, provider, shared)
+  }
+
+  // ---------------------------------------------------------------- private secrets (robot-vplt)
+
+  private secretVault(): VaultShape {
+    return makeVault(this.env.DATA_KEY, 'secrets')
+  }
+
+  async setSecret(name: string, value: string): Promise<void> {
+    const sealed = await Effect.runPromise(this.secretVault().seal(value))
+    this.sql.exec('INSERT INTO secret (name, sealed, updated_at) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET sealed = excluded.sealed, updated_at = excluded.updated_at', name, sealed, Date.now())
+  }
+
+  /** Plaintext of one private secret; only a Turn of this Member's own Robot asks for it. */
+  async secret(name: string): Promise<string | null> {
+    const row = this.sql.exec<{ sealed: string }>('SELECT sealed FROM secret WHERE name = ?', name).toArray()[0]
+    return row === undefined ? null : Effect.runPromise(this.secretVault().open(row.sealed))
+  }
+
+  /** Remove a private secret and return its value (used when it moves to the Home). */
+  async takeSecret(name: string): Promise<string | null> {
+    const value = await this.secret(name)
+    this.sql.exec('DELETE FROM secret WHERE name = ?', name)
+    return value
+  }
+
+  secretNames(): Array<{ name: string; updatedAt: number }> {
+    return this.sql.exec<{ name: string; updated_at: number }>('SELECT name, updated_at FROM secret ORDER BY name').toArray().map((row) => ({ name: row.name, updatedAt: row.updated_at }))
+  }
+
+  async sealedSecretForTest(name: string): Promise<string | undefined> {
+    return this.sql.exec<{ sealed: string }>('SELECT sealed FROM secret WHERE name = ?', name).toArray()[0]?.sealed
   }
 
   // ---------------------------------------------------------------- usage (robot-6jqh)

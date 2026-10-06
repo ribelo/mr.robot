@@ -19,7 +19,9 @@ import type {
   SettingsCatalog,
   Sharing,
 } from '@mr-robot/protocol'
+import * as Effect from 'effect/Effect'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
+import { makeVault } from '../platform/vault.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 
@@ -80,6 +82,7 @@ export class Home extends DurableObject<Env> {
       last_line TEXT NOT NULL, last_at INTEGER NOT NULL
     )`)
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS shared_secret (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
   }
 
@@ -315,8 +318,67 @@ export class Home extends DurableObject<Env> {
     return []
   }
 
-  protected async grantableSecrets(_memberId: string): Promise<SettingsCatalog['secrets']> {
-    return []
+  protected async grantableSecrets(memberId: string): Promise<SettingsCatalog['secrets']> {
+    const own = (await this.env.MEMBER.getByName(memberId).secretNames()).map(({ name }) => ({ name, scope: 'member' as const }))
+    const shared = this.sharedSecrets().filter(({ name }) => !own.some((secret) => secret.name === name)).map(({ name }) => ({ name, scope: 'home' as const }))
+    return [...own, ...shared]
+  }
+
+  // ---------------------------------------------------------------- secrets (robot-vplt, robot-0bde)
+
+  private secretVault() {
+    return makeVault(this.env.DATA_KEY, 'secrets')
+  }
+
+  sharedSecrets(): Array<{ name: string; ownerId: string; updatedAt: number }> {
+    return this.sql.exec<{ name: string; owner_id: string; updated_at: number }>('SELECT name, owner_id, updated_at FROM shared_secret ORDER BY name').toArray()
+      .map((row) => ({ name: row.name, ownerId: row.owner_id, updatedAt: row.updated_at }))
+  }
+
+  /**
+   * Store a secret: private ones stay in the Member DO, Home-shared ones live here. Changing
+   * the scope moves the value; a shared secret is changed only by the Member who shared it.
+   */
+  async putSecret(memberId: string, name: string, value: string | undefined, shared: boolean): Promise<void> {
+    const existing = this.sql.exec<{ owner_id: string }>('SELECT owner_id FROM shared_secret WHERE name = ?', name).toArray()[0]
+    if (existing !== undefined && existing.owner_id !== memberId) throw new Error(`"${name}" is shared by another Member`)
+    const member = this.env.MEMBER.getByName(memberId)
+    if (shared) {
+      const plaintext = value ?? (await member.takeSecret(name)) ?? (existing === undefined ? null : await this.sharedSecret(name))
+      if (plaintext === null) throw new Error(`no secret "${name}"`)
+      await member.takeSecret(name)
+      const sealed = await Effect.runPromise(this.secretVault().seal(plaintext))
+      this.sql.exec(
+        'INSERT INTO shared_secret (name, owner_id, sealed, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET sealed = excluded.sealed, updated_at = excluded.updated_at',
+        name, memberId, sealed, Date.now(),
+      )
+      return
+    }
+    const plaintext = value ?? (existing === undefined ? await member.secret(name) : await this.sharedSecret(name))
+    if (plaintext === null) throw new Error(`no secret "${name}"`)
+    await member.setSecret(name, plaintext)
+    if (existing !== undefined) this.sql.exec('DELETE FROM shared_secret WHERE name = ?', name)
+  }
+
+  async deleteSecret(memberId: string, name: string): Promise<void> {
+    this.sql.exec('DELETE FROM shared_secret WHERE name = ? AND owner_id = ?', name, memberId)
+    await this.env.MEMBER.getByName(memberId).takeSecret(name)
+  }
+
+  private async sharedSecret(name: string): Promise<string | null> {
+    const row = this.sql.exec<{ sealed: string }>('SELECT sealed FROM shared_secret WHERE name = ?', name).toArray()[0]
+    return row === undefined ? null : Effect.runPromise(this.secretVault().open(row.sealed))
+  }
+
+  /** The value a Robot's secret_get receives: its owner's private secret, else the Home's. */
+  async resolveSecret(memberId: string, name: string): Promise<string | null> {
+    return (await this.env.MEMBER.getByName(memberId).secret(name)) ?? this.sharedSecret(name)
+  }
+
+  async secretsView(memberId: string): Promise<Array<{ name: string; scope: 'member' | 'home'; mine: boolean; updatedAt: number }>> {
+    const own = (await this.env.MEMBER.getByName(memberId).secretNames()).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
+    const shared = this.sharedSecrets().map((secret) => ({ name: secret.name, updatedAt: secret.updatedAt, scope: 'home' as const, mine: secret.ownerId === memberId }))
+    return [...own, ...shared]
   }
 
   /** Models a Member's Robots can run on: the Home's model list, for Providers they can use. */

@@ -89,6 +89,16 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
 
+  // ------------------------------------------------------------ secrets (robot-vplt)
+  .on('GET', '/api/secrets', (c) => call(() => home(c.env).secretsView(c.member.id)))
+  .on('PUT', '/api/secrets/:name', (c, { name }) => Effect.gen(function* () {
+    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) return yield* Effect.fail(badRequest('secret names use letters, digits, ".", "_" and "-"'))
+    const input = yield* decodeBody(c.request, Schema.Struct({ value: Schema.optional(Schema.String), shared: Schema.Boolean }))
+    yield* call(() => home(c.env).putSecret(c.member.id, name, input.value, input.shared)).pipe(Effect.mapError((error) => badRequest(error.message)))
+    return { ok: true }
+  }))
+  .on('DELETE', '/api/secrets/:name', (c, { name }) => call(() => home(c.env).deleteSecret(c.member.id, name)))
+
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
   .on('GET', '/api/providers', (c) => call(() => home(c.env).providersView(c.member.id)))
   .on('PUT', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
@@ -134,8 +144,8 @@ export const api = new Router<ApiContext>()
     const { brief } = yield* decodeBody(c.request, Schema.Struct({ brief: Schema.optional(Schema.String) }))
     return yield* call(() => home(c.env).createRobot(c.member.id, brief))
   }))
-  .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).conversation()))))
-  .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryView()))))
+  .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).conversationView()))))
+  .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))
   .on('POST', '/api/robots/:id/rewind', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
     const { atSeq } = yield* decodeBody(c.request, RewindRequest)

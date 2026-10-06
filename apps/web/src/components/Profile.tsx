@@ -16,6 +16,7 @@ export function Profile({ me, onChanged }: { me: Me; onChanged: () => void }) {
       <Preferences me={me} onChanged={onChanged} />
       <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
       <Providers />
+      <Secrets />
       <MemberFiles />
     </div>
   )
@@ -227,4 +228,52 @@ function base64urlToBytes(text: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(new ArrayBuffer(binary.length))
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
   return bytes
+}
+/** The vault (robot-vplt): values go in, never come back out to the browser. */
+function Secrets() {
+  const [list, setList] = useState<Awaited<ReturnType<typeof api.secrets>>>()
+  const [name, setName] = useState('')
+  const [value, setValue] = useState('')
+  const [shared, setShared] = useState(false)
+  const [error, setError] = useState<string>()
+  const refresh = useCallback(() => api.secrets().then(setList), [])
+  useEffect(() => { void refresh() }, [refresh])
+  const run = async (action: () => Promise<unknown>) => {
+    try {
+      await action()
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'failed')
+    }
+    await refresh()
+  }
+  return (
+    <>
+      <h2>Secrets</h2>
+      <div className="muted">Site passwords and codes your Robots may read with secret_get once you grant them. Values are encrypted and never shown again.</div>
+      <table className="grid">
+        <tbody>
+          {(list ?? []).map((secret) => (
+            <tr key={`${secret.scope}-${secret.name}`}>
+              <td>{secret.name}</td>
+              <td>{secret.scope === 'home' ? 'shared with the Home' : 'yours'}</td>
+              <td>{secret.mine ? (
+                <span className="form inline">
+                  <button type="button" className="link" onClick={() => void run(() => api.putSecret(secret.name, secret.scope !== 'home'))}>{secret.scope === 'home' ? 'Make private' : 'Share with the Home'}</button>
+                  <button type="button" className="link" onClick={() => void run(() => api.deleteSecret(secret.name))}>Delete</button>
+                </span>
+              ) : null}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="form inline">
+        <input value={name} placeholder="name, e.g. allegro" onChange={(event) => setName(event.target.value)} />
+        <input type="password" value={value} placeholder="value" onChange={(event) => setValue(event.target.value)} />
+        <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /> share</label>
+        <button type="button" className="button" disabled={name === '' || value === ''} onClick={() => void run(async () => { await api.putSecret(name, shared, value); setName(''); setValue('') })}>Save</button>
+      </div>
+      {error === undefined ? null : <div className="muted">{error}</div>}
+    </>
+  )
 }

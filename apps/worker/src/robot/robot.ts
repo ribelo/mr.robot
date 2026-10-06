@@ -42,6 +42,7 @@ import { compose, type Composition } from '../agent/compose.ts'
 import type { RobotHost, RoutineHost, WorkspaceHost } from '../agent/host.ts'
 import { routineTools } from '../agent/tools/routines.ts'
 import { notifyTools, type NotifyHost } from '../agent/tools/notify.ts'
+import { maskSecrets, secretTools, type SecretHost } from '../agent/tools/secrets.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
@@ -91,11 +92,13 @@ export type AnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
   | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
 
-export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost {
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
+  /** Values of granted secrets, kept only in memory to mask views (never stored by the Robot). */
+  private secretValues: Array<readonly [string, string]> = []
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -444,6 +447,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       case 'files': return fileTools(this)
       case 'routines': return routineTools(this, config.timeZone)
       case 'notify': return notifyTools(this)
+      case 'secrets': return secretTools(this, this.store.grants().secrets)
       default: return []
     }
   }
@@ -763,6 +767,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- views
 
+  async conversationView(): Promise<Conversation> {
+    await this.loadSecretMasks()
+    const view = this.conversation()
+    return { ...view, items: view.items.map((item) => maskItem(item, (text) => this.mask(text))) }
+  }
+
+  async trajectoryMasked(): Promise<Trajectory> {
+    await this.loadSecretMasks()
+    return this.trajectoryView()
+  }
+
   conversation(): Conversation {
     const config = this.store.requireConfig()
     const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
@@ -797,9 +812,33 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { robotId: config.id, sessionId: config.liveSessionId, events: this.trajectory(), rewinds: this.store.rewinds() }
   }
 
-  /** Replace secret values with a mask; the secrets ticket supplies the values. */
+  /** Replace granted secret values with a mask (robot-4zi6). */
   protected mask(text: string): string {
-    return text
+    return maskSecrets(text, this.secretValues)
+  }
+
+  /** secret.get: a granted name only, resolved from the owner or the Home (robot-0bde). */
+  async secret(name: string): Promise<string> {
+    const config = this.store.requireConfig()
+    const granted = this.store.grants().secrets
+    if (!granted.includes(name)) throw new Error(`The secret "${name}" is not granted to you. Granted: ${granted.join(', ') || 'none'}. Ask with propose_grants.`)
+    const value = await this.home().resolveSecret(config.ownerId, name)
+    if (value === null) throw new Error(`The secret "${name}" no longer exists`)
+    this.remember(name, value)
+    return value
+  }
+
+  private remember(name: string, value: string): void {
+    this.secretValues = [...this.secretValues.filter(([known]) => known !== name), [name, value]]
+  }
+
+  /** Load every granted secret's value so views can mask them, also after a restart. */
+  protected async loadSecretMasks(): Promise<void> {
+    const config = this.store.config()
+    if (config === undefined) return
+    const granted = this.store.grants().secrets
+    const values = await Promise.all(granted.map(async (name) => [name, await this.home().resolveSecret(config.ownerId, name).catch(() => null)] as const))
+    this.secretValues = values.filter((entry): entry is readonly [string, string] => entry[1] !== null)
   }
 
   // ---------------------------------------------------------------- rewind (robot-0q6a, robot-8v1t, robot-acr3)
@@ -922,6 +961,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   status(): { status: RobotConfig['status']; fleetState: FleetState } {
     return { status: this.store.requireConfig().status, fleetState: this.fleetState() }
+  }
+}
+
+function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
+  switch (item.kind) {
+    case 'message': return { ...item, text: mask(item.text) }
+    case 'reply': return { ...item, text: mask(item.text) }
+    case 'notice': return { ...item, text: mask(item.text) }
+    default: return item
   }
 }
 
