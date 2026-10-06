@@ -1,0 +1,171 @@
+import { Fragment, type ReactNode } from 'react'
+import type { ChatItem, ProposalView } from '@mr-robot/protocol'
+import { separatorTime } from '../time.ts'
+import { Avatar } from './Avatar.tsx'
+
+export interface ChatViewProps {
+  readonly items: readonly ChatItem[]
+  readonly meId: string
+  readonly working: boolean
+  readonly canAnswer: boolean
+  readonly onAnswer?: (proposal: ProposalView, approve: boolean) => void
+  readonly now?: number
+}
+
+const GAP_MS = 60 * 60 * 1000
+
+/** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
+export function ChatView({ items, meId, working, canAnswer, onAnswer, now }: ChatViewProps) {
+  const rows: ReactNode[] = []
+  let lastAt = 0
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index]!
+    if (item.at - lastAt > GAP_MS) rows.push(<div key={`t-${item.id}`} className="chat-separator">{separatorTime(item.at, now)}</div>)
+    lastAt = item.at
+    const previous = items[index - 1]
+    if (item.kind === 'message' && item.sender.kind === 'robot' && !(previous?.kind === 'message' && previous.sender.kind === 'robot')) {
+      const senders: { name: string; color: string }[] = []
+      for (let next = index; next < items.length; next += 1) {
+        const candidate = items[next]!
+        if (candidate.kind !== 'message' || candidate.sender.kind !== 'robot') break
+        if (!senders.some((sender) => sender.name === (candidate.sender as { name: string }).name)) {
+          senders.push({ name: candidate.sender.name, color: candidate.sender.avatarColor })
+        }
+      }
+      rows.push(
+        <div key={`h-${item.id}`} className="chat-separator" data-testid="robot-messages-header">
+          Messages from {senders.map((sender, position) => (
+            <Fragment key={sender.name}>
+              {position > 0 ? (position === senders.length - 1 ? ' and ' : ', ') : ''}
+              <span className="inline-robot"><Avatar color={sender.color} size={14} /> {sender.name}</span>
+            </Fragment>
+          ))}
+        </div>,
+      )
+    }
+    rows.push(<Item key={item.id} item={item} meId={meId} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />)
+  }
+  if (working) rows.push(<div key="working" className="bubble bubble-robot typing" aria-label="working"><span /><span /><span /></div>)
+  return <div className="chat">{rows}</div>
+}
+
+function Item({ item, meId, canAnswer, onAnswer }: { item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
+  switch (item.kind) {
+    case 'message': {
+      const own = item.sender.kind === 'member' && item.sender.memberId === meId
+      const label = item.sender.kind === 'robot'
+        ? <span className="inline-robot" style={{ color: item.sender.avatarColor }}><Avatar color={item.sender.avatarColor} size={14} /> {item.sender.name}</span>
+        : item.sender.kind === 'member' && !own
+          ? <span className="sender">{item.sender.name}</span>
+          : item.sender.kind === 'channel'
+            ? <span className="sender">{item.sender.channel} · {item.sender.from}</span>
+            : null
+      return (
+        <div className={own ? 'row row-own' : 'row'}>
+          <div className={own ? 'bubble bubble-own' : 'bubble bubble-robot'}>
+            {label === null ? null : <>{label} </>}
+            <RichText text={item.text} />
+            {item.attachments.length > 0 ? (
+              <div className="attachments">{item.attachments.map((file) => <span key={file.path} className="attachment">📎 {file.name}</span>)}</div>
+            ) : null}
+          </div>
+          {item.reaction === null ? null : <span className="reaction" aria-label={`reacted ${item.reaction}`}>{item.reaction}</span>}
+        </div>
+      )
+    }
+    case 'reply':
+      return <div className="row"><div className="bubble bubble-robot"><RichText text={item.text} /></div></div>
+    case 'routine':
+      return (
+        <div className="chat-separator routine-line">
+          {item.action === 'ran' ? null : <span>{routineVerb(item.action)} </span>}
+          <span className="routine-name"><ClockIcon /> {item.name}</span>
+        </div>
+      )
+    case 'notice':
+      return <div className="chat-separator notice">{item.text}</div>
+    case 'question':
+      return <QuestionCard proposal={item.proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />
+    case 'working':
+      return null
+  }
+}
+
+function routineVerb(action: 'created' | 'updated' | 'deleted' | 'ran'): string {
+  return action === 'created' ? 'Created routine' : action === 'updated' ? 'Updated routine' : action === 'deleted' ? 'Deleted routine' : ''
+}
+
+export function QuestionCard({ proposal, canAnswer, onAnswer }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
+  const title = proposal.kind === 'setup' ? 'Approve these Grants to finish setup'
+    : proposal.kind === 'grants' ? 'Asks for more Grants'
+      : proposal.kind === 'member-file' ? `Proposes an edit to ${proposal.file?.name ?? 'your file'}`
+        : proposal.kind === 'skill' ? 'Proposes a skill for the library'
+          : 'Needs you'
+  const grants = proposal.grants
+  const lines = grants === null ? [] : [
+    ...grants.tools.map((name) => ['Tool', name]),
+    ...grants.skills.map((name) => ['Skill', name]),
+    ...grants.recipients.map((name) => ['Recipient', name]),
+    ...grants.secrets.map((name) => ['Secret', name]),
+  ]
+  return (
+    <div className="question" data-status={proposal.status}>
+      <div className="question-title">{title}</div>
+      <div className="question-purpose">{proposal.purpose}</div>
+      {lines.length > 0 ? (
+        <ul className="grant-list">{lines.map(([kind, name]) => <li key={`${kind}-${name}`}><span className="grant-kind">{kind}</span> {name}</li>)}</ul>
+      ) : grants !== null ? <div className="question-purpose">No Grants.</div> : null}
+      {proposal.file === null ? null : <pre className="file-preview">{proposal.file.content}</pre>}
+      {proposal.skill === null ? null : <div className="question-purpose"><b>{proposal.skill.name}</b>: {proposal.skill.description}</div>}
+      {proposal.status === 'open' && canAnswer ? (
+        <div className="question-actions">
+          <button type="button" className="button" onClick={() => onAnswer?.(proposal, false)}>Reject</button>
+          <button type="button" className="button button-primary" onClick={() => onAnswer?.(proposal, true)}>Approve</button>
+        </div>
+      ) : <div className="question-status">{statusText(proposal.status)}</div>}
+    </div>
+  )
+}
+
+function statusText(status: ProposalView['status']): string {
+  switch (status) {
+    case 'open': return 'Waiting for the owner'
+    case 'approved': return 'Approved'
+    case 'rejected': return 'Rejected'
+    case 'superseded': return 'Replaced by a newer proposal'
+    case 'done': return 'Done'
+  }
+}
+
+/** Plain text with **bold**, `code` and line breaks; nothing else is interpreted. */
+export function RichText({ text }: { text: string }) {
+  const lines = text.split('\n')
+  return (
+    <span className="rich">
+      {lines.map((line, index) => (
+        <Fragment key={index}>
+          {index > 0 ? <br /> : null}
+          {inline(line)}
+        </Fragment>
+      ))}
+    </span>
+  )
+}
+
+function inline(line: string): ReactNode[] {
+  const parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) return <b key={index}>{part.slice(2, -2)}</b>
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) return <code key={index}>{part.slice(1, -1)}</code>
+    return <Fragment key={index}>{part}</Fragment>
+  })
+}
+
+export function ClockIcon() {
+  return (
+    <svg className="icon-inline" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 4.6V8l2.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}

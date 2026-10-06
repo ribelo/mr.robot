@@ -1,0 +1,26 @@
+// Local development: `pnpm dev` serves the real Worker and the built PWA on http://127.0.0.1:8787,
+// signed in as DEV_IDENTITY (Cloudflare Access is absent locally). Deployment is declared in infra/stack.ts.
+{
+  "name": "mr-robot-dev",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "../web/dist", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROBOT", "class_name": "Robot" },
+      { "name": "MEMBER", "class_name": "Member" },
+      { "name": "HOME", "class_name": "Home" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Robot", "Member", "Home"] }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "files" }],
+  "worker_loaders": [{ "binding": "LOADER" }],
+  "vars": {
+    "HOME_NAME": "Home",
+    "DATA_KEY": "0000000000000000000000000000000000000000000000000000000000000001",
+    "VAPID_PRIVATE_KEY": "0000000000000000000000000000000000000000000000000000000000000002",
+    "VAPID_PUBLIC_KEY": "dev",
+    "DEV_IDENTITY": "owner@example.com"
+  }
+}

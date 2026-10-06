@@ -14,7 +14,8 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "lint:deps": "node scripts/dependency-lint.ts",
-    "check": "pnpm lint:deps && pnpm typecheck && pnpm test"
+    "check": "pnpm lint:deps && pnpm typecheck && pnpm test",
+    "dev": "pnpm --filter @mr-robot/web build && pnpm --filter @mr-robot/worker exec wrangler dev -c wrangler.dev.jsonc --ip 127.0.0.1 --port 8787 --persist-to ../../.wrangler/state"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261006.1",
