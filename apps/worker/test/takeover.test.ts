@@ -65,6 +65,11 @@ describe('live view and takeover', () => {
     const sent = await (env.MEMBER.getByName(owner.id) as unknown as DurableObjectStub<import('./worker.ts').Member>).deliveredForTest()
     expect(sent.find((notification) => notification.tag === `${id}-needs you`)).toMatchObject({ body: 'Please log in to the shop. Tap to take over the browser.' })
     expect((await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.working).toBe(false)
+    // A message sent meanwhile waits for the hand-back instead of starting a Turn.
+    const before = (requests.get(id) ?? []).length
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'are you done?' } })
+    await settle(id)
+    expect((requests.get(id) ?? []).length).toBe(before)
   })
 
   it('streams the screen to a watcher without taking it over (robot-ksvy)', async () => {

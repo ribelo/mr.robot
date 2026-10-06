@@ -305,6 +305,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const config = this.store.config()
       if (config === undefined || !runnable(config)) return
       const active = this.store.activeTurn()
+      // While a takeover is pending the Robot waits for the hand-back; later wake-ups queue behind it (robot-doqx).
+      if (active === undefined && this.store.get('takeover') !== undefined) return
       if (active === undefined && this.store.pendingWakeups() > 0 && config.status === 'active' && (await this.checkLimits())) return
       const wakeup = active === undefined ? this.store.nextWakeup() : this.store.wakeup(active.wakeupId)
       if (wakeup === undefined) {
