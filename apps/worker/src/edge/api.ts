@@ -166,7 +166,26 @@ export const api = new Router<ApiContext>()
   }))
 
   // ------------------------------------------------------------ robots
-  .on('GET', '/api/robots', (c) => call(() => home(c.env).reachable(c.member.id)))
+  .on('GET', '/api/robots', (c) => call(async () => {
+    const [robots, prefs] = await Promise.all([home(c.env).reachable(c.member.id), c.env.MEMBER.getByName(c.member.id).listPrefs()])
+    return robots.map((summary) => {
+      const pref = prefs[summary.id]
+      // Unread: newer than when this person last opened it, or marked unread by them (robot-mktj).
+      const unread = pref?.markedUnread === true || (pref?.seenAt != null && summary.lastAt > pref.seenAt)
+      return { ...summary, unread, pinned: pref?.pinned === true, hidden: pref?.hidden === true }
+    })
+  }))
+  .on('POST', '/api/robots/:id/list', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const change = yield* decodeBody(c.request, Schema.Struct({ pinned: Schema.optional(Schema.Boolean), hidden: Schema.optional(Schema.Boolean), unread: Schema.optional(Schema.Boolean) }))
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).setListPref(id, change))
+    return { ok: true }
+  }))
+  .on('POST', '/api/robots/:id/routines/:routine/pause', (c, { id, routine }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const { paused } = yield* decodeBody(c.request, Schema.Struct({ paused: Schema.Boolean }))
+    return yield* call(() => robot(c, id).pauseRoutine(routine, paused)).pipe(Effect.mapError((error) => notFound(error.detail ?? error.message)))
+  }))
   .on('POST', '/api/robots', (c) => Effect.gen(function* () {
     const { brief, model } = yield* decodeBody(c.request, Schema.Struct({
       brief: Schema.optional(Schema.String),
@@ -174,7 +193,10 @@ export const api = new Router<ApiContext>()
     }))
     return yield* call(() => home(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
   }))
-  .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).conversationView()))))
+  .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(
+    Effect.andThen(call(() => robot(c, id).conversationView())),
+    Effect.tap(() => call(() => c.env.MEMBER.getByName(c.member.id).markSeen(id, Date.now()))),
+  ))
   .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))
   .on('POST', '/api/robots/:id/rewind', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)

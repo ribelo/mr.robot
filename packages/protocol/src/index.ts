@@ -125,6 +125,9 @@ export interface RobotSummary {
   readonly lastLine: string
   readonly lastAt: number
   readonly unread: boolean
+  /** This person's list settings (robot-mktj). */
+  readonly pinned?: boolean
+  readonly hidden?: boolean
 }
 
 export interface RobotPanel {
@@ -166,6 +169,12 @@ export interface RoutineView {
   readonly summary: string
   readonly nextRun: number | null
   readonly lastRun: number | null
+  /** Paused by its owner: it keeps its schedule but does not run (robot-qhll). */
+  readonly paused: boolean
+  /** The schedule as a cron line with its time zone, when it has one ("CRON_TZ=Europe/Warsaw 0 9 * * 1-5"). */
+  readonly cron: string | null
+  /** The latest runs, newest first (robot-l3gr). */
+  readonly runs: ReadonlyArray<{ readonly at: number; readonly outcome: 'running' | 'done' | 'failed'; readonly summary: string }>
 }
 
 // ---------------------------------------------------------------- Conversation

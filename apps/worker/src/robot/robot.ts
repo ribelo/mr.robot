@@ -71,7 +71,7 @@ import { makeWorkspace, type WorkspaceShape } from '../workspace/workspace.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
-import { describeSchedule, nextRun, validateSchedule } from './schedule.ts'
+import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.ts'
 import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
 const HEARTBEAT_MS = 30_000
@@ -219,12 +219,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** A Turn that ended in an error keeps its wake-up for "Try again"; a good Turn clears it. */
-  private rememberFailure(wakeup: Wakeup, startSeq: number): void {
+  private rememberFailure(wakeup: Wakeup, startSeq: number): boolean {
     const config = this.store.requireConfig()
     const failed = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
       .some((event) => event.seq >= startSeq && event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')
     if (failed) this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
     else this.store.delete('failed-wakeup')
+    return failed
   }
 
   /** Run the wake-up whose Turn failed again (the chat's "Try again"). */
@@ -276,9 +277,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    */
   private fireRoutines(now: number): void {
     for (const routine of this.store.routines()) {
-      if (routine.nextRun === null || routine.nextRun > now) continue
+      if (routine.paused || routine.nextRun === null || routine.nextRun > now) continue
       this.store.transaction(() => {
-        this.store.enqueue('routine', { kind: 'routine', routineId: routine.id, name: routine.name }, routine.prompt, { routineId: routine.id, due: routine.nextRun }, now)
+        const wakeupId = this.store.enqueue('routine', { kind: 'routine', routineId: routine.id, name: routine.name }, routine.prompt, { routineId: routine.id, due: routine.nextRun }, now)
+        this.store.addRoutineRun(routine.id, wakeupId, now)
         const next = nextRun(routine.schedule, routine.timeZone, now, routine.createdAt)
         if (next === null) this.store.deleteRoutine(routine.id)
         else this.store.saveRoutine({ ...routine, lastRun: now, nextRun: next })
@@ -359,7 +361,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
-    this.rememberFailure(wakeup, startSeq)
+    const failedTurn = this.rememberFailure(wakeup, startSeq)
+    if (wakeup.kind === 'routine') {
+      const reply = this.conversation().items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
+      this.store.finishRoutineRun(wakeup.id, failedTurn ? 'failed' : 'done', failedTurn ? 'The Turn failed.' : (reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'))
+    }
     await this.loadSecretMasks()
     await this.deliverReplies(wakeup, startSeq)
     await this.notifyFinished(wakeup, startSeq)
@@ -456,6 +462,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const wakeup = active !== undefined ? this.store.wakeup(active.wakeupId) : this.starting
     // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
     if (wakeup !== undefined) {
+      if (wakeup.kind === 'routine') this.store.finishRoutineRun(wakeup.id, 'failed', 'The Turn failed.')
       this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
       this.store.endTurn(wakeup.id)
     }
@@ -887,6 +894,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config.status === 'paused') return 'paused'
     if (config.status === 'blocked') return 'blocked'
     if (this.store.activeTurn() !== undefined) return 'working'
+    // A failed Turn waiting for "Try again" is a state, not a raw error in the list (robot-n7th).
+    if (this.store.get('failed-wakeup') !== undefined) return 'blocked'
     if (this.store.proposals('open').length > 0 || this.store.get('takeover') !== undefined) return 'waiting for you'
     if (config.status === 'setup') return 'setup'
     return 'sleeping'
@@ -900,7 +909,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async report(): Promise<void> {
     const config = this.store.requireConfig()
-    const last = lastLine(this.conversation().items)
+    const last = this.store.get('failed-wakeup') !== undefined
+      ? { text: 'Could not finish its last task. Open to see why.', at: this.conversation().items.at(-1)?.at ?? Date.now() }
+      : lastLine(this.conversation().items)
     const entry: RegistryEntry = {
       id: config.id,
       ownerId: config.ownerId,
@@ -1270,6 +1281,20 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- Routines (robot-gbbt, robot-qyd5)
 
+  /** Pause keeps the Routine and its schedule but stops its alarm; resume plans the next run from now (robot-qhll). */
+  async pauseRoutine(id: string, paused: boolean): Promise<RoutineView> {
+    const config = this.store.requireConfig()
+    const routine = this.store.routine(id)
+    if (routine === undefined) throw new Error('no such Routine')
+    const now = Date.now()
+    const next = paused ? null : nextRun(routine.schedule, routine.timeZone, now, routine.createdAt)
+    const saved = { ...routine, paused, nextRun: next }
+    this.store.saveRoutine(saved)
+    await this.rearm()
+    await this.changed()
+    return routineView(config.id, saved, this.store.routineRuns(id))
+  }
+
   createRoutine(input: { name: string; prompt: string; schedule: RoutineSchedule }): RoutineView {
     const config = this.store.requireConfig()
     const now = Date.now()
@@ -1283,11 +1308,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       timeZone: config.timeZone,
       nextRun: nextRun(schedule, config.timeZone, now, now),
       lastRun: null,
+      paused: false,
       createdAt: now,
     }
     this.store.saveRoutine(routine)
     this.routinesChanged()
-    return routineView(config.id, routine)
+    return routineView(config.id, routine, this.store.routineRuns(routine.id))
   }
 
   updateRoutine(id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }): RoutineView {
@@ -1306,7 +1332,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     this.store.saveRoutine(routine)
     this.routinesChanged()
-    return routineView(config.id, routine)
+    return routineView(config.id, routine, this.store.routineRuns(routine.id))
   }
 
   deleteRoutine(id: string): RoutineView {
@@ -1315,7 +1341,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (existing === undefined) throw new Error(`no Routine ${id}`)
     this.store.deleteRoutine(id)
     this.routinesChanged()
-    return routineView(config.id, existing)
+    return routineView(config.id, existing, this.store.routineRuns(existing.id))
   }
 
   listRoutines(): RoutineView[] {
@@ -1508,7 +1534,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   protected routineViews(): RoutineView[] {
     const id = this.store.requireConfig().id
-    return this.store.routines().map((routine) => routineView(id, routine))
+    return this.store.routines().map((routine) => routineView(id, routine, this.store.routineRuns(routine.id)))
   }
 
   /** Filled by the browser and usage tickets. */
@@ -1607,8 +1633,14 @@ async function forwardInput(cdp: { send(method: string, params?: Record<string, 
 
 const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }
 
-function routineView(robotId: string, routine: RoutineRow): RoutineView {
-  return { ...routine, robotId, summary: describeSchedule(routine.schedule, routine.timeZone) }
+function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
+  return {
+    id: routine.id, name: routine.name, prompt: routine.prompt, schedule: routine.schedule, timeZone: routine.timeZone,
+    nextRun: routine.nextRun, lastRun: routine.lastRun, paused: routine.paused, robotId,
+    summary: describeSchedule(routine.schedule, routine.timeZone),
+    cron: cronOf(routine.schedule, routine.timeZone),
+    runs,
+  }
 }
 
 function runnable(config: RobotConfig): boolean {
@@ -1641,7 +1673,8 @@ function lastLine(items: readonly ChatItem[]): { text: string; at: number } | un
     const item = items[index]!
     if (item.kind === 'reply') return { text: item.text, at: item.at }
     if (item.kind === 'message') return { text: item.text, at: item.at }
-    if (item.kind === 'notice') return { text: item.text, at: item.at }
+    // A failure notice is shown in the conversation; the list keeps the last real line.
+    if (item.kind === 'notice' && !item.text.startsWith('The Turn failed')) return { text: item.text, at: item.at }
     if (item.kind === 'question') return { text: item.proposal.purpose, at: item.at }
   }
   return undefined

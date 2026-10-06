@@ -61,6 +61,7 @@ export interface RoutineRow {
   readonly nextRun: number | null
   readonly lastRun: number | null
   readonly createdAt: number
+  readonly paused: boolean
 }
 
 export interface ProposalRow extends ProposalView {
@@ -78,9 +79,13 @@ export interface NoticeRow {
   readonly sessionId: string
 }
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 const MIGRATIONS: Record<number, readonly string[]> = {
+  2: [
+    'ALTER TABLE routine ADD COLUMN paused INTEGER NOT NULL DEFAULT 0',
+    'CREATE TABLE routine_run (wakeup_id INTEGER PRIMARY KEY, routine_id TEXT NOT NULL, at INTEGER NOT NULL, outcome TEXT NOT NULL, summary TEXT NOT NULL)',
+  ],
   1: [
     `CREATE TABLE robot (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
     `CREATE TABLE grant_item (kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (kind, name)) WITHOUT ROWID`,
@@ -254,12 +259,26 @@ export class RobotStore {
 
   saveRoutine(routine: RoutineRow): void {
     this.sql.exec(
-      `INSERT INTO routine (id, name, prompt, schedule, time_zone, next_run, last_run, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO routine (id, name, prompt, schedule, time_zone, next_run, last_run, created_at, paused) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET name = excluded.name, prompt = excluded.prompt, schedule = excluded.schedule,
-         time_zone = excluded.time_zone, next_run = excluded.next_run, last_run = excluded.last_run`,
+         time_zone = excluded.time_zone, next_run = excluded.next_run, last_run = excluded.last_run, paused = excluded.paused`,
       routine.id, routine.name, routine.prompt, JSON.stringify(routine.schedule), routine.timeZone,
-      routine.nextRun, routine.lastRun, routine.createdAt,
+      routine.nextRun, routine.lastRun, routine.createdAt, routine.paused ? 1 : 0,
     )
+  }
+
+  addRoutineRun(routineId: string, wakeupId: number, at: number): void {
+    this.sql.exec("INSERT OR REPLACE INTO routine_run (wakeup_id, routine_id, at, outcome, summary) VALUES (?, ?, ?, 'running', '')", wakeupId, routineId, at)
+  }
+
+  finishRoutineRun(wakeupId: number, outcome: 'done' | 'failed', summary: string): void {
+    this.sql.exec('UPDATE routine_run SET outcome = ?, summary = ? WHERE wakeup_id = ?', outcome, summary, wakeupId)
+  }
+
+  routineRuns(routineId: string, limit = 10): Array<{ at: number; outcome: 'running' | 'done' | 'failed'; summary: string }> {
+    return this.sql.exec<{ at: number; outcome: 'running' | 'done' | 'failed'; summary: string }>(
+      'SELECT at, outcome, summary FROM routine_run WHERE routine_id = ? ORDER BY at DESC LIMIT ?', routineId, limit,
+    ).toArray()
   }
 
   deleteRoutine(id: string): boolean {
@@ -428,6 +447,7 @@ type RoutineSql = {
   next_run: number | null
   last_run: number | null
   created_at: number
+  paused: number
 }
 
 function routineFromSql(row: RoutineSql): RoutineRow {
@@ -440,6 +460,7 @@ function routineFromSql(row: RoutineSql): RoutineRow {
     nextRun: row.next_run,
     lastRun: row.last_run,
     createdAt: row.created_at,
+    paused: row.paused === 1,
   }
 }
 

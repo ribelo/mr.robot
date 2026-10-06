@@ -32,6 +32,7 @@ export class Member extends DurableObject<Env> {
     const sql = ctx.storage.sql
     sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS member_file (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS list_pref (robot_id TEXT PRIMARY KEY, pinned INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, marked_unread INTEGER NOT NULL DEFAULT 0, seen_at INTEGER)')
     sql.exec('CREATE TABLE IF NOT EXISTS secret (name TEXT PRIMARY KEY, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS usage (month TEXT NOT NULL, robot_id TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, robot_id)) WITHOUT ROWID')
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
@@ -207,6 +208,25 @@ export class Member extends DurableObject<Env> {
 
   private async publishSharing(provider: ProviderId, shared: boolean): Promise<void> {
     await this.env.HOME.getByName(HOME_ID).credentialShared(this.profile().id, provider, shared)
+  }
+
+  // ---------------------------------------------------------------- the robot list, per person (robot-mktj)
+
+  listPrefs(): Record<string, { pinned: boolean; hidden: boolean; markedUnread: boolean; seenAt: number | null }> {
+    return Object.fromEntries(this.sql.exec<{ robot_id: string; pinned: number; hidden: number; marked_unread: number; seen_at: number | null }>('SELECT * FROM list_pref').toArray()
+      .map((row) => [row.robot_id, { pinned: row.pinned === 1, hidden: row.hidden === 1, markedUnread: row.marked_unread === 1, seenAt: row.seen_at }]))
+  }
+
+  setListPref(robotId: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }): void {
+    this.sql.exec('INSERT INTO list_pref (robot_id) VALUES (?) ON CONFLICT (robot_id) DO NOTHING', robotId)
+    if (change.pinned !== undefined) this.sql.exec('UPDATE list_pref SET pinned = ? WHERE robot_id = ?', change.pinned ? 1 : 0, robotId)
+    if (change.hidden !== undefined) this.sql.exec('UPDATE list_pref SET hidden = ? WHERE robot_id = ?', change.hidden ? 1 : 0, robotId)
+    if (change.unread !== undefined) this.sql.exec('UPDATE list_pref SET marked_unread = ? WHERE robot_id = ?', change.unread ? 1 : 0, robotId)
+  }
+
+  /** The person opened this Robot's conversation: everything up to now is read. */
+  markSeen(robotId: string, at: number): void {
+    this.sql.exec('INSERT INTO list_pref (robot_id, seen_at) VALUES (?, ?) ON CONFLICT (robot_id) DO UPDATE SET seen_at = excluded.seen_at, marked_unread = 0', robotId, at)
   }
 
   // ---------------------------------------------------------------- private secrets (robot-vplt)

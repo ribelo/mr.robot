@@ -236,3 +236,24 @@ export function describeSchedule(schedule: RoutineSchedule, timeZone: string): s
       return `cron ${schedule.expression}`
   }
 }
+
+/** The schedule as a cron line with its time zone, or null when cron cannot say it (a single run, odd intervals). */
+export function cronOf(schedule: RoutineSchedule, timeZone: string): string | null {
+  const at = (time: string) => {
+    const [hour, minute] = time.split(':').map(Number)
+    return `${minute} ${hour}`
+  }
+  const line = (() => {
+    switch (schedule.kind) {
+      case 'cron': return schedule.expression
+      case 'daily': return `${at(schedule.time)} * * *`
+      case 'weekly': return `${at(schedule.time)} * * ${[...schedule.weekdays].sort().map((day) => (day === 7 ? 0 : day)).join(',')}`
+      case 'interval':
+        if (schedule.everyMinutes < 60 && 60 % schedule.everyMinutes === 0) return `*/${schedule.everyMinutes} * * * *`
+        if (schedule.everyMinutes % 60 === 0 && 24 % (schedule.everyMinutes / 60) === 0) return `0 */${schedule.everyMinutes / 60} * * *`
+        return null
+      case 'once': return null
+    }
+  })()
+  return line === null ? null : `CRON_TZ=${timeZone} ${line}`
+}
