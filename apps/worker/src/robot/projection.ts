@@ -44,7 +44,9 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         const message = data as unknown as MessageLike
         const sender = senderOf(message.source)
         if (sender.kind === 'platform') {
-          const summary = String(message.source?.['summary'] ?? '')
+          // Conversations started before the chat text was split from the setup instruction.
+          const raw = String(message.source?.['summary'] ?? '')
+          const summary = raw.startsWith('Setup started.') ? 'Setup started' : raw
           if (summary.length > 0 && message.source?.['hidden'] !== true) {
             items.push({ kind: 'notice', id: message.id, seq: event.seq, at: event.time, text: summary })
           }
