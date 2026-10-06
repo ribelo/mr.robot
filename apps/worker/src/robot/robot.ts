@@ -338,6 +338,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       agent.followup(wakeupMessage({
         sender: { kind: 'platform' },
         text: 'Your previous Turn was interrupted by a platform restart. Its tool results above are real. Continue that work from where it stopped; do not redo finished steps.',
+        summary: 'Resumed after a restart',
       }))
     }
     await this.rearm()
@@ -807,6 +808,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       kind: 'platform',
       sender: { kind: 'platform' },
       text: approve ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
+      // The chat shows what happened, not the instruction to the model.
+      payload: { summary: approve ? (answered.kind === 'setup' ? 'Setup approved' : 'Approved') : 'Rejected' },
     })
     return { ok: true, proposal: proposalView(answered) }
   }
@@ -1093,6 +1096,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.wake({
       kind: 'takeover',
       sender: { kind: 'platform' },
+      payload: { summary: `${member?.name ?? 'Your owner'} handed the browser back` },
       text: `${member?.name ?? 'Your owner'} handed the browser back after "${takeover?.reason ?? 'the takeover'}". The page is now ${page.url()}; a screenshot of it is at ${path}. Observe the page before you continue.`,
     })
     await this.changed()
@@ -1498,6 +1502,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         'Your owner rewound this Conversation to an earlier point. Everything after that point is gone from your memory of the Conversation, but its external effects still stand: messages already sent, files written, carts filled, orders placed stay as they are.',
         toolsAfter.length === 0 ? 'No tools were used after the rewind point.' : `After the rewind point you had used: ${toolsAfter.join(', ')}. Check the real state before you repeat or contradict anything.`,
       ].join('\n'),
+      // The notice below tells the owner; the instruction itself stays out of the chat.
+      summary: '',
     }))
     await ctx.sessions.flush(agent.session)
     this.store.addNotice(sessionId, storedLength(this.ctx.storage.sql, sessionId), `Rewound to an earlier point. The previous Conversation is kept in the archive.`, now)

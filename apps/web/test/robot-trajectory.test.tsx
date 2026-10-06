@@ -25,6 +25,24 @@ describe('the DSH trajectory over Robot events (robot-3ioa, robot-s54i)', () => 
     expect(JSON.stringify(result)).toContain('"name":"routine_create"')
   })
 
+  it('pages back through older events (robot-gq88)', async () => {
+    const all = events as Array<{ seq: number }>
+    const split = all.findIndex((event) => event.seq >= 30)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const before = new URL(url, 'https://x').searchParams.get('before')
+      return before === null
+        ? Response.json({ sessionId: 's-1', hasMore: true, events: all.slice(split) })
+        : Response.json({ sessionId: 's-1', hasMore: false, events: all.slice(0, split) })
+    }))
+    const feed = new TrajectoryFeed('r-fixture')
+    await feed.open()
+    expect(feed.getPaging().hasMore).toBe(true)
+    const recent = feed.getSnapshot().eventNodes.length
+    expect(await feed.loadOlder()).toBe(true)
+    expect(feed.getPaging().hasMore).toBe(false)
+    expect(feed.getSnapshot().eventNodes.length).toBeGreaterThan(recent)
+  })
+
   it('renders the view with its toolbar', async () => {
     serve()
     render(<RobotTrajectory robotId="r-fixture" liveVersion={0} />)
