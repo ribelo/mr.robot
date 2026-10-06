@@ -22,3 +22,4 @@ Tracker: Markdown files in this directory. Work the frontier: any ticket whose b
 | 16 | [Home skill library and per-robot skill grants](16-skill-library.md) | 07 |
 | 17 | [Admin view](17-admin-view.md) | 06, 13, 14, 16 |
 | 18 | [Channel seam with the PWA as first adapter](18-channel-seam.md) | 11 |
+| 19 | [OpenCode Go as a Provider with key rotation](19-opencode-go-provider.md) | 13 |
