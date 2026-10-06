@@ -50,6 +50,8 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           items.push({ kind: 'notice', id: message.id, seq: event.seq, at: event.time, text: 'Earlier conversation condensed to fit the context budget.' })
           break
         }
+        // DSH's own context messages (skill catalog, reminders) are for the model, not the chat.
+        if (!CHAT_SOURCES.has(String(message.source?.['kind'] ?? 'member'))) break
         const sender = senderOf(message.source)
         if (sender.kind === 'platform') {
           // Conversations started before the chat text was split from the setup instruction.
@@ -146,6 +148,9 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
   flushNotices(Number.POSITIVE_INFINITY)
   return items
 }
+
+/** Message sources that are people, Robots, Routines, Channels or Mr. Robot's platform notes. */
+const CHAT_SOURCES = new Set(['member', 'robot', 'routine', 'channel', 'platform'])
 
 function senderOf(source: Record<string, unknown> | undefined): Sender {
   switch (source?.['kind']) {

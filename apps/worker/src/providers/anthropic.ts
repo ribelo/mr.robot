@@ -17,7 +17,7 @@ type Block =
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
 
-function anthropicMessages(options: GenerateOptions, provider: string): Array<{ role: 'user' | 'assistant'; content: Block[] }> {
+export function anthropicMessages(options: GenerateOptions, provider: string): Array<{ role: 'user' | 'assistant'; content: Block[] }> {
   const out: Array<{ role: 'user' | 'assistant'; content: Block[] }> = []
   const push = (role: 'user' | 'assistant', blocks: Block[]) => {
     if (blocks.length === 0) return
@@ -27,7 +27,7 @@ function anthropicMessages(options: GenerateOptions, provider: string): Array<{ 
   }
   for (const message of options.messages) {
     if (message.role === 'user') push('user', [{ type: 'text', text: textOf(message.content) || '.' }])
-    else if (message.role === 'tool') push('user', [{ type: 'tool_result', tool_use_id: message.toolCallId, content: textOf(message.content), ...(message.isError === true ? { is_error: true } : {}) }])
+    else if (message.role === 'tool') push('user', [{ type: 'tool_result', tool_use_id: toolId(message.toolCallId), content: textOf(message.content), ...(message.isError === true ? { is_error: true } : {}) }])
     else if (message.role === 'assistant') push('assistant', assistantBlocks(message, provider))
   }
   return out
@@ -38,7 +38,7 @@ function assistantBlocks(message: DshMessage, provider: string): Block[] {
   const replay = sameProvider ? replayBlocks(message) : []
   return message.content.flatMap((block, index): Block[] => {
     if (block.type === 'text') return block.text === '' ? [] : [{ type: 'text', text: block.text }]
-    if (block.type === 'tool-call') return [{ type: 'tool_use', id: block.id, name: block.name, input: safeJson(block.arguments) }]
+    if (block.type === 'tool-call') return [{ type: 'tool_use', id: toolId(block.id), name: block.name, input: safeJson(block.arguments) }]
     if (block.type === 'reasoning') {
       const signature = (replay[index] as { signature?: string } | null | undefined)?.signature
       return signature === undefined ? [] : [{ type: 'thinking', thinking: block.text, signature }]
@@ -157,4 +157,9 @@ export class AnthropicAdapter extends LlmAdapter {
     yield* writer.close()
     yield { type: 'finish', reason: finishReason(stop, writer.sawToolCall), replayState: { response: null, blocks: writer.replay } }
   }
+}
+
+/** Anthropic accepts [a-zA-Z0-9_-] ids; calls made earlier on another model may carry others (kimi: "functions.run_code:0"). */
+function toolId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, '_')
 }
