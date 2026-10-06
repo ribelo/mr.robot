@@ -10,6 +10,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
 import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
   Attachment,
@@ -21,6 +22,7 @@ import type {
   ModelChoice,
   ProposalKind,
   ProposalView,
+  RewindView,
   RobotPanel,
   RobotSettings,
   RobotSummary,
@@ -31,6 +33,7 @@ import type {
   UsageView,
   SettingsPatch,
   Sharing,
+  Trajectory,
   TrajectoryEvent,
 } from '@mr-robot/protocol'
 import { CHIEF_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
@@ -90,6 +93,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
+  private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -292,9 +296,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const prompt = [{ name: 'platform', text: () => platformPrompt(this.store.requireConfig(), owner.name) }]
     if (config.status === 'setup') prompt.push({ name: 'setup', text: () => setupPrompt(owner.name, brief) })
     prompt.push({ name: 'workspace', text: () => personaText(this.persona) })
+    const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
     const value = await compose({
       storage: this.ctx.storage,
       sessionId: config.liveSessionId,
+      ...(seed === undefined ? {} : { seed }),
       onAppend: () => this.broadcast(),
       provider: config.model.provider,
       model: config.model.model,
@@ -307,6 +313,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       plugins: this.plugins(config),
     })
     this.composition = { revision: config.revision, value }
+    this.pendingSeed = undefined
     return value
   }
 
@@ -670,6 +677,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
+  /** The full session log of the live Conversation (robot-h5v3), secrets masked (robot-4zi6). */
   trajectory(): TrajectoryEvent[] {
     const config = this.store.requireConfig()
     return readStoredEvents(this.ctx.storage.sql, config.liveSessionId).map((event) => ({
@@ -677,7 +685,84 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       type: event.type,
       time: event.time,
       turn: typeof (event.data as { turn?: unknown }).turn === 'number' ? (event.data as { turn: number }).turn : null,
-      data: JSON.stringify(event.data),
+      data: this.mask(JSON.stringify(event.data)),
+    }))
+  }
+
+  trajectoryView(): Trajectory {
+    const config = this.store.requireConfig()
+    return { robotId: config.id, sessionId: config.liveSessionId, events: this.trajectory(), rewinds: this.store.rewinds() }
+  }
+
+  /** Replace secret values with a mask; the secrets ticket supplies the values. */
+  protected mask(text: string): string {
+    return text
+  }
+
+  // ---------------------------------------------------------------- rewind (robot-0q6a, robot-8v1t, robot-acr3)
+
+  /**
+   * Make a new live session seeded from the log up to and including `atSeq`. The old log
+   * stays in this Robot's SQLite as the archive, with a rewind record; nothing is rewritten.
+   * The Robot is told that external effects after the point still stand.
+   */
+  async rewind(atSeq: number): Promise<RewindView> {
+    const config = this.store.requireConfig()
+    if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw new Error('the Robot is working; rewind when it is done')
+    const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
+    if (!Number.isInteger(atSeq) || atSeq < 0 || atSeq >= events.length) throw new Error(`no event ${atSeq} in this Conversation`)
+    const dropped = events.slice(atSeq + 1)
+    const toolsAfter = [...new Set(dropped.filter((event) => event.type === 'tool/call').map((event) => String((event.data as { name?: unknown }).name)))]
+    const seed = buildForkSeed(events, SessionSeq(atSeq))
+    const sessionId = `s-${crypto.randomUUID()}`
+    const now = Date.now()
+    const rewind = { id: `rw-${crypto.randomUUID().slice(0, 8)}`, atSeq, archivedSessionId: config.liveSessionId, liveSessionId: sessionId, at: now }
+
+    await this.composition?.value.dispose()
+    this.composition = undefined
+    this.pendingSeed = { sessionId, events: seed, inheritedEventCount: atSeq + 1, parentSession: config.liveSessionId }
+    this.store.transaction(() => {
+      this.store.addRewind(rewind)
+      this.store.updateConfig(() => ({ liveSessionId: sessionId }))
+    })
+    const { agent, ctx } = await this.agent()
+    agent.inject(wakeupMessage({
+      sender: { kind: 'platform' },
+      text: [
+        'Your owner rewound this Conversation to an earlier point. Everything after that point is gone from your memory of the Conversation, but its external effects still stand: messages already sent, files written, carts filled, orders placed stay as they are.',
+        toolsAfter.length === 0 ? 'No tools were used after the rewind point.' : `After the rewind point you had used: ${toolsAfter.join(', ')}. Check the real state before you repeat or contradict anything.`,
+      ].join('\n'),
+    }))
+    await ctx.sessions.flush(agent.session)
+    this.store.addNotice(sessionId, storedLength(this.ctx.storage.sql, sessionId), `Rewound to an earlier point. The previous Conversation is kept in the archive.`, now)
+    await this.changed()
+    return { ...rewind, undone: false }
+  }
+
+  /** Undo the latest rewind: its archived log becomes live again (robot-8v1t). */
+  async undoRewind(id: string): Promise<RewindView> {
+    const config = this.store.requireConfig()
+    if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw new Error('the Robot is working; undo when it is done')
+    const rewind = this.store.rewinds().find((entry) => entry.id === id)
+    if (rewind === undefined || rewind.undone) throw new Error('no such rewind')
+    if (rewind.liveSessionId !== config.liveSessionId) throw new Error('only the latest rewind can be undone')
+    await this.composition?.value.dispose()
+    this.composition = undefined
+    this.store.transaction(() => {
+      this.store.markRewindUndone(id, Date.now())
+      this.store.updateConfig(() => ({ liveSessionId: rewind.archivedSessionId }))
+    })
+    await this.changed()
+    return { ...rewind, undone: true }
+  }
+
+  /** An archived log, read-only (the rewind archive). */
+  archivedTrajectory(sessionId: string): TrajectoryEvent[] {
+    if (!this.store.rewinds().some((rewind) => rewind.archivedSessionId === sessionId || rewind.liveSessionId === sessionId)) return []
+    return readStoredEvents(this.ctx.storage.sql, sessionId).map((event) => ({
+      seq: event.seq, type: event.type, time: event.time,
+      turn: typeof (event.data as { turn?: unknown }).turn === 'number' ? (event.data as { turn: number }).turn : null,
+      data: this.mask(JSON.stringify(event.data)),
     }))
   }
 

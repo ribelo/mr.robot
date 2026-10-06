@@ -7,6 +7,7 @@ import * as Schema from 'effect/Schema'
 import {
   MemberPreferences,
   ProposalAnswer,
+  RewindRequest,
   SendMessage,
   SettingsPatch,
   type Attachment,
@@ -76,7 +77,15 @@ export const api = new Router<ApiContext>()
     return yield* call(() => home(c.env).createRobot(c.member.id, brief))
   }))
   .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).conversation()))))
-  .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectory()))))
+  .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryView()))))
+  .on('POST', '/api/robots/:id/rewind', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const { atSeq } = yield* decodeBody(c.request, RewindRequest)
+    return yield* call(() => robot(c, id).rewind(atSeq)).pipe(Effect.mapError((error) => conflict(error.message)))
+  }))
+  .on('POST', '/api/robots/:id/rewinds/:rewind/undo', (c, { id, rewind }) => owner(c, id).pipe(
+    Effect.andThen(call(() => robot(c, id).undoRewind(rewind)).pipe(Effect.mapError((error) => conflict(error.message)))),
+  ))
   .on('POST', '/api/robots/:id/messages', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
     const message = yield* decodeBody(c.request, SendMessage)

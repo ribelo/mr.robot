@@ -7,7 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, { ReasoningEffortId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
@@ -20,6 +20,8 @@ import { SqliteSessionLog } from './session-log.ts'
 export interface CompositionInput {
   readonly storage: DurableObjectStorage
   readonly sessionId: string
+  /** A new session seeded from another one's prefix (rewind). Used only when the session does not exist yet. */
+  readonly seed?: { readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string }
   readonly onAppend?: (sessionId: string) => void
   readonly provider: string
   readonly model: string
@@ -74,7 +76,16 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     const exists = (await ctx.sessionPersistence.stat(id)) !== undefined
     const handle = exists
       ? await ctx.agents.resume({ resumeSessionId: id, agentOptions, setup })
-      : await ctx.agents.create({ sessionId: id, meta: { cwd: '/workspace' }, agentOptions, setup })
+      : input.seed === undefined
+        ? await ctx.agents.create({ sessionId: id, meta: { cwd: '/workspace' }, agentOptions, setup })
+        : await ctx.agents.create({
+          sessionId: id,
+          meta: { cwd: '/workspace', isSeeded: true, parentSession: SessionId(input.seed.parentSession) },
+          seed: input.seed.events,
+          inheritedEventCount: SessionLogOffset(input.seed.inheritedEventCount),
+          agentOptions,
+          setup,
+        })
     return {
       ctx,
       agent: handle.agent,

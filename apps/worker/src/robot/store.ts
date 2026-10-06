@@ -12,6 +12,7 @@ import type {
   NotificationSettings,
   ProposalKind,
   ProposalView,
+  RewindView,
   RobotStatus,
   RoutineSchedule,
   Sender,
@@ -323,6 +324,32 @@ export class RobotStore {
     return this.sql.exec<{ id: string; session_id: string; after_seq: number; at: number; text: string }>(
       'SELECT * FROM notice WHERE session_id = ? ORDER BY after_seq, at', sessionId,
     ).toArray().map((row) => ({ id: row.id, sessionId: row.session_id, afterSeq: row.after_seq, at: row.at, text: row.text }))
+  }
+
+  // ------------------------------------------------------------ rewinds (robot-0q6a, robot-8v1t)
+
+  rewinds(): RewindView[] {
+    return this.sql.exec<{ id: string; at_seq: number; archived_session_id: string; live_session_id: string; created_at: number; undone_at: number | null }>(
+      'SELECT * FROM rewind ORDER BY created_at',
+    ).toArray().map((row) => ({
+      id: row.id,
+      atSeq: row.at_seq,
+      archivedSessionId: row.archived_session_id,
+      liveSessionId: row.live_session_id,
+      at: row.created_at,
+      undone: row.undone_at !== null,
+    }))
+  }
+
+  addRewind(rewind: Omit<RewindView, 'undone'>): void {
+    this.sql.exec(
+      'INSERT INTO rewind (id, at_seq, archived_session_id, live_session_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      rewind.id, rewind.atSeq, rewind.archivedSessionId, rewind.liveSessionId, rewind.at,
+    )
+  }
+
+  markRewindUndone(id: string, now: number): void {
+    this.sql.exec('UPDATE rewind SET undone_at = ? WHERE id = ?', now, id)
   }
 
   // ------------------------------------------------------------ small values
