@@ -25,11 +25,12 @@ export function App() {
     return () => clearInterval(timer)
   }, [refreshRobots])
 
+  const [creating, setCreating] = useState(false)
+
   if (error !== undefined) return <div className="fatal">{error}</div>
   if (me === undefined) return <div className="fatal">Loading…</div>
 
   const selected = 'id' in route ? route.id : undefined
-  const [creating, setCreating] = useState(false)
   const create = () => setCreating(true)
   const created = async (id: string) => {
     setCreating(false)
