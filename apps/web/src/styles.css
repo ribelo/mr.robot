@@ -151,7 +151,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
 .check { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 8px; color: var(--text) !important; }
 .check small { display: block; color: var(--faint); }
-table.grid { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.grid { width: 100%; border-collapse: collapse; font-size: 13.5px; display: block; overflow-x: auto; }
+.page { overflow-x: hidden; }
 table.grid th, table.grid td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.grid th { color: var(--faint); font-weight: 500; }
 .state { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #ffffff12; white-space: nowrap; }
