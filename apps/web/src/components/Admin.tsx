@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AdminView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
 import { go } from '../route.ts'
+import { ConfirmButton } from './RobotSheets.tsx'
 
 const usd = (value: number) => `$${value.toFixed(2)}`
 const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value)
@@ -72,7 +73,7 @@ export function Admin() {
               <td>{member.name}<div className="muted">{member.email}</div></td>
               <td>{member.role === 'admin' ? 'admin' : member.status}</td>
               <td>{usd(member.usage.costUsd)}<div className="muted">{tokens(member.usage.inputTokens + member.usage.outputTokens)} tokens</div></td>
-              <td>{member.role === 'admin' || member.status === 'removed' ? null : <button type="button" className="link" onClick={() => { if (confirm(`Remove ${member.email}? Their Robots are paused.`)) void run(() => api.removeMember(member.id), 'Removed.') }}>Remove</button>}</td>
+              <td>{member.role === 'admin' || member.status === 'removed' ? null : <ConfirmButton label="Remove" confirm="Remove and pause their Robots" onConfirm={() => void run(() => api.removeMember(member.id), 'Removed.')} />}</td>
             </tr>
           ))}
         </tbody>

@@ -25,6 +25,7 @@ export interface ProjectionInput {
 export function projectChat(input: ProjectionInput): ChatItem[] {
   const items: ChatItem[] = []
   const calls = new Map<string, { name: string; args: Record<string, unknown> }>()
+  const innerCalls = new Map<string, Array<{ name: string; args: Record<string, unknown> }>>()
   const notices = [...input.notices]
   let lastMemberMessage = -1
 
@@ -89,9 +90,27 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         }
         break
       }
+      case 'tool/ptc-dispatch': {
+        // Code mode: the program's inner calls, shown once the program succeeds.
+        const root = String(data['rootCallId'])
+        const inner = innerCalls.get(root) ?? []
+        inner.push({ name: String(data['name']), args: (data['arguments'] ?? {}) as Record<string, unknown> })
+        innerCalls.set(root, inner)
+        break
+      }
       case 'tool/result': {
         const message = data['message'] as (MessageLike & { toolCallId?: string; isError?: boolean }) | undefined
         if (message === undefined || message.isError === true || data['error'] !== undefined) break
+        const inners = innerCalls.get(String(message.toolCallId)) ?? []
+        inners.forEach((inner, index) => {
+          const innerAction = ROUTINE_TOOLS[inner.name]
+          if (innerAction !== undefined) {
+            items.push({ kind: 'routine', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, name: String(inner.args['name'] ?? 'Routine') })
+          } else if (inner.name === 'react' && lastMemberMessage >= 0) {
+            const target = items[lastMemberMessage]
+            if (target?.kind === 'message') items[lastMemberMessage] = { ...target, reaction: String(inner.args['emoji'] ?? '👍') }
+          }
+        })
         const call = calls.get(String(message.toolCallId))
         if (call === undefined) break
         const result = parseResult(message)

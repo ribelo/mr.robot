@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort } from '@mr-robot/protocol'
 import { ModelSelect } from './ModelSelect.tsx'
+import { ConfirmButton } from './RobotSheets.tsx'
 import { api } from '../api.ts'
 
 export interface AdvancedSettingsProps {
@@ -132,7 +133,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         {panel.summary.status === 'paused'
           ? <button type="button" className="button" onClick={onResume}>Resume</button>
           : <button type="button" className="button" onClick={onPause}>Pause</button>}
-        {mrRobot ? null : <button type="button" className="button button-danger" onClick={onDelete}>Delete</button>}
+        {mrRobot ? null : <ConfirmButton label="Delete" confirm="Delete this Robot" onConfirm={onDelete} />}
         <span className="spacer" />
         <button type="button" className="button button-primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
       </div>

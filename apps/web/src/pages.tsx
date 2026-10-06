@@ -101,7 +101,7 @@ function AdvancedPage({ id, onChanged }: { id: string; onChanged: () => void }) 
           onPause={() => void act(() => api.pause(id), 'Paused.')}
           onResume={() => void act(() => api.resume(id), 'Resumed.')}
           onDelete={() => {
-            if (confirm('Delete this Robot? Its Conversation and Workspace stay in the archive.')) void act(() => api.remove(id)).then(() => go({ page: 'home' }))
+            void act(() => api.remove(id)).then(() => go({ page: 'home' }))
           }}
         />
       )}

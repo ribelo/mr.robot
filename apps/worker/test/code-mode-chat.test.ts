@@ -1,0 +1,36 @@
+import { reset } from 'cloudflare:test'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { Conversation } from '@mr-robot/protocol'
+import { api, settle, stubModels, testRobot } from './api.ts'
+import { scripts } from './stub-llm.ts'
+
+const ANNA = 'anna@example.com'
+
+beforeEach(async () => {
+  await reset()
+  scripts.clear()
+  await stubModels()
+  await api(ANNA, '/api/me')
+})
+
+describe('the chat in code mode (the default)', () => {
+  it('shows Routine cards, reactions and Grant questions made inside a program', async () => {
+    scripts.set('*', [{ text: 'Hello.' }])
+    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+    await settle(body.id)
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: true, grants: { tools: ['routines'], skills: [], recipients: [], secrets: [] } } })
+    await testRobot(body.id).activateForTest()
+    const program = [
+      "await tools.react({ emoji: '👍' })",
+      "await tools.routine_create({ name: 'Invoice check', prompt: 'Check invoices.', kind: 'daily', time: '09:00' })",
+      "return await tools.propose_grants({ purpose: 'Read the web for prices', tools: ['web'] })",
+    ].join('\n')
+    scripts.set(body.id, [{ calls: [{ name: 'run_code', args: { code: program, description: 'Set things up' } }] }, { text: 'Done.' }])
+    await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'set it up' } })
+    await settle(body.id)
+    const items = (await api<Conversation>(ANNA, `/api/robots/${body.id}/conversation`)).body.items
+    expect(items.find((item) => item.kind === 'message')).toMatchObject({ reaction: '👍' })
+    expect(items.find((item) => item.kind === 'routine')).toMatchObject({ action: 'created', name: 'Invoice check' })
+    expect(items.find((item) => item.kind === 'question')).toMatchObject({ proposal: { kind: 'grants', purpose: 'Read the web for prices' } })
+  })
+})

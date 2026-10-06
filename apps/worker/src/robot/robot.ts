@@ -1375,18 +1375,27 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   conversation(): Conversation {
     const config = this.store.requireConfig()
     const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
+    const items = projectChat({
+      events,
+      notices: this.store.notices(config.liveSessionId),
+      proposal: (id) => {
+        const row = this.store.proposal(id)
+        return row === undefined ? undefined : proposalView(row)
+      },
+    })
+    // A proposal made inside a code-mode program has no direct tool result to project from; an open
+    // proposal is always shown as a question so the owner can answer it (robot-vy9z).
+    const shown = new Set(items.flatMap((item) => (item.kind === 'question' ? [item.proposal.id] : [])))
+    for (const row of this.store.proposals('open')) {
+      if (shown.has(row.id)) continue
+      const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
+      items.splice(position, 0, { kind: 'question', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
+    }
     return {
       canRetry: this.store.get('failed-wakeup') !== undefined,
-            robotId: config.id,
+      robotId: config.id,
       working: this.store.activeTurn() !== undefined,
-      items: projectChat({
-        events,
-        notices: this.store.notices(config.liveSessionId),
-        proposal: (id) => {
-          const row = this.store.proposal(id)
-          return row === undefined ? undefined : proposalView(row)
-        },
-      }),
+      items,
     }
   }
 

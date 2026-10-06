@@ -118,7 +118,7 @@ export function RoutineSheet({ robotId, routineId, canEdit, onClose, onBack, onC
       {...(onBack === undefined ? {} : { onBack })}
       footer={canEdit ? (
         <>
-          <button type="button" className="link danger" onClick={() => { if (confirm(`Delete the Routine "${routine.name}"?`)) void act(() => api.deleteRoutine(robotId, routine.id), true) }}>Delete</button>
+          <ConfirmButton label="Delete" confirm="Delete for good" onConfirm={() => void act(() => api.deleteRoutine(robotId, routine.id), true)} />
           <span className="spacer" />
           <button type="button" className="button" onClick={() => void act(() => api.pauseRoutine(robotId, routine.id, !routine.paused))}>{routine.paused ? 'Resume' : 'Pause'}</button>
         </>
@@ -167,4 +167,17 @@ function Sheet({ title, onClose, onBack, footer, children }: { title?: string; o
       </div>
     </div>
   )
+}
+
+/** A destructive action asked twice in place, without a browser dialog. */
+export function ConfirmButton({ label, confirm, onConfirm }: { label: string; confirm: string; onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const timer = setTimeout(() => setArmed(false), 4000)
+    return () => clearTimeout(timer)
+  }, [armed])
+  return armed
+    ? <button type="button" className="button button-danger" onClick={onConfirm}>{confirm}</button>
+    : <button type="button" className="link danger" onClick={() => setArmed(true)}>{label}</button>
 }
