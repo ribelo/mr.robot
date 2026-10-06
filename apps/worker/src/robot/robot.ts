@@ -53,6 +53,7 @@ import { fileTools, memberFileTools } from '../agent/tools/files.ts'
 import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { webPlugin } from '../agent/web.ts'
+import { skillProposalTools, skillsPlugin } from '../agent/skills.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { ROBOT_FILES } from '../workspace/templates.ts'
@@ -466,6 +467,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       case 'notify': return notifyTools(this)
       case 'secrets': return secretTools(this, this.store.grants().secrets)
       case 'messaging': return messagingTools(this)
+      case 'skills': return skillProposalTools(this)
       case 'robots': return config.kind === 'chief' ? robotsTools(this) : []
       default: return []
     }
@@ -475,6 +477,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected plugins(config: RobotConfig): Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> {
     const plugins: Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> = []
     if (config.status !== 'setup' && this.store.hasGrant('tool', 'web')) plugins.push(webPlugin(this.credentials()))
+    if (config.status !== 'setup' && this.store.hasGrant('tool', 'skills')) {
+      plugins.push(skillsPlugin({
+        granted: () => this.home().loadableSkills(config.ownerId, this.store.grants().skills),
+        content: async (name) => this.store.grants().skills.includes(name) ? this.home().skillContent(config.ownerId, name) : null,
+      }))
+    }
     return plugins
   }
 
@@ -589,6 +597,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Proposal kinds beyond Grants: Member files here, skills in ticket 16. */
   protected async applyProposal(proposal: ProposalRow): Promise<void> {
+    if (proposal.kind === 'skill' && proposal.skill !== null) {
+      const visibility = proposal.payload['visibility'] === 'private' ? 'private' : 'home'
+      await this.home().publishSkill(this.store.requireConfig().ownerId, proposal.skill.name, proposal.skill.description, String(proposal.payload['content'] ?? ''), visibility)
+      return
+    }
     if (proposal.kind === 'member-file' && proposal.file !== null) {
       await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).writeFile(proposal.file.name as MemberFileName, proposal.file.content)
     }

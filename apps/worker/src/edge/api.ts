@@ -12,6 +12,7 @@ import {
   ProposalAnswer,
   PushSubscriptionInput,
   ShareInput,
+  SkillRepositoryInput,
   RewindRequest,
   SendMessage,
   SettingsPatch,
@@ -98,6 +99,17 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('DELETE', '/api/secrets/:name', (c, { name }) => call(() => home(c.env).deleteSecret(c.member.id, name)))
+
+  // ------------------------------------------------------------ skill library (robot-7qpi, robot-qjvu)
+  .on('GET', '/api/skills', (c) => call(async () => ({ skills: await home(c.env).skills(c.member.id), repository: await home(c.env).skillRepository() })))
+  .on('PUT', '/api/admin/skills/repository', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const input = yield* decodeBody(c.request, SkillRepositoryInput)
+    if (!/^[\w.-]+\/[\w.-]+$/.test(input.repo)) return yield* Effect.fail(badRequest('the repository is owner/name on GitHub'))
+    yield* call(() => home(c.env).setSkillRepository({ repo: input.repo, ref: input.ref || 'main', path: input.path }, input.token))
+    return { ok: true }
+  }))
+  .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.message))))))
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
   .on('GET', '/api/providers', (c) => call(() => home(c.env).providersView(c.member.id)))

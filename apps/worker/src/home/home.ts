@@ -18,10 +18,12 @@ import type {
   RobotSummary,
   SettingsCatalog,
   Sharing,
+  SkillView,
 } from '@mr-robot/protocol'
 import * as Effect from 'effect/Effect'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { makeVault } from '../platform/vault.ts'
+import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 
@@ -82,6 +84,10 @@ export class Home extends DurableObject<Env> {
       last_line TEXT NOT NULL, last_at INTEGER NOT NULL
     )`)
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+    sql.exec(`CREATE TABLE IF NOT EXISTS skill (
+      name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
+      owner_id TEXT, updated_at INTEGER NOT NULL
+    )`)
     sql.exec('CREATE TABLE IF NOT EXISTS shared_secret (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
   }
@@ -313,9 +319,82 @@ export class Home extends DurableObject<Env> {
     }
   }
 
-  /** Filled by the skill library (16), secrets (12) and providers (13) tickets. */
-  protected async grantableSkills(_memberId: string): Promise<SettingsCatalog['skills']> {
-    return []
+  protected async grantableSkills(memberId: string): Promise<SettingsCatalog['skills']> {
+    return this.skills(memberId).map(({ name, description }) => ({ name, description }))
+  }
+
+  // ---------------------------------------------------------------- the skill library (robot-7qpi, robot-qjvu, robot-lszy, robot-jqfw)
+
+  /** Skills a Member can see: every Home skill, and private skills of their own Robots. */
+  skills(memberId: string): SkillView[] {
+    return this.sql.exec<{ name: string; description: string; source: 'git' | 'robot'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number }>(
+      "SELECT * FROM skill WHERE visibility = 'home' OR owner_id = ? ORDER BY name", memberId,
+    ).toArray().map((row) => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at }))
+  }
+
+  /** Which of these names a Robot of this owner may load. */
+  loadableSkills(memberId: string, names: readonly string[]): SkillView[] {
+    return this.skills(memberId).filter((skill) => names.includes(skill.name))
+  }
+
+  async skillRepository(): Promise<SkillRepository | null> {
+    return this.setting<SkillRepository>('skillRepository') ?? null
+  }
+
+  async setSkillRepository(repository: SkillRepository, token: string | undefined): Promise<void> {
+    this.sql.exec("INSERT INTO setting (k, v) VALUES ('skillRepository', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(repository))
+    if (token !== undefined) {
+      const sealed = await Effect.runPromise(this.secretVault().seal(token))
+      this.sql.exec("INSERT INTO setting (k, v) VALUES ('skillRepositoryToken', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(sealed))
+    }
+  }
+
+  /** Pull the configured repository; its skills replace the previous Git skills (robot-qjvu). */
+  async syncSkills(): Promise<{ synced: string[] }> {
+    const repository = await this.skillRepository()
+    if (repository === null) throw new Error('set the skills repository first')
+    const sealed = this.setting<string>('skillRepositoryToken')
+    const token = sealed === undefined ? null : await Effect.runPromise(this.secretVault().open(sealed))
+    const files = await Effect.runPromise(fetchRepository(repository, token))
+    const skills = skillsInTree(files, repository.path)
+    const previous = this.sql.exec<{ name: string }>("SELECT name FROM skill WHERE source = 'git'").toArray().map((row) => row.name)
+    for (const skill of skills) {
+      await this.storeSkillFiles(skill.name, skill.files)
+      this.upsertSkill(skill.name, skill.description, 'git', 'home', null)
+    }
+    for (const gone of previous.filter((name) => !skills.some((skill) => skill.name === name))) {
+      this.sql.exec("DELETE FROM skill WHERE name = ? AND source = 'git'", gone)
+    }
+    return { synced: skills.map((skill) => skill.name) }
+  }
+
+  /** An approved Robot proposal enters the library (robot-jqfw). */
+  async publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private'): Promise<void> {
+    const existing = this.sql.exec<{ source: string; owner_id: string | null }>('SELECT source, owner_id FROM skill WHERE name = ?', name).toArray()[0]
+    if (existing !== undefined && (existing.source === 'git' || existing.owner_id !== ownerId)) throw new Error(`a skill named "${name}" already exists`)
+    await this.storeSkillFiles(name, [{ path: 'SKILL.md', body: new TextEncoder().encode(content) }])
+    this.upsertSkill(name, description, 'robot', visibility, ownerId)
+  }
+
+  async skillContent(memberId: string, name: string, path = 'SKILL.md'): Promise<string | null> {
+    if (!this.skills(memberId).some((skill) => skill.name === name)) return null
+    const object = await this.env.FILES.get(`skills/${name}/${path.replace(/\.\.\//g, '')}`)
+    return object === null ? null : object.text()
+  }
+
+  private async storeSkillFiles(name: string, files: ReadonlyArray<{ path: string; body: Uint8Array }>): Promise<void> {
+    const existing = await this.env.FILES.list({ prefix: `skills/${name}/` })
+    if (existing.objects.length > 0) await this.env.FILES.delete(existing.objects.map((object) => object.key))
+    await Promise.all(files.map((file) => this.env.FILES.put(`skills/${name}/${file.path}`, file.body)))
+  }
+
+  private upsertSkill(name: string, description: string, source: 'git' | 'robot', visibility: 'home' | 'private', ownerId: string | null): void {
+    this.sql.exec(
+      `INSERT INTO skill (name, description, source, visibility, owner_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (name) DO UPDATE SET description = excluded.description, source = excluded.source,
+         visibility = excluded.visibility, owner_id = excluded.owner_id, updated_at = excluded.updated_at`,
+      name, description, source, visibility, ownerId, Date.now(),
+    )
   }
 
   protected async grantableSecrets(memberId: string): Promise<SettingsCatalog['secrets']> {

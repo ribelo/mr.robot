@@ -294,6 +294,24 @@ export const HomeSettingsPatch = Schema.Struct({
   }))),
 })
 
+// ---------------------------------------------------------------- Skills (robot-7qpi)
+
+export interface SkillView {
+  readonly name: string
+  readonly description: string
+  readonly source: 'git' | 'robot'
+  readonly visibility: 'home' | 'private'
+  readonly ownerId: string | null
+  readonly updatedAt: number
+}
+
+export const SkillRepositoryInput = Schema.Struct({
+  repo: Schema.String,
+  ref: Schema.String,
+  path: Schema.String,
+  token: Schema.optional(Schema.String),
+})
+
 // ---------------------------------------------------------------- What a Robot's settings can choose from
 
 export interface ModelOption {
