@@ -1,4 +1,5 @@
 import type {
+  AdminView,
   Conversation,
   Me,
   MemberView,
@@ -77,6 +78,9 @@ export const api = {
   removeProvider: (provider: string) => request(`/api/providers/${provider}`, { method: 'DELETE' }),
   homeSettings: () => request<{ defaultModel: ModelChoice; robotSpendLimitUsd: number | null; memberSpendLimitUsd: number | null; models: ModelOption[] }>('/api/admin/settings'),
   updateHomeSettings: (patch: Record<string, unknown>) => request('/api/admin/settings', { method: 'PATCH', body: patch }),
+  admin: () => request<AdminView>('/api/admin'),
+  setSkillRepository: (input: { repo: string; ref: string; path: string; token?: string }) => request('/api/admin/skills/repository', { method: 'PUT', body: input }),
+  syncSkills: () => request<{ synced: string[] }>('/api/admin/skills/sync', { body: {} }),
   members: () => request<MemberView[]>('/api/admin/members'),
   invite: (email: string) => request<MemberView>('/api/admin/members', { body: { email } }),
   removeMember: (id: string) => request(`/api/admin/members/${id}`, { method: 'DELETE' }),

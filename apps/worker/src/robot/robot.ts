@@ -1397,6 +1397,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.tools(this.store.requireConfig()).map((tool) => tool.name)
   }
 
+  /** One row of the admin fleet list, from the DO itself (robot-x26m). */
+  adminRow(): { fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] } | null {
+    const config = this.store.config()
+    if (config === undefined) return null
+    return { fleetState: this.fleetState(), status: config.status, grants: this.store.grants(), model: config.model, usage: this.usage(), routines: this.routineViews() }
+  }
+
   openProposals(): ProposalView[] {
     return this.store.proposals('open').map(proposalView)
   }

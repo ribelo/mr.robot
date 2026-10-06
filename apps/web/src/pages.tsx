@@ -5,6 +5,7 @@ import { useLive } from './live.ts'
 import { go, type Route } from './route.ts'
 import { AdvancedSettings } from './components/AdvancedSettings.tsx'
 import { Profile } from './components/Profile.tsx'
+import { Admin } from './components/Admin.tsx'
 import { Takeover } from './components/Takeover.tsx'
 import { TrajectoryView } from './components/TrajectoryView.tsx'
 
@@ -13,6 +14,12 @@ export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; 
   switch (route.page) {
     case 'trajectory': return <TrajectoryPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} me={me} onChanged={onChanged} />
     case 'advanced': return <AdvancedPage id={route.id} onChanged={onChanged} />
+    case 'admin': return (
+      <div className="page">
+        <PageHead title="Admin" back={{ page: 'home' }} />
+        {me.role === 'admin' ? <Admin /> : <div className="muted">Only the Home admin sees this page.</div>}
+      </div>
+    )
     case 'takeover': return <TakeoverPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} />
     case 'profile': return (
       <div className="page">

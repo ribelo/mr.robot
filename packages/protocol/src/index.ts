@@ -296,6 +296,24 @@ export const HomeSettingsPatch = Schema.Struct({
   }))),
 })
 
+// ---------------------------------------------------------------- Admin view (robot-x26m, robot-1rap, robot-bvme)
+
+export interface FleetRow extends RobotSummary {
+  readonly grants: GrantSet
+  readonly model: ModelChoice
+  readonly usage: UsageView
+}
+
+export interface AdminView {
+  readonly fleet: readonly FleetRow[]
+  readonly routines: ReadonlyArray<RoutineView & { readonly robotName: string; readonly ownerName: string }>
+  readonly members: ReadonlyArray<MemberView & { readonly usage: UsageView }>
+  readonly skills: readonly SkillView[]
+  readonly skillRepository: { readonly repo: string; readonly ref: string; readonly path: string } | null
+  readonly providers: ReadonlyArray<{ readonly provider: string; readonly ownerName: string; readonly shared: boolean }>
+  readonly settings: { readonly defaultModel: ModelChoice; readonly robotSpendLimitUsd: number | null; readonly memberSpendLimitUsd: number | null; readonly models: readonly ModelOption[] }
+}
+
 // ---------------------------------------------------------------- Skills (robot-7qpi)
 
 export interface SkillView {

@@ -221,6 +221,7 @@ export const api = new Router<ApiContext>()
   .on('DELETE', '/api/robots/:id', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).remove()))))
 
   // ------------------------------------------------------------ admin (robot-x26m, robot-1rap, robot-d2uv)
+  .on('GET', '/api/admin', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).adminView()))))
   .on('GET', '/api/admin/members', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).members()))))
   .on('POST', '/api/admin/members', (c) => Effect.gen(function* () {
     yield* admin(c)

@@ -13,6 +13,7 @@ import type {
   ModelChoice,
   ModelOption,
   RobotStatus,
+  AdminView,
   ProvidersView,
   ProviderView,
   RobotSummary,
@@ -304,6 +305,34 @@ export class Home extends DurableObject<Env> {
   private summary(row: RobotSql): RobotSummary {
     const entry = entryFromSql(row)
     return { ...entry, ownerName: this.member(entry.ownerId)?.name ?? '', unread: false }
+  }
+
+  // ---------------------------------------------------------------- admin view (robot-x26m, robot-1rap, robot-bvme)
+
+  async adminView(): Promise<AdminView> {
+    const month = currentMonth()
+    const fleet = await Promise.all(this.fleet().map(async (summary) => {
+      const row = await this.env.ROBOT.getByName(summary.id).adminRow()
+      return row === null ? null : { summary, row }
+    }))
+    const live = fleet.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    const members = await Promise.all(this.members().map(async (member) => {
+      const usage = member.status === 'invited' ? { inputTokens: 0, outputTokens: 0, costUsd: 0 } : await this.env.MEMBER.getByName(member.id).usage(month)
+      return { ...member, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limitUsd: this.settings().memberSpendLimitUsd } }
+    }))
+    const providers = (await Promise.all(this.members().filter((member) => member.status === 'active').map(async (member) =>
+      (await this.env.MEMBER.getByName(member.id).providers()).map((view) => ({ provider: view.provider, ownerName: member.name, shared: view.shared }))))).flat()
+    return {
+      fleet: live.map(({ summary, row }) => ({ ...summary, fleetState: row.fleetState, status: row.status, grants: row.grants, model: row.model, usage: row.usage })),
+      routines: live.flatMap(({ summary, row }) => row.routines.map((routine) => ({ ...routine, robotName: summary.identity.name, ownerName: summary.ownerName })))
+        .sort((a, b) => (a.nextRun ?? Infinity) - (b.nextRun ?? Infinity)),
+      members,
+      skills: this.sql.exec<{ name: string; description: string; source: 'git' | 'robot'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number }>('SELECT * FROM skill ORDER BY name').toArray()
+        .map((row) => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at })),
+      skillRepository: await this.skillRepository(),
+      providers,
+      settings: { ...this.settings(), models: this.modelList() },
+    }
   }
 
   // ---------------------------------------------------------------- settings catalog (robot-vqtw)
