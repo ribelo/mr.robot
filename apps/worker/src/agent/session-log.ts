@@ -55,6 +55,11 @@ export function readStoredEvents(sql: SqlStorage, id: string, from = 0): Session
     .map((row) => JSON.parse(row.event) as SessionEvent)
 }
 
+/** Number of events stored for a session (0 when it does not exist yet). */
+export function storedLength(sql: SqlStorage, id: string): number {
+  return sql.exec<{ length: number }>('SELECT length FROM session_log WHERE id = ?', id).toArray()[0]?.length ?? 0
+}
+
 interface StoredLog {
   readonly header: SessionHeader
   readonly inherited: number
@@ -190,4 +195,3 @@ function snapshot(stored: StoredLog): SessionPersistenceSnapshot {
     eventCount: stored.length,
   }
 }
-

@@ -3,6 +3,7 @@ import { LlmAdapter, ToolCallId, type GenerateOptions, type LlmResolvedModelInfo
 /** One scripted model reply: text, or tool calls. */
 export type StubReply =
   | { readonly text: string }
+  | { readonly hang: true }
   | { readonly calls: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   | ((request: GenerateOptions) => StubReply)
 
@@ -26,6 +27,12 @@ export class StubLlm extends LlmAdapter {
     const scripted = scripts.get(this.robotId)?.shift() ?? { text: 'ok' }
     const reply = typeof scripted === 'function' ? scripted(options) : scripted
     if (typeof reply === 'function') throw new Error('StubLlm: a scripted reply function must return a reply')
+    if ('hang' in reply) {
+      await new Promise<void>((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+      })
+      return
+    }
     if ('text' in reply) {
       yield { type: 'block-start', index: 0, blockType: 'text' }
       yield { type: 'text-delta', index: 0, text: reply.text }

@@ -1,2 +1,282 @@
-/** Shapes shared by the edge Worker, the Durable Objects and the PWA. */
+/**
+ * Shapes shared by the edge Worker, the Durable Objects and the PWA.
+ * Vocabulary follows GLOSSARY.md. Request bodies are Effect Schemas so the edge
+ * validates what it accepts; views are plain types the PWA renders.
+ */
+import * as Schema from 'effect/Schema'
+
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
+
+// ---------------------------------------------------------------- Home, Members
+
+export type MemberRole = 'admin' | 'member'
+export type MemberStatus = 'active' | 'invited' | 'removed'
+
+export interface MemberView {
+  readonly id: string
+  readonly email: string
+  readonly name: string
+  readonly role: MemberRole
+  readonly status: MemberStatus
+}
+
+export interface Me extends MemberView {
+  readonly home: string
+  readonly timeZone: string
+  readonly quietHours: QuietHours | null
+  readonly vapidPublicKey: string
+}
+
+export const QuietHours = Schema.Struct({
+  /** Local start, "HH:MM". */
+  start: Schema.String,
+  /** Local end, "HH:MM"; may be earlier than start (overnight). */
+  end: Schema.String,
+})
+export type QuietHours = typeof QuietHours.Type
+
+export const MemberPreferences = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  timeZone: Schema.optional(Schema.String),
+  quietHours: Schema.optional(Schema.NullOr(QuietHours)),
+})
+
+// ---------------------------------------------------------------- Robots
+
+export type RobotStatus = 'setup' | 'active' | 'paused' | 'blocked' | 'deleted'
+/** What the admin fleet view shows for a Robot. */
+export type FleetState = 'sleeping' | 'working' | 'waiting for you' | 'paused' | 'blocked' | 'setup'
+export type Sharing = 'private' | 'home'
+export type ThinkingEffort = 'off' | 'low' | 'medium' | 'high' | 'max'
+
+export const Identity = Schema.Struct({
+  name: Schema.String,
+  title: Schema.String,
+  description: Schema.String,
+  avatarColor: Schema.String,
+})
+export type Identity = typeof Identity.Type
+
+export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret'])
+export type GrantKind = typeof GrantKind.Type
+
+export const GrantSet = Schema.Struct({
+  tools: Schema.Array(Schema.String),
+  skills: Schema.Array(Schema.String),
+  recipients: Schema.Array(Schema.String),
+  secrets: Schema.Array(Schema.String),
+})
+export type GrantSet = typeof GrantSet.Type
+export const emptyGrants: GrantSet = { tools: [], skills: [], recipients: [], secrets: [] }
+
+export const ModelChoice = Schema.Struct({
+  provider: Schema.String,
+  model: Schema.String,
+  effort: Schema.Literals(['off', 'low', 'medium', 'high', 'max']),
+})
+export type ModelChoice = typeof ModelChoice.Type
+
+export const NotificationSettings = Schema.Struct({
+  enabled: Schema.Boolean,
+  /** Members notified; empty means the owner only. */
+  members: Schema.Array(Schema.String),
+  /** Enabled Channels by id; "pwa" is always present. */
+  channels: Schema.Array(Schema.String),
+})
+export type NotificationSettings = typeof NotificationSettings.Type
+
+/** Everything the advanced settings page edits. */
+export interface RobotSettings {
+  readonly identity: Identity
+  readonly sharing: Sharing
+  readonly model: ModelChoice
+  readonly contextBudget: number
+  readonly codeMode: boolean
+  readonly compactionInstruction: string
+  readonly grants: GrantSet
+  readonly notifications: NotificationSettings
+  /** Monthly limit in USD; null inherits the Home default. */
+  readonly spendLimitUsd: number | null
+}
+
+export const SettingsPatch = Schema.Struct({
+  identity: Schema.optional(Identity),
+  sharing: Schema.optional(Schema.Literals(['private', 'home'])),
+  model: Schema.optional(ModelChoice),
+  contextBudget: Schema.optional(Schema.Number),
+  codeMode: Schema.optional(Schema.Boolean),
+  compactionInstruction: Schema.optional(Schema.String),
+  grants: Schema.optional(GrantSet),
+  notifications: Schema.optional(NotificationSettings),
+  spendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
+})
+export type SettingsPatch = typeof SettingsPatch.Type
+
+/** One row of the robot list. */
+export interface RobotSummary {
+  readonly id: string
+  readonly ownerId: string
+  readonly ownerName: string
+  readonly kind: 'chief' | 'robot'
+  readonly identity: Identity
+  readonly sharing: Sharing
+  readonly status: RobotStatus
+  readonly fleetState: FleetState
+  readonly lastLine: string
+  readonly lastAt: number
+  readonly unread: boolean
+}
+
+export interface RobotPanel {
+  readonly summary: RobotSummary
+  readonly settings: RobotSettings
+  readonly routines: readonly RoutineView[]
+  readonly screen: ScreenView | null
+  readonly usage: UsageView
+  readonly canEdit: boolean
+}
+
+export interface ScreenView {
+  /** Workspace path of the last screenshot. */
+  readonly path: string
+  readonly url: string
+  readonly at: number
+}
+
+// ---------------------------------------------------------------- Routines
+
+export const RoutineSchedule = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('once'), at: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('interval'), everyMinutes: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal('daily'), time: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('weekly'), time: Schema.String, weekdays: Schema.Array(Schema.Number) }),
+  Schema.Struct({ kind: Schema.Literal('cron'), expression: Schema.String }),
+])
+export type RoutineSchedule = typeof RoutineSchedule.Type
+
+export interface RoutineView {
+  readonly id: string
+  readonly robotId: string
+  readonly name: string
+  readonly prompt: string
+  readonly schedule: RoutineSchedule
+  readonly timeZone: string
+  readonly summary: string
+  readonly nextRun: number | null
+  readonly lastRun: number | null
+}
+
+// ---------------------------------------------------------------- Conversation
+
+export interface Attachment {
+  readonly name: string
+  /** Workspace path, e.g. attachments/2026-10-06/report.pdf */
+  readonly path: string
+  readonly size: number
+  readonly contentType: string
+}
+
+/** Who sent a message into a Robot's Conversation. */
+export type Sender =
+  | { readonly kind: 'member'; readonly memberId: string; readonly name: string }
+  | { readonly kind: 'robot'; readonly robotId: string; readonly name: string; readonly avatarColor: string }
+  | { readonly kind: 'routine'; readonly routineId: string; readonly name: string }
+  | { readonly kind: 'channel'; readonly channel: string; readonly from: string }
+  | { readonly kind: 'platform' }
+
+/** One item of the simple chat view. */
+export type ChatItem =
+  | {
+    readonly kind: 'message'
+    readonly id: string
+    readonly seq: number
+    readonly at: number
+    readonly sender: Sender
+    readonly text: string
+    readonly attachments: readonly Attachment[]
+    readonly reaction: string | null
+  }
+  | { readonly kind: 'reply'; readonly id: string; readonly seq: number; readonly at: number; readonly text: string }
+  | { readonly kind: 'routine'; readonly id: string; readonly seq: number; readonly at: number; readonly action: 'created' | 'updated' | 'deleted' | 'ran'; readonly name: string }
+  | { readonly kind: 'question'; readonly id: string; readonly seq: number; readonly at: number; readonly proposal: ProposalView }
+  | { readonly kind: 'notice'; readonly id: string; readonly seq: number; readonly at: number; readonly text: string }
+  | { readonly kind: 'working'; readonly id: string; readonly seq: number; readonly at: number }
+
+export interface Conversation {
+  readonly robotId: string
+  readonly items: readonly ChatItem[]
+  readonly working: boolean
+}
+
+/** One raw event of the Trajectory, with secrets masked; data is JSON text. */
+export interface TrajectoryEvent {
+  readonly seq: number
+  readonly type: string
+  readonly time: number
+  readonly turn: number | null
+  readonly data: string
+}
+
+export interface Trajectory {
+  readonly robotId: string
+  readonly sessionId: string
+  readonly events: readonly TrajectoryEvent[]
+  readonly rewinds: readonly RewindView[]
+}
+
+export interface RewindView {
+  readonly id: string
+  readonly atSeq: number
+  readonly archivedSessionId: string
+  readonly liveSessionId: string
+  readonly at: number
+  readonly undone: boolean
+}
+
+// ---------------------------------------------------------------- Grant proposals and questions
+
+export type ProposalKind = 'setup' | 'grants' | 'member-file' | 'skill' | 'takeover'
+
+export interface ProposalView {
+  readonly id: string
+  readonly kind: ProposalKind
+  readonly revision: number
+  readonly status: 'open' | 'approved' | 'rejected' | 'superseded' | 'done'
+  readonly purpose: string
+  /** Grants asked for (setup, grants). */
+  readonly grants: GrantSet | null
+  /** Member file edit: file name and the full proposed content. */
+  readonly file: { readonly name: string; readonly content: string } | null
+  /** Skill proposed to the library. */
+  readonly skill: { readonly name: string; readonly description: string } | null
+}
+
+export const ProposalAnswer = Schema.Struct({
+  revision: Schema.Number,
+  approve: Schema.Boolean,
+})
+
+// ---------------------------------------------------------------- Usage
+
+export interface UsageView {
+  readonly month: string
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly costUsd: number
+  readonly limitUsd: number | null
+}
+
+// ---------------------------------------------------------------- Requests
+
+export const SendMessage = Schema.Struct({
+  text: Schema.String,
+  attachments: Schema.optional(Schema.Array(Schema.Struct({
+    name: Schema.String,
+    path: Schema.String,
+    size: Schema.Number,
+    contentType: Schema.String,
+  }))),
+})
+export type SendMessage = typeof SendMessage.Type
+
+export const RewindRequest = Schema.Struct({ atSeq: Schema.Number })
