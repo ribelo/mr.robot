@@ -9,11 +9,13 @@ import {
   ProposalAnswer,
   SendMessage,
   SettingsPatch,
+  type Attachment,
   type Me,
   type MemberView,
   type RobotPanel,
 } from '@mr-robot/protocol'
 import { HOME_ID, type Env } from '../env.ts'
+import { makeWorkspace } from '../workspace/workspace.ts'
 import type { AnswerResult } from '../robot/robot.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
 
@@ -25,6 +27,7 @@ export interface ApiContext {
 }
 
 const home = (env: Env) => env.HOME.getByName(HOME_ID)
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 
 /** The caller may use this Robot (owner, or shared with the Home); returns how. */
 function reach(c: ApiContext, robotId: string): Effect.Effect<'owner' | 'shared', ApiError> {
@@ -81,6 +84,19 @@ export const api = new Router<ApiContext>()
     const sender = { kind: 'member' as const, memberId: c.member.id, name: c.member.name }
     const wakeup = yield* call(() => robot(c, id).wake({ kind: 'member', sender, text: message.text, attachments: message.attachments ?? [] }))
     return { wakeup }
+  }))
+  .on('PUT', '/api/robots/:id/files', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const name = new URL(c.request.url).searchParams.get('name') ?? ''
+    const safe = name.replace(/[\\/]/g, '_').replace(/^\.+/, '').slice(0, 200)
+    if (safe === '' || c.request.body === null) return yield* Effect.fail(badRequest('a file name and body are required'))
+    const size = Number(c.request.headers.get('content-length') ?? '0')
+    if (size > MAX_ATTACHMENT_BYTES) return yield* Effect.fail(badRequest('files up to 50 MB'))
+    const contentType = c.request.headers.get('content-type') ?? 'application/octet-stream'
+    const path = `attachments/${new Date().toISOString().slice(0, 10)}/${Date.now().toString(36)}-${safe}`
+    const entry = yield* makeWorkspace(c.env.FILES, id).write(path, c.request.body, contentType).pipe(Effect.mapError((error) => badRequest(error.message)))
+    const attachment: Attachment = { name: safe, path: entry.path, size: entry.size, contentType }
+    return attachment
   }))
   .on('GET', '/api/robots/:id/panel', (c, { id }) => Effect.gen(function* () {
     const access = yield* reach(c, id)

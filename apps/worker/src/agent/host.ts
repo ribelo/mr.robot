@@ -3,7 +3,10 @@
  * it; tools never touch the DO or its storage directly.
  */
 import type { GrantSet, Identity, ProposalKind, ProposalView, RoutineSchedule, RoutineView } from '@mr-robot/protocol'
+import type * as Effect from 'effect/Effect'
+import type { MemberFileName } from '../member/member.ts'
 import type { RobotConfig } from '../robot/store.ts'
+import type { WorkspaceShape } from '../workspace/workspace.ts'
 
 export interface RobotHost {
   config(): RobotConfig
@@ -12,6 +15,13 @@ export interface RobotHost {
   propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView
   setIdentity(identity: Partial<Identity>): Identity
   now(): number
+}
+
+export interface WorkspaceHost {
+  readonly workspace: WorkspaceShape
+  /** The owner's Member file, mounted read-only (robot-mj7v). */
+  memberFile(name: MemberFileName): Promise<string>
+  run<A, E>(effect: Effect.Effect<A, E>): Promise<A>
 }
 
 export interface RoutineHost {

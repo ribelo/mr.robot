@@ -50,10 +50,10 @@ describe('creating a Robot', () => {
     expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'Hi! What should I do for you?' })
   })
 
-  it('in setup may only ask and propose: no world-facing tools are offered (robot-cobv)', async () => {
+  it('in setup may only ask, propose and write its own persona: no world-facing tools (robot-cobv)', async () => {
     const id = await newRobot(ANNA)
     const tools = await env.ROBOT.getByName(id).toolNames()
-    expect(tools.sort()).toEqual(['react', 'set_identity', 'setup_complete'])
+    expect(tools.sort()).toEqual(['delete_file', 'edit_file', 'glob', 'grep', 'react', 'read_file', 'set_identity', 'setup_complete', 'write_file'])
   })
 
   it('asks for Grants in one summary; approval is a compare-and-swap that applies exactly that set (robot-cobv)', async () => {

@@ -2,7 +2,7 @@ import { LlmAdapter, ToolCallId, type GenerateOptions, type LlmResolvedModelInfo
 
 /** One scripted model reply: text, or tool calls. */
 export type StubReply =
-  | { readonly text: string }
+  | { readonly text: string; readonly inputTokens?: number }
   | { readonly hang: true }
   | { readonly calls: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   | ((request: GenerateOptions) => StubReply)
@@ -37,7 +37,7 @@ export class StubLlm extends LlmAdapter {
       yield { type: 'block-start', index: 0, blockType: 'text' }
       yield { type: 'text-delta', index: 0, text: reply.text }
       yield { type: 'block-end', index: 0, block: { type: 'text', text: reply.text } }
-      yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 10 } }
+      yield { type: 'usage', usage: { inputTokens: reply.inputTokens ?? 100, outputTokens: 10 } }
       yield { type: 'finish', reason: { kind: 'stop' } }
       return
     }

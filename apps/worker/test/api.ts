@@ -1,5 +1,6 @@
 import { env, SELF } from 'cloudflare:test'
 import type { RobotSummary } from '@mr-robot/protocol'
+import type { Robot as TestRobot } from './worker.ts'
 
 export const STUB_MODEL = { provider: 'stub', model: 'stub', effort: 'off' } as const
 
@@ -24,4 +25,8 @@ export async function robots(as: string): Promise<RobotSummary[]> {
 
 export async function settle(id: string): Promise<void> {
   await env.ROBOT.getByName(id).settled()
+}
+/** A Robot stub typed as the test Robot (with its test-only methods). */
+export function testRobot(id: string): DurableObjectStub<TestRobot> {
+  return env.ROBOT.getByName(id) as unknown as DurableObjectStub<TestRobot>
 }

@@ -49,9 +49,14 @@ export class BudgetedAdapter extends LlmAdapter {
     return this.inner.stream(options)
   }
 
+  /**
+   * The window becomes the budget, and the default output reservation shrinks to at most a
+   * quarter of it, so a small budget still leaves room for the conversation itself.
+   */
   private cap(info: LlmResolvedModelInfo): LlmResolvedModelInfo {
     const window = info.context?.contextWindow
     const contextWindow = window === undefined ? this.budget : Math.min(window, this.budget)
-    return { ...info, context: { ...info.context, contextWindow } }
+    const defaultMaxTokens = Math.min(info.defaultMaxTokens ?? 32_000, Math.floor(contextWindow / 4))
+    return { ...info, context: { ...info.context, contextWindow }, defaultMaxTokens }
   }
 }

@@ -8,6 +8,7 @@
  * interrupted Turn resumes from the last persisted event.
  */
 import { DurableObject } from 'cloudflare:workers'
+import * as Effect from 'effect/Effect'
 import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
@@ -33,13 +34,19 @@ import type {
 } from '@mr-robot/protocol'
 import { CHIEF_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
 import { compose, type Composition } from '../agent/compose.ts'
-import type { RobotHost } from '../agent/host.ts'
+import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage } from '../agent/sources.ts'
 import { conversationTools } from '../agent/tools/conversation.ts'
+import { fileTools, memberFileTools } from '../agent/tools/files.ts'
 import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
+import { webPlugin } from '../agent/web.ts'
+import type { MemberFileName } from '../member/member.ts'
+import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
+import { ROBOT_FILES } from '../workspace/templates.ts'
+import { makeWorkspace, type WorkspaceShape } from '../workspace/workspace.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import type { RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
@@ -75,10 +82,11 @@ export type AnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
   | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
 
-export class Robot extends DurableObject<Env> implements RobotHost {
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
+  private persona: PersonaSnapshot = { files: [], soul: '' }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -116,6 +124,7 @@ export class Robot extends DurableObject<Env> implements RobotHost {
       if (init.brief !== undefined) this.store.set('brief', init.brief)
       if (init.kind === 'chief') this.store.setGrants({ tools: [...CHIEF_TOOLS], skills: [], recipients: [], secrets: [] })
     })
+    await this.seedWorkspace()
     await this.report()
     if (init.status === 'setup') {
       await this.wake({
@@ -197,6 +206,7 @@ export class Robot extends DurableObject<Env> implements RobotHost {
 
   private async runTurn(wakeup: Wakeup, resuming: boolean): Promise<void> {
     const { agent, ctx } = await this.agent()
+    await this.refreshPersona()
     if (!resuming) {
       this.store.beginTurn(wakeup.id, agent.session.id, storedLength(this.ctx.storage.sql, agent.session.id), Date.now())
       agent.followup(wakeupMessage({
@@ -218,9 +228,24 @@ export class Robot extends DurableObject<Env> implements RobotHost {
     await agent.whenIdle()
     await ctx.sessions.flush(agent.session)
     this.store.endTurn(wakeup.id)
+    await this.afterTurn(wakeup)
     await this.rearm()
     await this.changed()
   }
+
+  /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
+  protected async afterTurn(_wakeup: Wakeup): Promise<void> {
+    const soul = (await this.run(this.workspace.readText('SOUL.md'))) ?? ''
+    if (soul !== this.persona.soul) {
+      const config = this.store.requireConfig()
+      this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${config.identity.name} changed SOUL.md.`, Date.now())
+      this.persona = { ...this.persona, soul }
+      await this.soulChanged()
+    }
+  }
+
+  /** Tell the owner the Robot changed who it is (robot-h1nm); Web Push joins in ticket 11. */
+  protected async soulChanged(): Promise<void> {}
 
   /** A Turn that could not run is never silent: it becomes a notice and the Robot stays runnable. */
   private failed(error: unknown): void {
@@ -245,6 +270,7 @@ export class Robot extends DurableObject<Env> implements RobotHost {
     const brief = this.store.get<string>('brief') ?? null
     const prompt = [{ name: 'platform', text: () => platformPrompt(this.store.requireConfig(), owner.name) }]
     if (config.status === 'setup') prompt.push({ name: 'setup', text: () => setupPrompt(owner.name, brief) })
+    prompt.push({ name: 'workspace', text: () => personaText(this.persona) })
     const value = await compose({
       storage: this.ctx.storage,
       sessionId: config.liveSessionId,
@@ -257,6 +283,7 @@ export class Robot extends DurableObject<Env> implements RobotHost {
       compactionInstruction: config.compactionInstruction,
       prompt,
       tools: this.tools(config),
+      plugins: this.plugins(config),
     })
     this.composition = { revision: config.revision, value }
     return value
@@ -277,15 +304,58 @@ export class Robot extends DurableObject<Env> implements RobotHost {
   /** Exactly the tools this Robot may call: the Conversation tools plus its granted groups. */
   protected tools(config: RobotConfig): ToolDefinition[] {
     const tools = [...conversationTools()]
-    if (config.status === 'setup') return [...tools, ...setupTools(this)]
-    tools.push(...grantProposalTools(this))
+    if (config.status === 'setup') return [...tools, ...setupTools(this), ...fileTools(this)]
+    tools.push(...grantProposalTools(this), ...memberFileTools(this))
     for (const group of this.store.grants().tools.filter(isToolGroup)) tools.push(...this.groupTools(group, config))
     return tools
   }
 
-  /** Tools of one granted group; filled in by the tickets that build each group. */
-  protected groupTools(_group: ToolGroup, _config: RobotConfig): ToolDefinition[] {
-    return []
+  /** Tools of one granted group. Groups whose tools come from a DSH plugin are mounted in plugins(). */
+  protected groupTools(group: ToolGroup, _config: RobotConfig): ToolDefinition[] {
+    switch (group) {
+      case 'files': return fileTools(this)
+      default: return []
+    }
+  }
+
+  /** Seam plugins for granted groups (DSH web, skills). */
+  protected plugins(config: RobotConfig): Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> {
+    const plugins: Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> = []
+    if (config.status !== 'setup' && this.store.hasGrant('tool', 'web')) plugins.push(webPlugin(this.credentials()))
+    return plugins
+  }
+
+  // ---------------------------------------------------------------- Workspace
+
+  get workspace(): WorkspaceShape {
+    return makeWorkspace(this.env.FILES, this.store.requireConfig().id)
+  }
+
+  run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
+    return Effect.runPromise(effect)
+  }
+
+  memberFile(name: MemberFileName): Promise<string> {
+    return this.env.MEMBER.getByName(this.store.requireConfig().ownerId).file(name)
+  }
+
+  /** The Muse layout, written once when the Robot is created (robot-om9f). */
+  private async seedWorkspace(): Promise<void> {
+    const ws = this.workspace
+    await this.run(Effect.forEach(Object.entries(ROBOT_FILES), ([path, content]) =>
+      ws.stat(path).pipe(Effect.flatMap((existing): Effect.Effect<unknown, unknown> => existing === undefined ? ws.write(path, content) : Effect.void)), { concurrency: 4, discard: true }))
+  }
+
+  private async refreshPersona(): Promise<void> {
+    const config = this.store.requireConfig()
+    const ws = this.workspace
+    const own = [...PERSONA_FILES, ...dailyNotePaths(Date.now(), config.timeZone)]
+    const files = await this.run(Effect.forEach(own, (path) => ws.readText(path).pipe(Effect.map((content) => ({ path, content: content ?? '' }))), { concurrency: 8 }))
+    const member = await this.env.MEMBER.getByName(config.ownerId).files().catch(() => ({ 'USER.md': '', 'PROACTIVE_PREFERENCES.md': '' }))
+    this.persona = {
+      files: [...files, { path: 'USER.md', content: member['USER.md'] }, { path: 'PROACTIVE_PREFERENCES.md', content: member['PROACTIVE_PREFERENCES.md'] }],
+      soul: files.find((file) => file.path === 'SOUL.md')?.content ?? '',
+    }
   }
 
   // ---------------------------------------------------------------- RobotHost
@@ -363,8 +433,12 @@ export class Robot extends DurableObject<Env> implements RobotHost {
     }
   }
 
-  /** Proposal kinds owned by later tickets (Member files, skills). */
-  protected async applyProposal(_proposal: ProposalRow): Promise<void> {}
+  /** Proposal kinds beyond Grants: Member files here, skills in ticket 16. */
+  protected async applyProposal(proposal: ProposalRow): Promise<void> {
+    if (proposal.kind === 'member-file' && proposal.file !== null) {
+      await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).writeFile(proposal.file.name as MemberFileName, proposal.file.content)
+    }
+  }
 
   /** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
   async setRecipients(robotIds: readonly string[]): Promise<void> {

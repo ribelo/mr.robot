@@ -14,7 +14,7 @@ import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import ToolRuntime, { type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ThinkingEffort } from '@mr-robot/protocol'
 import { BudgetedAdapter } from './budget.ts'
-import { robotCompaction } from './compaction.ts'
+import { compactionConfig, robotCompaction } from './compaction.ts'
 import { SqliteSessionLog } from './session-log.ts'
 
 export interface CompositionInput {
@@ -31,6 +31,8 @@ export interface CompositionInput {
   readonly prompt: ReadonlyArray<{ readonly name: string; readonly text: () => string }>
   /** Exactly the tools this Robot may call; nothing else is registered (robot-f9ln). */
   readonly tools: readonly ToolDefinition[]
+  /** Extra seam plugins mounted for granted capabilities (web, skills, ...). */
+  readonly plugins?: ReadonlyArray<(ctx: Context) => Promise<void>>
   /** Code mode (robot-5ewr): plugin that provides ctx.ptcRuntime, or undefined for direct tool calls. */
   readonly ptcRuntime?: (ctx: Context) => Promise<void>
 }
@@ -52,8 +54,9 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     await ctx.plugin(TokenMeter)
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
     await ctx.plugin(ToolRuntime, {})
+    for (const plugin of input.plugins ?? []) await plugin(ctx)
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
-    await ctx.plugin(robotCompaction(input.compactionInstruction), {})
+    await ctx.plugin(robotCompaction(input.compactionInstruction), compactionConfig(input.contextBudget))
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
 
