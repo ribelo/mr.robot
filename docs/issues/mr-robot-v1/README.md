@@ -23,3 +23,6 @@ Tracker: Markdown files in this directory. Work the frontier: any ticket whose b
 | 17 | [Admin view](17-admin-view.md) | 06, 13, 14, 16 |
 | 18 | [Channel seam with the PWA as first adapter](18-channel-seam.md) | 11 |
 | 19 | [OpenCode Go as a Provider with key rotation](19-opencode-go-provider.md) | 13 |
+| 20 | [Live model catalogs from configured providers](20-live-model-catalogs.md) | 13 |
+| 21 | [Robot list menu, Edit profile sheet, routine detail](21-robot-profile-and-routine-detail.md) | 06, 11 |
+| 22 | [Trajectory view with DeepSeek Harness parity](22-trajectory-parity-with-dsh.md) | 10 |

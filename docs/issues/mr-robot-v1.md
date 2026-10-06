@@ -143,6 +143,23 @@ The application starts empty; each person gets a personal chief robot, **Mr. Rob
 85. As an operator, I want the browser provided by Cloudflare Browser Rendering, so that no machine of mine is involved ^robot-0eew
 86. As an operator, I want a robot's turn to survive the client closing the tab, so that the phone can go to sleep ^robot-p9jm
 
+### Added 2026-10-06 after the first review of the deployed v1
+
+87. As a person, I want the Model list in a robot's advanced settings to contain exactly the models of the providers configured in my Home, read from each provider's live catalog, so that I can choose any model my subscriptions and keys actually give me ^robot-d994
+88. As a Home admin, I want to refresh provider catalogs from the admin view and see when each was last fetched, so that new models appear without a redeploy ^robot-3f4i
+89. As a person, I want a robot never to be created with a model whose provider has no credential, and the app to send me to provider setup when nothing is configured, so that a fresh robot cannot fail its first turn ^robot-mx6s
+90. As a person, I want a context menu on each robot in the list (Pin, Mark as unread, Edit profile, Hide from sidebar), so that everyday actions are one tap away as in the reference screens ^robot-mktj
+91. As a person, I want an Edit profile sheet with avatar, name, title, description, the wake-on-notification toggle and the routines list, so that the simple settings match the reference screens ^robot-lulc
+92. As a person, I want to open any routine and see its schedule in words and in cron with time zone, its status, next run, its full instructions and recent runs, so that I know what a routine will do before it does it ^robot-l3gr
+93. As a person, I want to pause, resume and delete a routine from its detail view, so that I control each routine without talking to the robot ^robot-qhll
+94. As a person, I want the trajectory view to match the DeepSeek Harness web client's Trajectory tab: a turn-aware ledger with User, Assistant, Tool and nested Subtool records, turn and step boundaries, and a timing overview strip (Duration, Turns, Calls), so that I can read what the robot did the way I read it on my desktop ^robot-3ioa
+95. As a person, I want every trajectory record to open an inspector with input, output, token usage, duration and images, so that no tool call is a bare label ^robot-cmz9
+96. As a person, I want to search the trajectory and page backwards through older events, so that a long conversation stays navigable ^robot-gq88
+97. As a person, I want the trajectory to render the executed code-mode program and its tool calls as nested records, so that code mode is as inspectable as direct tool calls ^robot-s54i
+98. As a person, I want the chat view to show tool activity compactly (what the robot is doing now, collapsed tool cards), so that the simple view is not a wall of raw event names ^robot-gr94
+99. As a person, I want the list entry of a robot to show its last line and time and never a raw error string, so that failures are presented as a state (blocked, needs you) with a reason inside the conversation ^robot-n7th
+100. As a person, I want every screen in the app to be reachable from the simple views without a URL, so that nothing exists only as a route ^robot-g6y0
+
 ## Implementation Decisions
 
 ### Vocabulary
@@ -211,7 +228,7 @@ Persona and memory are **not** fields: they are files in the workspace (SOUL.md,
 - Skills are granted per robot; the DSH skill seam loads only granted skills into the robot's catalog.
 
 ### Providers, usage, limits
-- Providers: OpenAI subscription (OAuth), Anthropic subscription (OAuth), DeepSeek API, OpenRouter, Workers AI. Credentials live in the Member DO and may be shared with the Home; the Home default model applies to new robots.
+- Providers: OpenAI subscription (OAuth), Anthropic subscription (OAuth), DeepSeek API, OpenRouter, Workers AI. Model lists are never static: each provider adapter exposes a live catalog (OpenRouter /models, Workers AI model listing, the subscriptions' model lists, DeepSeek's list), cached in the Home DO with a fetched-at time and refreshable from the admin view; a robot's Model control offers only models of providers with a credential in the Home. Credentials live in the Member DO and may be shared with the Home; the Home default model applies to new robots.
 - The DSH token meter reports per turn; the Robot DO accumulates per robot, the Member DO per person. Monthly spend limits per robot and per person; crossing one puts the robot into "blocked: limit" and notifies the owner; raising the limit unblocks.
 
 ### Channels and notifications
@@ -223,6 +240,8 @@ Persona and memory are **not** fields: they are files in the workspace (SOUL.md,
 - Cloudflare Access in front of the edge Worker; identity from verified Access claims; e-mail OTP so any address works. A Member is created on first sign-in and joins the Home named in the deployment configuration; the first Member is admin. A second Home is possible later; v1 deploys one.
 
 ### UI
+- Trajectory: port of the DSH web client's ui-trajectory package (turn-aware ledger, timing overview, record inspector, paging, search) onto Mr. Robot's session API; the DSH package is the reference and may be reused where its client dependencies allow. Reference screenshot: docs/reference/07-dsh-trajectory-reference.webp.
+- Robot list, Edit profile sheet and routine detail follow docs/reference/08–10.
 - React PWA, rebuilt (not the DSH web shell), talking to the edge Worker over HTTP and WebSocket. Views: robot list; conversation (simple chat); conversation in trajectory mode with rewind; robot panel (screen, routines, simple settings); advanced settings; admin (fleet state, routines across robots, providers and subscriptions, members, skills, grants, usage and limits); takeover screen.
 - Visual reference: the six Grok Bot screenshots stored under docs/reference/ in this repository.
 
