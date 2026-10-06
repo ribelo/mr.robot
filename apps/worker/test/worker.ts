@@ -1,13 +1,32 @@
 import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { Robot as ProductionRobot } from '../src/robot/robot.ts'
+import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { StubLlm } from './stub-llm.ts'
 
-export { default, Home, Member } from '../src/index.ts'
+import { Member as ProductionMember } from '../src/member/member.ts'
+
+export { default, Home } from '../src/index.ts'
+
+/** The production Member with a clock hook for OAuth expiry. */
+export class Member extends ProductionMember {
+  async expireCredentialsForTest(): Promise<void> {
+    this.ctx.storage.sql.exec('UPDATE credential SET expires = 0')
+  }
+
+  async sealedForTest(provider: string): Promise<string> {
+    return this.ctx.storage.sql.exec<{ sealed: string }>('SELECT sealed FROM credential WHERE provider = ?', provider).one().sealed
+  }
+}
 
 /** The production Robot with the scripted stub model on the "stub" Provider. */
 export class Robot extends ProductionRobot {
-  protected override adapter(provider: string): LlmAdapter {
-    return provider === 'stub' ? new StubLlm(this.store.requireConfig().id) : super.adapter(provider)
+  protected override adapter(provider: string, contextWindow?: number): LlmAdapter {
+    return provider === 'stub' ? new StubLlm(this.store.requireConfig().id) : super.adapter(provider, contextWindow)
+  }
+
+  /** The credential this Robot's Turns would use for a Provider. */
+  async credentialForTest(provider: ProviderId): Promise<ProviderCredential | null> {
+    return (await this.credentials().resolve(provider)) ?? null
   }
 
   /** Skip the setup interview: the Robot becomes active with its current Grants. */

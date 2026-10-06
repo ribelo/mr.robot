@@ -256,6 +256,38 @@ export const ProposalAnswer = Schema.Struct({
   approve: Schema.Boolean,
 })
 
+// ---------------------------------------------------------------- Providers (robot-dic7, robot-lzu3, robot-7v9s)
+
+export type ProviderName = 'deepseek' | 'openrouter' | 'workers-ai' | 'openai' | 'anthropic'
+
+export interface ProviderView {
+  readonly provider: ProviderName
+  readonly kind: 'api-key' | 'oauth'
+  readonly shared: boolean
+  readonly connectedAt: number
+  readonly ownerId: string
+  readonly ownerName: string
+}
+
+export interface ProvidersView {
+  /** The caller's own credentials. */
+  readonly mine: readonly ProviderView[]
+  /** Credentials other Members share with the Home. */
+  readonly shared: readonly ProviderView[]
+  readonly models: readonly ModelOption[]
+  readonly defaultModel: ModelChoice
+}
+
+export const ApiKeyInput = Schema.Struct({ key: Schema.String, shared: Schema.Boolean })
+export const OAuthFinish = Schema.Struct({ pasted: Schema.optional(Schema.String), shared: Schema.Boolean })
+export const ShareInput = Schema.Struct({ shared: Schema.Boolean })
+export const HomeSettingsPatch = Schema.Struct({
+  defaultModel: Schema.optional(ModelChoice),
+  robotSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
+  memberSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
+  models: Schema.optional(Schema.Array(Schema.Struct({ provider: Schema.String, model: Schema.String, label: Schema.String, contextWindow: Schema.Number }))),
+})
+
 // ---------------------------------------------------------------- What a Robot's settings can choose from
 
 export interface ModelOption {

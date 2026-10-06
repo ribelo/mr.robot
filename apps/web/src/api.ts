@@ -2,6 +2,9 @@ import type {
   Conversation,
   Me,
   MemberView,
+  ModelChoice,
+  ModelOption,
+  ProvidersView,
   ProposalView,
   RobotPanel,
   RobotSettings,
@@ -60,6 +63,15 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, 'upload failed')
     return (await response.json()) as { name: string; path: string; size: number; contentType: string }
   },
+  providers: () => request<ProvidersView>('/api/providers'),
+  setApiKey: (provider: string, key: string, shared: boolean) => request(`/api/providers/${provider}`, { method: 'PUT', body: { key, shared } }),
+  startOAuth: (provider: string) => request<{ url: string; userCode?: string }>(`/api/providers/${provider}/oauth/start`, { body: {} }),
+  finishOAuth: (provider: string, shared: boolean, pasted?: string) =>
+    request<{ connected: boolean }>(`/api/providers/${provider}/oauth/finish`, { body: pasted === undefined ? { shared } : { shared, pasted } }),
+  shareProvider: (provider: string, shared: boolean) => request(`/api/providers/${provider}`, { method: 'PATCH', body: { shared } }),
+  removeProvider: (provider: string) => request(`/api/providers/${provider}`, { method: 'DELETE' }),
+  homeSettings: () => request<{ defaultModel: ModelChoice; robotSpendLimitUsd: number | null; memberSpendLimitUsd: number | null; models: ModelOption[] }>('/api/admin/settings'),
+  updateHomeSettings: (patch: Record<string, unknown>) => request('/api/admin/settings', { method: 'PATCH', body: patch }),
   members: () => request<MemberView[]>('/api/admin/members'),
   invite: (email: string) => request<MemberView>('/api/admin/members', { body: { email } }),
   removeMember: (id: string) => request(`/api/admin/members/${id}`, { method: 'DELETE' }),

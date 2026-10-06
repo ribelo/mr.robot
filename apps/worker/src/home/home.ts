@@ -13,6 +13,8 @@ import type {
   ModelChoice,
   ModelOption,
   RobotStatus,
+  ProvidersView,
+  ProviderView,
   RobotSummary,
   SettingsCatalog,
   Sharing,
@@ -23,6 +25,16 @@ import type { Env } from '../env.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
 export const CHIEF_COLOR = '#5ec4b6'
+
+/** The Home's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
+export const DEFAULT_MODELS: ModelOption[] = [
+  { provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 1_000_000 },
+  { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', contextWindow: 1_000_000 },
+  { provider: 'openai', model: 'gpt-5.5', label: 'GPT-5.5 (ChatGPT subscription)', contextWindow: 272_000 },
+  { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Claude subscription)', contextWindow: 200_000 },
+  { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash (OpenRouter)', contextWindow: 1_000_000 },
+  { provider: 'workers-ai', model: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6 (Workers AI)', contextWindow: 262_144 },
+]
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
 export interface HomeSettings {
@@ -67,6 +79,7 @@ export class Home extends DurableObject<Env> {
       last_line TEXT NOT NULL, last_at INTEGER NOT NULL
     )`)
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
   }
 
   private get sql(): SqlStorage {
@@ -150,7 +163,7 @@ export class Home extends DurableObject<Env> {
     }
   }
 
-  updateSettings(patch: Partial<HomeSettings>): HomeSettings {
+  updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }): HomeSettings {
     for (const [key, value] of Object.entries(patch)) {
       this.sql.exec('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(value))
     }
@@ -292,17 +305,46 @@ export class Home extends DurableObject<Env> {
     return []
   }
 
-  async models(_memberId: string): Promise<ModelOption[]> {
-    return [
-      { provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 1_000_000 },
-      { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', contextWindow: 1_000_000 },
-    ]
+  /** Models a Member's Robots can run on: the Home's model list, for Providers they can use. */
+  async models(memberId: string): Promise<ModelOption[]> {
+    const usable = new Set<string>(['workers-ai'])
+    for (const provider of (await this.env.MEMBER.getByName(memberId).providers()).map((view) => view.provider)) usable.add(provider)
+    for (const row of this.sql.exec<{ provider: string }>('SELECT DISTINCT provider FROM shared_credential').toArray()) usable.add(row.provider)
+    return this.modelList().filter((option) => usable.has(option.provider))
   }
 
-  // ---------------------------------------------------------------- Providers
+  modelList(): ModelOption[] {
+    return this.setting<ModelOption[]>('models') ?? DEFAULT_MODELS
+  }
 
-  async providerCredential(_memberId: string, _provider: ProviderId): Promise<ProviderCredential | null> {
+  // ---------------------------------------------------------------- Providers (robot-dic7)
+
+  credentialShared(memberId: string, provider: ProviderId, shared: boolean): void {
+    if (shared) this.sql.exec('INSERT INTO shared_credential (provider, member_id) VALUES (?, ?) ON CONFLICT DO NOTHING', provider, memberId)
+    else this.sql.exec('DELETE FROM shared_credential WHERE provider = ? AND member_id = ?', provider, memberId)
+  }
+
+  /** The credential a Member's Robot uses: the Member's own, else one shared with the Home. */
+  async providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> {
+    const own = await this.env.MEMBER.getByName(memberId).credential(provider, false)
+    if (own !== null) return own
+    const sharers = this.sql.exec<{ member_id: string }>('SELECT member_id FROM shared_credential WHERE provider = ? AND member_id != ?', provider, memberId).toArray()
+    for (const { member_id } of sharers) {
+      if (this.member(member_id)?.status !== 'active') continue
+      const shared = await this.env.MEMBER.getByName(member_id).credential(provider, true)
+      if (shared !== null) return shared
+    }
     return null
+  }
+
+  async providersView(memberId: string): Promise<ProvidersView> {
+    const mine = await this.env.MEMBER.getByName(memberId).providers()
+    const others = this.sql.exec<{ provider: ProviderId; member_id: string }>('SELECT provider, member_id FROM shared_credential WHERE member_id != ?', memberId).toArray()
+    const shared: ProviderView[] = others.flatMap(({ provider, member_id }) => {
+      const member = this.member(member_id)
+      return member === undefined || member.status !== 'active' ? [] : [{ provider, kind: provider === 'openai' || provider === 'anthropic' ? 'oauth' as const : 'api-key' as const, shared: true, connectedAt: 0, ownerId: member.id, ownerName: member.name }]
+    })
+    return { mine, shared, models: await this.models(memberId), defaultModel: this.settings().defaultModel }
   }
 }
 

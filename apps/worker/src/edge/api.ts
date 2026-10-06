@@ -6,7 +6,11 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import {
   MemberPreferences,
+  ApiKeyInput,
+  HomeSettingsPatch,
+  OAuthFinish,
   ProposalAnswer,
+  ShareInput,
   RewindRequest,
   SendMessage,
   SettingsPatch,
@@ -17,6 +21,7 @@ import {
 } from '@mr-robot/protocol'
 import { HOME_ID, type Env } from '../env.ts'
 import { makeWorkspace } from '../workspace/workspace.ts'
+import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import type { AnswerResult } from '../robot/robot.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
 
@@ -68,6 +73,45 @@ export const api = new Router<ApiContext>()
     const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
     yield* call(() => c.env.MEMBER.getByName(c.member.id).writeFile(file, content))
     return { ok: true }
+  }))
+
+  // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
+  .on('GET', '/api/providers', (c) => call(() => home(c.env).providersView(c.member.id)))
+  .on('PUT', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
+    const name = yield* providerName(provider, API_KEY_PROVIDERS)
+    const input = yield* decodeBody(c.request, ApiKeyInput)
+    if (input.key.trim().length < 8) return yield* Effect.fail(badRequest('that does not look like an API key'))
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).setApiKey(name, input.key.trim(), input.shared))
+    return { ok: true }
+  }))
+  .on('POST', '/api/providers/:provider/oauth/start', (c, { provider }) => Effect.gen(function* () {
+    const name = yield* providerName(provider, OAUTH_PROVIDERS)
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).startOAuth(name as 'openai' | 'anthropic'))
+  }))
+  .on('POST', '/api/providers/:provider/oauth/finish', (c, { provider }) => Effect.gen(function* () {
+    const name = yield* providerName(provider, OAUTH_PROVIDERS)
+    const input = yield* decodeBody(c.request, OAuthFinish)
+    const connected = yield* call(() => c.env.MEMBER.getByName(c.member.id).finishOAuth(name as 'openai' | 'anthropic', input.pasted, input.shared)).pipe(
+      Effect.mapError((error) => badRequest(error.message)),
+    )
+    return { connected }
+  }))
+  .on('PATCH', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
+    const name = yield* providerName(provider, PROVIDER_IDS)
+    const { shared } = yield* decodeBody(c.request, ShareInput)
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).setShared(name, shared))
+    return { ok: true }
+  }))
+  .on('DELETE', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
+    const name = yield* providerName(provider, PROVIDER_IDS)
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).removeCredential(name))
+    return { ok: true }
+  }))
+  .on('GET', '/api/admin/settings', (c) => admin(c).pipe(Effect.andThen(call(async () => ({ ...(await home(c.env).settings()), models: await home(c.env).modelList() })))))
+  .on('PATCH', '/api/admin/settings', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const patch = yield* decodeBody(c.request, HomeSettingsPatch)
+    return yield* call(() => home(c.env).updateSettings(patch))
   }))
 
   // ------------------------------------------------------------ robots
@@ -146,6 +190,10 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).remove(member))
     return { ok: true }
   }))
+
+function providerName(name: string, allowed: readonly ProviderId[]): Effect.Effect<ProviderId, ApiError> {
+  return allowed.includes(name as ProviderId) ? Effect.succeed(name as ProviderId) : Effect.fail(notFound('no such Provider here'))
+}
 
 function fileName(name: string): Effect.Effect<'USER.md' | 'PROACTIVE_PREFERENCES.md', ApiError> {
   return name === 'USER.md' || name === 'PROACTIVE_PREFERENCES.md' ? Effect.succeed(name) : Effect.fail(notFound('no such file'))

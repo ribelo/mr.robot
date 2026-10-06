@@ -298,6 +298,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config.status === 'setup') prompt.push({ name: 'setup', text: () => setupPrompt(owner.name, brief) })
     prompt.push({ name: 'workspace', text: () => personaText(this.persona) })
     const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
+    const contextWindow = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.contextWindow
     const value = await compose({
       storage: this.ctx.storage,
       sessionId: config.liveSessionId,
@@ -306,7 +307,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       provider: config.model.provider,
       model: config.model.model,
       effort: config.model.effort,
-      adapter: this.adapter(config.model.provider),
+      adapter: this.adapter(config.model.provider, contextWindow),
       contextBudget: config.contextBudget,
       compactionInstruction: config.compactionInstruction,
       prompt,
@@ -320,8 +321,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The LLM adapter for a Provider; tests override it with a scripted stub. */
-  protected adapter(provider: string): LlmAdapter {
-    return providerAdapter(provider, { robotId: this.store.requireConfig().id, credentials: this.credentials(), ai: this.env.AI })
+  protected adapter(provider: string, contextWindow?: number): LlmAdapter {
+    return providerAdapter(provider, {
+      robotId: this.store.requireConfig().id,
+      credentials: this.credentials(),
+      ai: this.env.AI,
+      ...(contextWindow === undefined ? {} : { contextWindow }),
+    })
   }
 
   protected credentials(): CredentialSource {

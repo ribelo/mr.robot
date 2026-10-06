@@ -4,6 +4,7 @@ import { api, ApiError } from './api.ts'
 import { useLive } from './live.ts'
 import { go, type Route } from './route.ts'
 import { AdvancedSettings } from './components/AdvancedSettings.tsx'
+import { Profile } from './components/Profile.tsx'
 import { TrajectoryView } from './components/TrajectoryView.tsx'
 
 /** Full-page views reached from a Robot or the sidebar. */
@@ -11,6 +12,12 @@ export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; 
   switch (route.page) {
     case 'trajectory': return <TrajectoryPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} me={me} onChanged={onChanged} />
     case 'advanced': return <AdvancedPage id={route.id} onChanged={onChanged} />
+    case 'profile': return (
+      <div className="page">
+        <PageHead title={me.name} back={{ page: 'home' }} />
+        <Profile me={me} onChanged={onChanged} />
+      </div>
+    )
     default: return <div className="empty-main">{route.page}</div>
   }
 }
