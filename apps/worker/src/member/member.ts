@@ -31,6 +31,7 @@ export class Member extends DurableObject<Env> {
     const sql = ctx.storage.sql
     sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS member_file (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS usage (month TEXT NOT NULL, robot_id TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, robot_id)) WITHOUT ROWID')
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
     sql.exec(`CREATE TABLE IF NOT EXISTS credential (
@@ -199,6 +200,29 @@ export class Member extends DurableObject<Env> {
 
   private async publishSharing(provider: ProviderId, shared: boolean): Promise<void> {
     await this.env.HOME.getByName(HOME_ID).credentialShared(this.profile().id, provider, shared)
+  }
+
+  // ---------------------------------------------------------------- usage (robot-6jqh)
+
+  addUsage(month: string, robotId: string, inputTokens: number, outputTokens: number, costUsd: number): void {
+    this.sql.exec(
+      `INSERT INTO usage (month, robot_id, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (month, robot_id) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens,
+         output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd`,
+      month, robotId, inputTokens, outputTokens, costUsd,
+    )
+  }
+
+  usage(month: string): { inputTokens: number; outputTokens: number; costUsd: number; byRobot: Array<{ robotId: string; inputTokens: number; outputTokens: number; costUsd: number }> } {
+    const rows = this.sql.exec<{ robot_id: string; input_tokens: number; output_tokens: number; cost_usd: number }>(
+      'SELECT robot_id, input_tokens, output_tokens, cost_usd FROM usage WHERE month = ?', month,
+    ).toArray().map((row) => ({ robotId: row.robot_id, inputTokens: row.input_tokens, outputTokens: row.output_tokens, costUsd: row.cost_usd }))
+    return {
+      inputTokens: rows.reduce((sum, row) => sum + row.inputTokens, 0),
+      outputTokens: rows.reduce((sum, row) => sum + row.outputTokens, 0),
+      costUsd: rows.reduce((sum, row) => sum + row.costUsd, 0),
+      byRobot: rows,
+    }
   }
 
   // ---------------------------------------------------------------- Web Push (robot-ajrp, robot-9xoj, robot-bden)

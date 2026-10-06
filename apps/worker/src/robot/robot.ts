@@ -56,7 +56,7 @@ import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from
 import { ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, type WorkspaceShape } from '../workspace/workspace.ts'
 import { HOME_ID, type Env } from '../env.ts'
-import type { RegistryEntry } from '../home/home.ts'
+import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
 import { describeSchedule, nextRun, validateSchedule } from './schedule.ts'
 import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
@@ -223,6 +223,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const config = this.store.config()
       if (config === undefined || !runnable(config)) return
       const active = this.store.activeTurn()
+      if (active === undefined && this.store.pendingWakeups() > 0 && config.status === 'active' && (await this.checkLimits())) return
       const wakeup = active === undefined ? this.store.nextWakeup() : this.store.wakeup(active.wakeupId)
       if (wakeup === undefined) {
         if (active !== undefined) this.store.endTurn(active.wakeupId)
@@ -265,7 +266,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
   protected async afterTurn(wakeup: Wakeup): Promise<void> {
-    await this.notifyFinished(wakeup)
+    const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
+    this.store.delete(`turn-start:${wakeup.id}`)
+    await this.accountTurn(startSeq)
+    await this.notifyFinished(wakeup, startSeq)
+    await this.checkLimits()
     const soul = (await this.run(this.workspace.readText('SOUL.md'))) ?? ''
     if (soul !== this.persona.soul) {
       const config = this.store.requireConfig()
@@ -281,10 +286,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** "Finished": the Turn produced a reply and the person it concerns is not watching it live. */
-  private async notifyFinished(wakeup: Wakeup): Promise<void> {
-    const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
+  private async notifyFinished(wakeup: Wakeup, startSeq: number): Promise<void> {
     const replies = this.conversation().items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
-    this.store.delete(`turn-start:${wakeup.id}`)
     const last = replies.at(-1)
     if (last === undefined || last.kind !== 'reply') return
     const watcher = wakeup.sender.kind === 'member' ? wakeup.sender.memberId : undefined
@@ -317,6 +320,61 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `The Turn failed: ${message}`, Date.now())
     this.broadcast()
     this.ctx.waitUntil(this.notifyMembers('blocked', `A Turn failed: ${message}`).catch(() => 0))
+  }
+
+  // ---------------------------------------------------------------- usage and spend limits (robot-6jqh, robot-8gag, robot-40nw)
+
+  /** Add one Turn's tokens and cost to this Robot's and its owner's monthly counters. */
+  private async accountTurn(startSeq: number): Promise<void> {
+    const config = this.store.requireConfig()
+    let input = 0
+    let output = 0
+    let cached = 0
+    for (const event of readStoredEvents(this.ctx.storage.sql, config.liveSessionId, startSeq)) {
+      const usage = (event.data as { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } }).usage
+      if (usage === undefined) continue
+      input += usage.inputTokens ?? 0
+      output += usage.outputTokens ?? 0
+      cached += usage.cacheReadTokens ?? 0
+    }
+    if (input === 0 && output === 0) return
+    const price = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.price
+    const cost = price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000
+    const month = currentMonth()
+    this.store.addUsage(month, input, output, cost)
+    await this.env.MEMBER.getByName(config.ownerId).addUsage(month, config.id, input, output, cost)
+  }
+
+  /** Over the Robot's or its owner's monthly limit: stop and tell the owner; under it again: resume. */
+  private async checkLimits(): Promise<boolean> {
+    const config = this.store.requireConfig()
+    if (config.status !== 'active' && !(config.status === 'blocked' && config.blockedReason === 'limit')) return false
+    const limits = await this.home().limitsFor(config.ownerId)
+    const robotLimit = config.spendLimitUsd ?? limits.robotDefaultUsd
+    const spent = this.store.usage(currentMonth()).costUsd
+    const reason = robotLimit !== null && spent >= robotLimit
+      ? `This Robot reached its monthly spend limit (${spent.toFixed(2)} of ${robotLimit.toFixed(2)}).`
+      : limits.memberUsd !== null && limits.memberSpentUsd >= limits.memberUsd
+        ? `Your Robots reached your monthly spend limit (${limits.memberSpentUsd.toFixed(2)} of ${limits.memberUsd.toFixed(2)}).`
+        : null
+    if (reason !== null && config.status === 'active') {
+      this.store.updateConfig(() => ({ status: 'blocked', blockedReason: 'limit' }), false)
+      this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${reason} It stops here until the limit is raised.`, Date.now())
+      await this.changed()
+      await this.notifyMembers('blocked', `${reason} Raise the limit to let it continue.`)
+      return true
+    }
+    if (reason === null && config.status === 'blocked') {
+      this.store.updateConfig(() => ({ status: 'active', blockedReason: null }), false)
+      await this.changed()
+      this.drain()
+    }
+    return reason !== null
+  }
+
+  /** A limit changed somewhere: unblock when the Robot is under its limits again. */
+  async recheckLimits(): Promise<void> {
+    await this.checkLimits()
   }
 
   // ---------------------------------------------------------------- the agent composition
@@ -538,6 +596,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       }))
     })
     await this.changed()
+    if (patch.spendLimitUsd !== undefined) await this.checkLimits()
     return this.settings()
   }
 
@@ -848,7 +907,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   protected usage(): UsageView {
-    return { month: new Date().toISOString().slice(0, 7), inputTokens: 0, outputTokens: 0, costUsd: 0, limitUsd: this.store.requireConfig().spendLimitUsd }
+    const month = currentMonth()
+    return { month, ...this.store.usage(month), limitUsd: this.store.requireConfig().spendLimitUsd }
   }
 
   /** Names of the tools the current composition registers (what the model may call). */

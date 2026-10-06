@@ -27,13 +27,14 @@ export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepse
 export const CHIEF_COLOR = '#5ec4b6'
 
 /** The Home's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
+/** Prices are the admin's to correct in the admin view; subscriptions are flat and count as 0. */
 export const DEFAULT_MODELS: ModelOption[] = [
-  { provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 1_000_000 },
-  { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', contextWindow: 1_000_000 },
-  { provider: 'openai', model: 'gpt-5.5', label: 'GPT-5.5 (ChatGPT subscription)', contextWindow: 272_000 },
-  { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Claude subscription)', contextWindow: 200_000 },
-  { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash (OpenRouter)', contextWindow: 1_000_000 },
-  { provider: 'workers-ai', model: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6 (Workers AI)', contextWindow: 262_144 },
+  { provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 1_000_000, price: { input: 0.28, output: 1.1, cachedInput: 0.03 } },
+  { provider: 'deepseek', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', contextWindow: 1_000_000, price: { input: 0.55, output: 2.2, cachedInput: 0.07 } },
+  { provider: 'openai', model: 'gpt-5.5', label: 'GPT-5.5 (ChatGPT subscription)', contextWindow: 272_000, price: { input: 0, output: 0 } },
+  { provider: 'anthropic', model: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (Claude subscription)', contextWindow: 200_000, price: { input: 0, output: 0 } },
+  { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash (OpenRouter)', contextWindow: 1_000_000, price: { input: 0.3, output: 1.2 } },
+  { provider: 'workers-ai', model: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6 (Workers AI)', contextWindow: 262_144, price: { input: 0.95, output: 4, cachedInput: 0.16 } },
 ]
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
@@ -163,11 +164,24 @@ export class Home extends DurableObject<Env> {
     }
   }
 
-  updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }): HomeSettings {
+  /** Admin settings; a raised spend limit unblocks Robots stopped by the old one (robot-8gag). */
+  async updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }): Promise<HomeSettings> {
     for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue
       this.sql.exec('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(value))
     }
+    if (patch.robotSpendLimitUsd !== undefined || patch.memberSpendLimitUsd !== undefined) {
+      const blocked = this.sql.exec<{ id: string }>("SELECT id FROM robot WHERE status = 'blocked'").toArray()
+      await Promise.all(blocked.map(({ id }) => this.env.ROBOT.getByName(id).recheckLimits()))
+    }
     return this.settings()
+  }
+
+  /** Spend limits a Robot's Turns are held to. */
+  async limitsFor(memberId: string): Promise<{ robotDefaultUsd: number | null; memberUsd: number | null; memberSpentUsd: number }> {
+    const settings = this.settings()
+    const usage = await this.env.MEMBER.getByName(memberId).usage(currentMonth())
+    return { robotDefaultUsd: settings.robotSpendLimitUsd, memberUsd: settings.memberSpendLimitUsd, memberSpentUsd: usage.costUsd }
   }
 
   private setting<T>(key: string): T | undefined {
@@ -346,6 +360,10 @@ export class Home extends DurableObject<Env> {
     })
     return { mine, shared, models: await this.models(memberId), defaultModel: this.settings().defaultModel }
   }
+}
+
+export function currentMonth(at = Date.now()): string {
+  return new Date(at).toISOString().slice(0, 7)
 }
 
 function nameFromEmail(email: string): string {

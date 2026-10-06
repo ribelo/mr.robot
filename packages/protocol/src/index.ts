@@ -285,7 +285,13 @@ export const HomeSettingsPatch = Schema.Struct({
   defaultModel: Schema.optional(ModelChoice),
   robotSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
   memberSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
-  models: Schema.optional(Schema.Array(Schema.Struct({ provider: Schema.String, model: Schema.String, label: Schema.String, contextWindow: Schema.Number }))),
+  models: Schema.optional(Schema.Array(Schema.Struct({
+    provider: Schema.String,
+    model: Schema.String,
+    label: Schema.String,
+    contextWindow: Schema.Number,
+    price: Schema.optional(Schema.Struct({ input: Schema.Number, output: Schema.Number, cachedInput: Schema.optional(Schema.Number) })),
+  }))),
 })
 
 // ---------------------------------------------------------------- What a Robot's settings can choose from
@@ -295,6 +301,8 @@ export interface ModelOption {
   readonly model: string
   readonly label: string
   readonly contextWindow: number
+  /** USD per million tokens; subscription models cost 0 here (the plan is paid flat). */
+  readonly price?: { readonly input: number; readonly output: number; readonly cachedInput?: number }
 }
 
 export interface SettingsCatalog {
@@ -323,6 +331,13 @@ export interface UsageView {
   readonly outputTokens: number
   readonly costUsd: number
   readonly limitUsd: number | null
+}
+
+/** One row of the cost table: a Robot's or a Member's month. */
+export interface UsageRow extends UsageView {
+  readonly robotId: string | null
+  readonly memberId: string
+  readonly name: string
 }
 
 // ---------------------------------------------------------------- Requests

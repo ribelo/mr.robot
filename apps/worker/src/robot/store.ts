@@ -352,6 +352,22 @@ export class RobotStore {
     this.sql.exec('UPDATE rewind SET undone_at = ? WHERE id = ?', now, id)
   }
 
+  // ------------------------------------------------------------ usage (robot-6jqh)
+
+  addUsage(month: string, inputTokens: number, outputTokens: number, costUsd: number): void {
+    this.sql.exec(
+      `INSERT INTO usage (month, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?)
+       ON CONFLICT (month) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens,
+         output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd`,
+      month, inputTokens, outputTokens, costUsd,
+    )
+  }
+
+  usage(month: string): { inputTokens: number; outputTokens: number; costUsd: number } {
+    const row = this.sql.exec<{ input_tokens: number; output_tokens: number; cost_usd: number }>('SELECT * FROM usage WHERE month = ?', month).toArray()[0]
+    return { inputTokens: row?.input_tokens ?? 0, outputTokens: row?.output_tokens ?? 0, costUsd: row?.cost_usd ?? 0 }
+  }
+
   // ------------------------------------------------------------ small values
 
   get<T>(key: string): T | undefined {
