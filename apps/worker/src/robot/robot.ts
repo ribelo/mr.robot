@@ -56,6 +56,8 @@ import { webPlugin } from '../agent/web.ts'
 import { skillProposalTools, skillsPlugin } from '../agent/skills.ts'
 import { browserTools, type BrowserHost } from '../agent/tools/browser.ts'
 import { takeoverTools, type TakeoverHost } from '../agent/tools/takeover.ts'
+import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
+import { PwaChannel } from '../channels/pwa.ts'
 import { RenderingDriver, type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
@@ -297,6 +299,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
+    await this.loadSecretMasks()
+    await this.deliverReplies(wakeup, startSeq)
     await this.notifyFinished(wakeup, startSeq)
     await this.checkLimits()
     const soul = (await this.run(this.workspace.readText('SOUL.md'))) ?? ''
@@ -330,11 +334,56 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     if (!config.notifications.enabled) return 0
     const members = (config.notifications.members.length === 0 ? [config.ownerId] : config.notifications.members).filter((member) => !skip(member))
-    // A notification that cannot be delivered never fails the Turn that caused it.
-    await Promise.all(members.map((member) => this.env.MEMBER.getByName(member)
-      .notify({ robotId: config.id, robotName: config.identity.name, kind, body })
-      .catch((error: unknown) => console.warn('notification failed', member, error))))
+    await this.sendToChannels({
+      kind: 'notification', id: `n-${crypto.randomUUID()}`, robotId: config.id, robotName: config.identity.name,
+      notification: kind, text: body, memberIds: members,
+    })
     return members.length
+  }
+
+  // ---------------------------------------------------------------- Channels (robot-vfqd)
+
+  /** The Channel adapters this Robot can use; v1 has the PWA. Tests add a fake one. */
+  protected channels(): Map<string, ChannelAdapter> {
+    const pwa = new PwaChannel({ notify: (memberId, event) => this.env.MEMBER.getByName(memberId).notify(event) })
+    return new Map([[pwa.id, pwa]])
+  }
+
+  /** Output leaves through every enabled Channel; a failing Channel never fails the Turn. */
+  protected async sendToChannels(output: ChannelOutput): Promise<string[]> {
+    const config = this.store.requireConfig()
+    const delivered = {
+      has: (key: string) => this.store.get<boolean>(`delivered:${key}`) === true,
+      add: (key: string) => this.store.set(`delivered:${key}`, true),
+    }
+    try {
+      return await fanOut(output, config.notifications.channels, this.channels(), delivered)
+    } catch (error) {
+      console.warn('channel delivery failed', error)
+      return []
+    }
+  }
+
+  /** An external event arrives through a Channel and wakes the Robot (deduplicated by event id). */
+  async channelEvent(event: InboundEvent): Promise<{ accepted: boolean }> {
+    const adapter = this.channels().get(event.channel)
+    if (adapter === undefined) throw new Error(`no Channel ${event.channel}`)
+    if (!this.store.requireConfig().notifications.channels.includes(event.channel)) return { accepted: false }
+    const wakeup = adapter.inbound(event)
+    if (this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
+    this.store.set(`inbound:${wakeup.dedupeKey}`, true)
+    await this.wake({ kind: 'channel', sender: wakeup.sender, text: wakeup.text, payload: { route: wakeup.route } })
+    return { accepted: true }
+  }
+
+  /** Replies of a Turn go back out: to the Channel the message came from, and to every enabled one. */
+  private async deliverReplies(wakeup: Wakeup, startSeq: number): Promise<void> {
+    const config = this.store.requireConfig()
+    const route = (wakeup.payload['route'] as { channel: string; address: string } | undefined) ?? null
+    for (const item of this.conversation().items) {
+      if (item.seq < startSeq || item.kind !== 'reply') continue
+      await this.sendToChannels({ kind: 'reply', id: item.id, robotId: config.id, robotName: config.identity.name, text: this.mask(item.text), route })
+    }
   }
 
   /** A Turn that could not run is never silent: it becomes a notice and the Robot stays runnable. */

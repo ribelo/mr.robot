@@ -109,6 +109,15 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         </div>
       )}
 
+      <h2>Channels</h2>
+      <div className="muted">Where this Robot hears and answers. The app is always on; more Channels (Discord) come as adapters.</div>
+      <ul className="grant-list">
+        {draft.notifications.channels.map((channel) => <li key={channel}><span className="grant-kind">Channel</span> {channel === 'pwa' ? 'This app (chat and push notifications)' : channel}</li>)}
+      </ul>
+      <label className="check"><input type="checkbox" checked={draft.notifications.enabled} onChange={(event) => setDraft({ ...draft, notifications: { ...draft.notifications, enabled: event.target.checked } })} />
+        <span>Notifications<small>Push when it finishes, needs you, or is blocked.</small></span>
+      </label>
+
       <h2>Sharing and limits</h2>
       {chief ? null : (
         <label className="check"><input type="checkbox" checked={draft.sharing === 'home'} onChange={(event) => setDraft({ ...draft, sharing: event.target.checked ? 'home' : 'private' })} />

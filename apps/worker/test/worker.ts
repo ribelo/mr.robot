@@ -3,6 +3,8 @@ import { Robot as ProductionRobot } from '../src/robot/robot.ts'
 import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { StubLlm } from './stub-llm.ts'
 import { StubDriver } from './stub-browser.ts'
+import { FakeChannel } from './fake-channel.ts'
+import type { ChannelAdapter, InboundEvent } from '../src/channels/channel.ts'
 import type { BrowserDriver } from '../src/browser/driver.ts'
 
 import { Member as ProductionMember } from '../src/member/member.ts'
@@ -48,6 +50,17 @@ export class Robot extends ProductionRobot {
   /** The credential this Robot's Turns would use for a Provider. */
   async credentialForTest(provider: ProviderId): Promise<ProviderCredential | null> {
     return (await this.credentials().resolve(provider)) ?? null
+  }
+
+  protected override channels(): Map<string, ChannelAdapter> {
+    const channels = super.channels()
+    channels.set('fake', new FakeChannel())
+    return channels
+  }
+
+  /** Channel events as the edge would deliver them. */
+  override async channelEvent(event: InboundEvent): Promise<{ accepted: boolean }> {
+    return super.channelEvent(event)
   }
 
   protected override browserDriver(): BrowserDriver {
