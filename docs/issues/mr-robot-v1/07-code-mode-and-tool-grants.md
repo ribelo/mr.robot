@@ -6,11 +6,11 @@
 
 **Blocked by:** 02 Code-mode isolate prototype and decision; 04 Robot creation interview, grant approval, Mr. Robot bootstrap
 
-**Status:** in-progress
+**Status:** done
 
 - [x] With code mode on, one turn with three tool calls produces one executed program in the trajectory
 - [x] A tool not granted is absent from the robot's catalog and from the executor's bindings
 - [x] Grant proposal appears as a question; answering applies the exact stored set
 - [x] Advanced settings changes (model, effort, budget, code mode, grants) take effect on the next turn
 
-Reopened 2026-10-07 by the story verification (verification.md): stories 10 (later Grant proposals stub-only), 46 (direct tool calls stub-only).
+Verified live 2026-10-07: later Grant proposal and direct tool calls (verification.md 10, 46).

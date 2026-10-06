@@ -15,4 +15,4 @@
 - [x] Pause stops wake-ups, resume restores them, delete keeps the archive
 - [x] Mr. Robot recipient grants update when a robot is created or shared
 
-Reopened 2026-10-07 by the story verification (verification.md): stories 5, 12 (not tried live in a one-person Home), 14 (robot_create not tried live).
+Reopened 2026-10-07 by the story verification (verification.md): stories 5, 12 (not tried live in a one-person Home).

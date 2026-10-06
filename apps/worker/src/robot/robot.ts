@@ -510,9 +510,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const robotLimit = config.spendLimitUsd ?? limits.robotDefaultUsd
     const spent = this.store.usage(currentMonth()).costUsd
     const reason = robotLimit !== null && spent >= robotLimit
-      ? `This Robot reached its monthly spend limit (${spent.toFixed(2)} of ${robotLimit.toFixed(2)}).`
+      ? `This Robot reached its monthly spend limit (${usd(spent)} of ${usd(robotLimit)}).`
       : limits.memberUsd !== null && limits.memberSpentUsd >= limits.memberUsd
-        ? `Your Robots reached your monthly spend limit (${limits.memberSpentUsd.toFixed(2)} of ${limits.memberUsd.toFixed(2)}).`
+        ? `Your Robots reached your monthly spend limit (${usd(limits.memberSpentUsd)} of ${usd(limits.memberUsd)}).`
         : null
     if (reason !== null && config.status === 'active') {
       this.store.updateConfig(() => ({ status: 'blocked', blockedReason: 'limit' }), false)
@@ -1802,6 +1802,11 @@ interface WatchState {
 
 /** How often a watched browser is checked for notifications. */
 const WATCH_INTERVAL_MS = 60_000
+
+/** Dollars with cents, and small amounts with enough digits to tell them apart ($0.0105 of $0.0001). */
+function usd(amount: number): string {
+  return amount >= 1 || amount === 0 ? `${amount.toFixed(2)}` : `${amount.toPrecision(3).replace(/0+$/, '').replace(/\.$/, '')}`
+}
 
 function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
   return {

@@ -6,26 +6,21 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 67 works, 32 partial, 1 not done.
+Totals: 74 works, 25 partial, 1 not done.
 
 ## Partial or not done
 
 - 84 robot-naul, not done: Effect runs the edge API, Workspace, vault, OAuth, push, catalogs and the composition scope; the Robot, Member and Home DO internals are plain async classes. Remaining work: ticket 23
 - 5 robot-d2uv, partial (not tried live): home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home)
-- 10 robot-vy9z, partial (stub-only for later Grant proposals): code-mode-chat.test.ts (stub model); live only the setup and USER.md variants
 - 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
-- 14 robot-hk2s, partial (robot_create not tried live): Live: Mr. Robot answered a robot message with robot_reply. robot_create only in messaging.test.ts
-- 23 robot-i3et, partial (stub-only): code-mode-chat.test.ts (stub model); live: Claude chose to answer rather than react in the tests run
 - 29 robot-zzif, partial (stub-only): workspace.test.ts (stub model drives compaction); not seen live (no conversation long enough)
 - 30 robot-sw54, partial (effect stub-only): Live: setting saved; the budget's effect only in workspace.test.ts
-- 34 robot-7j1a, partial (routine firing not seen live yet): Live: message and robot-message wakes. Routine firing only in routines.test.ts (real DO alarm); none fired live yet (first at 07:15)
 - 39 robot-ksvy, partial (PWA view not tried live): Staging test: real screencast frames; takeover.test.ts relays them. The PWA live view not watched live
 - 40 robot-g6qb, partial (PWA screen not tried live): Staging test: tap and typing reach a real page; the PWA takeover screen not tried live
 - 41 robot-doqx, partial (stub-only): takeover.test.ts (stub browser, fake push)
 - 42 robot-j4ll, partial (stub-only): takeover.test.ts (stub browser)
 - 43 robot-ueh0, partial (stub-only): browser.test.ts (stub browser); not tried on a real shop
 - 44 robot-b49q, partial (untested): Not tested against a real CAPTCHA
-- 46 robot-ax7s, partial (stub-only): code-mode.test.ts; not used live
 - 53 robot-7qpi, partial (stub-only): skills.test.ts (faked GitHub); no library configured live
 - 54 robot-qjvu, partial (stub-only): skills.test.ts (faked GitHub)
 - 55 robot-lszy, partial (stub-only): skills.test.ts (stub model)
@@ -33,8 +28,6 @@ Totals: 67 works, 32 partial, 1 not done.
 - 57 robot-icrv, partial (stub-only): skills.test.ts
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
-- 68 robot-8gag, partial (stub-only): usage.test.ts (stub model, real DOs); not hit live
-- 69 robot-40nw, partial (stub-only): usage.test.ts
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
 - 71 robot-9xoj, partial (stub-only): push.test.ts against a fake push service; no device subscribed
 - 72 robot-r2uz, partial (delivery stub-only): Live: switch saved in the profile sheet; delivery only in push.test.ts
@@ -54,6 +47,7 @@ These were marked done but did not hold:
 - In code mode, the default, routine cards, reactions and Grant questions did not appear in the chat (10, 23, 31).
 - Rewinding to before a Turn left that Turn's message in the inbox, so it was delivered again (20).
 - web_search needed a DeepSeek key; now works without one (48).
+- The spend-limit notice printed $0.0105 of $0.0001 as "0.01 of 0.00"; now shows the digits.
 
 ## All stories
 
@@ -68,11 +62,11 @@ These were marked done but did not hold:
 | 7 | robot-1xbe | Mr. Robot bootstrapped on first sign-in | Live | works |
 | 8 | robot-btct | "New robot" form; setup interview; the Robot names itself and writes its persona | Live: Flat Watcher and Verifier interviews on Claude | works |
 | 9 | robot-cobv | One Grant summary at the end of setup; compare-and-swap approval | Live: approved twice, Robots became active with exactly the proposed Grants | works |
-| 10 | robot-vy9z | propose_grants as a question, also from code mode | code-mode-chat.test.ts (stub model); live only the setup and USER.md variants | partial (stub-only for later Grant proposals) |
+| 10 | robot-vy9z | propose_grants as a question, also from code mode | Live: Verifier proposed the skills group mid-conversation; rejecting it was delivered as "Rejected" and the Robot acknowledged | works |
 | 11 | robot-hpj1 | Robots private by default | lifecycle.test.ts (real DOs) | works |
 | 12 | robot-bld3 | "Shared with the Home" in advanced settings | lifecycle.test.ts (real DOs); not tried live (one-person Home) | partial (not tried live) |
 | 13 | robot-qo06 | Pause/Resume/Delete | Live: paused and resumed Verifier; a message sent while paused waited and ran on resume. Delete: lifecycle.test.ts | works |
-| 14 | robot-hk2s | Mr. Robot tools robot_create, robot_configure, messaging | Live: Mr. Robot answered a robot message with robot_reply. robot_create only in messaging.test.ts | partial (robot_create not tried live) |
+| 14 | robot-hk2s | Mr. Robot tools robot_create, robot_configure, messaging | Live: Mr. Robot created a gym-tracking Robot with robot_create (it started its interview; its recipient Grant was added) and answered a robot message with robot_reply | works |
 | 15 | robot-70kf | Mr. Robot's recipient Grants follow reachable Robots | Live: Mr. Robot listed in Verifier's directory after granting; sync in lifecycle.test.ts | works |
 | 16 | robot-frf5 | One live DSH session per Robot; chat is its projection | Live: chat and trajectory of the same session | works |
 | 17 | robot-q4b2 | Robot list with last line, time, unread; bubbles; routine cards; screen thumbnail | Live: all seen | works |
@@ -81,7 +75,7 @@ These were marked done but did not hold:
 | 20 | robot-0q6a | Rewind to before a Turn | Live: Verifier rewound to before Test 6 and remembered only up to Test 5 (fixed tonight: the message used to come back) | works |
 | 21 | robot-8v1t | Archive and Undo | Live: undo restored the conversation | works |
 | 22 | robot-acr3 | Rewind note: external effects stand, tools used after the point | Live note injected; rewind.test.ts checks its text | works |
-| 23 | robot-i3et | 👍 reaction for a plain instruction | code-mode-chat.test.ts (stub model); live: Claude chose to answer rather than react in the tests run | partial (stub-only) |
+| 23 | robot-i3et | 👍 reaction for a plain instruction | Live: Verifier reacted 👍 to "From now on, write test reports in bullet points." | works |
 | 24 | robot-9qnj | Robot messages with sender name and avatar | Live: Mr. Robot's chat shows "Verifier" with its avatar | works |
 | 25 | robot-om9f | Muse files seeded in R2 | Live: Verifier listed and edited them | works |
 | 26 | robot-h1nm | SOUL.md change noticed in the chat | Live: "Flat Watcher changed SOUL.md." | works |
@@ -92,7 +86,7 @@ These were marked done but did not hold:
 | 31 | robot-yrw7 | A routine from chat | Live: "Invoice check" and "Live check" created on Claude, cards shown | works |
 | 32 | robot-gbbt | once/interval/daily/weekly/cron in the owner's time zone | Live: weekly and daily with correct cron; other kinds in schedule.test.ts | works |
 | 33 | robot-qyd5 | Routines with next run in the panel | Live | works |
-| 34 | robot-7j1a | Sleep between Turns; wake on routine, message, robot message, channel event | Live: message and robot-message wakes. Routine firing only in routines.test.ts (real DO alarm); none fired live yet (first at 07:15) | partial (routine firing not seen live yet) |
+| 34 | robot-7j1a | Sleep between Turns; wake on routine, message, robot message, channel event | Live: message, robot-message and routine wakes (one-shot "Fire check" fired at 01:10 and replied "routine fired") | works |
 | 35 | robot-v1gb | Missed occurrences run once | routines.test.ts (real DO alarm) | works |
 | 36 | robot-makt | One Turn at a time, queue | robot-turn.test.ts (real DO); live: Verifier's request and Mr. Robot's reply queued and ran in order | works |
 | 37 | robot-l9te | browser_* tools | Live: Verifier opened example.com and took a screenshot on Claude; staging test on real Browser Rendering | works |
@@ -104,7 +98,7 @@ These were marked done but did not hold:
 | 43 | robot-ueh0 | Pay/order clicks refused (English and Polish labels) | browser.test.ts (stub browser); not tried on a real shop | partial (stub-only) |
 | 44 | robot-b49q | CAPTCHA vendor detection with guidance | Not tested against a real CAPTCHA | partial (untested) |
 | 45 | robot-5ewr | Code mode default, Worker Loader isolate | Live: every Verifier and Mr. Robot Turn ran as code programs on Claude | works |
-| 46 | robot-ax7s | Direct tool calls switch | code-mode.test.ts; not used live | partial (stub-only) |
+| 46 | robot-ax7s | Direct tool calls switch | Live: with code mode off Verifier called routine_list directly | works |
 | 47 | robot-8pqy | DSH tool-fs over R2, glob, grep, delete | Live: write, read, glob in Verifier's Workspace | works |
 | 48 | robot-o6lf | web_fetch; web_search via DeepSeek with a key, else Bing in Browser Rendering | Live: Verifier's search returned otodom.pl results without any search key | works |
 | 49 | robot-0bde | secret_get for granted names only | Live: granted secret read; ungranted refusal in secrets.test.ts | works |
@@ -126,8 +120,8 @@ These were marked done but did not hold:
 | 65 | robot-7v9s | DeepSeek, OpenRouter, Workers AI, OpenCode Go | Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home) | partial (DeepSeek, OpenRouter not tried live) |
 | 66 | robot-6nkv | Home default model | settings-flow.test.ts (real DOs); not changed live | works |
 | 67 | robot-6jqh | Token meter per Robot and Member | Live: Verifier's tokens grew from 330,767 to 345,032 input across a Turn; cost 0 on the subscription | works |
-| 68 | robot-8gag | Monthly limits | usage.test.ts (stub model, real DOs); not hit live | partial (stub-only) |
-| 69 | robot-40nw | Block and notify at the limit | usage.test.ts | partial (stub-only) |
+| 68 | robot-8gag | Monthly limits | Live: Verifier on Workers AI with a $0.0001 limit blocked after one Turn with a notice | works |
+| 69 | robot-40nw | Block and notify at the limit | Live: blocked state, a message sent while blocked waited, and ran after the limit was raised | works |
 | 70 | robot-ajrp | Installable PWA | Manifest, service worker and icons served; not installed on a phone | partial (not tried on a phone) |
 | 71 | robot-9xoj | Web Push | push.test.ts against a fake push service; no device subscribed | partial (stub-only) |
 | 72 | robot-r2uz | Per-robot notifications switch | Live: switch saved in the profile sheet; delivery only in push.test.ts | partial (delivery stub-only) |
