@@ -126,6 +126,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private persona: PersonaSnapshot = { files: [], soul: '' }
   private browserPage: Promise<BrowserPage> | undefined
   private screencast: { stop: () => Promise<void> } | undefined
+  /** The wake-up a Turn is being started for, so a failure before the Turn begins can still be retried. */
+  private starting: Wakeup | undefined
   private handingBack = false
   /** Values of granted secrets, kept only in memory to mask views (never stored by the Robot). */
   private secretValues: Array<readonly [string, string]> = []
@@ -305,7 +307,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         if (active !== undefined) this.store.endTurn(active.wakeupId)
         return
       }
-      await this.runTurn(wakeup, active !== undefined)
+      this.starting = wakeup
+      try {
+        await this.runTurn(wakeup, active !== undefined)
+      } finally {
+        this.starting = undefined
+      }
     }
   }
 
@@ -446,14 +453,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.config()
     if (config === undefined) return
     const active = this.store.activeTurn()
-    if (active !== undefined) {
-      const wakeup = this.store.wakeup(active.wakeupId)
-      // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
-      if (wakeup !== undefined) this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
-      this.store.endTurn(active.wakeupId)
+    const wakeup = active !== undefined ? this.store.wakeup(active.wakeupId) : this.starting
+    // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
+    if (wakeup !== undefined) {
+      this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
+      this.store.endTurn(wakeup.id)
     }
     const message = error instanceof Error ? error.message : String(error)
-    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `The Turn failed: ${message}`, Date.now())
+    const unsent = active === undefined && wakeup !== undefined && wakeup.sender.kind === 'member' ? ` Your message "${wakeup.text.slice(0, 80)}${wakeup.text.length > 80 ? '…' : ''}" was not delivered; Try again sends it.` : ''
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `The Turn failed: ${message}.${unsent}`, Date.now())
     this.broadcast()
     this.ctx.waitUntil(this.notifyMembers('blocked', `A Turn failed: ${message}`).catch(() => 0))
   }
