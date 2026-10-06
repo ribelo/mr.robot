@@ -1,5 +1,6 @@
 import type {
   AdminView,
+  RoutineView,
   OpencodeKeysView,
   Conversation,
   Me,
@@ -55,6 +56,8 @@ export const api = {
   pause: (id: string) => request(`/api/robots/${id}/pause`, { body: {} }),
   resume: (id: string) => request(`/api/robots/${id}/resume`, { body: {} }),
   remove: (id: string) => request(`/api/robots/${id}`, { method: 'DELETE' }),
+  listPref: (id: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }) => request(`/api/robots/${id}/list`, { body: change }),
+  pauseRoutine: (id: string, routine: string, paused: boolean) => request<RoutineView>(`/api/robots/${id}/routines/${routine}/pause`, { body: { paused } }),
   deleteRoutine: (id: string, routine: string) => request(`/api/robots/${id}/routines/${routine}`, { method: 'DELETE' }),
   rewind: (id: string, atSeq: number) => request(`/api/robots/${id}/rewind`, { body: { atSeq } }),
   undoRewind: (id: string, rewind: string) => request(`/api/robots/${id}/rewinds/${rewind}/undo`, { body: {} }),

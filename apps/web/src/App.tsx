@@ -10,6 +10,7 @@ import { Panel } from './components/Panel.tsx'
 import { RobotList } from './components/RobotList.tsx'
 import { Pages } from './pages.tsx'
 import { NewRobot } from './components/NewRobot.tsx'
+import { EditProfileSheet, RoutineSheet } from './components/RobotSheets.tsx'
 
 export function App() {
   const route = useRoute()
@@ -26,6 +27,8 @@ export function App() {
   }, [refreshRobots])
 
   const [creating, setCreating] = useState(false)
+  const [sheet, setSheet] = useState<Sheet>()
+  const [sheetVersion, setSheetVersion] = useState(0)
 
   if (error !== undefined) return <div className="fatal">{error}</div>
   if (me === undefined) return <div className="fatal">Loading…</div>
@@ -41,6 +44,24 @@ export function App() {
   return (
     <div className={`app page-${route.page}`}>
       {creating ? <NewRobot onCancel={() => setCreating(false)} onCreated={(id) => void created(id)} /> : null}
+      {sheet?.kind === 'profile' ? (
+        <EditProfileSheet
+          robotId={sheet.robotId}
+          onClose={() => setSheet(undefined)}
+          onChanged={() => { void refreshRobots(); setSheetVersion((version) => version + 1) }}
+          onOpenRoutine={(routine) => setSheet({ kind: 'routine', robotId: sheet.robotId, routineId: routine.id, fromProfile: true })}
+        />
+      ) : null}
+      {sheet?.kind === 'routine' ? (
+        <RoutineSheet
+          robotId={sheet.robotId}
+          routineId={sheet.routineId}
+          canEdit={robots.find((entry) => entry.id === sheet.robotId)?.ownerId === me.id}
+          onClose={() => setSheet(undefined)}
+          {...(sheet.fromProfile ? { onBack: () => setSheet({ kind: 'profile', robotId: sheet.robotId }) } : {})}
+          onChanged={() => { void refreshRobots(); setSheetVersion((version) => version + 1) }}
+        />
+      ) : null}
       <RobotList
         robots={robots}
         selected={selected}
@@ -50,10 +71,12 @@ export function App() {
         onCreate={() => void create()}
         onAdmin={() => go({ page: 'admin' })}
         onProfile={() => go({ page: 'profile' })}
+        onListPref={(id, change) => void api.listPref(id, change).then(refreshRobots)}
+        onEditProfile={(id) => setSheet({ kind: 'profile', robotId: id })}
       />
       <main className="main">
         {route.page === 'robot'
-          ? <RobotView key={route.id} route={route} me={me} robot={robots.find((robot) => robot.id === route.id)} onChanged={refreshRobots} />
+          ? <RobotView key={`${route.id}-${sheetVersion}`} route={route} me={me} robot={robots.find((robot) => robot.id === route.id)} onChanged={refreshRobots} onSheet={setSheet} />
           : route.page === 'home'
             ? <Empty />
             : <Pages route={route} me={me} robots={robots} onChanged={refreshRobots} />}
@@ -66,7 +89,10 @@ function Empty() {
   return <div className="empty-main">Pick a robot, or tap + to make a new one.</div>
 }
 
-function RobotView({ route, me, robot, onChanged }: { route: Extract<Route, { page: 'robot' }>; me: Me; robot: RobotSummary | undefined; onChanged: () => void }) {
+/** The sheet open over the app: a Robot's profile or one of its Routines. */
+type Sheet = { kind: 'profile'; robotId: string } | { kind: 'routine'; robotId: string; routineId: string; fromProfile: boolean }
+
+function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Route, { page: 'robot' }>; me: Me; robot: RobotSummary | undefined; onChanged: () => void; onSheet: (sheet: Sheet) => void }) {
   const [conversation, setConversation] = useState<ConversationData>()
   const [panel, setPanel] = useState<RobotPanel>()
   const [failure, setFailure] = useState<string>()
@@ -151,8 +177,8 @@ function RobotView({ route, me, robot, onChanged }: { route: Extract<Route, { pa
         <Panel
           panel={panel}
           onClose={() => go({ page: 'robot', id, panel: false })}
-          onDeleteRoutine={(routine) => void api.deleteRoutine(id, routine).then(refresh)}
-          onSave={(patch) => void api.updateSettings(id, patch).then(refresh).then(onChanged)}
+          onOpenRoutine={(routine) => onSheet({ kind: 'routine', robotId: id, routineId: routine, fromProfile: false })}
+          onEditProfile={() => onSheet({ kind: 'profile', robotId: id })}
           onOpenScreen={() => go({ page: 'takeover', id })}
           onAdvanced={() => go({ page: 'advanced', id })}
           onTrajectory={() => go({ page: 'trajectory', id })}
