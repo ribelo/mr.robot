@@ -5,7 +5,9 @@
  */
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
-import type { ProviderView, QuietHours } from '@mr-robot/protocol'
+import type { NotificationKind, ProviderView, QuietHours } from '@mr-robot/protocol'
+import { sendPush, type DeviceSubscription, type PushNotification } from '../platform/push.ts'
+import { localDate, zonedTime } from '../robot/schedule.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { makeVault, type VaultShape } from '../platform/vault.ts'
@@ -29,6 +31,8 @@ export class Member extends DurableObject<Env> {
     const sql = ctx.storage.sql
     sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS member_file (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
     sql.exec(`CREATE TABLE IF NOT EXISTS credential (
       provider TEXT PRIMARY KEY, kind TEXT NOT NULL, sealed TEXT NOT NULL, shared INTEGER NOT NULL, expires INTEGER, updated_at INTEGER NOT NULL
     )`)
@@ -195,6 +199,87 @@ export class Member extends DurableObject<Env> {
 
   private async publishSharing(provider: ProviderId, shared: boolean): Promise<void> {
     await this.env.HOME.getByName(HOME_ID).credentialShared(this.profile().id, provider, shared)
+  }
+
+  // ---------------------------------------------------------------- Web Push (robot-ajrp, robot-9xoj, robot-bden)
+
+  addPushDevice(device: DeviceSubscription & { device?: string }): void {
+    this.sql.exec(
+      `INSERT INTO push_device (endpoint, p256dh, auth, device, created_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device`,
+      device.endpoint, device.keys.p256dh, device.keys.auth, device.device ?? '', Date.now(),
+    )
+  }
+
+  removePushDevice(endpoint: string): void {
+    this.sql.exec('DELETE FROM push_device WHERE endpoint = ?', endpoint)
+  }
+
+  pushDevices(): Array<{ endpoint: string; device: string; createdAt: number }> {
+    return this.sql.exec<{ endpoint: string; device: string; created_at: number }>('SELECT endpoint, device, created_at FROM push_device ORDER BY created_at')
+      .toArray().map((row) => ({ endpoint: row.endpoint, device: row.device, createdAt: row.created_at }))
+  }
+
+  /**
+   * A Robot wants this Member to hear something. Inside the Member's quiet hours it waits
+   * for their end (robot-bden); otherwise it goes to every device now.
+   */
+  async notify(event: { robotId: string; robotName: string; kind: NotificationKind; body: string }): Promise<'sent' | 'deferred'> {
+    const notification: PushNotification = {
+      title: event.kind === 'finished' ? event.robotName : `${event.robotName} ${event.kind === 'needs you' ? 'needs you' : 'is blocked'}`,
+      body: event.body.slice(0, 400),
+      url: `/#/r/${encodeURIComponent(event.robotId)}`,
+      tag: `${event.robotId}-${event.kind}`,
+      urgency: event.kind === 'finished' ? 'normal' : 'high',
+    }
+    const until = this.quietUntil(Date.now())
+    if (until !== null) {
+      this.sql.exec('INSERT INTO pending_notification (deliver_at, notification) VALUES (?, ?)', until, JSON.stringify(notification))
+      const alarm = await this.ctx.storage.getAlarm()
+      if (alarm === null || alarm > until) await this.ctx.storage.setAlarm(until)
+      return 'deferred'
+    }
+    await this.deliver(notification)
+    return 'sent'
+  }
+
+  override async alarm(): Promise<void> {
+    const now = Date.now()
+    const due = this.sql.exec<{ id: number; notification: string }>('SELECT id, notification FROM pending_notification WHERE deliver_at <= ? ORDER BY id', now).toArray()
+    for (const row of due) {
+      this.sql.exec('DELETE FROM pending_notification WHERE id = ?', row.id)
+      await this.deliver(JSON.parse(row.notification) as PushNotification)
+    }
+    const next = this.sql.exec<{ at: number | null }>('SELECT MIN(deliver_at) AS at FROM pending_notification').one().at
+    if (next !== null) await this.ctx.storage.setAlarm(next)
+  }
+
+  /** When the current quiet window ends, or null when now is outside it. */
+  private quietUntil(now: number): number | null {
+    const profile = this.profile()
+    const quiet = profile.quietHours
+    if (quiet === null) return null
+    const [startHour, startMinute] = quiet.start.split(':').map(Number) as [number, number]
+    const [endHour, endMinute] = quiet.end.split(':').map(Number) as [number, number]
+    const local = localDate(now, profile.timeZone)
+    const minutes = local.hour * 60 + local.minute
+    const start = startHour * 60 + startMinute
+    const end = endHour * 60 + endMinute
+    const inside = start <= end ? minutes >= start && minutes < end : minutes >= start || minutes < end
+    if (!inside) return null
+    const endToday = zonedTime(local, endHour, endMinute, profile.timeZone)
+    return endToday > now ? endToday : endToday + 86_400_000
+  }
+
+  protected async deliver(notification: PushNotification): Promise<void> {
+    const vapid = { privateKeyHex: this.env.VAPID_PRIVATE_KEY, publicKey: this.env.VAPID_PUBLIC_KEY, subject: `mailto:${this.profile().email}` }
+    const devices = this.sql.exec<{ endpoint: string; p256dh: string; auth: string }>('SELECT endpoint, p256dh, auth FROM push_device').toArray()
+    await Promise.all(devices.map((device) => Effect.runPromise(
+      sendPush(vapid, { endpoint: device.endpoint, keys: { p256dh: device.p256dh, auth: device.auth } }, notification).pipe(
+        Effect.catchTag('PushGone', () => Effect.sync(() => this.removePushDevice(device.endpoint))),
+        Effect.catchTag('PushFailed', (error) => Effect.sync(() => console.warn('push failed', error.status))),
+      ),
+    )))
   }
 
   // ---------------------------------------------------------------- small values

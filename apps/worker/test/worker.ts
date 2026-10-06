@@ -4,6 +4,9 @@ import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { StubLlm } from './stub-llm.ts'
 
 import { Member as ProductionMember } from '../src/member/member.ts'
+import type { PushNotification } from '../src/platform/push.ts'
+
+export const delivered = new Map<string, PushNotification[]>()
 
 export { default, Home } from '../src/index.ts'
 
@@ -11,6 +14,22 @@ export { default, Home } from '../src/index.ts'
 export class Member extends ProductionMember {
   async expireCredentialsForTest(): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE credential SET expires = 0')
+  }
+
+  /** Every notification delivered to devices, in order. */
+  async deliveredForTest(): Promise<PushNotification[]> {
+    return delivered.get(this.profile().id) ?? []
+  }
+
+  protected override async deliver(notification: PushNotification): Promise<void> {
+    const list = delivered.get(this.profile().id) ?? []
+    list.push(notification)
+    delivered.set(this.profile().id, list)
+    await super.deliver(notification)
+  }
+
+  async endQuietHoursForTest(): Promise<void> {
+    this.ctx.storage.sql.exec('UPDATE pending_notification SET deliver_at = 0')
   }
 
   async sealedForTest(provider: string): Promise<string> {

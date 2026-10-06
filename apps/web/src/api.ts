@@ -63,6 +63,8 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, 'upload failed')
     return (await response.json()) as { name: string; path: string; size: number; contentType: string }
   },
+  subscribePush: (subscription: PushSubscriptionJSON, device: string) => request('/api/push/subscriptions', { body: { ...subscription, device } }),
+  unsubscribePush: (endpoint: string) => request('/api/push/subscriptions', { method: 'DELETE', body: { endpoint } }),
   providers: () => request<ProvidersView>('/api/providers'),
   setApiKey: (provider: string, key: string, shared: boolean) => request(`/api/providers/${provider}`, { method: 'PUT', body: { key, shared } }),
   startOAuth: (provider: string) => request<{ url: string; userCode?: string }>(`/api/providers/${provider}/oauth/start`, { body: {} }),

@@ -20,6 +20,7 @@ import type {
   GrantSet,
   Identity,
   ModelChoice,
+  NotificationKind,
   ProposalKind,
   ProposalView,
   RewindView,
@@ -40,6 +41,7 @@ import { CHIEF_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
 import { compose, type Composition } from '../agent/compose.ts'
 import type { RobotHost, RoutineHost, WorkspaceHost } from '../agent/host.ts'
 import { routineTools } from '../agent/tools/routines.ts'
+import { notifyTools, type NotifyHost } from '../agent/tools/notify.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
@@ -89,7 +91,7 @@ export type AnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
   | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
 
-export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost {
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition } | undefined
   private pumping: Promise<void> | undefined
@@ -234,7 +236,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const { agent, ctx } = await this.agent()
     await this.refreshPersona()
     if (!resuming) {
-      this.store.beginTurn(wakeup.id, agent.session.id, storedLength(this.ctx.storage.sql, agent.session.id), Date.now())
+      const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
+      this.store.beginTurn(wakeup.id, agent.session.id, startSeq, Date.now())
+      this.store.set(`turn-start:${wakeup.id}`, startSeq)
       agent.followup(wakeupMessage({
         sender: wakeup.sender,
         text: wakeup.text,
@@ -260,7 +264,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
-  protected async afterTurn(_wakeup: Wakeup): Promise<void> {
+  protected async afterTurn(wakeup: Wakeup): Promise<void> {
+    await this.notifyFinished(wakeup)
     const soul = (await this.run(this.workspace.readText('SOUL.md'))) ?? ''
     if (soul !== this.persona.soul) {
       const config = this.store.requireConfig()
@@ -270,8 +275,36 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** Tell the owner the Robot changed who it is (robot-h1nm); Web Push joins in ticket 11. */
-  protected async soulChanged(): Promise<void> {}
+  /** Tell the owner the Robot changed who it is (robot-h1nm). */
+  protected async soulChanged(): Promise<void> {
+    await this.notifyMembers('finished', 'changed SOUL.md: who it is has changed. Open the Conversation to see why.')
+  }
+
+  /** "Finished": the Turn produced a reply and the person it concerns is not watching it live. */
+  private async notifyFinished(wakeup: Wakeup): Promise<void> {
+    const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
+    const replies = this.conversation().items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
+    this.store.delete(`turn-start:${wakeup.id}`)
+    const last = replies.at(-1)
+    if (last === undefined || last.kind !== 'reply') return
+    const watcher = wakeup.sender.kind === 'member' ? wakeup.sender.memberId : undefined
+    await this.notifyMembers('finished', last.text, (memberId) => memberId === watcher && this.ctx.getWebSockets(memberId).length > 0)
+  }
+
+  /**
+   * Push to the Robot's notified Members through the Member DOs (quiet hours live there).
+   * @returns how many Members were notified; 0 when notifications are off (robot-r2uz).
+   */
+  async notifyMembers(kind: NotificationKind, body: string, skip: (memberId: string) => boolean = () => false): Promise<number> {
+    const config = this.store.requireConfig()
+    if (!config.notifications.enabled) return 0
+    const members = (config.notifications.members.length === 0 ? [config.ownerId] : config.notifications.members).filter((member) => !skip(member))
+    // A notification that cannot be delivered never fails the Turn that caused it.
+    await Promise.all(members.map((member) => this.env.MEMBER.getByName(member)
+      .notify({ robotId: config.id, robotName: config.identity.name, kind, body })
+      .catch((error: unknown) => console.warn('notification failed', member, error))))
+    return members.length
+  }
 
   /** A Turn that could not run is never silent: it becomes a notice and the Robot stays runnable. */
   private failed(error: unknown): void {
@@ -283,6 +316,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const message = error instanceof Error ? error.message : String(error)
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `The Turn failed: ${message}`, Date.now())
     this.broadcast()
+    this.ctx.waitUntil(this.notifyMembers('blocked', `A Turn failed: ${message}`).catch(() => 0))
   }
 
   // ---------------------------------------------------------------- the agent composition
@@ -351,6 +385,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     switch (group) {
       case 'files': return fileTools(this)
       case 'routines': return routineTools(this, config.timeZone)
+      case 'notify': return notifyTools(this)
       default: return []
     }
   }
@@ -412,6 +447,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView {
     const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
     this.ctx.waitUntil(this.changed())
+    this.ctx.waitUntil(this.notifyMembers('needs you', `${purpose}: waiting for your answer.`).catch(() => 0))
     return proposalView(row)
   }
 

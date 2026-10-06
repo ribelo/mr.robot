@@ -14,6 +14,7 @@ export function Profile({ me, onChanged }: { me: Me; onChanged: () => void }) {
   return (
     <div className="form">
       <Preferences me={me} onChanged={onChanged} />
+      <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
       <Providers />
       <MemberFiles />
     </div>
@@ -178,4 +179,52 @@ function MemberFile({ name }: { name: string }) {
       {saved ? <span className="muted">Saved.</span> : null}
     </label>
   )
+}
+/** Web Push on this device (robot-ajrp, robot-9xoj). On a phone, install the app first. */
+function DeviceNotifications({ vapidPublicKey }: { vapidPublicKey: string }) {
+  const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+  const [subscription, setSubscription] = useState<PushSubscription | null>(null)
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    if (!supported) return
+    void navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription()).then(setSubscription)
+  }, [supported])
+  if (!supported) return <><h2>Notifications</h2><div className="muted">This browser cannot receive push notifications. On a phone, add Mr. Robot to the home screen first.</div></>
+  const enable = async () => {
+    try {
+      if ((await Notification.requestPermission()) !== 'granted') throw new Error('notifications are blocked for this site')
+      const registration = await navigator.serviceWorker.ready
+      const created = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64urlToBytes(vapidPublicKey) })
+      await api.subscribePush(created.toJSON(), navigator.userAgent.slice(0, 80))
+      setSubscription(created)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'cannot enable notifications')
+    }
+  }
+  const disable = async () => {
+    if (subscription === null) return
+    await api.unsubscribePush(subscription.endpoint)
+    await subscription.unsubscribe()
+    setSubscription(null)
+  }
+  return (
+    <>
+      <h2>Notifications</h2>
+      <div className="toggle-card">
+        <div>
+          <div>Notifications on this device</div>
+          <div className="muted">Robots tell you when they finish, need you, or are blocked. Quiet hours hold them until morning.</div>
+        </div>
+        <button type="button" role="switch" aria-checked={subscription !== null} aria-label="Notifications on this device" className={subscription !== null ? 'switch on' : 'switch'} onClick={() => void (subscription === null ? enable() : disable())}><span /></button>
+      </div>
+      {error === undefined ? null : <div className="muted">{error}</div>}
+    </>
+  )
+}
+
+function base64urlToBytes(text: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(text.replaceAll('-', '+').replaceAll('_', '/'))
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length))
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
 }

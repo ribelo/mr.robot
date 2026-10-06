@@ -305,6 +305,16 @@ export interface SettingsCatalog {
   readonly models: readonly ModelOption[]
 }
 
+// ---------------------------------------------------------------- Notifications (robot-9xoj)
+
+export type NotificationKind = 'finished' | 'needs you' | 'blocked'
+
+export const PushSubscriptionInput = Schema.Struct({
+  endpoint: Schema.String,
+  keys: Schema.Struct({ p256dh: Schema.String, auth: Schema.String }),
+  device: Schema.optional(Schema.String),
+})
+
 // ---------------------------------------------------------------- Usage
 
 export interface UsageView {

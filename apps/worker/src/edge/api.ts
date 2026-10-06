@@ -10,6 +10,7 @@ import {
   HomeSettingsPatch,
   OAuthFinish,
   ProposalAnswer,
+  PushSubscriptionInput,
   ShareInput,
   RewindRequest,
   SendMessage,
@@ -72,6 +73,19 @@ export const api = new Router<ApiContext>()
     const file = yield* fileName(name)
     const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
     yield* call(() => c.env.MEMBER.getByName(c.member.id).writeFile(file, content))
+    return { ok: true }
+  }))
+
+  // ------------------------------------------------------------ Web Push devices (robot-ajrp, robot-9xoj)
+  .on('POST', '/api/push/subscriptions', (c) => Effect.gen(function* () {
+    const input = yield* decodeBody(c.request, PushSubscriptionInput)
+    if (!input.endpoint.startsWith('https://')) return yield* Effect.fail(badRequest('a push endpoint is an https URL'))
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).addPushDevice({ endpoint: input.endpoint, keys: input.keys, ...(input.device === undefined ? {} : { device: input.device }) }))
+    return { ok: true }
+  }))
+  .on('DELETE', '/api/push/subscriptions', (c) => Effect.gen(function* () {
+    const { endpoint } = yield* decodeBody(c.request, Schema.Struct({ endpoint: Schema.String }))
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).removePushDevice(endpoint))
     return { ok: true }
   }))
 
