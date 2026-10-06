@@ -6,10 +6,12 @@
 
 **Blocked by:** 03 A Robot Durable Object runs one turn
 
-**Status:** done
+**Status:** in-progress
 
 - [x] A new robot's workspace contains the seeded files; USER.md edits by the robot are refused and surface as a proposal
 - [x] File tools operate only inside the robot's R2 prefix
 - [x] Attachment sent in chat is readable by the robot
 - [x] Compaction uses the robot's instruction and triggers at the robot's budget
 - [x] SOUL.md change produces a message to the Member
+
+Reopened 2026-10-07 by the story verification (verification.md): stories 29, 30 (compaction and budget only with a stub model).

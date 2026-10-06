@@ -18,3 +18,5 @@
 Deployed at https://mrrobot-edge-live-ribelo-ffe667mhzh4ttltx.r-krzywaznia-2c4.workers.dev behind Access (team withered-snow-6eaa); e-mail-code sign-in verified end to end on 2026-10-06.
 
 Open 2026-10-07: installing on an Android phone has not been tried; manifest, service worker and icons are served.
+
+Reopened 2026-10-07 by the story verification (verification.md): stories 70 (not installed on a phone yet).

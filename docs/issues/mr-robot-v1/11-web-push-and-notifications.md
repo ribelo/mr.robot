@@ -6,9 +6,11 @@
 
 **Blocked by:** 04 Robot creation interview, grant approval, Mr. Robot bootstrap
 
-**Status:** done
+**Status:** in-progress
 
 - [x] Subscription stored per device; removal on unsubscribe
 - [x] Each event kind produces one push with a deep link to the conversation
 - [x] Robot with notifications off sends none
 - [x] An event inside quiet hours is delivered at their end
+
+Reopened 2026-10-07 by the story verification (verification.md): stories 71, 72, 73 (push only against a fake push service; no device subscribed).

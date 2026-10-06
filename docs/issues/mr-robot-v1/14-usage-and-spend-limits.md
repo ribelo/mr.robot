@@ -6,9 +6,11 @@
 
 **Blocked by:** 13 Providers, subscriptions and per-robot model
 
-**Status:** done
+**Status:** in-progress
 
 - [x] Token meter per turn sums to the robot and Member counters
 - [x] Crossing the limit mid-turn finishes the turn and blocks the next wake-up
 - [x] Raising the limit unblocks and queued wake-ups run
 - [x] Usage view shows the current month per robot
+
+Reopened 2026-10-07 by the story verification (verification.md): stories 68, 69 (limits only with a stub model).

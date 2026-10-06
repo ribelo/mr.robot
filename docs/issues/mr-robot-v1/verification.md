@@ -1,127 +1,161 @@
 # Mr. Robot v1: story verification
 
-Checked 2026-10-07 against the deployed app (mrrobot-edge-live-ribelo-ffe667mhzh4ttltx.r-krzywaznia-2c4.workers.dev), the worker and PWA test suites, and the staging Browser Rendering test (`pnpm --filter @mr-robot/worker test:integration`). "Live" means exercised by clicking through the deployed PWA as the owner. Test names refer to apps/worker/test and apps/web/test.
+Checked 2026-10-07 against the deployed app (mrrobot-edge-live-ribelo-ffe667mhzh4ttltx.r-krzywaznia-2c4.workers.dev), the worker and PWA test suites, and the staging Browser Rendering test (`pnpm --filter @mr-robot/worker test:integration`).
 
-Status: **works** (implemented and verified as stated), **partial** (part of the story is missing or rests on an instruction rather than enforcement), **not implemented**.
+Grading rule: **works** needs a live check on the deployment or a test on the real path (real Durable Objects, real R2, real Browser Rendering, real provider). A story that depends on an outside system the tests fake (model, push service, OAuth, Git, browser) and that was not seen live is **partial (stub-only)**. **not done**: required work is missing.
 
-## Not fully working
+"Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-- 44 robot-b49q: partial. Not tested against a real CAPTCHA
-- 48 robot-o6lf: partial. Fetch: tests. Search needs a DeepSeek key (the Home has none); keyless engines refuse servers (DuckDuckGo answers a bot check)
-- 84 robot-naul: partial (by decision). DO classes are plain async classes (ADR 0002)
-- 91 robot-lulc: partial. Live: sheet used. The "wake on screen notifications" toggle is not built: a Robot's browser exists only during a Turn
-- 95 robot-cmz9: partial (no images). Live: inspector on run_code. Images are not shown: Robots store no image attachments
+Totals: 67 works, 32 partial, 1 not done.
 
-## Corrected on 2026-10-06/07 after the review
+## Partial or not done
 
-Until these fixes the stories were marked done but did not hold:
-- Claude, ChatGPT, OpenRouter and OpenCode Go Turns failed in DSH (effort metadata used `label` instead of `name`); only Workers AI ran. Now covered by real-adapters.test.ts.
-- The model list was a typed-in list; now each Provider's live list (stories 63, 87–89).
-- A Robot could be created on a model without a credential and failed its first Turn (89).
+- 84 robot-naul, not done: Effect runs the edge API, Workspace, vault, OAuth, push, catalogs and the composition scope; the Robot, Member and Home DO internals are plain async classes. Remaining work: ticket 23
+- 5 robot-d2uv, partial (not tried live): home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home)
+- 10 robot-vy9z, partial (stub-only for later Grant proposals): code-mode-chat.test.ts (stub model); live only the setup and USER.md variants
+- 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
+- 14 robot-hk2s, partial (robot_create not tried live): Live: Mr. Robot answered a robot message with robot_reply. robot_create only in messaging.test.ts
+- 23 robot-i3et, partial (stub-only): code-mode-chat.test.ts (stub model); live: Claude chose to answer rather than react in the tests run
+- 29 robot-zzif, partial (stub-only): workspace.test.ts (stub model drives compaction); not seen live (no conversation long enough)
+- 30 robot-sw54, partial (effect stub-only): Live: setting saved; the budget's effect only in workspace.test.ts
+- 34 robot-7j1a, partial (routine firing not seen live yet): Live: message and robot-message wakes. Routine firing only in routines.test.ts (real DO alarm); none fired live yet (first at 07:15)
+- 39 robot-ksvy, partial (PWA view not tried live): Staging test: real screencast frames; takeover.test.ts relays them. The PWA live view not watched live
+- 40 robot-g6qb, partial (PWA screen not tried live): Staging test: tap and typing reach a real page; the PWA takeover screen not tried live
+- 41 robot-doqx, partial (stub-only): takeover.test.ts (stub browser, fake push)
+- 42 robot-j4ll, partial (stub-only): takeover.test.ts (stub browser)
+- 43 robot-ueh0, partial (stub-only): browser.test.ts (stub browser); not tried on a real shop
+- 44 robot-b49q, partial (untested): Not tested against a real CAPTCHA
+- 46 robot-ax7s, partial (stub-only): code-mode.test.ts; not used live
+- 53 robot-7qpi, partial (stub-only): skills.test.ts (faked GitHub); no library configured live
+- 54 robot-qjvu, partial (stub-only): skills.test.ts (faked GitHub)
+- 55 robot-lszy, partial (stub-only): skills.test.ts (stub model)
+- 56 robot-jqfw, partial (stub-only): skills.test.ts
+- 57 robot-icrv, partial (stub-only): skills.test.ts
+- 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
+- 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
+- 68 robot-8gag, partial (stub-only): usage.test.ts (stub model, real DOs); not hit live
+- 69 robot-40nw, partial (stub-only): usage.test.ts
+- 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
+- 71 robot-9xoj, partial (stub-only): push.test.ts against a fake push service; no device subscribed
+- 72 robot-r2uz, partial (delivery stub-only): Live: switch saved in the profile sheet; delivery only in push.test.ts
+- 73 robot-bden, partial (stub-only): push.test.ts (fake push); file in the live prompt preview
+- 83 robot-c8hq, partial (schedule seam not used): pnpm lint:deps; live Turns
+- 91 robot-lulc, partial (wake loop not run live end-to-end): Live: sheet. The wake loop: staging test (a real page left running, reattached, its notification read) and browser.test.ts; not run end-to-end live
+- 95 robot-cmz9, partial (no images): Live; images not shown (Robots store no image attachments)
+- 96 robot-gq88, partial (search not tried live): robot-trajectory.test.tsx (real session fixture); search not tried live on a long session
+
+## Broken until the review, fixed 2026-10-06/07
+
+These were marked done but did not hold:
+- No Turn could run on Claude, ChatGPT, OpenRouter or OpenCode Go (effort metadata used `label` instead of `name`); only Workers AI ran. Now: real-adapters.test.ts and live Claude Turns.
+- The model list was typed in; now each Provider's live list (63, 87–89).
+- A Robot could be created on a model without a credential and fail its first Turn (89).
 - The PWA crashed on load after an update (hook order); now covered by app.test.tsx.
 - In code mode, the default, routine cards, reactions and Grant questions did not appear in the chat (10, 23, 31).
+- Rewinding to before a Turn left that Turn's message in the inbox, so it was delivered again (20).
+- web_search needed a DeepSeek key; now works without one (48).
 
 ## All stories
 
 | # | Story | Implemented | Verified | Status |
 |---|---|---|---|---|
-| 1 | robot-7v5x | Cloudflare Access (one-time PIN) in front of the edge Worker; the Worker verifies the Access JWT against the team keys | Live: signed in with an e-mail code, /api/me returned the Member. Test: access.test.ts | works |
-| 2 | robot-q7rj | Home DO holds Members and the registry; one Home per deployment | Live: admin Member in Home "Home". Tests: home.test.ts | works |
-| 3 | robot-vplt | Secrets sealed in the Member DO; Home-shared secrets in the Home DO; vault UI on the profile page | Tests: secrets.test.ts (encryption at rest, sharing) | works |
-| 4 | robot-dic7 | Provider credentials in the Member DO, "shared with the Home" switch | Live: Claude subscription connected and used. Tests: providers.test.ts, opencode-go.test.ts | works |
-| 5 | robot-d2uv | Admin view invite/remove; removal pauses their Robots and closes their open views | Tests: home.test.ts, admin.test.ts, takeover.test.ts (socket closed on removal) | works |
-| 6 | robot-mn09 | A new Home has no Robots except each Member's Mr. Robot | Live: first sign-in showed only Mr. Robot. Test: home.test.ts | works |
-| 7 | robot-1xbe | Home bootstraps Mr. Robot on first sign-in | Live: Mr. Robot present and answering. Test: home.test.ts | works |
-| 8 | robot-btct | "New robot" form; the Robot runs a setup interview, names itself, writes its persona | Live: Flat Watcher interviewed the owner, set its name and colour (2026-10-07). Test: lifecycle.test.ts | works |
-| 9 | robot-cobv | Setup ends in one Grant summary question; compare-and-swap approval | Live: approved web+routines; the Robot became active and created its routine. Test: lifecycle.test.ts | works |
-| 10 | robot-vy9z | propose_grants as a question card; also in code mode | Tests: code-mode.test.ts, code-mode-chat.test.ts | works |
-| 11 | robot-hpj1 | Robots are private by default | Test: lifecycle.test.ts (shared vs private) | works |
-| 12 | robot-bld3 | "Shared with the Home" in advanced settings | Test: lifecycle.test.ts | works |
-| 13 | robot-qo06 | Pause/Resume/Delete in advanced settings (two-step delete) | Test: lifecycle.test.ts | works |
-| 14 | robot-hk2s | Mr. Robot tools robot_create, robot_configure and messaging | Test: messaging.test.ts (creates a Robot, Grants synced) | works |
-| 15 | robot-70kf | Home syncs Mr. Robot's recipient Grants to every reachable Robot | Tests: lifecycle.test.ts, messaging.test.ts | works |
-| 16 | robot-frf5 | One live DSH session per Robot in DO SQLite; chat is a projection of it | Live: same conversation in chat and trajectory. Test: robot-turn.test.ts | works |
-| 17 | robot-q4b2 | Robot list (last line, time, unread), bubbles, routine cards, screen thumbnail | Live: list, bubbles, "Created routine" cards seen. Tests: chat-view.test.tsx, app.test.tsx | works |
-| 18 | robot-jlzk | Composer with attachments stored in the Workspace | Test: workspace.test.ts (the Robot reads the attachment). Not exercised live | works (not tried live) |
-| 19 | robot-h5v3 | DSH trajectory view (ported ui-trajectory) over the session events | Live: Mr. Robot's 4 Turns with the code program and nested call. Test: robot-trajectory.test.tsx | works |
-| 20 | robot-0q6a | Rewind sheet on the trajectory page (per Turn) | Tests: rewind.test.ts; the sheet was opened live but not used on the owner's data | works (per Turn, not per record) |
-| 21 | robot-8v1t | Rewind archives the old session; Undo restores it | Test: rewind.test.ts | works |
-| 22 | robot-acr3 | Rewind note tells the Robot that external effects stand, listing tools used after the point | Test: rewind.test.ts | works |
-| 23 | robot-i3et | react tool; 👍 on the member message, also from code mode | Tests: routines.test.ts, code-mode-chat.test.ts | works |
-| 24 | robot-9qnj | Robot messages rendered with sender avatar and name | Tests: messaging.test.ts, chat-view.test.tsx | works |
-| 25 | robot-om9f | Muse files seeded into the R2 Workspace | Live: Flat Watcher filled IDENTITY/AGENTS/MEMORY. Test: workspace.test.ts | works |
-| 26 | robot-h1nm | SOUL.md change detected after a Turn and noticed in the chat | Live: "Flat Watcher changed SOUL.md." Test: workspace.test.ts | works |
-| 27 | robot-mj7v | USER.md and PROACTIVE_PREFERENCES.md in the Member DO, in every prompt, read-only to Robots | Test: workspace.test.ts | works |
-| 28 | robot-jpzp | propose_member_file_edit question | Test: workspace.test.ts | works |
-| 29 | robot-zzif | Compaction instruction in advanced settings | Test: workspace.test.ts (compaction uses it) | works |
-| 30 | robot-sw54 | Context budget slider up to the model's window | Tests: workspace.test.ts, code-mode.test.ts | works |
-| 31 | robot-yrw7 | routine_* tools; cards in the chat | Live: "Create a routine…" made "Invoice check" on Claude. Test: routines.test.ts | works |
-| 32 | robot-gbbt | once/interval/daily/weekly/cron in the owner's time zone | Test: schedule.test.ts, routines.test.ts | works |
-| 33 | robot-qyd5 | Routine cards in the panel and the profile sheet with status | Live: panel showed Invoice check. Test: panel.test.tsx | works |
-| 34 | robot-7j1a | Robots sleep in their DO; wake on routine, message, robot message, channel event | Tests: routines.test.ts, messaging.test.ts, channels.test.ts | works |
-| 35 | robot-v1gb | Missed occurrences collapse to one run | Test: routines.test.ts | works |
-| 36 | robot-makt | Wake-up queue in SQLite, one Turn at a time | Test: robot-turn.test.ts | works |
-| 37 | robot-l9te | browser_* tools over Browser Rendering | Staging test on real Browser Rendering: open, observe, type, check, click, screenshot. Test: browser.test.ts | works |
-| 38 | robot-t0vc | Cookies and storage saved in the Robot DO between sessions | Staging test: cookie carried into a new session. Test: browser.test.ts | works |
-| 39 | robot-ksvy | CDP screencast relayed over the Robot WebSocket to the PWA | Staging test: frames from real Browser Rendering. Test: takeover.test.ts. Not watched live in the PWA | works (PWA view not tried live) |
-| 40 | robot-g6qb | Takeover screen: taps, text, keys forwarded as CDP input | Staging test: tap and typing reach a real page. Test: takeover.test.ts | works |
-| 41 | robot-doqx | browser_request_takeover; "needs you" push; the Robot waits | Test: takeover.test.ts | works |
-| 42 | robot-j4ll | Hand back wakes the Robot with the page URL and a screenshot | Test: takeover.test.ts | works |
-| 43 | robot-ueh0 | Prompt rule plus a guard: a click or Enter on a pay/order button (English and Polish labels) is refused with a pointer to a takeover | Test: browser.test.ts ("Kupuję i płacę" refused). Labels outside the pattern are not caught | works |
-| 44 | robot-b49q | CAPTCHA vendor detection in observations with guidance; screenshots for image puzzles | Not tested against a real CAPTCHA | partial |
-| 45 | robot-5ewr | Code mode default, Worker Loader isolate (ADR 0001) | Live: run_code calling routine_create. Test: code-mode.test.ts | works |
-| 46 | robot-ax7s | Code mode switch in advanced settings | Test: code-mode.test.ts | works |
-| 47 | robot-8pqy | DSH tool-fs over the R2 fs seam, plus glob/grep/delete | Test: workspace.test.ts | works |
-| 48 | robot-o6lf | web_fetch from the Worker; web_search through DeepSeek search | Fetch: tests. Search needs a DeepSeek key (the Home has none); keyless engines refuse servers (DuckDuckGo answers a bot check) | partial |
-| 49 | robot-0bde | secret_get for granted names only | Test: secrets.test.ts | works |
-| 50 | robot-4zi6 | Secret values redacted before storage and masked in views and robot messages | Test: secrets.test.ts | works |
-| 51 | robot-f9ln | Only granted tool groups and skills are registered | Tests: code-mode.test.ts, skills.test.ts | works |
-| 52 | robot-0ms7 | No shell or container tool exists; dependency lint | Test: code-mode.test.ts; pnpm lint:deps | works |
-| 53 | robot-7qpi | Skill library in the Home DO and R2 | Test: skills.test.ts. No library configured live | works (not tried live) |
-| 54 | robot-qjvu | Git sync from GitHub (token optional), admin "Sync now" | Test: skills.test.ts (tarball fixture). Only GitHub is supported | works (GitHub only) |
-| 55 | robot-lszy | propose_skill tool | Test: skills.test.ts | works |
-| 56 | robot-jqfw | Skill proposal question; approval publishes | Test: skills.test.ts | works |
-| 57 | robot-icrv | Per-robot skill Grants; only granted skills in the catalog | Test: skills.test.ts | works |
-| 58 | robot-bsvs | robot_directory | Test: messaging.test.ts | works |
-| 59 | robot-mv15 | robot_send and robot_reply through the outbox | Test: messaging.test.ts | works |
-| 60 | robot-ppzu | Incoming robot message labelled with sender | Test: messaging.test.ts | works |
-| 61 | robot-bjq5 | Recipients granted only through owner-approved Grants | Test: messaging.test.ts | works |
-| 62 | robot-eiin | No tool creates helpers; only Mr. Robot creates top-level Robots | Test: code-mode.test.ts (tool catalog) | works |
-| 63 | robot-82r5 | One model and effort per Robot from the live lists | Live: Mr. Robot switched to Claude Sonnet 5.5 and answered. Tests: real-adapters.test.ts, settings-flow.test.ts | works |
-| 64 | robot-lzu3 | OpenAI device flow and Anthropic paste flow | Live: Claude subscription connected and running. ChatGPT adapter checked against the real service with the owner's DSH login (tool call returned); the ChatGPT sign-in in the PWA not tried live | works (ChatGPT sign-in not tried live) |
-| 65 | robot-7v9s | DeepSeek, OpenRouter, Workers AI (and OpenCode Go) | Live: Workers AI and OpenCode Go (local live check). DeepSeek/OpenRouter through faked APIs (real-adapters.test.ts) | works (DeepSeek, OpenRouter not tried live) |
-| 66 | robot-6nkv | Home default model in admin; a new Robot starts on it when usable | Tests: settings-flow.test.ts, home.test.ts | works |
-| 67 | robot-6jqh | Token meter per Turn into Robot and Member counters | Live: panel shows tokens. Test: usage.test.ts | works |
-| 68 | robot-8gag | Monthly limits per Robot and per Member | Test: usage.test.ts | works |
-| 69 | robot-40nw | Robot blocks and notifies at the limit | Test: usage.test.ts | works |
-| 70 | robot-ajrp | Manifest, service worker, icons | Not installed on an Android phone yet | works (not tried on a phone) |
-| 71 | robot-9xoj | Web Push per device (VAPID) | Test: push.test.ts against a fake push service. No real phone received one yet | works (not tried on a phone) |
-| 72 | robot-r2uz | Notifications switch in the profile sheet and settings | Tests: push.test.ts, panel.test.tsx | works |
-| 73 | robot-bden | Quiet hours in the Member DO; PROACTIVE_PREFERENCES.md in every prompt | Test: push.test.ts | works |
-| 74 | robot-vfqd | Channel seam with PWA adapter; contract suite | Test: channels.test.ts | works |
-| 75 | robot-z3ud | Panel: screen, routines, links; profile sheet for simple settings | Live: panel and sheet. Test: panel.test.tsx | works |
-| 76 | robot-vqtw | Advanced settings page (model, effort, budget, code mode, compaction, Grants, limit, prompt preview) | Live: model switched. Test: settings-flow.test.ts | works |
-| 77 | robot-x26m | Admin fleet list with live state | Live: admin view. Test: admin.test.ts | works |
-| 78 | robot-1rap | Admin: providers, model lists, members, skills, Grants, costs | Live: admin view, model refresh. Test: admin.test.ts | works |
-| 79 | robot-bvme | Admin routines across Robots | Test: admin.test.ts | works |
-| 80 | robot-ifp6 | One Durable Object with SQLite per Robot | Tests: all worker tests run on DOs | works |
-| 81 | robot-h3vr | Alchemy stack, one account | Live deploys; Test: stack.test.ts | works |
-| 82 | robot-scwl | Workspace in R2 under robots/<id>/ | Test: workspace.test.ts | works |
-| 83 | robot-c8hq | DSH Cordis packages assembled per Robot (session, llm, tools, ptc, fs, web, skill, compaction, credentials) | pnpm lint:deps; all Turn tests | works (schedule seam not used, ADR 0002) |
-| 84 | robot-naul | Effect for the edge API, Workspace, vault, OAuth, push, catalogs and the composition scope | DO classes are plain async classes (ADR 0002) | partial (by decision) |
-| 85 | robot-0eew | Browser Rendering binding | Staging test | works |
-| 86 | robot-p9jm | Turns run in the DO regardless of the client | Test: robot-turn.test.ts (socket closed mid-Turn, eviction resume) | works |
-| 87 | robot-d994 | Live model lists per connected Provider, metadata from models.dev | Live: 13 Claude + 20 Workers AI models from the Providers. Test: live-catalog.test.ts | works |
-| 88 | robot-3f4i | Admin "Model lists" with fetched time, "Refresh models" | Live: refresh returned both lists | works |
-| 89 | robot-mx6s | A new Robot gets a usable model; refused with a link to Providers when none; saving an unusable model is refused | Test: settings-flow.test.ts | works |
-| 90 | robot-mktj | Row menu: Pin, Mark as unread, Edit profile, Hide from sidebar | Live: menu used. Test: list-and-routines.test.ts | works |
-| 91 | robot-lulc | Edit profile sheet: avatar colour, name, title, description, notifications, routines | Live: sheet used. The "wake on screen notifications" toggle is not built: a Robot's browser exists only during a Turn | partial |
-| 92 | robot-l3gr | Routine detail: words + cron with TZ, status, next run, instructions, recent runs | Live: Invoice check detail. Tests: list-and-routines.test.ts, panel.test.tsx | works |
-| 93 | robot-qhll | Pause/Resume/Delete in routine detail | Live: paused and deleted Invoice check. Test: list-and-routines.test.ts | works |
-| 94 | robot-3ioa | Ported DSH ui-trajectory: turn ledger, nested subtools, Duration/Turns/Calls strip | Live: Mr. Robot trajectory. Test: robot-trajectory.test.tsx | works |
-| 95 | robot-cmz9 | DSH record inspector (input, output, usage, timing) | Live: inspector on run_code. Images are not shown: Robots store no image attachments | partial (no images) |
-| 96 | robot-gq88 | DSH search; paging older events through /events?before | Test: robot-trajectory.test.tsx (paging). Search not tried on a long session | works |
-| 97 | robot-s54i | Code-mode program with nested calls in the trajectory | Live and robot-trajectory.test.tsx | works |
-| 98 | robot-gr94 | Collapsed "Used …" lines and "Using … now" while working | Live: "Used a code program, routine create". Tests: code-mode-chat.test.ts, routines.test.ts | works |
-| 99 | robot-n7th | Failed Turn shows as blocked with a plain last line; reason and Try again in the chat | Test: list-and-routines.test.ts, settings-flow.test.ts | works |
-| 100 | robot-g6y0 | Settings button, panel links (Trajectory, Advanced settings, screen/takeover), profile and admin in the sidebar | Live: every screen reached by clicking | works |
+| 1 | robot-7v5x | Cloudflare Access (e-mail PIN) in front of the Worker; the Worker verifies the Access JWT | Live: signed in with an e-mail code, /api/me returned the Member | works |
+| 2 | robot-q7rj | Home DO with Members and the Robot registry | Live: one Member (owner). A second Member only in home.test.ts (real DOs) | works (second Member not tried live) |
+| 3 | robot-vplt | Secrets sealed in the Member DO, Home-shared ones in the Home DO | Live: secret "verifier-pin" stored and read by a Robot; sharing with another Member only in secrets.test.ts | works (sharing not tried live) |
+| 4 | robot-dic7 | Provider credentials per Member with "shared with the Home" | Live: Claude subscription connected and used. Sharing to another Member: providers.test.ts only | works (sharing not tried live) |
+| 5 | robot-d2uv | Admin invite/remove; removal pauses their Robots and closes their views | home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home) | partial (not tried live) |
+| 6 | robot-mn09 | Empty Home except each Member's Mr. Robot | Live: first sign-in showed only Mr. Robot | works |
+| 7 | robot-1xbe | Mr. Robot bootstrapped on first sign-in | Live | works |
+| 8 | robot-btct | "New robot" form; setup interview; the Robot names itself and writes its persona | Live: Flat Watcher and Verifier interviews on Claude | works |
+| 9 | robot-cobv | One Grant summary at the end of setup; compare-and-swap approval | Live: approved twice, Robots became active with exactly the proposed Grants | works |
+| 10 | robot-vy9z | propose_grants as a question, also from code mode | code-mode-chat.test.ts (stub model); live only the setup and USER.md variants | partial (stub-only for later Grant proposals) |
+| 11 | robot-hpj1 | Robots private by default | lifecycle.test.ts (real DOs) | works |
+| 12 | robot-bld3 | "Shared with the Home" in advanced settings | lifecycle.test.ts (real DOs); not tried live (one-person Home) | partial (not tried live) |
+| 13 | robot-qo06 | Pause/Resume/Delete | Live: paused and resumed Verifier; a message sent while paused waited and ran on resume. Delete: lifecycle.test.ts | works |
+| 14 | robot-hk2s | Mr. Robot tools robot_create, robot_configure, messaging | Live: Mr. Robot answered a robot message with robot_reply. robot_create only in messaging.test.ts | partial (robot_create not tried live) |
+| 15 | robot-70kf | Mr. Robot's recipient Grants follow reachable Robots | Live: Mr. Robot listed in Verifier's directory after granting; sync in lifecycle.test.ts | works |
+| 16 | robot-frf5 | One live DSH session per Robot; chat is its projection | Live: chat and trajectory of the same session | works |
+| 17 | robot-q4b2 | Robot list with last line, time, unread; bubbles; routine cards; screen thumbnail | Live: all seen | works |
+| 18 | robot-jlzk | Attachments stored in the Workspace and readable by the Robot | Live: invoice-77.txt uploaded, Verifier read amount and date on Claude | works |
+| 19 | robot-h5v3 | DSH trajectory view | Live: Mr. Robot's trajectory with code program and nested call | works |
+| 20 | robot-0q6a | Rewind to before a Turn | Live: Verifier rewound to before Test 6 and remembered only up to Test 5 (fixed tonight: the message used to come back) | works |
+| 21 | robot-8v1t | Archive and Undo | Live: undo restored the conversation | works |
+| 22 | robot-acr3 | Rewind note: external effects stand, tools used after the point | Live note injected; rewind.test.ts checks its text | works |
+| 23 | robot-i3et | 👍 reaction for a plain instruction | code-mode-chat.test.ts (stub model); live: Claude chose to answer rather than react in the tests run | partial (stub-only) |
+| 24 | robot-9qnj | Robot messages with sender name and avatar | Live: Mr. Robot's chat shows "Verifier" with its avatar | works |
+| 25 | robot-om9f | Muse files seeded in R2 | Live: Verifier listed and edited them | works |
+| 26 | robot-h1nm | SOUL.md change noticed in the chat | Live: "Flat Watcher changed SOUL.md." | works |
+| 27 | robot-mj7v | USER.md and PROACTIVE_PREFERENCES.md per person, read-only to Robots | Live: Verifier's edit of USER.md was refused | works |
+| 28 | robot-jpzp | propose_member_file_edit question | Live: the USER.md proposal question appeared | works |
+| 29 | robot-zzif | Compaction instruction | workspace.test.ts (stub model drives compaction); not seen live (no conversation long enough) | partial (stub-only) |
+| 30 | robot-sw54 | Context budget slider | Live: setting saved; the budget's effect only in workspace.test.ts | partial (effect stub-only) |
+| 31 | robot-yrw7 | A routine from chat | Live: "Invoice check" and "Live check" created on Claude, cards shown | works |
+| 32 | robot-gbbt | once/interval/daily/weekly/cron in the owner's time zone | Live: weekly and daily with correct cron; other kinds in schedule.test.ts | works |
+| 33 | robot-qyd5 | Routines with next run in the panel | Live | works |
+| 34 | robot-7j1a | Sleep between Turns; wake on routine, message, robot message, channel event | Live: message and robot-message wakes. Routine firing only in routines.test.ts (real DO alarm); none fired live yet (first at 07:15) | partial (routine firing not seen live yet) |
+| 35 | robot-v1gb | Missed occurrences run once | routines.test.ts (real DO alarm) | works |
+| 36 | robot-makt | One Turn at a time, queue | robot-turn.test.ts (real DO); live: Verifier's request and Mr. Robot's reply queued and ran in order | works |
+| 37 | robot-l9te | browser_* tools | Live: Verifier opened example.com and took a screenshot on Claude; staging test on real Browser Rendering | works |
+| 38 | robot-t0vc | Cookies and storage kept between sessions | Staging test (real Browser Rendering) | works |
+| 39 | robot-ksvy | Live view of the Robot's screen in the PWA | Staging test: real screencast frames; takeover.test.ts relays them. The PWA live view not watched live | partial (PWA view not tried live) |
+| 40 | robot-g6qb | Takeover input | Staging test: tap and typing reach a real page; the PWA takeover screen not tried live | partial (PWA screen not tried live) |
+| 41 | robot-doqx | Takeover request suspends the Robot and pushes "needs you" | takeover.test.ts (stub browser, fake push) | partial (stub-only) |
+| 42 | robot-j4ll | Hand back resumes with URL and screenshot | takeover.test.ts (stub browser) | partial (stub-only) |
+| 43 | robot-ueh0 | Pay/order clicks refused (English and Polish labels) | browser.test.ts (stub browser); not tried on a real shop | partial (stub-only) |
+| 44 | robot-b49q | CAPTCHA vendor detection with guidance | Not tested against a real CAPTCHA | partial (untested) |
+| 45 | robot-5ewr | Code mode default, Worker Loader isolate | Live: every Verifier and Mr. Robot Turn ran as code programs on Claude | works |
+| 46 | robot-ax7s | Direct tool calls switch | code-mode.test.ts; not used live | partial (stub-only) |
+| 47 | robot-8pqy | DSH tool-fs over R2, glob, grep, delete | Live: write, read, glob in Verifier's Workspace | works |
+| 48 | robot-o6lf | web_fetch; web_search via DeepSeek with a key, else Bing in Browser Rendering | Live: Verifier's search returned otodom.pl results without any search key | works |
+| 49 | robot-0bde | secret_get for granted names only | Live: granted secret read; ungranted refusal in secrets.test.ts | works |
+| 50 | robot-4zi6 | Secrets redacted before storage and masked | Live: the PIN appears nowhere in Verifier's stored events or trajectory, only [secret:verifier-pin] | works |
+| 51 | robot-f9ln | Only granted tools and skills | Live: Verifier's prompt preview lists exactly its granted tools | works |
+| 52 | robot-0ms7 | No shell or container tool | Live prompt preview; pnpm lint:deps | works |
+| 53 | robot-7qpi | Home skill library | skills.test.ts (faked GitHub); no library configured live | partial (stub-only) |
+| 54 | robot-qjvu | Git sync (GitHub tarball) | skills.test.ts (faked GitHub) | partial (stub-only) |
+| 55 | robot-lszy | propose_skill | skills.test.ts (stub model) | partial (stub-only) |
+| 56 | robot-jqfw | Skill proposal approval publishes | skills.test.ts | partial (stub-only) |
+| 57 | robot-icrv | Per-robot skill Grants | skills.test.ts | partial (stub-only) |
+| 58 | robot-bsvs | robot_directory | Live: Verifier listed Mr. Robot | works |
+| 59 | robot-mv15 | robot_send / robot_reply through the outbox | Live: request and "pong" reply round trip | works |
+| 60 | robot-ppzu | Incoming robot message labelled | Live | works |
+| 61 | robot-bjq5 | Recipients only by Grant | Live: Verifier could message Mr. Robot only after the Grant; refusal in messaging.test.ts | works |
+| 62 | robot-eiin | No helper creation; only Mr. Robot creates top-level Robots | Live prompt preview: no create tool for Verifier | works |
+| 63 | robot-82r5 | One model and effort per Robot from live lists | Live: Mr. Robot and Verifier on Claude Sonnet 5.5 | works |
+| 64 | robot-lzu3 | ChatGPT device flow, Claude paste flow | Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried | partial (ChatGPT sign-in not tried live) |
+| 65 | robot-7v9s | DeepSeek, OpenRouter, Workers AI, OpenCode Go | Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home) | partial (DeepSeek, OpenRouter not tried live) |
+| 66 | robot-6nkv | Home default model | settings-flow.test.ts (real DOs); not changed live | works |
+| 67 | robot-6jqh | Token meter per Robot and Member | Live: Verifier's tokens grew from 330,767 to 345,032 input across a Turn; cost 0 on the subscription | works |
+| 68 | robot-8gag | Monthly limits | usage.test.ts (stub model, real DOs); not hit live | partial (stub-only) |
+| 69 | robot-40nw | Block and notify at the limit | usage.test.ts | partial (stub-only) |
+| 70 | robot-ajrp | Installable PWA | Manifest, service worker and icons served; not installed on a phone | partial (not tried on a phone) |
+| 71 | robot-9xoj | Web Push | push.test.ts against a fake push service; no device subscribed | partial (stub-only) |
+| 72 | robot-r2uz | Per-robot notifications switch | Live: switch saved in the profile sheet; delivery only in push.test.ts | partial (delivery stub-only) |
+| 73 | robot-bden | Quiet hours; PROACTIVE_PREFERENCES.md in every prompt | push.test.ts (fake push); file in the live prompt preview | partial (stub-only) |
+| 74 | robot-vfqd | Channel seam with PWA adapter | channels.test.ts contract suite; the PWA is the only Channel | works |
+| 75 | robot-z3ud | Panel and profile sheet | Live | works |
+| 76 | robot-vqtw | Advanced settings incl. prompt preview | Live: model changed, prompt preview read | works |
+| 77 | robot-x26m | Admin fleet with live state | Live admin view | works |
+| 78 | robot-1rap | Admin: providers, model lists, members, skills, Grants, costs | Live admin view and model refresh | works |
+| 79 | robot-bvme | Admin routines across Robots | admin.test.ts; live list showed the routines | works |
+| 80 | robot-ifp6 | One DO with SQLite per Robot | Live and all worker tests | works |
+| 81 | robot-h3vr | Alchemy stack, one account | Live deploys | works |
+| 82 | robot-scwl | Workspace in R2 under robots/<id>/ | Live file tools | works |
+| 83 | robot-c8hq | DSH Cordis packages per Robot; schedule seam not used (ADR 0002) | pnpm lint:deps; live Turns | partial (schedule seam not used) |
+| 84 | robot-naul | Effect on the Cloudflare side | Effect runs the edge API, Workspace, vault, OAuth, push, catalogs and the composition scope; the Robot, Member and Home DO internals are plain async classes. Remaining work: ticket 23 | not done |
+| 85 | robot-0eew | Browser Rendering binding | Live and staging | works |
+| 86 | robot-p9jm | Turns survive the client going away | robot-turn.test.ts (real DO, socket closed mid-Turn); live: tab hung during a Turn, the Turn finished server-side | works |
+| 87 | robot-d994 | Live model lists per connected Provider | Live: 13 Claude + 20 Workers AI models from the Providers | works |
+| 88 | robot-3f4i | Admin refresh with fetched time | Live | works |
+| 89 | robot-mx6s | Never created on a model without a credential; refuse unusable model | settings-flow.test.ts (real DOs, faked OpenRouter list); live: the model list offers only connected Providers | works |
+| 90 | robot-mktj | Row menu: Pin, Mark as unread, Edit profile, Hide from sidebar | Live | works |
+| 91 | robot-lulc | Edit profile sheet incl. "Wake on screen notifications" | Live: sheet. The wake loop: staging test (a real page left running, reattached, its notification read) and browser.test.ts; not run end-to-end live | partial (wake loop not run live end-to-end) |
+| 92 | robot-l3gr | Routine detail with cron + TZ, runs | Live | works |
+| 93 | robot-qhll | Pause/Resume/Delete routine | Live | works |
+| 94 | robot-3ioa | DSH trajectory ledger and strip | Live | works |
+| 95 | robot-cmz9 | Record inspector | Live; images not shown (Robots store no image attachments) | partial (no images) |
+| 96 | robot-gq88 | Search and paging | robot-trajectory.test.tsx (real session fixture); search not tried live on a long session | partial (search not tried live) |
+| 97 | robot-s54i | Code program with nested calls | Live | works |
+| 98 | robot-gr94 | Collapsed tool activity and "Using … now" | Live: "Used a code program, routine create" lines | works |
+| 99 | robot-n7th | Failure as blocked state with plain line and Try again | list-and-routines.test.ts, settings-flow.test.ts (real DOs); the earlier live failure now shows the plain line | works |
+| 100 | robot-g6y0 | Every screen reachable by clicking | Live: all screens reached from the list, header, panel, sidebar | works |

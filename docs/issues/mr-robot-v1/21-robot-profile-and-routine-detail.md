@@ -6,7 +6,7 @@
 
 **Blocked by:** 06 Routines on Durable Object alarms; 11 Web Push and notification settings
 
-**Status:** done
+**Status:** in-progress
 
 - [x] Menu actions work and persist per Member (pin, unread, hidden)
 - [x] Edit profile saves and the list updates without reload
@@ -17,3 +17,5 @@
 Verified 2026-10-07 on the live deployment: row menu (Pin, Mark as unread, Edit profile, Hide from sidebar), Edit profile sheet with routines, routine detail with cron line, Pause and two-step Delete, all by clicking. Tests: list-and-routines.test.ts, code-mode-chat.test.ts, apps/web panel.test.tsx.
 
 Not built: reference 09's "Wake on screen notifications". A Robot's browser exists only during a Turn (it is closed and its state saved when the Turn ends), so no page can raise a notification between Turns. The sheet carries the per-Robot Notifications switch instead. "Move to new section" and "Replace with different bot" from reference 10 are not in the stories.
+
+Reopened 2026-10-07 by the story verification (verification.md): stories 91 (wake loop not run live end to end).

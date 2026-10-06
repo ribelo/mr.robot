@@ -6,11 +6,11 @@
 
 **Blocked by:** 08 Browser Rendering provider with Leash primitives; 11 Web Push and notification settings
 
-**Status:** done
+**Status:** in-progress
 
 - [x] Screencast frames reach the PWA through the Robot DO WebSocket
 - [x] Takeover forwards taps and keys; another Member cannot claim the same tab
 - [x] Turn state is 'waiting for takeover' until handed back; the resumed turn sees the return note
 - [x] Push 'needs you' is sent on takeover request
 
-
+Reopened 2026-10-07 by the story verification (verification.md): stories 39, 40 (PWA live view and takeover screen not tried live), 41, 42 (stub-only).

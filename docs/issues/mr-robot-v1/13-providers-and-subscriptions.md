@@ -6,7 +6,7 @@
 
 **Blocked by:** 04 Robot creation interview, grant approval, Mr. Robot bootstrap
 
-**Status:** done
+**Status:** in-progress
 
 - [x] OAuth flows complete from the PWA and refresh without the Member
 - [x] A robot of another Member runs on a Home-shared subscription
@@ -14,3 +14,5 @@
 - [x] Default model applies to newly created robots
 
 Corrected 2026-10-07: until then no Turn could run on Claude, ChatGPT, OpenRouter or OpenCode Go (effort metadata used `label` instead of `name`), and the model list was typed in. Fixed, with Turns through each adapter tested (real-adapters.test.ts), Claude verified live and ChatGPT's adapter checked against the real service. See verification.md.
+
+Reopened 2026-10-07 by the story verification (verification.md): stories 64 (ChatGPT sign-in not tried live), 65 (DeepSeek, OpenRouter not tried live).

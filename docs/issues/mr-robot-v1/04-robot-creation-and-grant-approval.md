@@ -6,7 +6,7 @@
 
 **Blocked by:** 03 A Robot Durable Object runs one turn
 
-**Status:** done
+**Status:** in-progress
 
 - [x] New robot creates a Robot DO in setup state and opens its conversation with the kickoff turn
 - [x] Setup may only ask questions and propose; approval is a compare-and-swap on the proposal revision
@@ -14,3 +14,5 @@
 - [x] Shared robot appears for the other Member; private does not
 - [x] Pause stops wake-ups, resume restores them, delete keeps the archive
 - [x] Mr. Robot recipient grants update when a robot is created or shared
+
+Reopened 2026-10-07 by the story verification (verification.md): stories 5, 12 (not tried live in a one-person Home), 14 (robot_create not tried live).
