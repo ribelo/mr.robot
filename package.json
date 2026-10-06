@@ -16,7 +16,7 @@
     "lint:deps": "node scripts/dependency-lint.ts",
     "check": "pnpm lint:deps && pnpm typecheck && pnpm test",
     "dev": "pnpm --filter @mr-robot/web build && pnpm --filter @mr-robot/worker exec wrangler dev -c wrangler.dev.jsonc --ip 127.0.0.1 --port 8787 --persist-to ../../.wrangler/state",
-    "login": "ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy profile edit --profile mr-robot --add Cloudflare"
+    "cloudflare-login": "ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy profile edit --profile mr-robot --add Cloudflare"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261006.1",

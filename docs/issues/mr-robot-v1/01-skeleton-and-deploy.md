@@ -15,4 +15,4 @@
 - [x] A dependency lint forbids Node-bound DSH packages and Effect imports inside DSH packages
 
 
-**Pending:** Waiting on the first deploy: `pnpm login` (owner, once), then `pnpm deploy`.
+**Pending:** Waiting on the first deploy: `pnpm cloudflare-login` (owner, once), then `pnpm deploy`.

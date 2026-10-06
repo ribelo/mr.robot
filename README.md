@@ -22,7 +22,7 @@ Self-hosted robots on Cloudflare: persistent agents with one endless conversatio
 - `pnpm test`: everything (workerd tests for the Worker, component tests for the PWA, the Alchemy plan test)
 - `pnpm lint:deps`: no Node-bound DSH package and no Effect inside DSH packages in the Worker bundle
 - `pnpm dev`: local server on http://127.0.0.1:8787, signed in as owner@example.com
-- `pnpm login`: one-time Cloudflare login for deploying (Alchemy profile `mr-robot` in ~/.alchemy-mr-robot)
+- `pnpm cloudflare-login`: one-time Cloudflare login for deploying (Alchemy profile `mr-robot` in ~/.alchemy-mr-robot)
 - `pnpm deploy`: build the PWA and deploy every resource; prints the URL
 - `pnpm --filter @mr-robot/worker test:integration`: real Browser Rendering (needs Cloudflare credentials)
 
