@@ -82,6 +82,19 @@ export function Admin() {
       <h2>Home settings</h2>
       <HomeSettings view={view} onSave={(patch) => run(() => api.updateHomeSettings(patch), 'Saved.')} />
 
+      <h2>Model lists</h2>
+      <div className="muted">Each Provider's own list of models, fetched with a connected key or subscription and refreshed daily. Robots choose from these.</div>
+      <table className="grid"><tbody>
+        {(view.modelLists ?? []).map((list) => (
+          <tr key={list.provider}>
+            <td>{list.provider}</td>
+            <td>{list.count} models</td>
+            <td className="muted">{list.error !== null ? `last refresh failed: ${list.error}` : list.fetchedAt === null ? '' : `fetched ${new Date(list.fetchedAt).toLocaleString()}`}</td>
+          </tr>
+        ))}
+      </tbody></table>
+      <div className="question-actions"><button type="button" className="button" onClick={() => void run(async () => { const result = await api.refreshModels(); setMessage(result.map((entry) => `${entry.provider}: ${entry.error ?? `${entry.count} models`}`).join(' · ')) })}>Refresh models</button></div>
+
       <h2>Providers</h2>
       {view.providers.length === 0 ? <div className="muted">No Provider connected yet. Connect one on your profile page.</div> : (
         <table className="grid"><tbody>{view.providers.map((entry) => <tr key={`${entry.provider}-${entry.ownerName}`}><td>{entry.provider}</td><td>{entry.ownerName}</td><td>{entry.shared ? 'shared with the Home' : 'private'}</td></tr>)}</tbody></table>

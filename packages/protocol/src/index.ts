@@ -320,6 +320,8 @@ export interface AdminView {
   readonly skills: readonly SkillView[]
   readonly skillRepository: { readonly repo: string; readonly ref: string; readonly path: string } | null
   readonly providers: ReadonlyArray<{ readonly provider: string; readonly ownerName: string; readonly shared: boolean }>
+  /** Each Provider's live model list: how many models, when fetched, and the last error. */
+  readonly modelLists?: ReadonlyArray<{ readonly provider: string; readonly count: number; readonly fetchedAt: number | null; readonly error: string | null }>
   readonly settings: { readonly defaultModel: ModelChoice; readonly robotSpendLimitUsd: number | null; readonly memberSpendLimitUsd: number | null; readonly models: readonly ModelOption[] }
 }
 

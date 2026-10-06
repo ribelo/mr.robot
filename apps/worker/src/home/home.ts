@@ -24,6 +24,7 @@ import type {
 import * as Effect from 'effect/Effect'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { CATALOG } from '../providers/catalog.ts'
+import { liveModels, type ListingAccess } from '../providers/live-catalog.ts'
 import { PROVIDER_IDS } from '../agent/providers.ts'
 import { makeVault } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
@@ -37,6 +38,7 @@ export const MR_ROBOT_COLOR = '#5ec4b6'
 /** Prices are the admin's to correct in the admin view; subscriptions are flat and count as 0. */
 /** Every Provider's models, from pi-ai's catalog (providers/catalog.ts). */
 export const DEFAULT_MODELS: readonly ModelOption[] = CATALOG
+const CATALOG_TTL_MS = 24 * 60 * 60 * 1000
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
 export interface HomeSettings {
@@ -85,6 +87,7 @@ export class Home extends DurableObject<Env> {
       name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
       owner_id TEXT, updated_at INTEGER NOT NULL
     )`)
+    sql.exec('CREATE TABLE IF NOT EXISTS model_catalog (provider TEXT PRIMARY KEY, models TEXT, fetched_at INTEGER, error TEXT)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_secret (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
   }
@@ -317,7 +320,7 @@ export class Home extends DurableObject<Env> {
 
   // ---------------------------------------------------------------- admin view (robot-x26m, robot-1rap, robot-bvme)
 
-  async adminView(): Promise<AdminView> {
+  async adminView(adminId: string): Promise<AdminView> {
     const month = currentMonth()
     const fleet = await Promise.all(this.fleet().map(async (summary) => {
       const row = await this.env.ROBOT.getByName(summary.id).adminRow()
@@ -339,7 +342,8 @@ export class Home extends DurableObject<Env> {
         .map((row) => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at })),
       skillRepository: await this.skillRepository(),
       providers,
-      settings: { ...this.settings(), models: this.modelList() },
+      modelLists: this.catalogStatus(),
+      settings: { ...this.settings(), models: await this.models(adminId) },
     }
   }
 
@@ -499,11 +503,82 @@ export class Home extends DurableObject<Env> {
   }
 
   /** Models a Member's Robots can run on: the Home's model list, for Providers they can use. */
-  async models(memberId: string): Promise<ModelOption[]> {
+  /** Providers this Member's Robots can run on: Workers AI, their own credentials, Home-shared ones. */
+  async usableProviders(memberId: string): Promise<Set<string>> {
     const usable = new Set<string>(['workers-ai'])
     for (const provider of (await this.env.MEMBER.getByName(memberId).providers()).map((view) => view.provider)) usable.add(provider)
     for (const row of this.sql.exec<{ provider: string }>('SELECT DISTINCT provider FROM shared_credential').toArray()) usable.add(row.provider)
+    return usable
+  }
+
+  /** The models a Member can choose: the live lists of the Providers they can use (refreshed daily). */
+  async models(memberId: string): Promise<ModelOption[]> {
+    const usable = await this.usableProviders(memberId)
+    await Promise.all([...usable].filter((provider) => (PROVIDER_IDS as readonly string[]).includes(provider)).map((provider) => this.ensureCatalog(provider, memberId)))
     return this.modelList().filter((option) => usable.has(option.provider))
+  }
+
+  // ---------------------------------------------------------------- live model lists (robot-82r5)
+
+  /** When each Provider's list was last tried, so a failing Provider is not asked on every request. */
+  private readonly catalogTries = new Map<string, number>()
+
+  private catalogRow(provider: string): { models: ModelOption[] | null; fetchedAt: number | null; error: string | null } | undefined {
+    const row = this.sql.exec<{ models: string | null; fetched_at: number | null; error: string | null }>('SELECT models, fetched_at, error FROM model_catalog WHERE provider = ?', provider).toArray()[0]
+    return row === undefined ? undefined : { models: row.models === null ? null : JSON.parse(row.models) as ModelOption[], fetchedAt: row.fetched_at, error: row.error }
+  }
+
+  private async ensureCatalog(provider: string, memberId: string): Promise<void> {
+    const row = this.catalogRow(provider)
+    if (row?.models != null && row.fetchedAt !== null && Date.now() - row.fetchedAt < CATALOG_TTL_MS) return
+    if (row?.error != null && Date.now() - (this.catalogTries.get(provider) ?? 0) < 60_000) return
+    await this.refreshCatalog(provider, memberId)
+  }
+
+  /** Fetch one Provider's live list with a credential this Member can use; a failure keeps the last list. */
+  async refreshCatalog(provider: string, memberId: string): Promise<{ provider: string; count: number; error: string | null }> {
+    this.catalogTries.set(provider, Date.now())
+    try {
+      const access = await this.listingAccess(provider, memberId)
+      const models = await liveModels(provider, access)
+      this.sql.exec(
+        'INSERT INTO model_catalog (provider, models, fetched_at, error) VALUES (?, ?, ?, NULL) ON CONFLICT (provider) DO UPDATE SET models = excluded.models, fetched_at = excluded.fetched_at, error = NULL',
+        provider, JSON.stringify(models), Date.now(),
+      )
+      return { provider, count: models.length, error: null }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.sql.exec('INSERT INTO model_catalog (provider, error) VALUES (?, ?) ON CONFLICT (provider) DO UPDATE SET error = excluded.error', provider, message)
+      return { provider, count: this.catalogRow(provider)?.models?.length ?? 0, error: message }
+    }
+  }
+
+  private async listingAccess(provider: string, memberId: string): Promise<ListingAccess> {
+    if (provider === 'workers-ai') return this.env.AI === undefined ? {} : { ai: this.env.AI }
+    if (provider === 'openrouter') return {}
+    if (provider === 'opencode-go') {
+      const owner = await this.opencodePoolOwner(memberId)
+      if (owner === null) throw new Error('no OpenCode Go key')
+      const pool = await this.env.MEMBER.getByName(owner.ownerId).opencodeCandidates(null, owner.forHome)
+      const key = pool.keys[0]?.key
+      if (key === undefined) throw new Error('no OpenCode Go key')
+      return { key }
+    }
+    const credential = await this.providerCredential(memberId, provider as ProviderId)
+    if (credential === null) throw new Error(`no ${provider} credential`)
+    return credential.kind === 'api-key' ? { key: credential.key } : { oauth: { access: credential.access, ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }) } }
+  }
+
+  /** Each Provider's list status, for the admin view. */
+  catalogStatus(): Array<{ provider: string; count: number; fetchedAt: number | null; error: string | null }> {
+    return this.sql.exec<{ provider: string; models: string | null; fetched_at: number | null; error: string | null }>('SELECT * FROM model_catalog ORDER BY provider').toArray()
+      .map((row) => ({ provider: row.provider, count: row.models === null ? 0 : (JSON.parse(row.models) as unknown[]).length, fetchedAt: row.fetched_at, error: row.error }))
+  }
+
+  /** Refresh every Provider this Member can use (the admin's "Refresh models"). */
+  async refreshCatalogs(memberId: string): Promise<Array<{ provider: string; count: number; error: string | null }>> {
+    const usable = [...(await this.usableProviders(memberId))].filter((provider) => (PROVIDER_IDS as readonly string[]).includes(provider))
+    return Promise.all(usable.map((provider) => this.refreshCatalog(provider, memberId)))
   }
 
   async unavailableModels(memberId: string): Promise<ModelOption[]> {
@@ -512,15 +587,17 @@ export class Home extends DurableObject<Env> {
   }
 
   /**
-   * The catalog, with the admin's entries on top: an entry for a catalog model overrides its label
-   * and price, any other entry adds a model the catalog does not know.
+   * Every known model: each Provider's last live list (pi-ai's catalog only for a Provider never
+   * listed successfully), with the admin's entries on top: an entry for a listed model overrides
+   * its label and price, any other entry adds a model.
    */
   modelList(): ModelOption[] {
     const stored = this.setting<ModelOption[]>('models') ?? []
     const same = (a: ModelOption, b: ModelOption) => a.provider === b.provider && a.model === b.model
+    const live = PROVIDER_IDS.flatMap((provider) => this.catalogRow(provider)?.models ?? CATALOG.filter((model) => model.provider === provider))
     return [
-      ...CATALOG.map((model) => stored.find((entry) => same(entry, model)) ?? model),
-      ...stored.filter((entry) => !CATALOG.some((model) => same(entry, model))),
+      ...live.map((model) => stored.find((entry) => same(entry, model)) ?? model),
+      ...stored.filter((entry) => !live.some((model) => same(entry, model))),
     ]
   }
 

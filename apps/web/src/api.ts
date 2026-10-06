@@ -87,6 +87,7 @@ export const api = {
   updateHomeSettings: (patch: Record<string, unknown>) => request('/api/admin/settings', { method: 'PATCH', body: patch }),
   admin: () => request<AdminView>('/api/admin'),
   setSkillRepository: (input: { repo: string; ref: string; path: string; token?: string }) => request('/api/admin/skills/repository', { method: 'PUT', body: input }),
+  refreshModels: () => request<Array<{ provider: string; count: number; error: string | null }>>('/api/admin/models/refresh', { body: {} }),
   syncSkills: () => request<{ synced: string[] }>('/api/admin/skills/sync', { body: {} }),
   members: () => request<MemberView[]>('/api/admin/members'),
   invite: (email: string) => request<MemberView>('/api/admin/members', { body: { email } }),

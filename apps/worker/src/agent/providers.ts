@@ -58,7 +58,7 @@ export function providerAdapter(provider: string, context: ProviderContext): Llm
     case 'opencode-go': {
       const pool = context.credentials.opencodePool?.()
       if (pool === undefined || context.model === undefined) throw new LlmError('OpenCode Go is not available here', 'MISSING_CREDENTIAL')
-      return opencodeGoAdapter(context.model, pool)
+      return opencodeGoAdapter(context.model, pool, context.contextWindow)
     }
     default:
       throw new LlmError(`Provider "${provider}" is not available`, 'MISSING_CREDENTIAL')

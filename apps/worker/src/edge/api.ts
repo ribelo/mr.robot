@@ -109,6 +109,7 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).setSkillRepository({ repo: input.repo, ref: input.ref || 'main', path: input.path }, input.token))
     return { ok: true }
   }))
+  .on('POST', '/api/admin/models/refresh', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).refreshCatalogs(c.member.id)))))
   .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message))))))
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
@@ -243,7 +244,7 @@ export const api = new Router<ApiContext>()
   .on('DELETE', '/api/robots/:id', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).remove()))))
 
   // ------------------------------------------------------------ admin (robot-x26m, robot-1rap, robot-d2uv)
-  .on('GET', '/api/admin', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).adminView()))))
+  .on('GET', '/api/admin', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).adminView(c.member.id)))))
   .on('GET', '/api/admin/members', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).members()))))
   .on('POST', '/api/admin/members', (c) => Effect.gen(function* () {
     yield* admin(c)
