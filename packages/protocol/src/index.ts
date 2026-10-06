@@ -97,6 +97,8 @@ export interface RobotSettings {
   readonly notifications: NotificationSettings
   /** Monthly limit in USD; null inherits the Home default. */
   readonly spendLimitUsd: number | null
+  /** Keep the Robot's browser open between Turns and wake it when a page shows a notification (robot-lulc). */
+  readonly wakeOnScreenNotifications: boolean
 }
 
 export const SettingsPatch = Schema.Struct({
@@ -105,6 +107,7 @@ export const SettingsPatch = Schema.Struct({
   model: Schema.optional(ModelChoice),
   contextBudget: Schema.optional(Schema.Number),
   codeMode: Schema.optional(Schema.Boolean),
+  wakeOnScreenNotifications: Schema.optional(Schema.Boolean),
   compactionInstruction: Schema.optional(Schema.String),
   grants: Schema.optional(GrantSet),
   notifications: Schema.optional(NotificationSettings),

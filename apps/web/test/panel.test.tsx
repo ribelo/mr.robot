@@ -15,7 +15,7 @@ const panel: RobotPanel = {
   settings: {
     identity: { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a' },
     sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, contextBudget: 128000,
-    codeMode: true, compactionInstruction: '', grants: { tools: [], skills: [], recipients: [], secrets: [] },
+    codeMode: true, wakeOnScreenNotifications: false, compactionInstruction: '', grants: { tools: [], skills: [], recipients: [], secrets: [] },
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: null,
   },
   routines: [{
@@ -83,9 +83,10 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
     render(<EditProfileSheet robotId="r-1" onClose={vi.fn()} onChanged={changed} onOpenRoutine={vi.fn()} />)
     fireEvent.change(await screen.findByDisplayValue('Sales Outbound'), { target: { value: 'Outbound' } })
     fireEvent.click(screen.getByRole('switch', { name: 'Notifications' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Wake on screen notifications' }))
     fireEvent.click(screen.getByText('Save'))
     await vi.waitFor(() => expect(changed).toHaveBeenCalled())
-    expect(calls.find((call) => call.method === 'PATCH')!.body).toMatchObject({ identity: { name: 'Outbound' }, notifications: { enabled: false } })
+    expect(calls.find((call) => call.method === 'PATCH')!.body).toMatchObject({ identity: { name: 'Outbound' }, notifications: { enabled: false }, wakeOnScreenNotifications: true })
     vi.unstubAllGlobals()
   })
 })

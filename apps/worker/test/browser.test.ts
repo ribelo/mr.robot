@@ -1,8 +1,8 @@
-import { abortAllDurableObjects, reset } from 'cloudflare:test'
+import { abortAllDurableObjects, env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { browserLog } from './stub-browser.ts'
+import { browserLog, runningSessions } from './stub-browser.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -83,6 +83,28 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
     expect(other).toContain('Cart: 1 item')
     expect(pay).toContain('looks like the payment or final order step')
     expect(browserLog.filter((entry) => entry === 'act:click')).toHaveLength(1)
+  })
+
+  it('wakes on a notification shown by a page left open, and stops when switched off (robot-lulc)', async () => {
+    const id = await shopper()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { wakeOnScreenNotifications: true } })
+    await say(id, 'keep the shop open', [{ calls: [{ name: 'browser_open', args: { url: 'https://shop.test/' } }] }, { text: 'Watching.' }])
+    expect(browserLog).not.toContain('close')
+    expect(browserLog.at(-1)).toBe('detach')
+    const [page] = [...runningSessions.values()]
+    page!.shown.push({ title: 'Order 1042', body: 'Your parcel is out for delivery', at: Date.now() })
+
+    scripts.set(id, [{ text: 'Your parcel is on its way.' }])
+    await testRobot(id).watchDueForTest()
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    const items = (await api<{ items: Array<{ kind: string; text?: string }> }>(ANNA, `/api/robots/${id}/conversation`)).body.items
+    expect(items).toContainEqual(expect.objectContaining({ kind: 'notice', text: 'Notification on screen: Order 1042: Your parcel is out for delivery' }))
+    expect(items.at(-1)).toMatchObject({ kind: 'reply', text: 'Your parcel is on its way.' })
+    expect(browserLog).toContain('attach')
+
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { wakeOnScreenNotifications: false } })
+    expect(runningSessions.size).toBe(0)
   })
 
   it('updates the screen thumbnail after each screenshot (robot-ksvy)', async () => {

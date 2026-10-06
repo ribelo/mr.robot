@@ -16,6 +16,7 @@ export function EditProfileSheet({ robotId, onClose, onChanged, onOpenRoutine }:
   const [panel, setPanel] = useState<RobotPanel>()
   const [identity, setIdentity] = useState<Identity>()
   const [notify, setNotify] = useState(true)
+  const [watch, setWatch] = useState(false)
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
   useEffect(() => {
@@ -23,13 +24,14 @@ export function EditProfileSheet({ robotId, onClose, onChanged, onOpenRoutine }:
       setPanel(loaded)
       setIdentity(loaded.settings.identity)
       setNotify(loaded.settings.notifications.enabled)
+      setWatch(loaded.settings.wakeOnScreenNotifications)
     })
   }, [robotId])
   if (panel === undefined || identity === undefined) return <Sheet onClose={onClose}><div className="muted">Loading…</div></Sheet>
   const save = async () => {
     setSaving(true)
     try {
-      await api.updateSettings(robotId, { identity, notifications: { ...panel.settings.notifications, enabled: notify } })
+      await api.updateSettings(robotId, { identity, notifications: { ...panel.settings.notifications, enabled: notify }, wakeOnScreenNotifications: watch })
       onChanged()
       onClose()
     } catch (cause) {
@@ -51,6 +53,13 @@ export function EditProfileSheet({ robotId, onClose, onChanged, onOpenRoutine }:
       <label>Name<input value={identity.name} disabled={!editable} onChange={(event) => setIdentity({ ...identity, name: event.target.value })} /></label>
       <label>Title (optional)<input value={identity.title} disabled={!editable} onChange={(event) => setIdentity({ ...identity, title: event.target.value })} /></label>
       <label>Description<textarea rows={3} value={identity.description} disabled={!editable} onChange={(event) => setIdentity({ ...identity, description: event.target.value })} /></label>
+      <div className="toggle-card">
+        <div>
+          <div>Wake on screen notifications</div>
+          <div className="muted">Wake this Robot when an app on its screen shows a notification. Its browser stays open between Turns (Browser Rendering time is billed while it runs).</div>
+        </div>
+        <button type="button" role="switch" aria-checked={watch} aria-label="Wake on screen notifications" disabled={!editable} className={watch ? 'switch on' : 'switch'} onClick={() => setWatch(!watch)}><span /></button>
+      </div>
       <div className="toggle-card">
         <div>
           <div>Notifications</div>

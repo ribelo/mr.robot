@@ -97,6 +97,12 @@ export class Robot extends ProductionRobot {
     return this.store.sql.exec<{ id: string; status: string }>('SELECT id, status FROM outbox').toArray()
   }
 
+  /** Make the screen watch due now. */
+  async watchDueForTest(): Promise<void> {
+    this.store.set('watch-next', Date.now() - 1)
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
+  }
+
   async alarmForTest(): Promise<number | null> {
     return this.ctx.storage.getAlarm()
   }

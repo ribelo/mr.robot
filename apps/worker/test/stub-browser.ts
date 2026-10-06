@@ -29,22 +29,48 @@ class StubCdp {
   }
 }
 
+/** Sessions left running between Turns, by id (the stub's Browser Rendering). */
+export const runningSessions = new Map<string, StubPage>()
+
 export class StubDriver implements BrowserDriver {
   async open(state: BrowserState | null): Promise<BrowserPage> {
     browserLog.push('open')
     return new StubPage(state)
   }
+
+  async attach(sessionId: string): Promise<BrowserPage | undefined> {
+    browserLog.push('attach')
+    return runningSessions.get(sessionId)
+  }
 }
 
-class StubPage implements BrowserPage {
+export class StubPage implements BrowserPage {
+  private readonly id = `session-${crypto.randomUUID()}`
+  /** A test puts what a page would show here. */
+  readonly shown: Array<{ title: string; body: string; at: number }> = []
+
+  constructor(stateArg: BrowserState | null, _unused?: undefined) {
+    this.cookies = [...(stateArg?.cookies ?? [])]
+    runningSessions.set(this.id, this)
+  }
+
+  sessionId(): string {
+    return this.id
+  }
+
+  async detach(): Promise<void> {
+    browserLog.push('detach')
+  }
+
+  async takeNotifications(): Promise<Array<{ title: string; body: string; at: number }>> {
+    return this.shown.splice(0)
+  }
+
   private current = 'about:blank'
   private cookies: Array<Record<string, unknown>>
   private typed = ''
   private shots = 0
 
-  constructor(state: BrowserState | null) {
-    this.cookies = [...(state?.cookies ?? [])]
-  }
 
   private get loggedIn(): boolean {
     return this.cookies.some((cookie) => cookie['name'] === 'session' && cookie['value'] === 'ok')
@@ -115,5 +141,6 @@ class StubPage implements BrowserPage {
 
   async close(): Promise<void> {
     browserLog.push('close')
+    runningSessions.delete(this.id)
   }
 }

@@ -30,10 +30,18 @@ export interface BrowserPage {
   /** Raw CDP for the live view and takeover. */
   cdp(): Promise<CDPSession | undefined>
   close(): Promise<void>
+  /** The Browser Rendering session, to reconnect between Turns (robot-lulc). */
+  sessionId(): string
+  /** Leave the browser running and drop this Worker's connection to it. */
+  detach(): Promise<void>
+  /** Notifications pages showed since the last call (Notification and showNotification). */
+  takeNotifications(): Promise<Array<{ title: string; body: string; at: number }>>
 }
 
 export interface BrowserDriver {
   open(state: BrowserState | null): Promise<BrowserPage>
+  /** Reconnect to a session left running; undefined when it has ended. */
+  attach(sessionId: string): Promise<BrowserPage | undefined>
 }
 
 export class StaleRef extends Error {
@@ -50,6 +58,7 @@ export class RenderingDriver implements BrowserDriver {
     const browser = await puppeteer.launch(this.binding as never, { keep_alive: 600_000 })
     const page = await browser.newPage()
     await page.setViewport({ width: 1280, height: 800 })
+    await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
     if (state !== null) {
       if (state.cookies.length > 0) await page.setCookie(...(state.cookies as never[]))
       await page.evaluateOnNewDocument(`(() => {
@@ -61,7 +70,39 @@ export class RenderingDriver implements BrowserDriver {
     }
     return new RenderingPage(browser, page, state?.storage ?? {})
   }
+
+  async attach(sessionId: string): Promise<BrowserPage | undefined> {
+    try {
+      const browser = await puppeteer.connect(this.binding as never, sessionId)
+      // A launched browser keeps its initial blank tab; the Robot's page is the one with an address.
+      const pages = await browser.pages()
+      const page = pages.filter((candidate) => candidate.url() !== 'about:blank').at(-1) ?? pages.at(-1)
+      if (page === undefined) {
+        await browser.close().catch(() => undefined)
+        return undefined
+      }
+      return new RenderingPage(browser, page, {})
+    } catch {
+      return undefined
+    }
+  }
 }
+
+/**
+ * Runs in every page: grants notification permission and records what the page shows, so the
+ * Robot can be woken by it. Pages see a granted permission; nothing is displayed.
+ */
+const NOTIFICATION_CAPTURE = `(() => {
+  const seen = (window.__mrNotifications = window.__mrNotifications || [])
+  const record = (title, options) => seen.push({ title: String(title || ''), body: String((options && options.body) || ''), at: Date.now() })
+  const Fake = function (title, options) { record(title, options); return { close() {}, addEventListener() {}, removeEventListener() {} } }
+  Fake.permission = 'granted'
+  Fake.requestPermission = (callback) => { if (callback) callback('granted'); return Promise.resolve('granted') }
+  try { Object.defineProperty(window, 'Notification', { value: Fake, configurable: true, writable: true }) } catch {}
+  if (window.ServiceWorkerRegistration) {
+    ServiceWorkerRegistration.prototype.showNotification = function (title, options) { record(title, options); return Promise.resolve() }
+  }
+})()`
 
 class RenderingPage implements BrowserPage {
   private cdpSession: CDPSession | undefined
@@ -154,6 +195,18 @@ class RenderingPage implements BrowserPage {
 
   async close(): Promise<void> {
     await this.browser.close().catch(() => undefined)
+  }
+
+  sessionId(): string {
+    return this.browser.sessionId()
+  }
+
+  async detach(): Promise<void> {
+    await this.browser.disconnect().catch(() => undefined)
+  }
+
+  async takeNotifications(): Promise<Array<{ title: string; body: string; at: number }>> {
+    return (await this.page.evaluate('(() => { const all = window.__mrNotifications || []; window.__mrNotifications = []; return all })()').catch(() => [])) as Array<{ title: string; body: string; at: number }>
   }
 
   /** Give the page a moment to react: a short network quiet period, bounded. */

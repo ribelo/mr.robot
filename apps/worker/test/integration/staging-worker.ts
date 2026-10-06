@@ -17,6 +17,7 @@ export default {
     const url = new URL(request.url)
     if (url.pathname === '/fixture') return new Response(FIXTURE, { headers: { 'content-type': 'text/html' } })
     if (url.pathname === '/cookie') return new Response(`<!doctype html><title>Cookie</title><p>${request.headers.get('cookie') ?? 'none'}</p>`, { headers: { 'content-type': 'text/html' } })
+    if (url.pathname === '/notify') return new Response('<!doctype html><title>Notifier</title><p>Waiting</p><script>setTimeout(() => { Notification.requestPermission().then(() => new Notification("Order 1042", { body: "Out for delivery" })) }, 1500)</script>', { headers: { 'content-type': 'text/html' } })
     if (url.pathname !== '/run') return new Response('not found', { status: 404 })
     const report: Record<string, unknown> = {}
     const driver = new RenderingDriver(env.BROWSER)
@@ -76,6 +77,20 @@ export default {
     } catch (error) {
       report.error = error instanceof Error ? error.message : String(error)
       await page.close()
+    }
+    try {
+      // Wake on screen notifications: leave a page running, reconnect, read what it showed.
+      const watched = await driver.open(null)
+      await watched.goto(`${url.origin}/notify`)
+      const sessionId = watched.sessionId()
+      await watched.detach()
+      await new Promise((resolve) => setTimeout(resolve, 4000))
+      const again = await driver.attach(sessionId)
+      report.watchReattached = again !== undefined
+      report.watchNotifications = again === undefined ? [] : await again.takeNotifications()
+      await again?.close()
+    } catch (error) {
+      report.watchError = error instanceof Error ? error.message : String(error)
     }
     try {
       const found = await new BrowserSearchProvider(env.BROWSER).search({ query: 'otodom mokotow 2 pokoje' })

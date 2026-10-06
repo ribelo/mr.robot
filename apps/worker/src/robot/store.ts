@@ -30,6 +30,8 @@ export interface RobotConfig {
   readonly model: ModelChoice
   readonly contextBudget: number
   readonly codeMode: boolean
+  /** Absent in Robots created before the setting existed: off. */
+  readonly wakeOnScreenNotifications?: boolean
   readonly compactionInstruction: string
   readonly notifications: NotificationSettings
   readonly spendLimitUsd: number | null

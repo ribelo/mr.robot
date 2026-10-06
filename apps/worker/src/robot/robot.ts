@@ -189,6 +189,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config.status === 'deleted' || config.status === 'paused') return
     this.store.set('resumeStatus', config.status)
     this.store.updateConfig(() => ({ status: 'paused' }), false)
+    await this.stopWatching()
     await this.changed()
   }
 
@@ -266,6 +267,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   override async alarm(): Promise<void> {
     const config = this.store.config()
     if (config !== undefined && config.status !== 'deleted') this.fireRoutines(Date.now())
+    if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
     if (config !== undefined) await this.deliverOutbox()
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
@@ -358,7 +360,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
   protected async afterTurn(wakeup: Wakeup): Promise<void> {
-    if (this.store.get('takeover') === undefined) await this.closeBrowser()
+    if (this.store.get('takeover') === undefined) {
+      if (this.store.requireConfig().wakeOnScreenNotifications === true) await this.keepWatching()
+      else await this.closeBrowser()
+    }
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
@@ -660,13 +665,89 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return new RenderingDriver(this.env.BROWSER)
   }
 
-  /** The Robot's one browser session, opened on first use with its saved cookies and storage. */
+  /** The Robot's one browser session: the watched one if it still runs, else a new one with saved cookies and storage. */
   protected page(): Promise<BrowserPage> {
-    this.browserPage ??= this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null).catch((error: unknown) => {
+    this.browserPage ??= this.resumeBrowser().catch((error: unknown) => {
       this.browserPage = undefined
       throw error
     })
     return this.browserPage
+  }
+
+  private async resumeBrowser(): Promise<BrowserPage> {
+    const watch = this.store.get<WatchState>('watch')
+    if (watch !== undefined) {
+      const attached = await this.browserDriver().attach(watch.sessionId)
+      if (attached !== undefined) return attached
+      const reopened = await this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
+      if (watch.url.startsWith('http')) await reopened.goto(watch.url).catch(() => undefined)
+      return reopened
+    }
+    return this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
+  }
+
+  // ---------------------------------------------------------------- wake on screen notifications (robot-lulc)
+
+  /** End of a Turn with the setting on: save state, leave the browser running, check it every minute. */
+  protected async keepWatching(): Promise<void> {
+    const opening = this.browserPage
+    this.browserPage = undefined
+    const page = await opening?.catch(() => undefined)
+    if (page === undefined) {
+      if (this.store.get<WatchState>('watch') !== undefined) this.store.set('watch-next', Date.now() + WATCH_INTERVAL_MS)
+      await this.rearm()
+      return
+    }
+    try {
+      this.store.set('browser-state', await page.exportState())
+      await this.saveScreen(await page.screenshot())
+    } catch (error) {
+      console.warn('browser state was not saved', error)
+    }
+    this.store.set('watch', { sessionId: page.sessionId(), url: page.url() } satisfies WatchState)
+    this.store.set('watch-next', Date.now() + WATCH_INTERVAL_MS)
+    await page.detach()
+    await this.rearm()
+  }
+
+  /** The alarm's check: notifications the watched pages showed wake the Robot; an ended session is reopened. */
+  protected async checkWatch(now: number): Promise<void> {
+    const watch = this.store.get<WatchState>('watch')
+    const due = this.store.get<number>('watch-next')
+    if (watch === undefined || due === undefined || due > now || this.store.activeTurn() !== undefined || this.browserPage !== undefined) return
+    this.store.set('watch-next', now + WATCH_INTERVAL_MS)
+    const config = this.store.requireConfig()
+    if (config.wakeOnScreenNotifications !== true || config.status !== 'active') return this.stopWatching()
+    let page = await this.browserDriver().attach(watch.sessionId)
+    if (page === undefined) {
+      page = await this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
+      if (watch.url.startsWith('http')) await page.goto(watch.url).catch(() => undefined)
+      this.store.set('watch', { sessionId: page.sessionId(), url: page.url() } satisfies WatchState)
+    }
+    const notes = await page.takeNotifications()
+    const url = page.url()
+    await page.detach()
+    for (const note of notes) {
+      const line = [note.title, note.body].filter((part) => part.trim() !== '').join(': ')
+      await this.wake({
+        kind: 'platform',
+        sender: { kind: 'platform' },
+        text: `A notification appeared on your screen (${url}): ${line}. Decide whether it needs action; open the browser to look.`,
+        payload: { summary: `Notification on screen: ${line.slice(0, 100)}` },
+      })
+    }
+  }
+
+  /** The setting was switched off or the Robot paused: close the watched browser. */
+  protected async stopWatching(): Promise<void> {
+    const watch = this.store.get<WatchState>('watch')
+    this.store.delete('watch')
+    this.store.delete('watch-next')
+    if (watch !== undefined && this.browserPage === undefined) {
+      const page = await this.browserDriver().attach(watch.sessionId)
+      await page?.close()
+    }
+    await this.rearm()
   }
 
   async browserOpen(url: string): Promise<Observation> {
@@ -878,6 +959,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         ...(patch.model === undefined ? {} : { model: patch.model }),
         ...(patch.contextBudget === undefined ? {} : { contextBudget: Math.max(8_000, Math.round(patch.contextBudget)) }),
         ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
+        ...(patch.wakeOnScreenNotifications === undefined ? {} : { wakeOnScreenNotifications: patch.wakeOnScreenNotifications }),
         ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
         ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels])] } }),
         ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
@@ -886,6 +968,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     })
     await this.changed()
     if (patch.spendLimitUsd !== undefined) await this.checkLimits()
+    if (patch.wakeOnScreenNotifications === false) await this.stopWatching()
     return this.settings()
   }
 
@@ -1147,7 +1230,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.config()
     if (config === undefined || config.status === 'deleted') return []
     const outbox = this.store.sql.exec<{ at: number | null }>("SELECT MIN(next_attempt) AS at FROM outbox WHERE status = 'pending'").one().at
-    return [...this.store.routines().flatMap((routine) => routine.nextRun === null ? [] : [routine.nextRun]), ...(outbox === null ? [] : [outbox])]
+    const watch = this.store.get<number>('watch-next')
+    return [...this.store.routines().flatMap((routine) => routine.nextRun === null ? [] : [routine.nextRun]), ...(outbox === null ? [] : [outbox]), ...(watch === undefined ? [] : [watch])]
   }
 
   // ---------------------------------------------------------------- Robot messages (robot-bsvs, robot-mv15, robot-ppzu, robot-bjq5)
@@ -1552,6 +1636,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       model: config.model,
       contextBudget: config.contextBudget,
       codeMode: config.codeMode,
+      wakeOnScreenNotifications: config.wakeOnScreenNotifications === true,
       compactionInstruction: config.compactionInstruction,
       grants: this.store.grants(),
       notifications: config.notifications,
@@ -1695,6 +1780,14 @@ function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): st
 
 /** Labels of the final payment or order step, in English and Polish. */
 const PAYMENT_STEP = /\b(pay( now)?|place (your )?order|buy now|complete (purchase|order)|confirm (and pay|payment|purchase)|submit order)\b|zapłać|płacę|kupuję|kupuj i płać|zamawiam|złóż zamówienie|potwierdzam (zakup|płatność)|przejdź do płatności/i
+
+interface WatchState {
+  readonly sessionId: string
+  readonly url: string
+}
+
+/** How often a watched browser is checked for notifications. */
+const WATCH_INTERVAL_MS = 60_000
 
 function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
   return {
