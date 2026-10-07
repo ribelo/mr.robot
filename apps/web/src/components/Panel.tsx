@@ -32,8 +32,8 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
               <div className="question-actions"><button type="button" className="button button-primary" onClick={onOpenScreen}>Take over</button></div>
             </div>
           )}
-          <button type="button" className="screen" onClick={onOpenScreen} aria-label={`${name}'s screen`} disabled={panel.screen === null && panel.takeover === null}>
-            {panel.screen === null ? <span className="screen-empty">No screen yet</span> : <img src={panel.screen.url} alt="" />}
+          <button type="button" className="screen" onClick={onOpenScreen} aria-label={`${name}'s screen`}>
+            {panel.screen === null ? <span className="screen-empty">Open the browser</span> : <img src={panel.screen.url} alt="" />}
           </button>
           <div className="screen-caption">{name}’s screen</div>
           <h3 className="panel-section">Routines</h3>

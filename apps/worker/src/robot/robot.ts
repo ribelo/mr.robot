@@ -99,6 +99,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The wake-up a Turn is being started for, so a failure before the Turn begins can still be retried. */
   private starting: Wakeup | undefined
   private handingBack = false
+  /** The browser was opened for a viewer (live view or takeover), not by a Turn (rb-keaw). */
+  private openedForViewer = false
   /** Values of granted secrets, kept only in memory to mask views (never stored by the Robot). */
   private secretValues: Array<readonly [string, string]> = []
   /** Secret values fetched during the running Turn; redacted from everything stored. */
@@ -339,7 +341,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
   protected async afterTurn(wakeup: Wakeup): Promise<void> {
     if (this.store.get('takeover') === undefined) {
-      if (this.store.requireConfig().wakeOnScreenNotifications === true) await this.keepWatching()
+      // Someone is watching the screen: the browser stays open for them and closes when they leave (rb-keaw).
+      if (this.liveWatchers() > 0 && this.browserPage !== undefined) this.openedForViewer = true
+      else if (this.store.requireConfig().wakeOnScreenNotifications === true) await this.keepWatching()
       else await this.closeBrowser()
     }
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
@@ -690,7 +694,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A new session with the saved cookies and storage (they follow the Robot across backends), back on the page it was on.
     const reopened = await this.browserDriver(backend).open(this.store.get<BrowserState>('browser-state') ?? null)
     this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
-    const url = watch?.url ?? takeover?.url
+    const url = watch?.url ?? takeover?.url ?? this.store.get<string>('browser-url')
     if (url?.startsWith('http') === true) await reopened.goto(url).catch(() => undefined)
     return reopened
   }
@@ -839,10 +843,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (page === undefined) return
     try {
       this.store.set('browser-state', await page.exportState())
+      if (page.url().startsWith('http')) this.store.set('browser-url', page.url())
       await this.saveScreen(await page.screenshot())
     } catch (error) {
       console.warn('browser state was not saved', error)
     } finally {
+      this.openedForViewer = false
       await page.close()
       await this.accountBrowser(true)
     }
@@ -1001,6 +1007,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.set('takeover', { ...takeover, claimedBy: null })
     }
     await this.updateScreencast()
+    await this.closeIfUnwatched()
   }
 
   /** A removed Member's open views end now, not when they next reconnect. */
@@ -1027,13 +1034,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     switch (input['type']) {
       case 'live':
         socket.serializeAttachment({ ...viewer, live: input['on'] !== false } satisfies ViewerState)
-        // After a restart the waiting browser is reattached for the watcher.
-        if (input['on'] !== false && this.store.get('takeover') !== undefined) await this.page()
+        // The screen opens on demand: a waiting browser is reattached, an idle Robot's browser reopens at its last page (rb-keaw).
+        if (input['on'] !== false) await this.openForViewer()
         await this.updateScreencast()
+        await this.closeIfUnwatched()
         return
       case 'claim': {
-        const takeover = this.store.get<TakeoverState>('takeover')
-        if (takeover === undefined) throw new Error('the Robot did not ask for a takeover')
+        let takeover = this.store.get<TakeoverState>('takeover')
+        if (takeover === undefined) {
+          // The owner may take the browser of an idle Robot; its wake-ups wait until they hand it back.
+          if (this.store.activeTurn() !== undefined) throw new Error('the Robot is using its browser; wait for it to finish or ask it to hand over')
+          const page = await this.openForViewer()
+          takeover = { reason: 'Opened by you', url: page.url(), requestedAt: Date.now(), claimedBy: null, sessionId: page.sessionId(), byOwner: true }
+          this.store.set('takeover', takeover)
+          await this.changed()
+        }
         if (takeover.claimedBy !== null && takeover.claimedBy !== viewer.memberId) {
           socket.send(JSON.stringify({ type: 'claim-refused', heldBy: takeover.claimedBy }))
           return
@@ -1060,6 +1075,28 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         await this.handBack(viewer.memberId)
         return
       }
+    }
+  }
+
+/** Sockets watching the screen. */
+  private liveWatchers(): number {
+    return this.ctx.getWebSockets().filter((socket) => (socket.deserializeAttachment() as ViewerState | null)?.live === true).length
+  }
+
+  /** Open the browser for a viewer when no Turn has it (rb-keaw). */
+  private async openForViewer(): Promise<BrowserPage> {
+    if (this.browserPage === undefined && this.store.activeTurn() === undefined && this.store.get('takeover') === undefined) this.openedForViewer = true
+    return this.page()
+  }
+
+  /** A browser opened only for viewers closes when the last one leaves and no Turn or takeover needs it. */
+  private async closeIfUnwatched(): Promise<void> {
+    if (!this.openedForViewer || this.liveWatchers() > 0 || this.store.activeTurn() !== undefined || this.store.get('takeover') !== undefined) return
+    if (this.store.requireConfig().wakeOnScreenNotifications === true) {
+      this.openedForViewer = false
+      await this.keepWatching()
+    } else {
+      await this.closeBrowser()
     }
   }
 
@@ -1126,6 +1163,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const running = this.screencast
     this.screencast = undefined
     await running?.stop()
+    if (takeover?.byOwner === true) {
+      // The owner opened it themselves: nothing to resume; the browser closes and held wake-ups run.
+      this.openedForViewer = true
+      await this.closeIfUnwatched()
+      await this.rearm()
+      if (this.store.pendingWakeups() > 0) this.drain()
+      await this.changed()
+      return
+    }
     const member = await this.home().member(memberId)
     await this.wake({
       kind: 'takeover',
@@ -1375,6 +1421,8 @@ export interface TakeoverState {
   readonly claimedBy: string | null
   /** The Browser Rendering session to reattach after the Robot's DO restarts. */
   readonly sessionId?: string
+  /** The owner opened the browser themselves; hand-back does not wake the Robot. */
+  readonly byOwner?: boolean
 }
 
 /** Taps, text, keys and scrolls from the owner's device become CDP input (robot-g6qb). */

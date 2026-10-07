@@ -83,6 +83,7 @@ export class StubPage implements BrowserPage {
   }
 
   async goto(url: string): Promise<void> {
+    browserLog.push(`goto:${url}`)
     this.current = url
   }
 

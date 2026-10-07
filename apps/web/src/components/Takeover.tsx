@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react'
 export interface TakeoverProps {
   readonly robotId: string
   readonly robotName: string
-  /** The Robot asked for a takeover; without it the view only watches (live view). */
+  /** The Robot asked for a takeover; without it the owner can still take an idle Robot's browser (rb-keaw). */
   readonly requested: { readonly reason: string } | null
   readonly onClose: () => void
 }
@@ -58,7 +58,7 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
       <div className="takeover-bar">
         <span className="conversation-name">{robotName}’s browser</span>
         <span className="spacer" />
-        {requested !== null && !claimed ? <button type="button" className="button button-primary" onClick={() => send({ type: 'claim' })}>Take over</button> : null}
+        {!claimed ? <button type="button" className="button button-primary" onClick={() => send({ type: 'claim' })}>Take over</button> : null}
         {claimed ? <button type="button" className="button button-primary" onClick={() => { send({ type: 'handback' }); onClose() }}>Hand back</button> : null}
         <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button>
       </div>
@@ -66,7 +66,7 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
       {message === undefined ? null : <div className="muted" style={{ padding: '0 14px' }}>{message}</div>}
       <div className="takeover-screen">
         {frame === undefined
-          ? <div className="muted">Waiting for the screen… The browser streams while the Robot has it open.</div>
+          ? <div className="muted">Opening the browser at its last page…</div>
           : <img ref={image} src={frame.src} alt="" onPointerUp={tap} draggable={false} />}
       </div>
       {claimed ? (

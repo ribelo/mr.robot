@@ -118,6 +118,10 @@ describe('live view and takeover', () => {
     expect(last).toMatch(/screens\/.+\.png/)
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
     expect(panel.takeover).toBeNull()
+    // The browser stays open while the owner still watches, and closes when they leave (rb-keaw).
+    expect(browserLog.at(-1)).not.toBe('close')
+    anna.socket.close(1000)
+    await new Promise((resolve) => setTimeout(resolve, 100))
     expect(browserLog.at(-1)).toBe('close')
     void env
   })
@@ -137,5 +141,35 @@ describe('live view and takeover', () => {
     await api(ANNA, `/api/admin/members/${benId}`, { method: 'DELETE' })
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(closed).toBe(true)
+  })
+
+  it("opens an idle Robot's browser on demand at its last page, and closes it when the viewer leaves (rb-keaw)", async () => {
+    scripts.set('*', [{ text: 'Hello.' }])
+    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+    await settle(body.id)
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['browser'], skills: [], recipients: [], secrets: [] } } })
+    await testRobot(body.id).activateForTest()
+    scripts.set(body.id, [{ calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] }, { text: 'Seen.' }])
+    await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'look' } })
+    await settle(body.id)
+    expect(browserLog.at(-1)).toBe('close')
+    browserLog.length = 0
+    cdpLog.length = 0
+
+    const viewer = await connect(ANNA, body.id)
+    await viewer.send({ type: 'live', on: true })
+    expect(browserLog).toEqual(['open', 'goto:https://shop.test/login'])
+    expect(viewer.received.some((message) => message.type === 'frame')).toBe(true)
+
+    // The owner takes the idle browser without being asked; hand-back does not wake the Robot.
+    const before = (requests.get(body.id) ?? []).length
+    await viewer.send({ type: 'claim' })
+    expect(viewer.received.some((message) => message.type === 'claimed')).toBe(true)
+    await viewer.send({ type: 'handback' })
+    viewer.socket.close(1000)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await settle(body.id)
+    expect(browserLog.at(-1)).toBe('close')
+    expect((requests.get(body.id) ?? []).length).toBe(before)
   })
 })
