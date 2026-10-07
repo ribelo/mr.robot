@@ -58,6 +58,8 @@ export interface RobotPlatformShape {
   background(work: Effect.Effect<void, never, RobotState | RobotPlatform>): Effect.Effect<void>
   /** Mask granted secret values in outgoing text. */
   mask(text: string): Effect.Effect<string>
+  /** A masking function with the granted secrets loaded (for many strings at once). */
+  masker(): Effect.Effect<(text: string) => string>
   /** Close a browser kept open for screen notifications. */
   stopWatching(): Effect.Effect<void>
   /** Push to the Robot's notification recipients through its Channels. */

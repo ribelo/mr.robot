@@ -75,6 +75,7 @@ import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.
 import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
+import * as Views from './views.ts'
 import { proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
 export type { AnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
@@ -128,6 +129,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         changed: () => Effect.promise(() => this.changed()),
         drain: () => Effect.sync(() => this.drain()),
         background: (work) => Effect.sync(() => this.ctx.waitUntil(this.program(work))),
+        masker: () => Effect.promise(async () => {
+          await this.loadSecretMasks()
+          return (text: string) => this.mask(text)
+        }),
         mask: (text) => Effect.promise(async () => {
           await this.loadSecretMasks()
           return this.mask(text)
@@ -232,15 +237,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** Run the wake-up whose Turn failed again (the chat's "Try again"). */
-  async retry(): Promise<boolean> {
-    const failed = this.store.get<{ kind: WakeInput['kind']; sender: WakeInput['sender']; text: string; payload: Record<string, unknown> }>('failed-wakeup')
-    if (failed === undefined) return false
-    this.store.delete('failed-wakeup')
-    const { attachments, ...payload } = failed.payload as { attachments?: Attachment[] } & Record<string, unknown>
-    await this.wake({ kind: failed.kind, sender: failed.sender, text: failed.text, payload, ...(attachments === undefined ? {} : { attachments }) })
-    await this.changed()
-    return true
+  retry(): Promise<boolean> {
+    return this.program(Views.retry)
   }
+
 
   /**
    * What the model is given at the start of the next Turn (robot-vqtw): the system prompt sections,
@@ -395,13 +395,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.accountTurn(startSeq)
     const failedTurn = this.rememberFailure(wakeup, startSeq)
     const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
-    if (!failedTurn && wakeup.kind !== 'routine' && !this.conversation().items.some((item) => item.seq >= startSeq && shown(item))) {
+    if (!failedTurn && wakeup.kind !== 'routine' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
       // A Turn that ends with nothing to show (e.g. a reasoning model spent its output cap thinking) is not silent.
       const config = this.store.requireConfig()
       this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${config.identity.name} finished without a reply. If this repeats, raise its context budget in Advanced settings.`, Date.now())
     }
     if (wakeup.kind === 'routine') {
-      const reply = this.conversation().items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
+      const reply = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
       this.store.finishRoutineRun(wakeup.id, failedTurn ? 'failed' : 'done', failedTurn ? 'The Turn failed.' : (reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'))
     }
     await this.loadSecretMasks()
@@ -424,7 +424,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** "Finished": the Turn produced a reply and the person it concerns is not watching it live. */
   private async notifyFinished(wakeup: Wakeup, startSeq: number): Promise<void> {
-    const replies = this.conversation().items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
+    const replies = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
     const last = replies.at(-1)
     if (last === undefined || last.kind !== 'reply') return
     const watcher = wakeup.sender.kind === 'member' ? wakeup.sender.memberId : undefined
@@ -485,7 +485,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async deliverReplies(wakeup: Wakeup, startSeq: number): Promise<void> {
     const config = this.store.requireConfig()
     const route = (wakeup.payload['route'] as { channel: string; address: string } | undefined) ?? null
-    for (const item of this.conversation().items) {
+    for (const item of (await this.conversation()).items) {
       if (item.seq < startSeq || item.kind !== 'reply') continue
       await this.sendToChannels({ kind: 'reply', id: item.id, robotId: config.id, robotName: config.identity.name, text: this.mask(item.text), route })
     }
@@ -954,17 +954,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.env.HOME.getByName(HOME_ID)
   }
 
-  fleetState(): FleetState {
-    const config = this.store.requireConfig()
-    if (config.status === 'paused') return 'paused'
-    if (config.status === 'blocked') return 'blocked'
-    if (this.store.activeTurn() !== undefined) return 'working'
-    // A failed Turn waiting for "Try again" is a state, not a raw error in the list (robot-n7th).
-    if (this.store.get('failed-wakeup') !== undefined) return 'blocked'
-    if (this.store.proposals('open').length > 0 || this.store.get('takeover') !== undefined) return 'waiting for you'
-    if (config.status === 'setup') return 'setup'
-    return 'sleeping'
+  fleetState(): Promise<FleetState> {
+    return this.program(Views.fleetState)
   }
+
 
   /** Report the registry row to the Home and tell open views to refresh. */
   protected async changed(): Promise<void> {
@@ -972,24 +965,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.report()
   }
 
-  private async report(): Promise<void> {
-    const config = this.store.requireConfig()
-    const last = this.store.get('failed-wakeup') !== undefined
-      ? { text: 'Could not finish its last task. Open to see why.', at: this.conversation().items.at(-1)?.at ?? Date.now() }
-      : lastLine(this.conversation().items)
-    const entry: RegistryEntry = {
-      id: config.id,
-      ownerId: config.ownerId,
-      kind: config.kind,
-      identity: config.identity,
-      sharing: config.sharing,
-      status: config.status,
-      fleetState: this.fleetState(),
-      lastLine: last?.text ?? '',
-      lastAt: last?.at ?? config.createdAt,
-    }
-    await this.home().robotChanged(entry)
+  private report(): Promise<void> {
+    return this.program(Views.report)
   }
+
 
   override async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket', { status: 426 })
@@ -1278,80 +1257,36 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- views
 
-  async conversationView(): Promise<Conversation> {
-    await this.loadSecretMasks()
-    const view = this.conversation()
-    return { ...view, items: view.items.map((item) => maskItem(item, (text) => this.mask(text))) }
+  conversationView(): Promise<Conversation> {
+    return this.program(Views.conversationView)
   }
+
 
 /**
    * The live session's DSH events exactly as stored (every field, including surfaceOp), secrets
    * masked, for the DSH trajectory view (ticket 22). Pages backwards with before, forwards with after.
    */
-  async sessionEvents(input: { before?: number; after?: number; limit?: number }): Promise<{ events: string; hasMore: boolean; sessionId: string }> {
-    const config = this.store.requireConfig()
-    await this.loadSecretMasks()
-    const limit = Math.min(Math.max(input.limit ?? 400, 1), 2000)
-    const rows = input.after !== undefined
-      ? this.ctx.storage.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?', config.liveSessionId, input.after, limit).toArray()
-      : this.ctx.storage.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?', config.liveSessionId, input.before ?? Number.MAX_SAFE_INTEGER, limit).toArray().reverse()
-    const first = rows[0]?.seq
-    const hasMore = first !== undefined && first > 0 && input.after === undefined
-    // Events cross the RPC boundary as one JSON text (deep JSON types do not survive RPC typing).
-    return { events: `[${rows.map((row) => this.mask(row.event)).join(',')}]`, hasMore, sessionId: config.liveSessionId }
+  sessionEvents(input: { before?: number; after?: number; limit?: number }): Promise<{ events: string; hasMore: boolean; sessionId: string }> {
+    return this.program(Views.sessionEvents(input))
   }
 
-  async trajectoryMasked(): Promise<Trajectory> {
-    await this.loadSecretMasks()
-    return this.trajectoryView()
+
+  /** The live log's events, secrets masked. */
+  async trajectory(): Promise<TrajectoryEvent[]> {
+    return [...(await this.program(Views.trajectory)).events]
   }
 
-  conversation(): Conversation {
-    const config = this.store.requireConfig()
-    const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
-    const items = projectChat({
-      events,
-      notices: this.store.notices(config.liveSessionId),
-      proposal: (id) => {
-        const row = this.store.proposal(id)
-        return row === undefined ? undefined : proposalView(row)
-      },
-    })
-    // A proposal made inside a code-mode program has no direct tool result to project from; an open
-    // proposal is always shown as a question so the owner can answer it (robot-vy9z).
-    const shown = new Set(items.flatMap((item) => (item.kind === 'question' ? [item.proposal.id] : [])))
-    for (const row of this.store.proposals('open')) {
-      if (shown.has(row.id)) continue
-      const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
-      items.splice(position, 0, { kind: 'question', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
-    }
-    const working = this.store.activeTurn() !== undefined
-    const activity = working ? runningTool(events) : undefined
-    return {
-      canRetry: this.store.get('failed-wakeup') !== undefined,
-      robotId: config.id,
-      working,
-      items,
-      ...(activity === undefined ? {} : { activity }),
-    }
+  trajectoryMasked(): Promise<Trajectory> {
+    return this.program(Views.trajectory)
   }
 
-  /** The full session log of the live Conversation (robot-h5v3), secrets masked (robot-4zi6). */
-  trajectory(): TrajectoryEvent[] {
-    const config = this.store.requireConfig()
-    return readStoredEvents(this.ctx.storage.sql, config.liveSessionId).map((event) => ({
-      seq: event.seq,
-      type: event.type,
-      time: event.time,
-      turn: typeof (event.data as { turn?: unknown }).turn === 'number' ? (event.data as { turn: number }).turn : null,
-      data: this.mask(JSON.stringify(event.data)),
-    }))
+
+  conversation(): Promise<Conversation> {
+    return this.program(Views.conversation)
   }
 
-  trajectoryView(): Trajectory {
-    const config = this.store.requireConfig()
-    return { robotId: config.id, sessionId: config.liveSessionId, events: this.trajectory(), rewinds: this.store.rewinds() }
-  }
+
+
 
   /** Replace secret values with a mask (robot-4zi6); stored history is already redacted at write. */
   protected mask(text: string): string {
@@ -1406,58 +1341,34 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   /** An archived log, read-only (the rewind archive). */
-  archivedTrajectory(sessionId: string): TrajectoryEvent[] {
-    if (!this.store.rewinds().some((rewind) => rewind.archivedSessionId === sessionId || rewind.liveSessionId === sessionId)) return []
-    return readStoredEvents(this.ctx.storage.sql, sessionId).map((event) => ({
-      seq: event.seq, type: event.type, time: event.time,
-      turn: typeof (event.data as { turn?: unknown }).turn === 'number' ? (event.data as { turn: number }).turn : null,
-      data: this.mask(JSON.stringify(event.data)),
-    }))
+  archivedTrajectory(sessionId: string): Promise<TrajectoryEvent[]> {
+    return this.program(Views.archivedTrajectory(sessionId))
   }
+
 
   settings(): Promise<RobotSettings> {
     return this.program(Programs.settings)
   }
 
 
-  async panel(canEdit: boolean, summary: RobotSummary): Promise<RobotPanel> {
-    return {
-      summary,
-      settings: await this.settings(),
-      routines: this.routineViews(),
-      screen: this.screen(),
-      usage: this.usage(),
-      canEdit,
-      takeover: (() => {
-        const takeover = this.store.get<TakeoverState>('takeover')
-        return takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy }
-      })(),
-    }
+  panel(canEdit: boolean, summary: RobotSummary): Promise<RobotPanel> {
+    return this.program(Views.panel(canEdit, summary))
   }
 
-  protected routineViews(): RoutineView[] {
-    const id = this.store.requireConfig().id
-    return this.store.routines().map((routine) => routineView(id, routine, this.store.routineRuns(routine.id)))
+
+  protected routineViews(): Promise<RoutineView[]> {
+    return this.program(Views.routineViews)
   }
+
 
   /** Filled by the browser and usage tickets. */
 
-  protected screen(): ScreenView | null {
-    const screen = this.store.get<{ path: string; at: number }>('screen')
-    if (screen === undefined) return null
-    const id = this.store.requireConfig().id
-    return { path: screen.path, at: screen.at, url: `/api/robots/${encodeURIComponent(id)}/screen?at=${screen.at}` }
-  }
 
   /** The latest screenshot's Workspace path (the thumbnail). */
   screenPath(): string | null {
     return this.store.get<{ path: string }>('screen')?.path ?? null
   }
 
-  protected usage(): UsageView {
-    const month = currentMonth()
-    return { month, ...this.store.usage(month), limitUsd: this.store.requireConfig().spendLimitUsd }
-  }
 
   /** Names of the tools the current composition registers (what the model may call). */
   toolNames(): string[] {
@@ -1467,29 +1378,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** One row of the admin fleet list, from the DO itself (robot-x26m). */
-  adminRow(): { fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] } | null {
-    const config = this.store.config()
-    if (config === undefined) return null
-    return { fleetState: this.fleetState(), status: config.status, grants: this.store.grants(), model: config.model, usage: this.usage(), routines: this.routineViews() }
+  adminRow(): Promise<{ fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] } | null> {
+    return this.program(Views.adminRow)
   }
+
 
   openProposals(): ProposalView[] {
     return this.store.proposals('open').map(proposalView)
   }
 
-  status(): { status: RobotConfig['status']; fleetState: FleetState } {
-    return { status: this.store.requireConfig().status, fleetState: this.fleetState() }
+  status(): Promise<{ status: RobotConfig['status']; fleetState: FleetState }> {
+    return this.program(Views.status)
   }
+
 }
 
-function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
-  switch (item.kind) {
-    case 'message': return { ...item, text: mask(item.text) }
-    case 'reply': return { ...item, text: mask(item.text) }
-    case 'notice': return { ...item, text: mask(item.text) }
-    default: return item
-  }
-}
 
 interface ViewerState {
   readonly memberId: string
@@ -1532,22 +1435,6 @@ async function forwardInput(cdp: { send(method: string, params?: Record<string, 
 const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }
 
 /** The tool running now: the latest call without a result (a code program's latest inner call wins). */
-function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): string | undefined {
-  const open = new Map<string, string>()
-  let inner: string | undefined
-  for (const event of events) {
-    const data = event.data as Record<string, unknown>
-    if (event.type === 'tool/call') open.set(String(data['callId']), String(data['name']))
-    else if (event.type === 'tool/ptc-dispatch') inner = String(data['name'])
-    else if (event.type === 'tool/result') {
-      const message = data['message'] as { toolCallId?: string } | undefined
-      open.delete(String(message?.toolCallId))
-      inner = undefined
-    }
-  }
-  const last = [...open.values()].at(-1)
-  return last === undefined ? undefined : last === 'run_code' ? (inner ?? 'code') : last
-}
 
 /** Labels of the final payment or order step, in English and Polish. */
 const PAYMENT_STEP = /\b(pay( now)?|place (your )?order|buy now|complete (purchase|order)|confirm (and pay|payment|purchase)|submit order)\b|zapłać|płacę|kupuję|kupuj i płać|zamawiam|złóż zamówienie|potwierdzam (zakup|płatność)|przejdź do płatności/i
@@ -1565,8 +1452,6 @@ interface WatchState {
 /** How often a watched browser is checked for notifications. */
 const WATCH_INTERVAL_MS = 60_000
 
-/** Dollars with cents, and small amounts with enough digits to tell them apart ($0.0105 of $0.0001). */
-
 function runnable(config: RobotConfig): boolean {
   return config.status === 'active' || config.status === 'setup'
 }
@@ -1574,19 +1459,4 @@ function runnable(config: RobotConfig): boolean {
 function optionalString(payload: Record<string, unknown>, key: string): Record<string, string> {
   const value = payload[key]
   return typeof value === 'string' ? { [key]: value } : {}
-}
-
-
-
-
-function lastLine(items: readonly ChatItem[]): { text: string; at: number } | undefined {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index]!
-    if (item.kind === 'reply') return { text: item.text, at: item.at }
-    if (item.kind === 'message') return { text: item.text, at: item.at }
-    // A failure notice is shown in the conversation; the list keeps the last real line.
-    if (item.kind === 'notice' && !item.text.startsWith('The Turn failed')) return { text: item.text, at: item.at }
-    if (item.kind === 'question') return { text: item.proposal.purpose, at: item.at }
-  }
-  return undefined
 }
