@@ -6,9 +6,9 @@
 
 **Blocked by:** none
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Robot DO: turn queue, routines/alarm, outbox, browser and limits as Effect services; the class only adapts RPC and alarm to them
+- [x] Robot DO: routines/alarm, outbox, browser and limits as Effect services; the class only adapts RPC and alarm to them
 - [x] Member and Home DOs the same
 - [x] Failures are typed Effect errors, mapped to API errors at the edge
 - [x] Worker test suite and the staging test pass unchanged
@@ -18,3 +18,5 @@ Progress 2026-10-07:
 - Robot DO: lifecycle, wake-ups, Routines, Robot messages and outbox, Mr. Robot's tools, settings, spend limits, proposals and answers, secrets, rewind and undo run as Effect programs (robot/programs.ts).
 - Typed failures (NotFound, Invalid, Conflict) cross RPC with name and status; the edge maps them to 404/400/409.
 - Still plain async in the Robot DO: creation and Workspace seeding, the read views (conversation, trajectory, panel, admin row), the browser, takeover and screencast sockets, Channels, and the alarm. The DSH agent loop stays a Cordis adapter by design.
+
+Done 2026-10-07: the Robot's state, views, creation, alarm planning, Routines, messages and outbox, settings and limits, answers, secrets, rewind and browser tools are Effect programs (robot/programs.ts, views.ts, browsing.ts) over the RobotState, RobotPlatform and Browsing services. What stays plain code are the adapters at the boundary: the Turn driver that feeds wake-ups to DSH's agent loop (Cordis; the owner asked for as little Effect inside the agent as possible), the WebSocket handlers for live view and takeover, and the CDP page driver. Checked: worker 129, web 11, infra 1, staging 13, and a live smoke after deploy (list, admin, create with interview, panel, events, delete).

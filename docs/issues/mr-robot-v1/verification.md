@@ -6,7 +6,7 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 94 works, 6 partial, 0 not done.
+Totals: 95 works, 5 partial, 0 not done.
 
 ## Partial or not done
 
@@ -15,7 +15,6 @@ Totals: 94 works, 6 partial, 0 not done.
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
-- 84 robot-naul, partial: Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23)
 
 ## Broken until the review, fixed 2026-10-06/07
 
@@ -129,7 +128,7 @@ Suites on that build: worker 124, web 11, infra 1, dependency lint, and the stag
 | 81 | robot-h3vr | Alchemy stack, one account | Live deploys | works |
 | 82 | robot-scwl | Workspace in R2 under robots/<id>/ | Live file tools | works |
 | 83 | robot-c8hq | DSH Cordis packages per Robot, including DSH schedule ported onto the Robot's alarm (agent/schedule.ts): DSH's schedule_* tools, records and recurrence | pnpm lint:deps; live: Verifier made a one-shot with schedule_create and the alarm delivered it ("seam fired"); a Routine stored before the port converted in place | works |
-| 84 | robot-naul | Effect programs over services in the Member and Home DOs and for the Robot's state (programs.ts); typed failures mapped at the edge | Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23) | partial |
+| 84 | robot-naul | Effect programs over services in all three Durable Objects (Member, Home, and the Robot's state, views, creation, alarm, browser tools); the DO classes adapt RPC and the alarm; typed failures mapped at the edge. Plain code only at the boundaries: the Turn driver into DSH's agent loop, WebSockets, the CDP driver | Worker suite 129, web 11, infra 1, staging 13 on the converted build; live smoke after deploy (list, admin, create with interview, panel, events, delete) | works |
 | 85 | robot-0eew | Browser Rendering binding | Live and staging | works |
 | 86 | robot-p9jm | Turns survive the client going away | robot-turn.test.ts (real DO, socket closed mid-Turn); live: tab hung during a Turn, the Turn finished server-side | works |
 | 87 | robot-d994 | Live model lists per connected Provider | Live: 13 Claude + 20 Workers AI models from the Providers | works |
