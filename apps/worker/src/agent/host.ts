@@ -25,8 +25,8 @@ export interface WorkspaceHost {
 }
 
 export interface RoutineHost {
-  createRoutine(input: { name: string; prompt: string; schedule: RoutineSchedule }): RoutineView
-  updateRoutine(id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }): RoutineView
-  deleteRoutine(id: string): RoutineView
-  listRoutines(): RoutineView[]
+  createRoutine(input: { name: string; prompt: string; schedule: RoutineSchedule }): Promise<RoutineView>
+  updateRoutine(id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }): Promise<RoutineView>
+  deleteRoutine(id: string): Promise<RoutineView>
+  listRoutines(): Promise<RoutineView[]>
 }

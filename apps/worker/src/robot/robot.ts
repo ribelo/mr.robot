@@ -72,6 +72,11 @@ import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
 import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.ts'
+import * as Layer from 'effect/Layer'
+import { DurableRuntime } from '../platform/durable.ts'
+import * as Programs from './programs.ts'
+import { RobotPlatform, RobotState, routineView, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
+export type { ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
 const HEARTBEAT_MS = 30_000
@@ -92,32 +97,9 @@ export interface RobotInit {
   readonly brief?: string
 }
 
-export interface WakeInput {
-  readonly kind: WakeupKind
-  readonly sender: Sender
-  readonly text: string
-  readonly attachments?: readonly Attachment[]
-  readonly payload?: Record<string, unknown>
-}
-
 export type AnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
   | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
-
-/** A message between Robots, as the platform carries it (robot-mv15). */
-export interface RobotMessage {
-  readonly id: string
-  readonly kind: 'request' | 'reply'
-  readonly from: { readonly robotId: string; readonly ownerId: string; readonly name: string; readonly avatarColor: string }
-  readonly text: string
-  readonly requestId: string
-  readonly chain: { readonly id: string; readonly hops: number }
-}
-
-export type ReceiveResult = { readonly accepted: true } | { readonly accepted: false; readonly reason: 'unavailable' | 'queue-full' | 'chain-limit' }
-
-const MAX_CHAIN_HOPS = 8
-const MAX_QUEUED_WAKEUPS = 32
 
 export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost {
   protected readonly store: RobotStore
@@ -135,9 +117,33 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private turnSecrets: Array<readonly [string, string]> = []
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
 
+  private readonly runtime: DurableRuntime<RobotState | RobotPlatform>
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.store = new RobotStore(ctx.storage)
+    // The Robot's state programs (programs.ts) run on Effect; this class adapts them to RPC,
+    // the alarm and DSH's agent loop.
+    this.runtime = new DurableRuntime(Layer.mergeAll(
+      Layer.succeed(RobotState)(this.store),
+      Layer.succeed(RobotPlatform)({
+        env,
+        rearm: () => Effect.promise(() => this.rearm()),
+        changed: () => Effect.promise(() => this.changed()),
+        drain: () => Effect.sync(() => this.drain()),
+        background: (work) => Effect.sync(() => this.ctx.waitUntil(this.program(work))),
+        mask: (text) => Effect.promise(async () => {
+          await this.loadSecretMasks()
+          return this.mask(text)
+        }),
+        stopWatching: () => Effect.promise(() => this.stopWatching()),
+      }),
+    ))
+  }
+
+  /** Run one of the Robot's Effect programs; typed failures reach the caller as Errors with a status. */
+  protected program<A, E>(program: Effect.Effect<A, E, RobotState | RobotPlatform>): Promise<A> {
+    return this.runtime.run(program as Effect.Effect<A, never, RobotState | RobotPlatform>)
   }
 
   // ---------------------------------------------------------------- lifecycle (robot-qo06)
@@ -184,40 +190,29 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return config
   }
 
-  async pause(): Promise<void> {
-    const config = this.store.requireConfig()
-    if (config.status === 'deleted' || config.status === 'paused') return
-    this.store.set('resumeStatus', config.status)
-    this.store.updateConfig(() => ({ status: 'paused' }), false)
-    await this.stopWatching()
-    await this.changed()
+  pause(): Promise<void> {
+    return this.program(Programs.pause)
   }
 
-  async resume(): Promise<void> {
-    const config = this.store.requireConfig()
-    if (config.status !== 'paused') return
-    this.store.updateConfig(() => ({ status: this.store.get<'active' | 'setup'>('resumeStatus') ?? 'active' }), false)
-    await this.changed()
-    this.drain()
+
+  resume(): Promise<void> {
+    return this.program(Programs.resume)
   }
+
 
   /** Delete: no more Wake-ups and gone from every list; the log and Workspace are kept as the archive. */
-  async remove(): Promise<void> {
-    this.store.updateConfig(() => ({ status: 'deleted' }), false)
-    await this.ctx.storage.deleteAlarm()
-    await this.changed()
+  remove(): Promise<void> {
+    return this.program(Programs.remove)
   }
+
 
   // ---------------------------------------------------------------- wake-ups
 
   /** Queue a Wake-up and make sure the queue is being drained. */
-  async wake(input: WakeInput): Promise<number> {
-    const config = this.store.requireConfig()
-    if (config.status === 'deleted') throw new Error('robot is deleted')
-    const id = this.store.enqueue(input.kind, input.sender, input.text, { ...input.payload, attachments: input.attachments ?? [] }, Date.now())
-    this.drain()
-    return id
+  wake(input: WakeInput): Promise<number> {
+    return this.program(Programs.wake(input))
   }
+
 
   /** A Turn that ended in an error keeps its wake-up for "Try again"; a good Turn clears it. */
   private rememberFailure(wakeup: Wakeup, startSeq: number): boolean {
@@ -1249,223 +1244,82 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- Robot messages (robot-bsvs, robot-mv15, robot-ppzu, robot-bjq5)
 
-  /** The causal chain of the current Turn: inherited from a Robot message, or a new root. */
-  private currentChain(): { id: string; hops: number } {
-    const active = this.store.activeTurn()
-    const wakeup = active === undefined ? undefined : this.store.wakeup(active.wakeupId)
-    const chain = wakeup?.payload['chain'] as { id: string; hops: number } | undefined
-    return chain ?? { id: `chain-${active?.wakeupId ?? 'none'}-${this.store.requireConfig().id}`, hops: 0 }
-  }
 
   /** Recipients the Robot holds a Grant for, that its owner can still reach, and that are active. */
-  async directory(): Promise<DirectoryEntry[]> {
-    const config = this.store.requireConfig()
-    const granted = new Set(this.store.grants().recipients)
-    return (await this.home().reachable(config.ownerId))
-      .filter((robot) => granted.has(robot.id) && robot.id !== config.id && robot.status === 'active')
-      .map((robot) => ({ id: robot.id, name: robot.identity.name, description: robot.identity.description, availability: robot.fleetState }))
+  directory(): Promise<DirectoryEntry[]> {
+    return this.program(Programs.directory)
   }
 
-  async sendRobotMessage(to: string, text: string, idempotencyKey: string): Promise<{ requestId: string; status: string }> {
-    const config = this.store.requireConfig()
-    if (!this.store.hasGrant('recipient', to)) throw new Error(`You have no Grant to message ${to}. Ask your owner with propose_grants (recipients).`)
-    if (!(await this.directory()).some((entry) => entry.id === to)) throw new Error(`${to} is not available to you now`)
-    const chain = this.currentChain()
-    if (chain.hops + 1 > MAX_CHAIN_HOPS) throw new Error(`This chain of Robot messages is already ${chain.hops} hops long; finish it without delegating further.`)
-    const id = `msg-${await digest(`${config.id}:${idempotencyKey}`)}`
-    const existing = this.store.sql.exec<{ status: string }>('SELECT status FROM outbox WHERE id = ?', id).toArray()[0]
-    if (existing !== undefined) return { requestId: id, status: existing.status === 'failed' ? 'failed earlier' : 'already sent' }
-    await this.loadSecretMasks()
-    const message: RobotMessage = {
-      id,
-      kind: 'request',
-      from: { robotId: config.id, ownerId: config.ownerId, name: config.identity.name, avatarColor: config.identity.avatarColor },
-      text: this.mask(text),
-      requestId: id,
-      chain: { id: chain.id, hops: chain.hops + 1 },
-    }
-    this.enqueueOutbox(to, message)
-    this.ctx.waitUntil(this.deliverOutbox())
-    return { requestId: id, status: 'sent; the reply will arrive as a message' }
+
+  sendRobotMessage(to: string, text: string, idempotencyKey: string): Promise<{ requestId: string; status: string }> {
+    return this.program(Programs.sendRobotMessage(to, text, idempotencyKey))
   }
 
-  async replyRobotMessage(handle: string, text: string): Promise<{ status: string }> {
-    const config = this.store.requireConfig()
-    const row = this.store.sql.exec<{ sender_robot: string; request_id: string; chain: number; used_at: number | null }>('SELECT * FROM reply_handle WHERE id = ?', handle).toArray()[0]
-    if (row === undefined) throw new Error('unknown reply handle')
-    if (row.used_at !== null) throw new Error('this request was already answered')
-    await this.loadSecretMasks()
-    this.store.sql.exec('UPDATE reply_handle SET used_at = ? WHERE id = ?', Date.now(), handle)
-    this.enqueueOutbox(row.sender_robot, {
-      id: `reply-${handle}`,
-      kind: 'reply',
-      from: { robotId: config.id, ownerId: config.ownerId, name: config.identity.name, avatarColor: config.identity.avatarColor },
-      text: this.mask(text),
-      requestId: row.request_id,
-      chain: { id: this.currentChain().id, hops: row.chain },
-    })
-    this.ctx.waitUntil(this.deliverOutbox())
-    return { status: 'reply sent' }
+
+  replyRobotMessage(handle: string, text: string): Promise<{ status: string }> {
+    return this.program(Programs.replyRobotMessage(handle, text))
   }
 
-  private enqueueOutbox(recipient: string, message: RobotMessage): void {
-    this.store.sql.exec(
-      "INSERT INTO outbox (id, recipient, payload, status, attempts, next_attempt, created_at) VALUES (?, ?, ?, 'pending', 0, ?, ?) ON CONFLICT (id) DO NOTHING",
-      message.id, recipient, JSON.stringify(message), Date.now(), Date.now(),
-    )
-  }
+
 
   /** Deliver pending outbox rows; a lost RPC is retried on the alarm, the recipient dedupes. */
-  private async deliverOutbox(): Promise<void> {
-    const pending = this.store.sql.exec<{ id: string; recipient: string; payload: string; attempts: number }>(
-      "SELECT id, recipient, payload, attempts FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY created_at", Date.now(),
-    ).toArray()
-    for (const row of pending) {
-      const message = JSON.parse(row.payload) as RobotMessage
-      try {
-        const result: ReceiveResult = await this.env.ROBOT.getByName(row.recipient).receive(message)
-        this.store.sql.exec('UPDATE outbox SET status = ?, attempts = attempts + 1 WHERE id = ?', result.accepted ? 'delivered' : 'failed', row.id)
-        if (!result.accepted) {
-          await this.wake({ kind: 'platform', sender: { kind: 'platform' }, text: `Your ${message.kind} to robot ${row.recipient} was not delivered: ${undeliverable(result.reason)}` })
-        }
-      } catch {
-        const attempts = row.attempts + 1
-        if (attempts >= 8) {
-          this.store.sql.exec("UPDATE outbox SET status = 'failed', attempts = ? WHERE id = ?", attempts, row.id)
-          await this.wake({ kind: 'platform', sender: { kind: 'platform' }, text: `Your ${message.kind} to robot ${row.recipient} could not be delivered after ${attempts} attempts.` })
-        } else {
-          this.store.sql.exec('UPDATE outbox SET attempts = ?, next_attempt = ? WHERE id = ?', attempts, Date.now() + 2 ** attempts * 1000, row.id)
-        }
-      }
-    }
-    await this.rearm()
+  private deliverOutbox(): Promise<void> {
+    return this.program(Programs.deliverOutbox)
   }
 
+
   /** A message from another Robot arrives (robot-ppzu): deduped, capped, and queued as a Wake-up. */
-  async receive(message: RobotMessage): Promise<ReceiveResult> {
-    const config = this.store.config()
-    if (config === undefined || config.status === 'deleted' || config.status === 'setup') return { accepted: false, reason: 'unavailable' }
-    if (this.store.sql.exec('SELECT 1 FROM intake WHERE key = ?', message.id).toArray().length > 0) return { accepted: true }
-    if (message.kind === 'request' && message.chain.hops > MAX_CHAIN_HOPS) return { accepted: false, reason: 'chain-limit' }
-    if (this.store.pendingWakeups() >= MAX_QUEUED_WAKEUPS) return { accepted: false, reason: 'queue-full' }
-    const handle = message.kind === 'request' ? `rh-${crypto.randomUUID()}` : undefined
-    this.store.transaction(() => {
-      this.store.sql.exec('INSERT INTO intake (key, sender, received_at) VALUES (?, ?, ?)', message.id, message.from.robotId, Date.now())
-      if (handle !== undefined) {
-        this.store.sql.exec('INSERT INTO reply_handle (id, sender_robot, request_id, chain) VALUES (?, ?, ?, ?)', handle, message.from.robotId, message.requestId, message.chain.hops)
-      }
-      this.store.enqueue(
-        'robot',
-        { kind: 'robot', robotId: message.from.robotId, name: message.from.name, avatarColor: message.from.avatarColor },
-        message.text,
-        message.kind === 'request'
-          ? { requestId: message.requestId, replyHandle: handle, chain: message.chain }
-          : { replyTo: message.requestId, chain: message.chain },
-        Date.now(),
-      )
-    })
-    this.drain()
-    return { accepted: true }
+  receive(message: RobotMessage): Promise<ReceiveResult> {
+    return this.program(Programs.receive(message))
   }
+
 
   // ---------------------------------------------------------------- Mr. Robot (robot-hk2s)
 
-  async createRobot(brief: string): Promise<{ id: string; status: string }> {
-    const config = this.store.requireConfig()
-    if (config.kind !== 'mr-robot') throw new Error('only Mr. Robot creates Robots')
-    const entry = await this.home().createRobot(config.ownerId, brief)
-    return { id: entry.id, status: 'created; it is interviewing your owner in its own Conversation and will propose its Grants there' }
+  createRobot(brief: string): Promise<{ id: string; status: string }> {
+    return this.program(Programs.createRobot(brief))
   }
 
-  async configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }> {
-    const config = this.store.requireConfig()
-    if (config.kind !== 'mr-robot') throw new Error('only Mr. Robot configures Robots')
-    const entry = await this.home().entry(id)
-    if (entry === undefined || entry.ownerId !== config.ownerId || entry.kind !== 'robot' || entry.status === 'deleted') throw new Error(`${id} is not one of your owner's Robots`)
-    const identity = { ...entry.identity, ...Object.fromEntries(Object.entries(change).filter(([, value]) => typeof value === 'string' && value.trim() !== '')) }
-    const settings = await this.env.ROBOT.getByName(id).updateSettings({ identity })
-    return { id, identity: settings.identity }
+
+  configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }> {
+    return this.program(Programs.configureRobot(id, change))
   }
+
 
   // ---------------------------------------------------------------- Routines (robot-gbbt, robot-qyd5)
 
   /** Pause keeps the Routine and its schedule but stops its alarm; resume plans the next run from now (robot-qhll). */
-  async pauseRoutine(id: string, paused: boolean): Promise<RoutineView> {
-    const config = this.store.requireConfig()
-    const routine = this.store.routine(id)
-    if (routine === undefined) throw new Error('no such Routine')
-    const now = Date.now()
-    const next = paused ? null : nextRun(routine.schedule, routine.timeZone, now, routine.createdAt)
-    const saved = { ...routine, paused, nextRun: next }
-    this.store.saveRoutine(saved)
-    await this.rearm()
-    await this.changed()
-    return routineView(config.id, saved, this.store.routineRuns(id))
+  pauseRoutine(id: string, paused: boolean): Promise<RoutineView> {
+    return this.program(Programs.pauseRoutine(id, paused))
   }
 
-  createRoutine(input: { name: string; prompt: string; schedule: RoutineSchedule }): RoutineView {
-    const config = this.store.requireConfig()
-    const now = Date.now()
-    const schedule = validateSchedule(input.schedule, config.timeZone, now)
-    if (input.name.trim() === '' || input.prompt.trim() === '') throw new Error('a Routine needs a name and a prompt')
-    const routine: RoutineRow = {
-      id: `rt-${crypto.randomUUID().slice(0, 8)}`,
-      name: input.name.trim(),
-      prompt: input.prompt.trim(),
-      schedule,
-      timeZone: config.timeZone,
-      nextRun: nextRun(schedule, config.timeZone, now, now),
-      lastRun: null,
-      paused: false,
-      createdAt: now,
-    }
-    this.store.saveRoutine(routine)
-    this.routinesChanged()
-    return routineView(config.id, routine, this.store.routineRuns(routine.id))
+
+  createRoutine(input: { name: string; prompt: string; schedule: RoutineSchedule }): Promise<RoutineView> {
+    return this.program(Programs.createRoutine(input))
   }
 
-  updateRoutine(id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }): RoutineView {
-    const config = this.store.requireConfig()
-    const existing = this.store.routine(id)
-    if (existing === undefined) throw new Error(`no Routine ${id}`)
-    const now = Date.now()
-    const schedule = input.schedule === undefined ? existing.schedule : validateSchedule(input.schedule, existing.timeZone, now)
-    const routine: RoutineRow = {
-      ...existing,
-      ...(input.name === undefined ? {} : { name: input.name.trim() }),
-      ...(input.prompt === undefined ? {} : { prompt: input.prompt.trim() }),
-      schedule,
-      nextRun: input.schedule === undefined ? existing.nextRun : nextRun(schedule, existing.timeZone, now, now),
-      ...(input.schedule === undefined ? {} : { createdAt: now }),
-    }
-    this.store.saveRoutine(routine)
-    this.routinesChanged()
-    return routineView(config.id, routine, this.store.routineRuns(routine.id))
+
+  updateRoutine(id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }): Promise<RoutineView> {
+    return this.program(Programs.updateRoutine(id, input))
   }
 
-  deleteRoutine(id: string): RoutineView {
-    const config = this.store.requireConfig()
-    const existing = this.store.routine(id)
-    if (existing === undefined) throw new Error(`no Routine ${id}`)
-    this.store.deleteRoutine(id)
-    this.routinesChanged()
-    return routineView(config.id, existing, this.store.routineRuns(existing.id))
+
+  deleteRoutine(id: string): Promise<RoutineView> {
+    return this.program(Programs.deleteRoutine(id))
   }
 
-  listRoutines(): RoutineView[] {
-    return this.routineViews()
+
+  listRoutines(): Promise<RoutineView[]> {
+    return this.program(Programs.listRoutines)
   }
+
 
   /** The owner deletes a Routine from the panel (robot-qyd5). */
-  async removeRoutine(id: string): Promise<void> {
-    this.deleteRoutine(id)
-    await this.rearm()
-    await this.changed()
+  removeRoutine(id: string): Promise<void> {
+    return this.program(Programs.removeRoutine(id))
   }
 
-  private routinesChanged(): void {
-    this.ctx.waitUntil(this.rearm())
-  }
+
 
   // ---------------------------------------------------------------- views
 
@@ -1740,15 +1594,6 @@ function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
   }
 }
 
-async function digest(text: string): Promise<string> {
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
-  return [...bytes.slice(0, 12)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
-function undeliverable(reason: 'unavailable' | 'queue-full' | 'chain-limit'): string {
-  return reason === 'unavailable' ? 'that Robot is not active' : reason === 'queue-full' ? 'that Robot has too much queued work; try later' : 'the chain of Robot messages is too long'
-}
-
 interface ViewerState {
   readonly memberId: string
   readonly live: boolean
@@ -1820,17 +1665,7 @@ const WATCH_INTERVAL_MS = 60_000
 
 /** Dollars with cents, and small amounts with enough digits to tell them apart ($0.0105 of $0.0001). */
 function usd(amount: number): string {
-  return amount >= 1 || amount === 0 ? `${amount.toFixed(2)}` : `${amount.toPrecision(3).replace(/0+$/, '').replace(/\.$/, '')}`
-}
-
-function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
-  return {
-    id: routine.id, name: routine.name, prompt: routine.prompt, schedule: routine.schedule, timeZone: routine.timeZone,
-    nextRun: routine.nextRun, lastRun: routine.lastRun, paused: routine.paused, robotId,
-    summary: describeSchedule(routine.schedule, routine.timeZone),
-    cron: cronOf(routine.schedule, routine.timeZone),
-    runs,
-  }
+  return amount >= 1 || amount === 0 ? '$' + amount.toFixed(2) : '$' + String(Number(amount.toPrecision(3)))
 }
 
 function runnable(config: RobotConfig): boolean {
