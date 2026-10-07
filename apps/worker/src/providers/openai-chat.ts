@@ -10,7 +10,11 @@ type ChatMessage =
   | { role: 'assistant'; content: string | null; reasoning_content?: string; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> }
   | { role: 'tool'; tool_call_id: string; content: string }
 
-export function chatMessages(options: GenerateOptions): ChatMessage[] {
+/**
+ * Chat-completions history. An assistant turn with only tool calls carries content null, as
+ * OpenAI documents; Workers AI's schema refuses null there and needs '' (gpt-oss-120b, 2026-10-07).
+ */
+export function chatMessages(options: GenerateOptions, emptyAssistant: '' | null = null): ChatMessage[] {
   const out: ChatMessage[] = []
   const system = systemText(options)
   if (system !== '') out.push({ role: 'system', content: system })
@@ -26,7 +30,7 @@ export function chatMessages(options: GenerateOptions): ChatMessage[] {
         const reasoning = message.content.flatMap((block) => (block.type === 'reasoning' ? [block.text] : [])).join('')
         out.push({
           role: 'assistant',
-          content: text === '' ? null : text,
+          content: text === '' ? emptyAssistant : text,
           ...(reasoning === '' ? {} : { reasoning_content: reasoning }),
           ...(calls.length === 0 ? {} : { tool_calls: calls }),
         })
@@ -138,7 +142,7 @@ export class WorkersAiAdapter extends LlmAdapter {
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const result = await (this.ai.run as unknown as (model: string, input: unknown) => Promise<unknown>)(options.model, {
-      messages: chatMessages(options),
+      messages: chatMessages(options, ''),
       ...(options.tools === undefined || options.tools.length === 0 ? {} : { tools: chatTools(options), tool_choice: 'auto' }),
       ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }),
     }).catch((error: unknown) => {
