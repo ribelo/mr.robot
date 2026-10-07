@@ -29,7 +29,7 @@ in
 pkgs.dockerTools.buildLayeredImage {
   name = "mrrobot-chrome";
   tag = "latest";
-  contents = [ start pkgs.chromium pkgs.socat pkgs.wireproxy pkgs.bashInteractive pkgs.coreutils pkgs.cacert pkgs.fontconfig pkgs.dejavu_fonts pkgs.noto-fonts ];
+  contents = [ start pkgs.chromium pkgs.socat pkgs.wireproxy pkgs.bashInteractive pkgs.coreutils pkgs.cacert pkgs.fontconfig pkgs.dejavu_fonts pkgs.noto-fonts pkgs.noto-fonts-cjk-sans pkgs.noto-fonts-color-emoji ];
   extraCommands = "mkdir -p tmp && chmod 1777 tmp";
   config = {
     Cmd = [ "/bin/start" ];
