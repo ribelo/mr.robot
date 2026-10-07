@@ -6,32 +6,18 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 74 works, 25 partial, 1 not done.
+Totals: 88 works, 11 partial, 1 not done.
 
 ## Partial or not done
 
 - 84 robot-naul, not done: Effect runs the edge API, Workspace, vault, OAuth, push, catalogs and the composition scope; the Robot, Member and Home DO internals are plain async classes. Remaining work: ticket 23
 - 5 robot-d2uv, partial (not tried live): home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home)
 - 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
-- 29 robot-zzif, partial (stub-only): workspace.test.ts (stub model drives compaction); not seen live (no conversation long enough)
-- 30 robot-sw54, partial (effect stub-only): Live: setting saved; the budget's effect only in workspace.test.ts
-- 39 robot-ksvy, partial (PWA view not tried live): Staging test: real screencast frames; takeover.test.ts relays them. The PWA live view not watched live
-- 40 robot-g6qb, partial (PWA screen not tried live): Staging test: tap and typing reach a real page; the PWA takeover screen not tried live
-- 41 robot-doqx, partial (stub-only): takeover.test.ts (stub browser, fake push)
-- 42 robot-j4ll, partial (stub-only): takeover.test.ts (stub browser)
 - 43 robot-ueh0, partial (stub-only): browser.test.ts (stub browser); not tried on a real shop
 - 44 robot-b49q, partial (untested): Not tested against a real CAPTCHA
-- 53 robot-7qpi, partial (stub-only): skills.test.ts (faked GitHub); no library configured live
-- 54 robot-qjvu, partial (stub-only): skills.test.ts (faked GitHub)
-- 55 robot-lszy, partial (stub-only): skills.test.ts (stub model)
-- 56 robot-jqfw, partial (stub-only): skills.test.ts
-- 57 robot-icrv, partial (stub-only): skills.test.ts
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
-- 71 robot-9xoj, partial (stub-only): push.test.ts against a fake push service; no device subscribed
-- 72 robot-r2uz, partial (delivery stub-only): Live: switch saved in the profile sheet; delivery only in push.test.ts
-- 73 robot-bden, partial (stub-only): push.test.ts (fake push); file in the live prompt preview
 - 83 robot-c8hq, partial (schedule seam not used): pnpm lint:deps; live Turns
 - 91 robot-lulc, partial (wake loop not run live end-to-end): Live: sheet. The wake loop: staging test (a real page left running, reattached, its notification read) and browser.test.ts; not run end-to-end live
 - 95 robot-cmz9, partial (no images): Live; images not shown (Robots store no image attachments)
@@ -47,6 +33,9 @@ These were marked done but did not hold:
 - In code mode, the default, routine cards, reactions and Grant questions did not appear in the chat (10, 23, 31).
 - Rewinding to before a Turn left that Turn's message in the inbox, so it was delivered again (20).
 - web_search needed a DeepSeek key; now works without one (48).
+- Switching a Robot to Claude after Workers AI tool calls failed every Turn (tool id format); DSH's skill catalog showed as a chat bubble.
+- After a deploy a pending takeover lost its browser; messages during a takeover started Turns.
+- Compaction never completed at small budgets (checkpoint cap 400 tokens).
 - The spend-limit notice printed $0.0105 of $0.0001 as "0.01 of 0.00"; now shows the digits.
 
 ## All stories
@@ -81,8 +70,8 @@ These were marked done but did not hold:
 | 26 | robot-h1nm | SOUL.md change noticed in the chat | Live: "Flat Watcher changed SOUL.md." | works |
 | 27 | robot-mj7v | USER.md and PROACTIVE_PREFERENCES.md per person, read-only to Robots | Live: Verifier's edit of USER.md was refused | works |
 | 28 | robot-jpzp | propose_member_file_edit question | Live: the USER.md proposal question appeared | works |
-| 29 | robot-zzif | Compaction instruction | workspace.test.ts (stub model drives compaction); not seen live (no conversation long enough) | partial (stub-only) |
-| 30 | robot-sw54 | Context budget slider | Live: setting saved; the budget's effect only in workspace.test.ts | partial (effect stub-only) |
+| 29 | robot-zzif | Compaction instruction | Live: Verifier at an 8k budget compacted with its instruction and still answered correctly (Flat 30 price). Two fixes found live: the checkpoint cap was 400 tokens so every summary was cut off; the checkpoint showed as a chat bubble | works |
+| 30 | robot-sw54 | Context budget slider | Live: compaction triggered at the 8k budget on Workers AI | works |
 | 31 | robot-yrw7 | A routine from chat | Live: "Invoice check" and "Live check" created on Claude, cards shown | works |
 | 32 | robot-gbbt | once/interval/daily/weekly/cron in the owner's time zone | Live: weekly and daily with correct cron; other kinds in schedule.test.ts | works |
 | 33 | robot-qyd5 | Routines with next run in the panel | Live | works |
@@ -91,10 +80,10 @@ These were marked done but did not hold:
 | 36 | robot-makt | One Turn at a time, queue | robot-turn.test.ts (real DO); live: Verifier's request and Mr. Robot's reply queued and ran in order | works |
 | 37 | robot-l9te | browser_* tools | Live: Verifier opened example.com and took a screenshot on Claude; staging test on real Browser Rendering | works |
 | 38 | robot-t0vc | Cookies and storage kept between sessions | Staging test (real Browser Rendering) | works |
-| 39 | robot-ksvy | Live view of the Robot's screen in the PWA | Staging test: real screencast frames; takeover.test.ts relays them. The PWA live view not watched live | partial (PWA view not tried live) |
-| 40 | robot-g6qb | Takeover input | Staging test: tap and typing reach a real page; the PWA takeover screen not tried live | partial (PWA screen not tried live) |
-| 41 | robot-doqx | Takeover request suspends the Robot and pushes "needs you" | takeover.test.ts (stub browser, fake push) | partial (stub-only) |
-| 42 | robot-j4ll | Hand back resumes with URL and screenshot | takeover.test.ts (stub browser) | partial (stub-only) |
+| 39 | robot-ksvy | Live view of the Robot's screen in the PWA | Live: the waiting browser streamed example.com to the PWA takeover screen (fixed live: after a deploy the DO lost the browser; it now reattaches) | works |
+| 40 | robot-g6qb | Takeover input | Live: Take over, tapped a link in the streamed page, the real browser navigated to iana.org | works |
+| 41 | robot-doqx | Takeover request suspends the Robot and pushes "needs you" | Live: takeover request suspended Verifier; a message sent meanwhile now waits for the hand-back (fixed live: it used to start a Turn). "Needs you" push: push.test.ts; push itself proven live (71) | works |
+| 42 | robot-j4ll | Hand back resumes with URL and screenshot | Live: Hand back woke Verifier, which reported the new URL iana.org/help/example-domains | works |
 | 43 | robot-ueh0 | Pay/order clicks refused (English and Polish labels) | browser.test.ts (stub browser); not tried on a real shop | partial (stub-only) |
 | 44 | robot-b49q | CAPTCHA vendor detection with guidance | Not tested against a real CAPTCHA | partial (untested) |
 | 45 | robot-5ewr | Code mode default, Worker Loader isolate | Live: every Verifier and Mr. Robot Turn ran as code programs on Claude | works |
@@ -105,11 +94,11 @@ These were marked done but did not hold:
 | 50 | robot-4zi6 | Secrets redacted before storage and masked | Live: the PIN appears nowhere in Verifier's stored events or trajectory, only [secret:verifier-pin] | works |
 | 51 | robot-f9ln | Only granted tools and skills | Live: Verifier's prompt preview lists exactly its granted tools | works |
 | 52 | robot-0ms7 | No shell or container tool | Live prompt preview; pnpm lint:deps | works |
-| 53 | robot-7qpi | Home skill library | skills.test.ts (faked GitHub); no library configured live | partial (stub-only) |
-| 54 | robot-qjvu | Git sync (GitHub tarball) | skills.test.ts (faked GitHub) | partial (stub-only) |
-| 55 | robot-lszy | propose_skill | skills.test.ts (stub model) | partial (stub-only) |
-| 56 | robot-jqfw | Skill proposal approval publishes | skills.test.ts | partial (stub-only) |
-| 57 | robot-icrv | Per-robot skill Grants | skills.test.ts | partial (stub-only) |
+| 53 | robot-7qpi | Home skill library | Live: library synced from github.com/anthropics/skills (19 skills) | works |
+| 54 | robot-qjvu | Git sync (GitHub tarball) | Live: real GitHub tarball sync | works |
+| 55 | robot-lszy | propose_skill | Live: Verifier proposed "test-report" | works |
+| 56 | robot-jqfw | Skill proposal approval publishes | Live: approving published it to the Home library | works |
+| 57 | robot-icrv | Per-robot skill Grants | Live: Verifier granted only internal-comms saw and loaded only that skill | works |
 | 58 | robot-bsvs | robot_directory | Live: Verifier listed Mr. Robot | works |
 | 59 | robot-mv15 | robot_send / robot_reply through the outbox | Live: request and "pong" reply round trip | works |
 | 60 | robot-ppzu | Incoming robot message labelled | Live | works |
@@ -123,9 +112,9 @@ These were marked done but did not hold:
 | 68 | robot-8gag | Monthly limits | Live: Verifier on Workers AI with a $0.0001 limit blocked after one Turn with a notice | works |
 | 69 | robot-40nw | Block and notify at the limit | Live: blocked state, a message sent while blocked waited, and ran after the limit was raised | works |
 | 70 | robot-ajrp | Installable PWA | Manifest, service worker and icons served; not installed on a phone | partial (not tried on a phone) |
-| 71 | robot-9xoj | Web Push | push.test.ts against a fake push service; no device subscribed | partial (stub-only) |
-| 72 | robot-r2uz | Per-robot notifications switch | Live: switch saved in the profile sheet; delivery only in push.test.ts | partial (delivery stub-only) |
-| 73 | robot-bden | Quiet hours; PROACTIVE_PREFERENCES.md in every prompt | push.test.ts (fake push); file in the live prompt preview | partial (stub-only) |
+| 71 | robot-9xoj | Web Push | Live: a real Chrome subscription (FCM) registered on the deployment received "Verifier: Done." when a Turn finished | works (Chrome desktop; not on a phone) |
+| 72 | robot-r2uz | Per-robot notifications switch | Live: with notifications off for Verifier a finished Turn sent no push | works |
+| 73 | robot-bden | Quiet hours; PROACTIVE_PREFERENCES.md in every prompt | Live: quiet hours until 02:00 held a push from 01:56 and delivered it at 02:00:00 | works |
 | 74 | robot-vfqd | Channel seam with PWA adapter | channels.test.ts contract suite; the PWA is the only Channel | works |
 | 75 | robot-z3ud | Panel and profile sheet | Live | works |
 | 76 | robot-vqtw | Advanced settings incl. prompt preview | Live: model changed, prompt preview read | works |

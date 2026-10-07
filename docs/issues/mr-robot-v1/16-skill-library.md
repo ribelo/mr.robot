@@ -6,11 +6,11 @@
 
 **Blocked by:** 07 Code mode executor, tool grants, advanced settings
 
-**Status:** in-progress
+**Status:** done
 
 - [x] Sync pulls the configured repository and lists its skills
 - [x] Robot proposal shows as a question; approval publishes the skill
 - [x] Ungranted skill is absent from the robot's skill catalog
 - [x] Private skill is visible only to its author's owner
 
-Reopened 2026-10-07 by the story verification (verification.md): stories 53–57 (skill library only against faked GitHub).
+Verified live 2026-10-07: real GitHub sync, load, propose and publish verified live (53–57).
