@@ -30,15 +30,20 @@ describe('conversation: streaming and Work details (v1.3 ticket 03)', () => {
     const response = await SELF.fetch(`https://mr-robot.test/api/robots/${id}/ws`, { headers: { upgrade: 'websocket', 'x-dev-identity': ANNA } })
     const socket = response.webSocket!
     socket.accept()
-    const frames: Array<{ type?: string; text?: string; done?: boolean }> = []
+    const frames: Array<{ type?: string; text?: string; thinking?: string; done?: boolean }> = []
     socket.addEventListener('message', (event) => { if (typeof event.data === 'string' && event.data !== 'pong') frames.push(JSON.parse(event.data)) })
-    scripts.set(id, [{ text: 'A **streamed** answer.' }])
+    scripts.set(id, [{ text: 'A **streamed** answer.', thinking: 'Let me weigh this first.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
     await settle(id)
     await new Promise((resolve) => setTimeout(resolve, 300))
     socket.close()
     expect(frames.some((frame) => frame.type === 'stream' && frame.text === 'A **streamed** answer.')).toBe(true)
+    expect(frames.some((frame) => frame.type === 'stream' && frame.thinking === 'Let me weigh this first.')).toBe(true)
     expect(frames.some((frame) => frame.type === 'stream' && frame.done === true)).toBe(true)
+    // Stored thinking shows at Detailed and Verbose (pl-etps).
+    const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation?details=1`)).body.items
+    expect(items).toContainEqual(expect.objectContaining({ kind: 'thinking', text: 'Let me weigh this first.' }))
+    expect((await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.some((item) => item.kind === 'thinking')).toBe(false)
   })
 
   it('returns tool calls with arguments and results only when details are asked for; the setting is per Member (pl-6eir)', async () => {

@@ -140,7 +140,8 @@ export class AnthropicAdapter extends LlmAdapter {
         system: breakpoint([...(this.endpoint.claudeCode ? [{ type: 'text', text: IDENTITY }] : []), ...(system === '' ? [] : [{ type: 'text', text: system }])], ttl),
         messages,
         ...(options.tools === undefined || options.tools.length === 0 ? {} : { tools: breakpoint(options.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })), ttl) }),
-        ...(budget === undefined ? {} : { thinking: { type: 'enabled', budget_tokens: budget } }),
+        // Newer models omit thinking text unless asked; the summary is what the chat shows (pl-jzr7).
+        ...(budget === undefined ? {} : { thinking: { type: 'enabled', budget_tokens: budget, display: 'summarized' } }),
       }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     })

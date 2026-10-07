@@ -75,7 +75,7 @@ describe('Provider adapters', () => {
     expect(request.headers.get('authorization')).toBe('Bearer oauth-token')
     expect(request.body.system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.")
     expect(request.body.system[1].text).toBe('Be a Robot.')
-    expect(request.body.thinking).toEqual({ type: 'enabled', budget_tokens: 12_000 })
+    expect(request.body.thinking).toEqual({ type: 'enabled', budget_tokens: 12_000, display: 'summarized' })
     const finish = chunks.at(-1) as unknown as { replayState: { response: null; blocks: readonly unknown[] } }
     expect(finish.replayState.blocks).toEqual([{ signature: 'sig-1' }, null])
 

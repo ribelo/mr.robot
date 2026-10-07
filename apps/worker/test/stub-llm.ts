@@ -2,7 +2,7 @@ import { LlmAdapter, ToolCallId, type GenerateOptions, type LlmResolvedModelInfo
 
 /** One scripted model reply: text, or tool calls. */
 export type StubReply =
-  | { readonly text: string; readonly inputTokens?: number }
+  | { readonly text: string; readonly inputTokens?: number; readonly thinking?: string }
   | { readonly hang: true }
   | { readonly calls: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   | ((request: GenerateOptions) => StubReply)
@@ -34,9 +34,15 @@ export class StubLlm extends LlmAdapter {
       return
     }
     if ('text' in reply) {
-      yield { type: 'block-start', index: 0, blockType: 'text' }
-      yield { type: 'text-delta', index: 0, text: reply.text }
-      yield { type: 'block-end', index: 0, block: { type: 'text', text: reply.text } }
+      const offset = reply.thinking === undefined ? 0 : 1
+      if (reply.thinking !== undefined) {
+        yield { type: 'block-start', index: 0, blockType: 'reasoning' }
+        yield { type: 'reasoning-delta', index: 0, text: reply.thinking }
+        yield { type: 'block-end', index: 0, block: { type: 'reasoning', text: reply.thinking } }
+      }
+      yield { type: 'block-start', index: offset, blockType: 'text' }
+      yield { type: 'text-delta', index: offset, text: reply.text }
+      yield { type: 'block-end', index: offset, block: { type: 'text', text: reply.text } }
       yield { type: 'usage', usage: { inputTokens: reply.inputTokens ?? 100, outputTokens: 10 } }
       yield { type: 'finish', reason: { kind: 'stop' } }
       return

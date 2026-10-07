@@ -6,7 +6,7 @@ Spec: ../mr-robot-v1.3.md. 01 first (the refactor every later plugin rides on); 
 |---|---|---|---|
 | 01 | [Capabilities as Cordis plugins mounted by grant](01-capabilities-as-plugins.md) | — | done |
 | 02 | [Memory plugin: scopes, baseline injection, change notes, cache warming](02-memory-plugin.md) | 01 | done |
-| 03 | [Markdown, streaming and Work details levels](03-conversation-markdown-streaming-work-details.md) | — | ready-for-agent |
+| 03 | [Markdown, streaming and Work details levels](03-conversation-markdown-streaming-work-details.md) | — | done |
 | 04 | [Takeover: keys, close semantics, cookie note, speed](04-takeover-input-close-speed.md) | — | ready-for-agent |
 | 05 | [Native notifications in the app and unread badges](05-native-notifications-unread.md) | — | ready-for-agent |
 | 06 | [Delete robot, clear history, reset everything](06-delete-clear-reset.md) | — | ready-for-agent |
