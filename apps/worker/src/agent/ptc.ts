@@ -38,7 +38,7 @@ class Bridge extends RpcTarget {
 
 /** The program as the body of an async function, types stripped. */
 export function compileProgram(program: string): string {
-  return transform(`async function __program__(__bindings__, console) {\n${callIfOnlyAFunction(program)}\n}`, {
+  return transform(`async function __program__(__bindings__, console) {\n${program}\n}`, {
     transforms: ['typescript'],
     disableESTransforms: true,
   }).code
@@ -118,7 +118,7 @@ export class WorkerLoaderPtcRuntime extends PtcRuntime {
   async run(spec: PtcRunSpec): Promise<PtcRunResult> {
     let compiled: string
     try {
-      compiled = compileProgram(withGlobals(spec.program, spec.bindings))
+      compiled = compileProgram(withGlobals(callIfOnlyAFunction(spec.program), spec.bindings))
     } catch (error) {
       return { logs: [], error: { kind: 'exception', message: `the program does not parse: ${error instanceof Error ? error.message : String(error)}` } }
     }
