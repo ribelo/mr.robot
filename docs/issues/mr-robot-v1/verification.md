@@ -6,7 +6,7 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 88 works, 12 partial, 0 not done.
+Totals: 89 works, 11 partial, 0 not done.
 
 ## Partial or not done
 
@@ -17,7 +17,6 @@ Totals: 88 works, 12 partial, 0 not done.
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
-- 83 robot-c8hq, partial (schedule seam not used): pnpm lint:deps; live Turns
 - 84 robot-naul, partial: Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23)
 - 91 robot-lulc, partial (wake loop not run live end-to-end): Live: sheet. The wake loop: staging test (a real page left running, reattached, its notification read) and browser.test.ts; not run end-to-end live
 - 95 robot-cmz9, partial (no images): Live; images not shown (Robots store no image attachments)
@@ -73,7 +72,7 @@ These were marked done but did not hold:
 | 29 | robot-zzif | Compaction instruction | Live: Verifier at an 8k budget compacted with its instruction and still answered correctly (Flat 30 price). Two fixes found live: the checkpoint cap was 400 tokens so every summary was cut off; the checkpoint showed as a chat bubble | works |
 | 30 | robot-sw54 | Context budget slider | Live: compaction triggered at the 8k budget on Workers AI | works |
 | 31 | robot-yrw7 | A routine from chat | Live: "Invoice check" and "Live check" created on Claude, cards shown | works |
-| 32 | robot-gbbt | once/interval/daily/weekly/cron in the owner's time zone | Live: weekly and daily with correct cron; other kinds in schedule.test.ts | works |
+| 32 | robot-gbbt | DSH schedule records (after, at, every, daily, weekly, cron) in the owner's time zone | Live: daily, weekly and a one-shot through schedule_create; routines.test.ts | works |
 | 33 | robot-qyd5 | Routines with next run in the panel | Live | works |
 | 34 | robot-7j1a | Sleep between Turns; wake on routine, message, robot message, channel event | Live: message, robot-message and routine wakes (one-shot "Fire check" fired at 01:10 and replied "routine fired") | works |
 | 35 | robot-v1gb | Missed occurrences run once | routines.test.ts (real DO alarm) | works |
@@ -124,7 +123,7 @@ These were marked done but did not hold:
 | 80 | robot-ifp6 | One DO with SQLite per Robot | Live and all worker tests | works |
 | 81 | robot-h3vr | Alchemy stack, one account | Live deploys | works |
 | 82 | robot-scwl | Workspace in R2 under robots/<id>/ | Live file tools | works |
-| 83 | robot-c8hq | DSH Cordis packages per Robot; schedule seam not used (ADR 0002) | pnpm lint:deps; live Turns | partial (schedule seam not used) |
+| 83 | robot-c8hq | DSH Cordis packages per Robot, including DSH schedule ported onto the Robot's alarm (agent/schedule.ts): DSH's schedule_* tools, records and recurrence | pnpm lint:deps; live: Verifier made a one-shot with schedule_create and the alarm delivered it ("seam fired"); a Routine stored before the port converted in place | works |
 | 84 | robot-naul | Effect programs over services in the Member and Home DOs and for the Robot's state (programs.ts); typed failures mapped at the edge | Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23) | partial |
 | 85 | robot-0eew | Browser Rendering binding | Live and staging | works |
 | 86 | robot-p9jm | Turns survive the client going away | robot-turn.test.ts (real DO, socket closed mid-Turn); live: tab hung during a Turn, the Turn finished server-side | works |
