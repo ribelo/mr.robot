@@ -1,0 +1,7 @@
+# Mr. Robot's Exa tools; set apiKey (and agentRuns: true for the agent-run tools).
+- insert:
+    - id: mr-robot-exa
+      name: '@mr-robot/dsh-exa'
+      config:
+        research: true
+        agentRuns: false

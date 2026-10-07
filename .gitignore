@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 *.tmp.mjs
 apps/host/dist/
+packages/dsh-mr-robot-exa/dist/

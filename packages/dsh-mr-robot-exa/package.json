@@ -1,0 +1,23 @@
+{
+  "name": "@mr-robot/dsh-exa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mr. Robot's Exa capability as a DeepSeek Harness bundle (v1.3 ticket 01, pl-d1oz).",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "@deepseek-ai/schemastery": "3.18.4"
+  }
+}

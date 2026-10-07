@@ -330,6 +330,15 @@ importers:
         specifier: 4.147.0
         version: 4.147.0(@cloudflare/workers-types@5.20261006.1)(@types/node@24.19.1)
 
+  packages/dsh-mr-robot-exa:
+    devDependencies:
+      '@deepseek-ai/schemastery':
+        specifier: 3.18.4
+        version: 3.18.4
+      esbuild:
+        specifier: 0.28.1
+        version: 0.28.1
+
   packages/host-protocol:
     dependencies:
       effect:

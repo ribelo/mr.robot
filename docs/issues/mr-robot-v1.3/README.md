@@ -4,7 +4,7 @@ Spec: ../mr-robot-v1.3.md. 01 first (the refactor every later plugin rides on); 
 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
-| 01 | [Capabilities as Cordis plugins mounted by grant](01-capabilities-as-plugins.md) | — | ready-for-agent |
+| 01 | [Capabilities as Cordis plugins mounted by grant](01-capabilities-as-plugins.md) | — | done |
 | 02 | [Memory plugin: scopes, baseline injection, change notes, cache warming](02-memory-plugin.md) | 01 | ready-for-agent |
 | 03 | [Markdown, streaming and Work details levels](03-conversation-markdown-streaming-work-details.md) | — | ready-for-agent |
 | 04 | [Takeover: keys, close semantics, cookie note, speed](04-takeover-input-close-speed.md) | — | ready-for-agent |
