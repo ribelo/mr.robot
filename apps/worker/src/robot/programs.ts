@@ -6,11 +6,14 @@
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
-import type { RoutineSchedule, RoutineView } from '@mr-robot/protocol'
+import type { NotificationKind, ProposalView, RobotSettings, RoutineSchedule, RoutineView, SettingsPatch } from '@mr-robot/protocol'
+import type { MemberFileName } from '../member/member.ts'
+import { currentMonth } from '../home/home.ts'
+import { storedLength } from '../agent/session-log.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.ts'
-import type { RobotStore, RoutineRow, WakeupKind } from './store.ts'
+import type { ProposalRow, RobotStore, RoutineRow, WakeupKind } from './store.ts'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 
 export const MAX_CHAIN_HOPS = 8
@@ -54,6 +57,10 @@ export interface RobotPlatformShape {
   mask(text: string): Effect.Effect<string>
   /** Close a browser kept open for screen notifications. */
   stopWatching(): Effect.Effect<void>
+  /** Push to the Robot's notification recipients through its Channels. */
+  notifyMembers(kind: NotificationKind, body: string): Effect.Effect<number>
+  /** Keep a fetched secret's value in memory to mask it (never stored). */
+  rememberSecret(name: string, value: string): Effect.Effect<void>
 }
 
 export class RobotPlatform extends Context.Service<RobotPlatform, RobotPlatformShape>()('mr-robot/RobotPlatform') {}
@@ -356,4 +363,186 @@ export const configureRobot = (id: string, change: { name?: string; title?: stri
   const identity = { ...entry.identity, ...Object.fromEntries(Object.entries(change).filter(([, value]) => typeof value === 'string' && value.trim() !== '')) }
   const settings = yield* promise(() => platform.env.ROBOT.getByName(id).updateSettings({ identity }))
   return { id, identity: settings.identity as unknown }
+})
+
+// ------------------------------------------------------------------ settings and Grants (robot-vqtw)
+
+export const settings = Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  return {
+    identity: current.identity,
+    sharing: current.sharing,
+    model: current.model,
+    contextBudget: current.contextBudget,
+    codeMode: current.codeMode,
+    wakeOnScreenNotifications: current.wakeOnScreenNotifications === true,
+    compactionInstruction: current.compactionInstruction,
+    grants: store.grants(),
+    notifications: current.notifications,
+    spendLimitUsd: current.spendLimitUsd,
+  } as RobotSettings
+})
+
+/** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
+export const setRecipients = (robotIds: readonly string[]) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const grants = store.grants()
+  if (grants.recipients.length === robotIds.length && grants.recipients.every((id) => robotIds.includes(id))) return
+  store.setGrants({ ...grants, recipients: [...robotIds] })
+  store.updateConfig(() => ({}))
+})
+
+/** Dollars with cents, and small amounts with enough digits to tell them apart ($0.0105 of $0.0001). */
+function usd(amount: number): string {
+  return amount >= 1 || amount === 0 ? '$' + amount.toFixed(2) : '$' + String(Number(amount.toPrecision(3)))
+}
+
+/** Over the Robot's or its owner's monthly limit: stop and tell the owner; under it again: resume (robot-8gag, robot-40nw). */
+export const checkLimits = Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  if (current.status !== 'active' && !(current.status === 'blocked' && current.blockedReason === 'limit')) return false
+  const limits = yield* promise(() => platform.env.HOME.getByName(HOME_ID).limitsFor(current.ownerId))
+  const robotLimit = current.spendLimitUsd ?? limits.robotDefaultUsd
+  const spent = store.usage(currentMonth()).costUsd
+  const reason = robotLimit !== null && spent >= robotLimit
+    ? `This Robot reached its monthly spend limit (${usd(spent)} of ${usd(robotLimit)}).`
+    : limits.memberUsd !== null && limits.memberSpentUsd >= limits.memberUsd
+      ? `Your Robots reached your monthly spend limit (${usd(limits.memberSpentUsd)} of ${usd(limits.memberUsd)}).`
+      : null
+  if (reason !== null && current.status === 'active') {
+    store.updateConfig(() => ({ status: 'blocked', blockedReason: 'limit' }), false)
+    store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), `${reason} It stops here until the limit is raised.`, Date.now())
+    yield* platform.changed()
+    yield* platform.notifyMembers('blocked', `${reason} Raise the limit to let it continue.`)
+    return true
+  }
+  if (reason === null && current.status === 'blocked') {
+    store.updateConfig(() => ({ status: 'active', blockedReason: null }), false)
+    yield* platform.changed()
+    yield* platform.drain()
+  }
+  return reason !== null
+})
+
+/** Advanced settings (robot-vqtw): every change takes effect on the next Turn. */
+export const updateSettings = (patch: SettingsPatch) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  store.transaction(() => {
+    if (patch.grants !== undefined) store.setGrants(patch.grants)
+    store.updateConfig((current) => ({
+      ...(patch.identity === undefined ? {} : { identity: patch.identity }),
+      ...(patch.sharing === undefined ? {} : { sharing: patch.sharing }),
+      ...(patch.model === undefined ? {} : { model: patch.model }),
+      ...(patch.contextBudget === undefined ? {} : { contextBudget: Math.max(8_000, Math.round(patch.contextBudget)) }),
+      ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
+      ...(patch.wakeOnScreenNotifications === undefined ? {} : { wakeOnScreenNotifications: patch.wakeOnScreenNotifications }),
+      ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
+      ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels])] } }),
+      ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
+      ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
+    }))
+  })
+  yield* platform.changed()
+  if (patch.spendLimitUsd !== undefined) yield* checkLimits
+  if (patch.wakeOnScreenNotifications === false) yield* platform.stopWatching()
+  return yield* settings
+})
+
+// ------------------------------------------------------------------ proposals and the owner's answers (robot-cobv, robot-vy9z)
+
+export function proposalView(row: ProposalRow): ProposalView {
+  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill }
+}
+
+function approvedNote(proposal: ProposalRow): string {
+  switch (proposal.kind) {
+    case 'setup': return 'Your owner approved your setup. You are active now with exactly the Grants you proposed. Say hello in one line and tell them what happens next.'
+    case 'grants': return `Your owner approved your Grant proposal (${proposal.purpose}). The new Grants are available from now on.`
+    default: return `Your owner approved your ${proposal.kind} proposal (${proposal.purpose}).`
+  }
+}
+
+const NO_GRANTS = { tools: [], skills: [], recipients: [], secrets: [] }
+
+/** What approval does: the stored payload, exactly. */
+const apply = (proposal: ProposalRow) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const ownerId = (yield* config).ownerId
+  switch (proposal.kind) {
+    case 'setup': {
+      const grants = proposal.grants ?? NO_GRANTS
+      store.transaction(() => {
+        store.setGrants(grants)
+        store.updateConfig(() => ({ status: 'active' }))
+      })
+      return
+    }
+    case 'grants': {
+      const current = store.grants()
+      const add = proposal.grants ?? NO_GRANTS
+      store.setGrants({ tools: [...current.tools, ...add.tools], skills: [...current.skills, ...add.skills], recipients: [...current.recipients, ...add.recipients], secrets: [...current.secrets, ...add.secrets] })
+      store.updateConfig(() => ({}))
+      return
+    }
+    case 'skill': {
+      if (proposal.skill === null) return
+      const visibility = proposal.payload['visibility'] === 'private' ? 'private' : 'home'
+      yield* Effect.tryPromise({
+        try: () => platform.env.HOME.getByName(HOME_ID).publishSkill(ownerId, proposal.skill!.name, proposal.skill!.description, String(proposal.payload['content'] ?? ''), visibility),
+        catch: (error) => conflict(error instanceof Error ? error.message : String(error)),
+      })
+      return
+    }
+    case 'member-file': {
+      if (proposal.file === null) return
+      yield* promise(() => platform.env.MEMBER.getByName(ownerId).writeFile(proposal.file!.name as MemberFileName, proposal.file!.content))
+      return
+    }
+  }
+})
+
+export type AnswerResult =
+  | { readonly ok: true; readonly proposal: ProposalView }
+  | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
+
+/**
+ * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
+ * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
+ */
+export const answer = (proposalId: string, revision: number, approve: boolean) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  if (store.proposal(proposalId) === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
+  const answered = store.answerProposal(proposalId, revision, approve, Date.now())
+  if (answered === undefined) return { ok: false, reason: 'stale' } as AnswerResult
+  if (approve) yield* apply(answered)
+  yield* platform.changed()
+  yield* wake({
+    kind: 'platform',
+    sender: { kind: 'platform' },
+    text: approve ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
+    // The chat shows what happened, not the instruction to the model.
+    payload: { summary: approve ? (answered.kind === 'setup' ? 'Setup approved' : 'Approved') : 'Rejected' },
+  })
+  return { ok: true, proposal: proposalView(answered) } as AnswerResult
+})
+
+// ------------------------------------------------------------------ secrets (robot-0bde)
+
+/** secret.get: a granted name only, resolved from the owner or the Home. */
+export const secret = (name: string) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const granted = store.grants().secrets
+  if (!granted.includes(name)) return yield* invalid(`The secret "${name}" is not granted to you. Granted: ${granted.join(', ') || 'none'}. Ask with propose_grants.`)
+  const ownerId = (yield* config).ownerId
+  const value = yield* promise(() => platform.env.HOME.getByName(HOME_ID).resolveSecret(ownerId, name))
+  if (value === null) return yield* notFound(`The secret "${name}" no longer exists`)
+  yield* platform.rememberSecret(name, value)
+  return value
 })

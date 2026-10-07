@@ -75,8 +75,8 @@ import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.
 import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
-import { RobotPlatform, RobotState, routineView, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
-export type { ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
+import { proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
+export type { AnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
 const HEARTBEAT_MS = 30_000
@@ -96,10 +96,6 @@ export interface RobotInit {
   /** What the Robot was asked to become (setup only). */
   readonly brief?: string
 }
-
-export type AnswerResult =
-  | { readonly ok: true; readonly proposal: ProposalView }
-  | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
 
 export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, RoutineHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost {
   protected readonly store: RobotStore
@@ -137,6 +133,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
           return this.mask(text)
         }),
         stopWatching: () => Effect.promise(() => this.stopWatching()),
+        notifyMembers: (kind, body) => Effect.promise(() => this.notifyMembers(kind, body).catch(() => 0)),
+        rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
       }),
     ))
   }
@@ -506,31 +504,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** Over the Robot's or its owner's monthly limit: stop and tell the owner; under it again: resume. */
-  private async checkLimits(): Promise<boolean> {
-    const config = this.store.requireConfig()
-    if (config.status !== 'active' && !(config.status === 'blocked' && config.blockedReason === 'limit')) return false
-    const limits = await this.home().limitsFor(config.ownerId)
-    const robotLimit = config.spendLimitUsd ?? limits.robotDefaultUsd
-    const spent = this.store.usage(currentMonth()).costUsd
-    const reason = robotLimit !== null && spent >= robotLimit
-      ? `This Robot reached its monthly spend limit (${usd(spent)} of ${usd(robotLimit)}).`
-      : limits.memberUsd !== null && limits.memberSpentUsd >= limits.memberUsd
-        ? `Your Robots reached your monthly spend limit (${usd(limits.memberSpentUsd)} of ${usd(limits.memberUsd)}).`
-        : null
-    if (reason !== null && config.status === 'active') {
-      this.store.updateConfig(() => ({ status: 'blocked', blockedReason: 'limit' }), false)
-      this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${reason} It stops here until the limit is raised.`, Date.now())
-      await this.changed()
-      await this.notifyMembers('blocked', `${reason} Raise the limit to let it continue.`)
-      return true
-    }
-    if (reason === null && config.status === 'blocked') {
-      this.store.updateConfig(() => ({ status: 'active', blockedReason: null }), false)
-      await this.changed()
-      this.drain()
-    }
-    return reason !== null
+  private checkLimits(): Promise<boolean> {
+    return this.program(Programs.checkLimits)
   }
+
 
   /** A limit changed somewhere: unblock when the Robot is under its limits again. */
   async recheckLimits(): Promise<void> {
@@ -890,92 +867,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
    * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
    */
-  async answer(proposalId: string, revision: number, approve: boolean): Promise<AnswerResult> {
-    const existing = this.store.proposal(proposalId)
-    if (existing === undefined) return { ok: false, reason: 'not-found' }
-    const answered = this.store.answerProposal(proposalId, revision, approve, Date.now())
-    if (answered === undefined) return { ok: false, reason: 'stale' }
-    if (approve) await this.apply(answered)
-    await this.changed()
-    await this.wake({
-      kind: 'platform',
-      sender: { kind: 'platform' },
-      text: approve ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
-      // The chat shows what happened, not the instruction to the model.
-      payload: { summary: approve ? (answered.kind === 'setup' ? 'Setup approved' : 'Approved') : 'Rejected' },
-    })
-    return { ok: true, proposal: proposalView(answered) }
+  answer(proposalId: string, revision: number, approve: boolean): Promise<AnswerResult> {
+    return this.program(Programs.answer(proposalId, revision, approve))
   }
 
-  private async apply(proposal: ProposalRow): Promise<void> {
-    switch (proposal.kind) {
-      case 'setup': {
-        const grants = proposal.grants ?? { tools: [], skills: [], recipients: [], secrets: [] }
-        this.store.transaction(() => {
-          this.store.setGrants(grants)
-          this.store.updateConfig(() => ({ status: 'active' }))
-        })
-        return
-      }
-      case 'grants': {
-        const current = this.store.grants()
-        const add = proposal.grants ?? { tools: [], skills: [], recipients: [], secrets: [] }
-        this.store.setGrants({
-          tools: [...current.tools, ...add.tools],
-          skills: [...current.skills, ...add.skills],
-          recipients: [...current.recipients, ...add.recipients],
-          secrets: [...current.secrets, ...add.secrets],
-        })
-        this.store.updateConfig(() => ({}))
-        return
-      }
-      default:
-        await this.applyProposal(proposal)
-    }
-  }
 
-  /** Proposal kinds beyond Grants: Member files here, skills in ticket 16. */
-  protected async applyProposal(proposal: ProposalRow): Promise<void> {
-    if (proposal.kind === 'skill' && proposal.skill !== null) {
-      const visibility = proposal.payload['visibility'] === 'private' ? 'private' : 'home'
-      await this.home().publishSkill(this.store.requireConfig().ownerId, proposal.skill.name, proposal.skill.description, String(proposal.payload['content'] ?? ''), visibility)
-      return
-    }
-    if (proposal.kind === 'member-file' && proposal.file !== null) {
-      await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).writeFile(proposal.file.name as MemberFileName, proposal.file.content)
-    }
-  }
+
 
   /** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
-  async setRecipients(robotIds: readonly string[]): Promise<void> {
-    const grants = this.store.grants()
-    if (sameSet(grants.recipients, robotIds)) return
-    this.store.setGrants({ ...grants, recipients: [...robotIds] })
-    this.store.updateConfig(() => ({}))
+  setRecipients(robotIds: readonly string[]): Promise<void> {
+    return this.program(Programs.setRecipients(robotIds))
   }
 
+
   /** Advanced settings (robot-vqtw): every change takes effect on the next Turn. */
-  async updateSettings(patch: SettingsPatch): Promise<RobotSettings> {
-    this.store.transaction(() => {
-      if (patch.grants !== undefined) this.store.setGrants(patch.grants)
-      this.store.updateConfig((config) => ({
-        ...(patch.identity === undefined ? {} : { identity: patch.identity }),
-        ...(patch.sharing === undefined ? {} : { sharing: patch.sharing }),
-        ...(patch.model === undefined ? {} : { model: patch.model }),
-        ...(patch.contextBudget === undefined ? {} : { contextBudget: Math.max(8_000, Math.round(patch.contextBudget)) }),
-        ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
-        ...(patch.wakeOnScreenNotifications === undefined ? {} : { wakeOnScreenNotifications: patch.wakeOnScreenNotifications }),
-        ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
-        ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels])] } }),
-        ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
-        ...(config.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
-      }))
-    })
-    await this.changed()
-    if (patch.spendLimitUsd !== undefined) await this.checkLimits()
-    if (patch.wakeOnScreenNotifications === false) await this.stopWatching()
-    return this.settings()
+  updateSettings(patch: SettingsPatch): Promise<RobotSettings> {
+    return this.program(Programs.updateSettings(patch))
   }
+
 
   // ---------------------------------------------------------------- reporting and live updates
 
@@ -1404,15 +1313,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** secret.get: a granted name only, resolved from the owner or the Home (robot-0bde). */
-  async secret(name: string): Promise<string> {
-    const config = this.store.requireConfig()
-    const granted = this.store.grants().secrets
-    if (!granted.includes(name)) throw new Error(`The secret "${name}" is not granted to you. Granted: ${granted.join(', ') || 'none'}. Ask with propose_grants.`)
-    const value = await this.home().resolveSecret(config.ownerId, name)
-    if (value === null) throw new Error(`The secret "${name}" no longer exists`)
-    this.remember(name, value)
-    return value
+  secret(name: string): Promise<string> {
+    return this.program(Programs.secret(name))
   }
+
 
   private remember(name: string, value: string): void {
     this.secretValues = [...this.secretValues.filter(([known]) => known !== name), [name, value]]
@@ -1509,26 +1413,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }))
   }
 
-  settings(): RobotSettings {
-    const config = this.store.requireConfig()
-    return {
-      identity: config.identity,
-      sharing: config.sharing,
-      model: config.model,
-      contextBudget: config.contextBudget,
-      codeMode: config.codeMode,
-      wakeOnScreenNotifications: config.wakeOnScreenNotifications === true,
-      compactionInstruction: config.compactionInstruction,
-      grants: this.store.grants(),
-      notifications: config.notifications,
-      spendLimitUsd: config.spendLimitUsd,
-    }
+  settings(): Promise<RobotSettings> {
+    return this.program(Programs.settings)
   }
 
-  panel(canEdit: boolean, summary: RobotSummary): RobotPanel {
+
+  async panel(canEdit: boolean, summary: RobotSummary): Promise<RobotPanel> {
     return {
       summary,
-      settings: this.settings(),
+      settings: await this.settings(),
       routines: this.routineViews(),
       screen: this.screen(),
       usage: this.usage(),
@@ -1664,9 +1557,6 @@ interface WatchState {
 const WATCH_INTERVAL_MS = 60_000
 
 /** Dollars with cents, and small amounts with enough digits to tell them apart ($0.0105 of $0.0001). */
-function usd(amount: number): string {
-  return amount >= 1 || amount === 0 ? '$' + amount.toFixed(2) : '$' + String(Number(amount.toPrecision(3)))
-}
 
 function runnable(config: RobotConfig): boolean {
   return config.status === 'active' || config.status === 'setup'
@@ -1677,21 +1567,8 @@ function optionalString(payload: Record<string, unknown>, key: string): Record<s
   return typeof value === 'string' ? { [key]: value } : {}
 }
 
-function proposalView(row: ProposalRow): ProposalView {
-  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill }
-}
 
-function approvedNote(proposal: ProposalRow): string {
-  switch (proposal.kind) {
-    case 'setup': return 'Your owner approved your setup. You are active now with exactly the Grants you proposed. Say hello in one line and tell them what happens next.'
-    case 'grants': return `Your owner approved your Grant proposal (${proposal.purpose}). The new Grants are available from now on.`
-    default: return `Your owner approved your ${proposal.kind} proposal (${proposal.purpose}).`
-  }
-}
 
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((item) => b.includes(item))
-}
 
 function lastLine(items: readonly ChatItem[]): { text: string; at: number } | undefined {
   for (let index = items.length - 1; index >= 0; index -= 1) {
