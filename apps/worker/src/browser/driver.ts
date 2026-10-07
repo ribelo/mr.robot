@@ -133,6 +133,13 @@ type ChromeStub = { fetch(input: RequestInfo, init?: RequestInit): Promise<Respo
  * Container Chrome (rb-wn96): one container per Robot and backend; its session id is the
  * container's name, so a session left running is reattached by name. Closing stops the container.
  */
+/** Leave a warm container with one blank tab: no page keeps loading or holding state between uses. */
+async function closeTabs(browser: Browser): Promise<void> {
+  const pages = await browser.pages().catch(() => [])
+  const blank = await browser.newPage().catch(() => undefined)
+  for (const page of pages) if (page !== blank) await page.close().catch(() => undefined)
+}
+
 export class ContainerDriver implements BrowserDriver {
   constructor(
     private readonly chrome: { getByName(name: string): ChromeStub },
@@ -142,9 +149,12 @@ export class ContainerDriver implements BrowserDriver {
 
   async open(state: BrowserState | null): Promise<BrowserPage> {
     const stub = this.chrome.getByName(this.name)
-    await stub.begin(await this.startEnv())
+    // A container still running from the last open is reused: no boot, no VPN handshake (pl-n2vs).
+    if (!(await stub.running())) await stub.begin(await this.startEnv())
     const browser = await containerBrowser(stub)
-    return new RenderingPage(browser, await preparedPage(browser, state), state?.storage ?? {}, { id: this.name, close: () => stub.end() })
+    const page = await preparedPage(browser, state)
+    // Closing closes the tab only; the container sleeps by itself after a few idle minutes (ChromeContainer.sleepAfter).
+    return new RenderingPage(browser, page, state?.storage ?? {}, { id: this.name, close: () => closeTabs(browser) })
   }
 
   async attach(sessionId: string): Promise<BrowserPage | undefined> {
@@ -157,7 +167,7 @@ export class ContainerDriver implements BrowserDriver {
       const page = pages.filter((candidate) => candidate.url() !== 'about:blank').at(-1) ?? pages.at(-1)
       if (page === undefined) return undefined
       await rearmed(page)
-      return new RenderingPage(browser, page, {}, { id: sessionId, close: () => stub.end() })
+      return new RenderingPage(browser, page, {}, { id: sessionId, close: () => closeTabs(browser) })
     } catch {
       return undefined
     }

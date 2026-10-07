@@ -8,8 +8,8 @@ import type { Env } from '../env.ts'
 
 export class ChromeContainer extends Container<Env> {
   override defaultPort = 9222
-  /** The container sleeps when nothing reaches it for this long (the Robot also stops it at the end of a Turn). */
-  override sleepAfter = '5m'
+  /** The container sleeps when nothing reaches it for this long; a reopen within it is warm (pl-n2vs). */
+  override sleepAfter = '3m'
 
   /** Start Chrome; WG_CONFIG routes it through the VPN, PROXY_URL through a proxy (v1.2 ticket 05). */
   async begin(envVars: Record<string, string>): Promise<void> {
