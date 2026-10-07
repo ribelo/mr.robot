@@ -10,7 +10,7 @@ import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
-import type { NotificationKind, ProviderView, QuietHours } from '@mr-robot/protocol'
+import type { NotificationKind, ProviderView, QuietHours, WorkDetails } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -30,6 +30,7 @@ export interface MemberProfile {
   readonly name: string
   readonly timeZone: string
   readonly quietHours: QuietHours | null
+  readonly workDetails?: WorkDetails
 }
 
 /** What a Member's programs need besides its SQLite: vaults, sign-in clients, push, the Home and its alarm. */
@@ -78,7 +79,7 @@ const init = (input: { id: string; email: string; name: string }) => Effect.gen(
   return created
 })
 
-const updateProfile = (patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null }) => Effect.gen(function* () {
+const updateProfile = (patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null; workDetails?: WorkDetails }) => Effect.gen(function* () {
   const next = { ...(yield* profile), ...patch }
   yield* kvSet('profile', next)
   return next

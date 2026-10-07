@@ -37,6 +37,8 @@ export interface CompositionInput {
   readonly compactionInstruction: string
   /** Called after a compaction replaced the context with a checkpoint. */
   readonly onCompacted?: () => void
+  /** The model's output as it streams (pl-jzr7): text and thinking deltas, start and end of an attempt. */
+  readonly onStream?: (frame: { type: 'start' | 'chunk' | 'end'; chunk?: { type: string; text?: string } }) => void
   /** Prompt sections, in order; text is read at every request so persona edits apply immediately. */
   readonly prompt: ReadonlyArray<{ readonly name: string; readonly text: () => string }>
   /** The capability plugins its grants allow (pl-rsoy); nothing else registers tools (robot-f9ln). */
@@ -73,6 +75,10 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
     await ctx.plugin(robotCompaction(input.compactionInstruction, input.onCompacted), compactionConfig(input.contextBudget, input.modelWindow))
     await ctx.plugin(AgentRegistry)
+    if (input.onStream !== undefined) {
+      const onStream = input.onStream
+      ;(ctx as unknown as { on(event: string, listener: (payload: { frame: never }) => void): void }).on('agent/assistant-stream', ({ frame }) => onStream(frame))
+    }
     await ctx.plugin(AgentLoop, { agents: [] })
 
     const id = SessionId(input.sessionId)

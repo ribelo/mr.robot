@@ -1,5 +1,7 @@
 import { Fragment, type ReactNode , useState } from 'react'
-import type { ChatItem, ProposalView } from '@mr-robot/protocol'
+import type { ChatItem, ProposalView, WorkDetails } from '@mr-robot/protocol'
+import { Markdown } from './Markdown.tsx'
+import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
 import { Avatar } from './Avatar.tsx'
 
@@ -12,12 +14,16 @@ export interface ChatViewProps {
   readonly canAnswer: boolean
   readonly onAnswer?: (proposal: ProposalView, approve: boolean) => void
   readonly now?: number
+  /** How much of the Robot's work to show (pl-6eir); Compact by default. */
+  readonly workDetails?: WorkDetails
+  /** The reply and thinking streaming in now (pl-jzr7). */
+  readonly stream?: { readonly text: string; readonly thinking: string }
 }
 
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -45,9 +51,13 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
         </div>,
       )
     }
-    rows.push(<Item key={item.id} item={item} meId={meId} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />)
+    rows.push(<Item key={item.id} item={item} meId={meId} canAnswer={canAnswer} level={workDetails} {...(onAnswer === undefined ? {} : { onAnswer })} />)
   }
-  if (working) {
+  const showThinking = workDetails === 'detailed' || workDetails === 'verbose'
+  if (working && stream !== undefined && showThinking && stream.thinking !== '') rows.push(<ThinkingRow key="live-thinking" text={stream.thinking} level={workDetails} running={stream.text === ''} />)
+  if (working && stream !== undefined && stream.text !== '') {
+    rows.push(<div key="live" className="row"><div className="bubble bubble-robot"><Markdown text={stream.text} streaming /></div></div>)
+  } else if (working) {
     rows.push(activity === undefined
       ? <div key="working" className="bubble bubble-robot typing" aria-label="working"><span /><span /><span /></div>
       : <div key="working" className="activity-now" aria-label="working"><span className="spinner" /> Using {toolLabel(activity)}…</div>)
@@ -55,7 +65,7 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
   return <div className="chat">{rows}</div>
 }
 
-function Item({ item, meId, canAnswer, onAnswer }: { item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
+function Item({ item, meId, canAnswer, onAnswer, level }: { item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; level: WorkDetails }) {
   switch (item.kind) {
     case 'message': {
       const own = item.sender.kind === 'member' && item.sender.memberId === meId
@@ -80,7 +90,7 @@ function Item({ item, meId, canAnswer, onAnswer }: { item: ChatItem; meId: strin
       )
     }
     case 'reply':
-      return <div className="row"><div className="bubble bubble-robot"><RichText text={item.text} /></div></div>
+      return <div className="row"><div className="bubble bubble-robot"><Markdown text={item.text} /></div></div>
     case 'routine':
       return (
         <div className="chat-separator routine-line">
@@ -91,7 +101,9 @@ function Item({ item, meId, canAnswer, onAnswer }: { item: ChatItem; meId: strin
     case 'notice':
       return <div className="chat-separator notice">{item.text}</div>
     case 'activity':
-      return <ActivityLine tools={item.tools} />
+      return level === 'compact' || item.calls === undefined ? (item.tools.length === 0 ? null : <ActivityLine tools={item.tools} />) : <ToolCards calls={item.calls} level={level} />
+    case 'thinking':
+      return level === 'detailed' || level === 'verbose' ? <ThinkingRow text={item.text} level={level} /> : null
     case 'question':
       // The ask itself is answered where the owner types (rb-dat4); the stream keeps one line of it.
       return <div className="chat-separator ask-line" data-status={item.proposal.status}>{`${askTitle(item.proposal)} · ${item.proposal.status === 'open' ? (canAnswer ? 'answer below' : 'waiting for the owner') : statusText(item.proposal.status)}`}</div>

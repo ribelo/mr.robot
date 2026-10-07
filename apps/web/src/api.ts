@@ -42,14 +42,14 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
 
 export const api = {
   me: () => request<Me>('/api/me'),
-  updateMe: (patch: Partial<Pick<Me, 'name' | 'timeZone' | 'quietHours'>>) => request('/api/me', { method: 'PATCH', body: patch }),
+  updateMe: (patch: Partial<Pick<Me, 'name' | 'timeZone' | 'quietHours' | 'workDetails'>>) => request('/api/me', { method: 'PATCH', body: patch }),
   memberFile: (name: string) => request<{ name: string; content: string }>(`/api/me/files/${encodeURIComponent(name)}`),
   writeMemberFile: (name: string, content: string) => request(`/api/me/files/${encodeURIComponent(name)}`, { method: 'PUT', body: { content } }),
   robots: () => request<RobotSummary[]>('/api/robots'),
   createRobot: (input: { brief?: string; model?: ModelChoice }) => request<{ id: string }>('/api/robots', { body: input }),
   retry: (id: string) => request<{ retried: boolean }>(`/api/robots/${id}/retry`, { body: {} }),
   prompt: (id: string) => request<{ sections: Array<{ name: string; text: string }>; tools: string[]; skills: string[] }>(`/api/robots/${id}/prompt`),
-  conversation: (id: string) => request<Conversation>(`/api/robots/${id}/conversation`),
+  conversation: (id: string, details = false) => request<Conversation>(`/api/robots/${id}/conversation${details ? '?details=1' : ''}`),
   trajectory: (id: string) => request<Trajectory>(`/api/robots/${id}/trajectory`),
   send: (id: string, message: SendMessage) => request(`/api/robots/${id}/messages`, { body: message }),
   panel: (id: string) => request<RobotPanel>(`/api/robots/${id}/panel`),

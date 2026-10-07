@@ -3,7 +3,7 @@
  * log the Trajectory shows (robot-frf5). Nothing here is stored separately except notices.
  */
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { Attachment, ChatItem, ProposalView, Sender } from '@mr-robot/protocol'
+import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender } from '@mr-robot/protocol'
 import type { NoticeRow } from './store.ts'
 
 interface ContentBlock { readonly type: string; readonly text?: string }
@@ -23,6 +23,8 @@ const ROUTINE_TOOLS: Record<string, 'created' | 'updated' | 'deleted'> = {
 const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'request_takeover', 'setup_complete'])
 
 export interface ProjectionInput {
+  /** Tool arguments, results and thinking for Standard, Detailed and Verbose (pl-6eir). */
+  readonly details?: boolean
   readonly events: readonly SessionEvent[]
   readonly notices: readonly NoticeRow[]
   readonly proposal: (id: string) => ProposalView | undefined
@@ -84,6 +86,10 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
       }
       case 'assistant/message': {
         const message = data['message'] as MessageLike | undefined
+        if (input.details === true && message !== undefined) {
+          const thinking = message.content.filter((block) => block.type === 'reasoning').map((block) => block.text ?? '').join('\n').trim()
+          if (thinking.length > 0) items.push({ kind: 'thinking', id: 'thinking-' + message.id, seq: event.seq, at: event.time, text: clip(thinking, 20_000) })
+        }
         const text = (message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim()
         if (message !== undefined && text.length > 0) items.push({ kind: 'reply', id: message.id, seq: event.seq, at: event.time, text })
         break
@@ -115,6 +121,23 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
       }
       case 'tool/result': {
         const message = data['message'] as (MessageLike & { toolCallId?: string; isError?: boolean }) | undefined
+        if (input.details === true && message !== undefined) {
+          const call = calls.get(String(message.toolCallId))
+          if (call !== undefined && !HIDDEN_TOOLS.has(call.name)) {
+            const text = message.content.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('')
+            const view: ToolCallView = {
+              id: String(message.toolCallId),
+              name: call.name,
+              args: clip(JSON.stringify(call.args, null, 2), 4_000),
+              result: clip(text || String((data['error'] as { message?: string } | undefined)?.message ?? ''), 6_000),
+              error: message.isError === true || data['error'] !== undefined,
+              inner: (innerCalls.get(String(message.toolCallId)) ?? []).map((inner) => ({ name: inner.name, args: clip(JSON.stringify(inner.args), 1_000) })),
+            }
+            const previous = items.at(-1)
+            if (previous?.kind === 'activity') items[items.length - 1] = { ...previous, calls: [...(previous.calls ?? []), view] }
+            else items.push({ kind: 'activity', id: 'activity-' + message.id, seq: event.seq, at: event.time, tools: [], calls: [view] })
+          }
+        }
         if (message === undefined || message.isError === true || data['error'] !== undefined) break
         const call = calls.get(String(message.toolCallId))
         if (call === undefined) break
@@ -184,6 +207,10 @@ function parseArgs(value: unknown): Record<string, unknown> {
     try { return JSON.parse(value) as Record<string, unknown> } catch { return {} }
   }
   return (value as Record<string, unknown> | undefined) ?? {}
+}
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text
 }
 
 function parseResult(message: MessageLike): Record<string, unknown> {

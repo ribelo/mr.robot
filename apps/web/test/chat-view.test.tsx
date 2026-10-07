@@ -29,7 +29,8 @@ describe('ChatView (robot-q4b2)', () => {
     expect(screen.getByTestId('robot-messages-header').textContent).toBe('Messages from  Account Manager and  Chief')
     expect(container.querySelector('.bubble-own')?.textContent).toBe('Send it. Run this every week.')
     expect(screen.getByLabelText('reacted 👍')).toBeTruthy()
-    expect(container.querySelector('b')?.textContent).toBe('Salesforce')
+    // Robot replies are Markdown (pl-6bop).
+    expect(container.querySelector('.bubble-robot strong')?.textContent).toBe('Salesforce')
     expect(screen.getByText('Created routine')).toBeTruthy()
     expect(screen.getByText('Overnight outbound')).toBeTruthy()
     expect(screen.queryByText('Approve')).toBeNull()
@@ -63,5 +64,26 @@ describe('ChatView (robot-q4b2)', () => {
     const { container } = render(<ChatView items={[other]} meId="m-1" working={false} canAnswer={false} now={at} />)
     expect(container.querySelector('.bubble-own')).toBeNull()
     expect(screen.getByText('Ben')).toBeTruthy()
+  })
+
+  it('shows one activity line at Compact and DSH tool cards with thinking at Detailed (pl-s0hp, pl-etps)', () => {
+    const worked: ChatItem[] = [
+      { kind: 'thinking', id: 'th', seq: 1, at, text: 'I should read the notes first.' },
+      { kind: 'activity', id: 'ac', seq: 2, at, tools: ['read'], calls: [{ id: 'c1', name: 'read', args: '{"file_path": "notes.md"}', result: 'hello', error: false, inner: [] }] },
+      { kind: 'reply', id: 'r', seq: 3, at, text: '| a | b |\n|---|---|\n| 1 | 2 |\n\n[site](https://example.com)' },
+    ]
+    const compact = render(<ChatView items={worked} meId="m-1" working={false} canAnswer={false} now={at} workDetails="compact" />)
+    expect(compact.container.textContent).toContain('Used read')
+    expect(compact.container.textContent).not.toContain('Thought')
+    expect(compact.container.querySelector('.bubble-robot table')).not.toBeNull()
+    expect(compact.container.querySelector('.bubble-robot a')?.getAttribute('href')).toBe('https://example.com')
+    cleanup()
+    const detailed = render(<ChatView items={worked} meId="m-1" working={false} canAnswer={false} now={at} workDetails="detailed" />)
+    expect(detailed.container.textContent).toContain('read notes.md')
+    expect(detailed.container.textContent).toContain('Thought')
+    expect(detailed.container.textContent).not.toContain('Used read')
+    cleanup()
+    const live = render(<ChatView items={[]} meId="m-1" working={true} canAnswer={false} now={at} stream={{ text: 'Half of the ans', thinking: '' }} />)
+    expect(live.container.textContent).toContain('Half of the ans')
   })
 })

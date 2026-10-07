@@ -62,7 +62,7 @@ export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ me
   .on('GET', '/api/me', (c) => call(async (): Promise<Me> => {
     const profile = await c.env.MEMBER.getByName(c.member.id).profile()
-    return { ...c.member, home: c.env.HOME_NAME, timeZone: profile.timeZone, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY }
+    return { ...c.member, home: c.env.HOME_NAME, timeZone: profile.timeZone, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact' }
   }))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
     const patch = yield* decodeBody(c.request, MemberPreferences)
@@ -255,7 +255,7 @@ export const api = new Router<ApiContext>()
     return yield* call(() => home(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
   }))
   .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(
-    Effect.andThen(call(() => robot(c, id).conversationView())),
+    Effect.andThen(call(() => robot(c, id).conversationView(new URL(c.request.url).searchParams.get('details') === '1'))),
     Effect.tap(() => call(() => c.env.MEMBER.getByName(c.member.id).markSeen(id, Date.now()))),
   ))
   .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))

@@ -1,3 +1,4 @@
+import { WORK_DETAILS } from './WorkDetails.tsx'
 import { Hosts } from './Hosts.tsx'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { Me, ProvidersView, LoginView } from '@mr-robot/protocol'
@@ -15,6 +16,7 @@ export function Profile({ me, onChanged }: { me: Me; onChanged: () => void }) {
   return (
     <div className="form">
       <Preferences me={me} onChanged={onChanged} />
+      <WorkDetailsSetting me={me} onChanged={onChanged} />
       <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
       <Providers />
       <Secrets />
@@ -388,5 +390,23 @@ function LoginForm({ draft, onChange, onSave, onCancel }: { draft: LoginDraft; o
         <button type="button" className="button button-primary" disabled={draft.name === '' || (!draft.existing && draft.password === '')} onClick={() => void onSave(draft)}>Save</button>
       </div>
     </div>
+  )
+}
+
+/** Work details (pl-6eir): how much of a Robot's work the chat shows; per person. */
+function WorkDetailsSetting({ me, onChanged }: { me: Me; onChanged: () => void }) {
+  const [value, setValue] = useState(me.workDetails ?? 'compact')
+  return (
+    <>
+      <h2>Work details</h2>
+      <div className="muted">How much of a Robot's work you see in a conversation. The trajectory stays available as the full debug view.</div>
+      <div className="segmented" role="radiogroup" aria-label="Work details">
+        {WORK_DETAILS.map((option) => (
+          <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? 'segment active' : 'segment'}
+            onClick={() => { setValue(option.id); void api.updateMe({ workDetails: option.id }).then(onChanged) }}>{option.label}</button>
+        ))}
+      </div>
+      <div className="muted">{WORK_DETAILS.find((option) => option.id === value)?.note}</div>
+    </>
   )
 }

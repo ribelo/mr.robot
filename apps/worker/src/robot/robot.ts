@@ -567,6 +567,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       compactionInstruction: config.compactionInstruction,
       // A compacted context lost the memory baseline; the next step brings it back fresh (pl-552r).
       onCompacted: () => this.store.delete('memory-baseline'),
+      onStream: (frame) => this.streamed(frame),
       prompt,
       mounts: this.mounts(config),
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
@@ -1313,6 +1314,42 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.store.get<TakeoverState>('takeover') ?? null
   }
 
+  /** The model's output so far in this attempt, pushed to viewers as it grows (pl-jzr7); the stored log is unchanged. */
+  private live = { text: '', thinking: '', sentAt: 0, timer: undefined as ReturnType<typeof setTimeout> | undefined }
+
+  private streamed(frame: { type: 'start' | 'chunk' | 'end'; chunk?: { type: string; text?: string } }): void {
+    const live = this.live
+    if (frame.type === 'start') {
+      live.text = ''
+      live.thinking = ''
+      live.sentAt = 0
+      return
+    }
+    if (frame.type === 'end') {
+      // Text still waiting for the throttle goes out first.
+      if (live.timer !== undefined) {
+        clearTimeout(live.timer)
+        this.broadcast({ type: 'stream', text: live.text, thinking: live.thinking.slice(-8_000) })
+      }
+      live.timer = undefined
+      live.text = ''
+      live.thinking = ''
+      this.broadcast({ type: 'stream', text: '', thinking: '', done: true })
+      return
+    }
+    if (frame.chunk?.type === 'text-delta') live.text += frame.chunk.text ?? ''
+    else if (frame.chunk?.type === 'reasoning-delta') live.thinking += frame.chunk.text ?? ''
+    else return
+    // At most about eight updates a second; each carries the whole text so far.
+    const send = () => {
+      live.timer = undefined
+      live.sentAt = Date.now()
+      this.broadcast({ type: 'stream', text: live.text, thinking: live.thinking.slice(-8_000) })
+    }
+    if (Date.now() - live.sentAt >= 120) send()
+    else live.timer ??= setTimeout(send, 120)
+  }
+
   protected broadcast(event: Record<string, unknown> = { type: 'changed' }): void {
     const config = this.store.config()
     if (config === undefined) return
@@ -1415,8 +1452,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- views
 
-  conversationView(): Promise<Conversation> {
-    return this.program(Views.conversationView)
+  conversationView(details = false): Promise<Conversation> {
+    return this.program(Views.conversationView(details))
   }
 
 
@@ -1440,7 +1477,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   conversation(): Promise<Conversation> {
-    return this.program(Views.conversation)
+    return this.program(Views.conversation())
   }
 
 

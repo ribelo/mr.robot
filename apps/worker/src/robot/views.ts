@@ -53,11 +53,12 @@ function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): st
 }
 
 /** The chat (robot-q4b2): the session log projected, with open proposals always shown as questions. */
-export const conversation = Effect.gen(function* () {
+export const conversation = (details = false) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = yield* config
   const events = readStoredEvents(store.sql, current.liveSessionId)
   const items = projectChat({
+    details,
     events,
     notices: store.notices(current.liveSessionId),
     proposal: (id) => {
@@ -89,15 +90,17 @@ function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
     case 'message': return { ...item, text: mask(item.text) }
     case 'reply': return { ...item, text: mask(item.text) }
     case 'notice': return { ...item, text: mask(item.text) }
+    case 'thinking': return { ...item, text: mask(item.text) }
+    case 'activity': return item.calls === undefined ? item : { ...item, calls: item.calls.map((call) => ({ ...call, args: mask(call.args), result: mask(call.result), inner: call.inner.map((inner) => ({ ...inner, args: mask(inner.args) })) })) }
     default: return item
   }
 }
 
 /** The chat as a viewer gets it, secrets masked (robot-4zi6). */
-export const conversationView = Effect.gen(function* () {
+export const conversationView = (details = false) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const mask = yield* platform.masker()
-  const view = yield* conversation
+  const view = yield* conversation(details)
   return { ...view, items: view.items.map((item) => maskItem(item, mask)) } as Conversation
 })
 
@@ -212,7 +215,7 @@ export const report = Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
-  const items = (yield* conversation).items
+  const items = (yield* conversation()).items
   const last = store.get('failed-wakeup') !== undefined
     ? { text: 'Could not finish its last task. Open to see why.', at: items.at(-1)?.at ?? Date.now() }
     : lastLine(items)

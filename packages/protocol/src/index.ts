@@ -25,7 +25,12 @@ export interface Me extends MemberView {
   readonly timeZone: string
   readonly quietHours: QuietHours | null
   readonly vapidPublicKey: string
+  /** How much of a Robot's work the chat shows (pl-6eir). */
+  readonly workDetails: WorkDetails
 }
+
+export const WorkDetails = Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])
+export type WorkDetails = typeof WorkDetails.Type
 
 export const QuietHours = Schema.Struct({
   /** Local start, "HH:MM". */
@@ -39,6 +44,7 @@ export const MemberPreferences = Schema.Struct({
   name: Schema.optional(Schema.String),
   timeZone: Schema.optional(Schema.String),
   quietHours: Schema.optional(Schema.NullOr(QuietHours)),
+  workDetails: Schema.optional(Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])),
 })
 
 // ---------------------------------------------------------------- Robots
@@ -293,8 +299,21 @@ export type ChatItem =
   | { readonly kind: 'question'; readonly id: string; readonly seq: number; readonly at: number; readonly proposal: ProposalView }
   | { readonly kind: 'notice'; readonly id: string; readonly seq: number; readonly at: number; readonly text: string }
   /** Tools the Robot used in one step, shown collapsed (robot-gr94). */
-  | { readonly kind: 'activity'; readonly id: string; readonly seq: number; readonly at: number; readonly tools: readonly string[] }
+  | { readonly kind: 'activity'; readonly id: string; readonly seq: number; readonly at: number; readonly tools: readonly string[]; readonly calls?: readonly ToolCallView[] }
+  /** The model's thinking, shown at Detailed and Verbose (pl-etps). */
+  | { readonly kind: 'thinking'; readonly id: string; readonly seq: number; readonly at: number; readonly text: string }
   | { readonly kind: 'working'; readonly id: string; readonly seq: number; readonly at: number }
+
+/** One tool call as Standard, Detailed and Verbose show it (pl-6eir); text fields are truncated. */
+export interface ToolCallView {
+  readonly id: string
+  readonly name: string
+  readonly args: string
+  readonly result: string
+  readonly error: boolean
+  /** Code mode: the tools the program called. */
+  readonly inner: ReadonlyArray<{ readonly name: string; readonly args: string }>
+}
 
 export interface Conversation {
   readonly robotId: string

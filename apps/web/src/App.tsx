@@ -100,26 +100,36 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
   const [panel, setPanel] = useState<RobotPanel>()
   const [failure, setFailure] = useState<string>()
   const [replyingInstead, setReplyingInstead] = useState(false)
+  const [stream, setStream] = useState<{ text: string; thinking: string }>()
   const id = route.id
+  const details = me.workDetails !== 'compact'
 
   const refresh = useCallback(async () => {
     try {
-      const [nextConversation, nextPanel] = await Promise.all([api.conversation(id), api.panel(id)])
+      const [nextConversation, nextPanel] = await Promise.all([api.conversation(id, details), api.panel(id)])
       setConversation(nextConversation)
       setPanel(nextPanel)
       setFailure(undefined)
     } catch (cause) {
       setFailure(cause instanceof ApiError ? cause.message : 'cannot load this robot')
     }
-  }, [id])
+  }, [id, details])
 
   useEffect(() => { void refresh() }, [refresh])
-  useLive(id, () => { void refresh(); onChanged() })
+  useLive(id, (_working, message) => {
+    // Streaming text updates the live bubble only; the stored message arrives with the next change.
+    if (message.type === 'stream') {
+      setStream(message.done === true ? undefined : { text: message.text ?? '', thinking: message.thinking ?? '' })
+      return
+    }
+    void refresh()
+    onChanged()
+  })
 
   useEffect(() => {
     const end = document.querySelector('.chat-scroll')
     end?.scrollTo({ top: end.scrollHeight })
-  }, [conversation?.items.length, conversation?.working])
+  }, [conversation?.items.length, conversation?.working, stream?.text.length])
 
   if (failure !== undefined) return <div className="empty-main">{failure}</div>
   if (conversation === undefined || panel === undefined) return <div className="empty-main">Loading…</div>
@@ -162,7 +172,7 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
       <section className="conversation-main">
         {header}
         <div className="chat-scroll">
-          <ChatView items={conversation.items} meId={me.id} working={conversation.working} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
+          <ChatView items={conversation.items} meId={me.id} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === undefined ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void api.retry(id).then(refresh)}>Try again</button>
