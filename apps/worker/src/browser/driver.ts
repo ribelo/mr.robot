@@ -122,10 +122,15 @@ class RenderingPage implements BrowserPage {
   }
 
   async observe(): Promise<Observation> {
-    return (await this.page.evaluate(OBSERVE_SCRIPT)) as Observation
+    return bounded(this.page.evaluate(OBSERVE_SCRIPT) as Promise<Observation>, 20_000, 'the page did not answer within 20 seconds; it may be stuck, try browser_wait or open it again')
   }
 
   async act(action: BrowserAction): Promise<void> {
+    // A hung page must fail the call, not stall the Robot's Turn (seen on saucedemo.com, 2026-10-07).
+    return bounded(this.actNow(action), 30_000, `the page did not respond to the ${action.action} within 30 seconds; observe it again`)
+  }
+
+  private async actNow(action: BrowserAction): Promise<void> {
     if (action.action === 'press') {
       await this.page.keyboard.press(action.key as never)
     } else if (action.action === 'scroll') {
@@ -224,4 +229,13 @@ class RenderingPage implements BrowserPage {
       new Promise((resolve) => setTimeout(resolve, 4000)),
     ])
   }
+}
+
+/** Reject when the work takes too long; the work itself is abandoned. */
+function bounded<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms) }),
+  ]).finally(() => clearTimeout(timer))
 }
