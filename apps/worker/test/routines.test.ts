@@ -25,7 +25,7 @@ async function activeRobot(tools: string[]): Promise<string> {
 
 async function weeklyRoutine(id: string): Promise<void> {
   scripts.set(id, [
-    { calls: [{ name: 'routine_create', args: { name: 'Overnight outbound', prompt: 'Work the outreach queue.', kind: 'weekly', time: '02:00', weekdays: [7] } }] },
+    { calls: [{ name: 'schedule_create', args: { title: 'Overnight outbound', prompt: 'Work the outreach queue.', weekly: { time: '02:00:00', time_zone: 'Europe/Warsaw', weekdays: [7] } } }] },
     { calls: [{ name: 'react', args: { emoji: '👍' } }] },
     { text: '' },
   ])
@@ -40,7 +40,7 @@ describe('Routines on the Durable Object alarm', () => {
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.slice(-3)).toEqual([
       expect.objectContaining({ kind: 'message', text: 'Run this every week.', reaction: '👍' }),
-      expect.objectContaining({ kind: 'activity', tools: ['routine_create'] }),
+      expect.objectContaining({ kind: 'activity', tools: ['schedule_create'] }),
       expect.objectContaining({ kind: 'routine', action: 'created', name: 'Overnight outbound' }),
     ])
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
@@ -74,7 +74,7 @@ describe('Routines on the Durable Object alarm', () => {
   it('three missed occurrences after downtime produce one run (robot-v1gb)', async () => {
     const id = await activeRobot(['routines'])
     scripts.set(id, [
-      { calls: [{ name: 'routine_create', args: { name: 'Pulse', prompt: 'Check prices.', kind: 'interval', everyMinutes: 5 } }] },
+      { calls: [{ name: 'schedule_create', args: { title: 'Pulse', prompt: 'Check prices.', every_seconds: 300 } }] },
       { text: 'Created.' },
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'check every 5 minutes' } })

@@ -6,12 +6,13 @@
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
-import type { NotificationKind, ProposalView, RobotSettings, RoutineSchedule, RoutineView, SettingsPatch } from '@mr-robot/protocol'
+import type { NotificationKind, ProposalView, RobotSettings, RoutineView, SettingsPatch } from '@mr-robot/protocol'
 import type { MemberFileName } from '../member/member.ts'
 import { currentMonth } from '../home/home.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
-import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.ts'
+import { cronOf, describeSchedule } from './schedule.ts'
+import { displaySchedule, resumed } from '../agent/schedule.ts'
 import type { ProposalRow, RobotStore, RoutineRow, WakeupKind } from './store.ts'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
@@ -128,11 +129,13 @@ export const remove = Effect.gen(function* () {
 // ------------------------------------------------------------------ Routines (robot-gbbt, robot-qyd5, robot-qhll)
 
 export function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
+  const schedule = displaySchedule(routine.record)
+  const timeZone = 'timeZone' in routine.record ? routine.record.timeZone : routine.timeZone
   return {
-    id: routine.id, name: routine.name, prompt: routine.prompt, schedule: routine.schedule, timeZone: routine.timeZone,
+    id: routine.id, name: routine.record.title, prompt: routine.record.prompt, schedule, timeZone,
     nextRun: routine.nextRun, lastRun: routine.lastRun, paused: routine.paused, robotId,
-    summary: describeSchedule(routine.schedule, routine.timeZone),
-    cron: cronOf(routine.schedule, routine.timeZone),
+    summary: describeSchedule(schedule, timeZone),
+    cron: cronOf(schedule, timeZone),
     runs,
   }
 }
@@ -142,76 +145,12 @@ const view = (routine: RoutineRow) => Effect.gen(function* () {
   return routineView((yield* config).id, routine, store.routineRuns(routine.id))
 })
 
-const routinesChanged = Effect.gen(function* () {
-  const platform = yield* RobotPlatform
-  yield* platform.rearm()
-})
-
-const schedule = (input: RoutineSchedule, timeZone: string, now: number) => Effect.try({
-  try: () => validateSchedule(input, timeZone, now),
-  catch: (error) => invalid(error instanceof Error ? error.message : String(error)),
-})
-
-export const createRoutine = (input: { name: string; prompt: string; schedule: RoutineSchedule }) => Effect.gen(function* () {
-  const store = yield* RobotState
-  const current = yield* config
-  const now = Date.now()
-  const valid = yield* schedule(input.schedule, current.timeZone, now)
-  if (input.name.trim() === '' || input.prompt.trim() === '') return yield* invalid('a Routine needs a name and a prompt')
-  const routine: RoutineRow = {
-    id: `rt-${crypto.randomUUID().slice(0, 8)}`,
-    name: input.name.trim(),
-    prompt: input.prompt.trim(),
-    schedule: valid,
-    timeZone: current.timeZone,
-    nextRun: nextRun(valid, current.timeZone, now, now),
-    lastRun: null,
-    paused: false,
-    createdAt: now,
-  }
-  store.saveRoutine(routine)
-  yield* routinesChanged
-  return yield* view(routine)
-})
-
-export const updateRoutine = (id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }) => Effect.gen(function* () {
-  const store = yield* RobotState
-  const existing = store.routine(id)
-  if (existing === undefined) return yield* notFound(`no Routine ${id}`)
-  const now = Date.now()
-  const valid = input.schedule === undefined ? existing.schedule : yield* schedule(input.schedule, existing.timeZone, now)
-  const routine: RoutineRow = {
-    ...existing,
-    ...(input.name === undefined ? {} : { name: input.name.trim() }),
-    ...(input.prompt === undefined ? {} : { prompt: input.prompt.trim() }),
-    schedule: valid,
-    nextRun: input.schedule === undefined ? existing.nextRun : nextRun(valid, existing.timeZone, now, now),
-    ...(input.schedule === undefined ? {} : { createdAt: now }),
-  }
-  store.saveRoutine(routine)
-  yield* routinesChanged
-  return yield* view(routine)
-})
-
-export const deleteRoutine = (id: string) => Effect.gen(function* () {
-  const store = yield* RobotState
-  const existing = store.routine(id)
-  if (existing === undefined) return yield* notFound(`no Routine ${id}`)
-  const shown = yield* view(existing)
-  store.deleteRoutine(id)
-  yield* routinesChanged
-  return shown
-})
-
-export const listRoutines = Effect.gen(function* () {
-  const store = yield* RobotState
-  return yield* Effect.forEach(store.routines(), view)
-})
-
 /** The owner deletes a Routine from the panel (robot-qyd5). */
 export const removeRoutine = (id: string) => Effect.gen(function* () {
+  const store = yield* RobotState
   const platform = yield* RobotPlatform
-  yield* deleteRoutine(id)
+  if (!store.deleteRoutine(id)) return yield* notFound(`no Routine ${id}`)
+  yield* platform.rearm()
   yield* platform.changed()
 })
 
@@ -221,7 +160,9 @@ export const pauseRoutine = (id: string, paused: boolean) => Effect.gen(function
   const platform = yield* RobotPlatform
   const routine = store.routine(id)
   if (routine === undefined) return yield* notFound('no such Routine')
-  const saved = { ...routine, paused, nextRun: paused ? null : nextRun(routine.schedule, routine.timeZone, Date.now(), routine.createdAt) }
+  // Resuming skips what a recurring Routine missed while paused (DSH's recurrence arithmetic).
+  const record = paused ? routine.record : resumed(routine.record, Date.now())
+  const saved = { ...routine, paused, record: record ?? routine.record, nextRun: paused || record === null ? null : Date.parse(record.scheduledAt) }
   store.saveRoutine(saved)
   yield* platform.rearm()
   yield* platform.changed()

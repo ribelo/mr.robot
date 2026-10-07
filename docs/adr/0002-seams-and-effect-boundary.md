@@ -17,11 +17,7 @@ Mr. Robot plugs its own Cordis adapters into these DSH seams:
 | ptc-runtime | Worker Loader isolate (ADR 0001) | apps/worker/src/agent/ptc.ts |
 | web, skill, compaction, token meter, llm | DSH packages with Mr. Robot providers | apps/worker/src/agent |
 
-**schedule is not used.** DSH's schedule service needs storage-domain, session-controller and
-host timers, and schedules belong to a session the host controller wakes. A Robot has one endless
-Conversation and is woken by its own Durable Object alarm, which also carries outbox retries and
-Turn recovery. Routines are therefore the Robot's own table and alarm (apps/worker/src/robot/schedule.ts),
-exposed to the model as routine_* tools. Revisit if DSH ships a schedule seam without the host services.
+**schedule is ported onto Durable Object alarms** (2026-10-07; the earlier decision not to use it was reversed at the owner's request). The Robot's composition provides `ctx.schedule` (apps/worker/src/agent/schedule.ts) and attaches DSH's own schedule_create / schedule_list / schedule_update / schedule_delete tools, so a Robot schedules exactly as the desktop harness does. Records, recurrence and reminder framing are DSH's; what DSH keeps in a Host storage domain and drives with timers is the Robot's routine table and its alarm. DSH's update rule is restated locally because the published package does not export it.
 
 **Browser actions are Mr. Robot tools.** browser-use in DSH 0.2.0-rc.2 is only an exclusive provider
 registration; the operations themselves live in experimental MCP packages for desktop Chrome. The

@@ -77,7 +77,8 @@ export class Robot extends ProductionRobot {
   /** Pretend the Robot was down: every Routine's next run moves into the past by `ms`. */
   async backdateRoutinesForTest(ms: number): Promise<void> {
     for (const routine of this.store.routines()) {
-      if (routine.nextRun !== null) this.store.saveRoutine({ ...routine, nextRun: Date.now() - ms, createdAt: routine.createdAt - ms })
+      // Back in time as if the DO had slept: the stored DSH record's target moves too.
+      if (routine.nextRun !== null) this.store.saveRoutine({ ...routine, nextRun: Date.now() - ms, createdAt: routine.createdAt - ms, record: { ...routine.record, scheduledAt: new Date(Date.now() - ms).toISOString() } })
     }
     await this.ctx.storage.setAlarm(Date.now() - ms)
   }

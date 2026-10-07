@@ -45,7 +45,7 @@ describe('the admin view', () => {
     const one = await robotOf(ANNA, ['routines'])
     const two = await robotOf(ANNA, ['routines'])
     for (const [id, name, time] of [[one, 'Late', '23:00'], [two, 'Early', '06:00']] as const) {
-      scripts.set(id, [{ calls: [{ name: 'routine_create', args: { name, prompt: 'go', kind: 'daily', time } }] }, { text: 'ok' }])
+      scripts.set(id, [{ calls: [{ name: 'schedule_create', args: { title: name, prompt: 'go', daily: { time: `${time}:00`, time_zone: 'Europe/Warsaw' } } }] }, { text: 'ok' }])
       await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'make it' } })
       await settle(id)
     }

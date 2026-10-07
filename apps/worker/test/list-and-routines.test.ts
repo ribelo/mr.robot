@@ -20,8 +20,8 @@ async function robotWithRoutines(): Promise<string> {
   await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['routines'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   scripts.set(body.id, [
-    { calls: [{ name: 'routine_create', args: { name: 'Taxes', prompt: 'Check the tax e-mails.', kind: 'weekly', time: '10:59', weekdays: [1, 2, 3, 4, 5] } }] },
-    { calls: [{ name: 'routine_create', args: { name: 'Invoices', prompt: 'Send invoices.', kind: 'daily', time: '09:00' } }] },
+    { calls: [{ name: 'schedule_create', args: { title: 'Taxes', prompt: 'Check the tax e-mails.', weekly: { time: '10:59:00', time_zone: 'Europe/Warsaw', weekdays: [1, 2, 3, 4, 5] } } }] },
+    { calls: [{ name: 'schedule_create', args: { title: 'Invoices', prompt: 'Send invoices.', daily: { time: '09:00:00', time_zone: 'Europe/Warsaw' } } }] },
     { text: 'Created.' },
   ])
   await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'set up my routines' } })

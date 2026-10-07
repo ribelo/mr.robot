@@ -4,6 +4,7 @@
  * session log lives beside it (agent/session-log.ts).
  */
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
+import { recordFromLegacy, type ScheduleRecord } from '../agent/schedule.ts'
 import type {
   GrantKind,
   GrantSet,
@@ -64,6 +65,9 @@ export interface RoutineRow {
   readonly lastRun: number | null
   readonly createdAt: number
   readonly paused: boolean
+  /** The DSH schedule record: title, prompt, rule and next target. */
+  readonly record: ScheduleRecord
+  readonly sessionId: string
 }
 
 export interface ProposalRow extends ProposalView {
@@ -81,9 +85,11 @@ export interface NoticeRow {
   readonly sessionId: string
 }
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 const MIGRATIONS: Record<number, readonly string[]> = {
+  // The DSH schedule record each Routine now is (robot-c8hq) and the session that made it.
+  3: ['ALTER TABLE routine ADD COLUMN record TEXT', 'ALTER TABLE routine ADD COLUMN session_id TEXT'],
   2: [
     'ALTER TABLE routine ADD COLUMN paused INTEGER NOT NULL DEFAULT 0',
     'CREATE TABLE routine_run (wakeup_id INTEGER PRIMARY KEY, routine_id TEXT NOT NULL, at INTEGER NOT NULL, outcome TEXT NOT NULL, summary TEXT NOT NULL)',
@@ -261,11 +267,12 @@ export class RobotStore {
 
   saveRoutine(routine: RoutineRow): void {
     this.sql.exec(
-      `INSERT INTO routine (id, name, prompt, schedule, time_zone, next_run, last_run, created_at, paused) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO routine (id, name, prompt, schedule, time_zone, next_run, last_run, created_at, paused, record, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET name = excluded.name, prompt = excluded.prompt, schedule = excluded.schedule,
-         time_zone = excluded.time_zone, next_run = excluded.next_run, last_run = excluded.last_run, paused = excluded.paused`,
+         time_zone = excluded.time_zone, next_run = excluded.next_run, last_run = excluded.last_run, paused = excluded.paused,
+         record = excluded.record, session_id = excluded.session_id`,
       routine.id, routine.name, routine.prompt, JSON.stringify(routine.schedule), routine.timeZone,
-      routine.nextRun, routine.lastRun, routine.createdAt, routine.paused ? 1 : 0,
+      routine.nextRun, routine.lastRun, routine.createdAt, routine.paused ? 1 : 0, JSON.stringify(routine.record), routine.sessionId,
     )
   }
 
@@ -450,6 +457,8 @@ type RoutineSql = {
   last_run: number | null
   created_at: number
   paused: number
+  record: string | null
+  session_id: string | null
 }
 
 function routineFromSql(row: RoutineSql): RoutineRow {
@@ -463,6 +472,9 @@ function routineFromSql(row: RoutineSql): RoutineRow {
     lastRun: row.last_run,
     createdAt: row.created_at,
     paused: row.paused === 1,
+    // A Routine stored before the DSH schedule port becomes the record it describes.
+    record: row.record === null ? recordFromLegacy(row.id, row.name, row.prompt, JSON.parse(row.schedule) as RoutineSchedule, row.time_zone, (row.next_run ?? Date.now()) - 1) : (JSON.parse(row.record) as ScheduleRecord),
+    sessionId: row.session_id ?? '',
   }
 }
 

@@ -14,6 +14,9 @@ const HIDDEN_TOOLS = new Set(['react'])
 
 const ROUTINE_TOOLS: Record<string, 'created' | 'updated' | 'deleted'> = {
   routine_create: 'created',
+  schedule_create: 'created',
+  schedule_update: 'updated',
+  schedule_delete: 'deleted',
   routine_update: 'updated',
   routine_delete: 'deleted',
 }
@@ -126,7 +129,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         inners.forEach((inner, index) => {
           const innerAction = ROUTINE_TOOLS[inner.name]
           if (innerAction !== undefined) {
-            items.push({ kind: 'routine', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, name: String(inner.args['name'] ?? 'Routine') })
+            items.push({ kind: 'routine', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, name: String(inner.args['title'] ?? inner.args['name'] ?? 'Routine') })
           } else if (inner.name === 'react' && lastMemberMessage >= 0) {
             const target = items[lastMemberMessage]
             if (target?.kind === 'message') items[lastMemberMessage] = { ...target, reaction: String(inner.args['emoji'] ?? '👍') }
@@ -135,7 +138,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         const result = parseResult(message)
         const action = ROUTINE_TOOLS[call.name]
         if (action !== undefined) {
-          const name = String(result['name'] ?? call.args['name'] ?? 'Routine')
+          const name = String(result['title'] ?? result['name'] ?? call.args['title'] ?? call.args['name'] ?? 'Routine')
           items.push({ kind: 'routine', id: message.id, seq: event.seq, at: event.time, action, name })
         } else if (QUESTION_TOOLS.has(call.name) && typeof result['proposalId'] === 'string') {
           const proposal = input.proposal(result['proposalId'])
