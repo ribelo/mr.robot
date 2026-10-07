@@ -22,13 +22,14 @@ export class Member extends ProductionMember {
 
   /** Every notification delivered to devices, in order. */
   async deliveredForTest(): Promise<PushNotification[]> {
-    return delivered.get(this.profile().id) ?? []
+    return delivered.get((await this.profile()).id) ?? []
   }
 
   protected override async deliver(notification: PushNotification): Promise<void> {
-    const list = delivered.get(this.profile().id) ?? []
+    const id = (await this.profile()).id
+    const list = delivered.get(id) ?? []
     list.push(notification)
-    delivered.set(this.profile().id, list)
+    delivered.set(id, list)
     await super.deliver(notification)
   }
 

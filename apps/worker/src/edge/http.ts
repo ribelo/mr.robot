@@ -22,6 +22,11 @@ export function call<A>(run: () => Promise<A>): Effect.Effect<A, ApiError> {
   return Effect.tryPromise({
     try: run,
     catch: (cause) => {
+      // A Durable Object's typed failure (NotFound, Invalid, Conflict) keeps its status across RPC.
+      const status = (cause as { status?: unknown } | null)?.status
+      if (typeof status === 'number' && status >= 400 && status < 500 && cause instanceof Error) {
+        return new ApiError({ status, message: cause.message, detail: cause.message })
+      }
       console.error('request failed', cause)
       return new ApiError({ status: 500, message: 'something went wrong; try again', detail: cause instanceof Error ? cause.message : String(cause) })
     },
