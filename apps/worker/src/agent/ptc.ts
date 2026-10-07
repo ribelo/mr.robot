@@ -38,7 +38,7 @@ class Bridge extends RpcTarget {
 
 /** The program as the body of an async function, types stripped. */
 export function compileProgram(program: string): string {
-  return transform(`async function __program__(__bindings__, console) {\n${program}\n}`, {
+  return transform(`async function __program__(__bindings__, console) {\n${callIfOnlyAFunction(program)}\n}`, {
     transforms: ['typescript'],
     disableESTransforms: true,
   }).code
@@ -156,4 +156,15 @@ export function ptcPlugin(loader: WorkerLoader): (ctx: Context) => Promise<void>
   return async (ctx) => {
     await ctx.plugin(WorkerLoaderPtcRuntime, { loader })
   }
+}
+
+/**
+ * Some models send the program as one function expression ("async () => { ... }") instead of
+ * its body, which would define the function and never run it (seen with gpt-oss-120b, 2026-10-07).
+ * Such a program is called and its result returned.
+ */
+export function callIfOnlyAFunction(program: string): string {
+  const trimmed = program.trim().replace(/;$/, '')
+  const looksLikeFunction = /^(async\s+)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(trimmed) || /^(async\s+)?function\b/.test(trimmed)
+  return looksLikeFunction ? `return await (${trimmed})()` : program
 }

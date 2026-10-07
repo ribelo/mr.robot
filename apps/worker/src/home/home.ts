@@ -39,6 +39,8 @@ export const MR_ROBOT_COLOR = '#5ec4b6'
 
 /** The Home's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
 /** Prices are the admin's to correct in the admin view; subscriptions are flat and count as 0. */
+/** Which connected Provider a new Robot starts on when the Home default is not usable. */
+const FALLBACK_ORDER = ['anthropic', 'openai', 'opencode-go', 'deepseek', 'openrouter', 'workers-ai']
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
@@ -275,7 +277,8 @@ const startingModel = (memberId: string, wanted?: ModelChoice) => Effect.gen(fun
   const pick = wanted ?? (yield* settings).defaultModel
   // Only a known Provider can be missing a connection; anything else (an admin's own entry) is kept.
   if (!(PROVIDER_IDS as readonly string[]).includes(pick.provider) || usable.some((option) => option.provider === pick.provider && option.model === pick.model)) return pick
-  const fallback = usable.find((option) => option.provider === 'workers-ai') ?? usable[0]
+  // A Provider the person connected themselves comes first; Workers AI is the fallback that is always there.
+  const fallback = FALLBACK_ORDER.map((provider) => usable.find((option) => option.provider === provider)).find((option) => option !== undefined) ?? usable[0]
   if (fallback === undefined) return yield* invalid('Connect a Provider first: open your name → Providers and add a key or a subscription.')
   return { provider: fallback.provider, model: fallback.model, effort: 'off' } as ModelChoice
 })
