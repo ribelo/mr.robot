@@ -355,8 +355,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // The in-memory session still holds plaintext; the next Turn starts from the redacted log.
       await this.releaseComposition()
       this.turnSecrets = []
-      this.blockedThisTurn.clear()
     }
+    // A block is remembered for its own Turn only (rb-kank).
+    this.blockedThisTurn.clear()
     this.store.endTurn(wakeup.id)
     await this.afterTurn(wakeup)
     await this.rearm()

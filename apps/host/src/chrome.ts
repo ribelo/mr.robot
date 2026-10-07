@@ -47,6 +47,8 @@ export class HostChrome {
     rmSync(portFile, { force: true })
     this.child = spawn(binary, [
       `--user-data-dir=${this.profile}`, '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
+      // DevTools control must not mark the page as automated (navigator.webdriver), as in the container image.
+      '--disable-blink-features=AutomationControlled',
       '--no-first-run', '--no-default-browser-check', '--window-size=1280,900', 'about:blank',
     ], { stdio: 'ignore', detached: false })
     this.child.on('exit', () => { this.endpoint = undefined })

@@ -4,7 +4,9 @@ declare module 'electron' {
     whenReady(): Promise<void>
     on(event: string, listener: (...args: unknown[]) => void): void
     quit(): void
-    getPath(name: 'userData' | 'home'): string
+    getPath(name: 'userData' | 'home' | 'appData'): string
+    setPath(name: 'userData', path: string): void
+    setName(name: string): void
     getVersion(): string
     requestSingleInstanceLock(): boolean
     setLoginItemSettings(settings: { openAtLogin: boolean }): void

@@ -14,6 +14,9 @@ const VERSION = '0.1.0'
 // A small green robot dot for the tray (16x16 PNG).
 const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMElEQVR4nGNgoBZgZGRk+M/AwMDAxMTEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMBQAQC5xQMRrW1ZcgAAAABJRU5ErkJggg=='
 
+// Settings live in ~/.config/mr-robot-host (Linux) or ~/Library/Application Support/mr-robot-host (macOS).
+app.setName('Mr. Robot host')
+app.setPath('userData', join(app.getPath('appData'), 'mr-robot-host'))
 if (!app.requestSingleInstanceLock()) app.quit()
 
 const configFile = ConfigFile.in(join(app.getPath('userData')))
