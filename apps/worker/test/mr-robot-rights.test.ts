@@ -54,6 +54,17 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     expect(ask?.kind === 'question' ? ask.proposal.purpose : '').toBe('Mr. Robot asks: it needs to search the web')
   })
 
+  it('edits a library skill without approval (rb-axxy)', async () => {
+    await api(ANNA, '/api/admin/skills/checklist', { method: 'PUT', body: { description: 'A list', content: '---\nname: checklist\ndescription: A list\n---\n1.' } })
+    const id = await mrRobotId()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
+    scripts.set(id, [{ calls: [{ name: 'skill_write', args: { name: 'checklist', content: '---\nname: checklist\ndescription: A better list\n---\n1. 2.' } }] }, { text: 'Updated.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'improve the checklist skill' } })
+    await settle(id)
+    expect(toolResults(id)[0]).toContain('"scope": "global"')
+    expect((await api<{ content: string }>(ANNA, '/api/skills/checklist')).body.content).toContain('A better list')
+  })
+
   it('starts with the default compaction instruction (rb-yagl)', async () => {
     const id = await mrRobotId()
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.compactionInstruction).toMatch(/^Keep, in this order: \(1\) every open commitment/)
