@@ -118,6 +118,12 @@ export const api = new Router<ApiContext>()
     const input = yield* decodeBody(c.request, Schema.Struct({ backend: BrowserBackend, url: Schema.String, waitMs: Schema.optional(Schema.Number) }))
     return yield* call(() => probe(c.env, input.backend, input.url, () => home(c.env).vpnConfig(), input.waitMs))
   }))
+  .on('PUT', '/api/admin/exa', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const { key } = yield* decodeBody(c.request, Schema.Struct({ key: Schema.NullOr(Schema.String) }))
+    yield* call(() => home(c.env).setExaKey(key))
+    return { ok: true, configured: key !== null && key.trim() !== '' }
+  }))
   .on('PUT', '/api/admin/vpn', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { config } = yield* decodeBody(c.request, Schema.Struct({ config: Schema.NullOr(Schema.String) }))

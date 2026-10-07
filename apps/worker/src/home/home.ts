@@ -368,6 +368,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     settings: { ...current, models: yield* models(adminId) },
     browserBackends: yield* browserBackends,
     vpnConfigured: (yield* setting<string>('vpn-config')) !== undefined,
+    exaConfigured: (yield* setting<string>('exa-key')) !== undefined,
   } as AdminView
 })
 
@@ -386,6 +387,20 @@ const setVpnConfig = (config: string | null) => Effect.gen(function* () {
   if (config === null || config.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'vpn-config'")
   if (!/\[Interface\][\s\S]*PrivateKey[\s\S]*\[Peer\][\s\S]*Endpoint/i.test(config)) return yield* invalid('This is not a WireGuard configuration: it needs [Interface] with PrivateKey and [Peer] with Endpoint.')
   yield* putSetting('vpn-config', yield* platform.secrets.seal(config.trim()))
+})
+
+/** The Home's Exa API key (rb-x8i3), sealed; never shown back. */
+const exaKey = Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  const sealed = yield* setting<string>('exa-key')
+  return sealed === undefined ? null : yield* platform.secrets.open(sealed)
+})
+
+const setExaKey = (key: string | null) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* HomePlatform
+  if (key === null || key.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'exa-key'")
+  yield* putSetting('exa-key', yield* platform.secrets.seal(key.trim()))
 })
 
 /** Browser backends this Home can run; the VPN one needs the Home's WireGuard configuration (rb-rb1x). */
@@ -410,7 +425,7 @@ const grantableSecrets = (memberId: string) => Effect.gen(function* () {
 /** What a Member can grant a Robot and which models it can run on. */
 const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
   return {
-    toolGroups: Object.entries(TOOL_GROUPS).filter(([name]) => name !== 'robots').map(([name, description]) => ({ name, description })),
+    toolGroups: yield* Effect.map(setting<string>('exa-key'), (key) => Object.entries(TOOL_GROUPS).filter(([name]) => name !== 'robots').map(([name, description]) => ({ name, description: name.startsWith('exa') && key === undefined ? `${description} Needs the Home's Exa API key: the Home admin adds it under Admin → Exa.` : description }))),
     skills: (yield* skills(memberId)).map(({ name, description }) => ({ name, description })),
     robots: (yield* reachable(memberId)).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
     secrets: yield* grantableSecrets(memberId),
@@ -842,6 +857,8 @@ export class Home extends DurableObject<Env> {
   unavailableModels(memberId: string): Promise<ModelOption[]> { return this.run(unavailableModels(memberId)) }
   modelList(): Promise<ModelOption[]> { return this.run(modelList) }
   vpnConfig(): Promise<string | null> { return this.run(vpnConfig) }
+  exaKey(): Promise<string | null> { return this.run(exaKey) }
+  setExaKey(key: string | null): Promise<void> { return this.run(setExaKey(key)) }
   setVpnConfig(config: string | null): Promise<void> { return this.run(setVpnConfig(config)) }
   credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }
   providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> { return this.run(providerCredential(memberId, provider)) }

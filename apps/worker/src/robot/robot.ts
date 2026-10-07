@@ -7,6 +7,7 @@
  * armed while it runs; if the DO dies mid-Turn, the alarm brings it back and the
  * interrupted Turn resumes from the last persisted event.
  */
+import { exaAgentTools, exaResearchTools } from '../agent/exa.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
@@ -626,6 +627,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       case 'skills': return skillProposalTools(this)
       case 'browser': return [...browserTools(this), ...takeoverTools(this)]
       case 'robots': return config.kind === 'mr-robot' ? robotsTools(this) : []
+      case 'exa': return exaResearchTools(this)
+      case 'exa-agent': return exaAgentTools(this)
       default: return []
     }
   }
@@ -1451,6 +1454,28 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.run(this.workspace.remove(path))
     const edits = this.store.get<string[]>('owner-edits') ?? []
     this.store.set('owner-edits', [...new Set([...edits, `${path} (deleted)`])])
+  }
+
+  exaKey(): Promise<string | null> {
+    return this.home().exaKey()
+  }
+
+  /** An Exa call in usage and limits (rb-pb26); an agent run's cost is counted the first time it is seen. */
+  async recordExa(costUsd: number, runId?: string): Promise<void> {
+    let cost = costUsd
+    if (runId !== undefined) {
+      const billed = this.store.get<string[]>('exa-billed-runs') ?? []
+      if (billed.includes(runId) || cost === 0) cost = 0
+      else this.store.set('exa-billed-runs', [...billed.slice(-200), runId])
+    }
+    const config = this.store.requireConfig()
+    const month = currentMonth()
+    this.store.addServiceUsage(month, 'exa', 1, cost)
+    if (cost > 0) {
+      this.store.addUsage(month, 0, 0, cost)
+      await this.env.MEMBER.getByName(config.ownerId).addUsage(month, config.id, 0, 0, cost).catch(() => undefined)
+      await this.checkLimits()
+    }
   }
 
   /** Granted login entries and whether each belongs to the open page (rb-vpes). */

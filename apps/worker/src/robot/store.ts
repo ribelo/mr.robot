@@ -89,9 +89,11 @@ export interface NoticeRow {
   readonly sessionId: string
 }
 
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 
 const MIGRATIONS: Record<number, readonly string[]> = {
+  // Paid services per month (Exa, rb-pb26).
+  5: ['CREATE TABLE service_usage (month TEXT NOT NULL, service TEXT NOT NULL, calls INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, service)) WITHOUT ROWID'],
   // Browser time per backend (rb-y50l).
   4: ['CREATE TABLE browser_usage (month TEXT NOT NULL, backend TEXT NOT NULL, ms INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, backend)) WITHOUT ROWID'],
   // The DSH schedule record each Routine now is (robot-c8hq) and the session that made it.
@@ -427,6 +429,14 @@ export class RobotStore {
       'INSERT INTO browser_usage (month, backend, ms, cost_usd) VALUES (?, ?, ?, ?) ON CONFLICT (month, backend) DO UPDATE SET ms = ms + excluded.ms, cost_usd = cost_usd + excluded.cost_usd',
       month, backend, Math.max(0, Math.round(ms)), costUsd,
     )
+  }
+
+  addServiceUsage(month: string, service: string, calls: number, costUsd: number): void {
+    this.sql.exec('INSERT INTO service_usage (month, service, calls, cost_usd) VALUES (?, ?, ?, ?) ON CONFLICT (month, service) DO UPDATE SET calls = calls + excluded.calls, cost_usd = cost_usd + excluded.cost_usd', month, service, calls, costUsd)
+  }
+
+  serviceUsage(month: string): Array<{ service: string; calls: number; costUsd: number }> {
+    return this.sql.exec<{ service: string; calls: number; cost_usd: number }>('SELECT service, calls, cost_usd FROM service_usage WHERE month = ? ORDER BY service', month).toArray().map((row) => ({ service: row.service, calls: row.calls, costUsd: row.cost_usd }))
   }
 
   browserUsage(month: string): Array<{ backend: string; ms: number; costUsd: number }> {

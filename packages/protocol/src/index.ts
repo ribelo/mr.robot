@@ -401,6 +401,8 @@ export interface AdminView {
   readonly browserBackends?: readonly BrowserBackendOption[]
   /** Whether the Home's Proton VPN WireGuard configuration is stored (rb-rb1x); the value is never sent. */
   readonly vpnConfigured?: boolean
+  /** Whether the Home has an Exa API key (rb-x8i3); the key is never sent. */
+  readonly exaConfigured?: boolean
 }
 
 // ---------------------------------------------------------------- Skills (robot-7qpi)
@@ -470,6 +472,8 @@ export interface UsageView {
   readonly limitUsd: number | null
   /** Browser time this month per backend (rb-y50l); its cost is included in costUsd. */
   readonly browser?: ReadonlyArray<{ readonly backend: BrowserBackend; readonly minutes: number; readonly costUsd: number }>
+  /** Paid services this month (Exa); their cost is included in costUsd (rb-pb26). */
+  readonly services?: ReadonlyArray<{ readonly service: string; readonly calls: number; readonly costUsd: number }>
 }
 
 /** One row of the cost table: a Robot's or a Member's month. */

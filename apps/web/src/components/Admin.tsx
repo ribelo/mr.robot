@@ -82,6 +82,8 @@ export function Admin() {
 
       <h2>Home settings</h2>
       <HomeSettings view={view} onSave={(patch) => run(() => api.updateHomeSettings(patch), 'Saved.')} />
+      <h2>Exa</h2>
+      <ExaKey configured={view.exaConfigured === true} onSave={(key) => run(() => api.setExaKey(key), key === null ? 'Removed.' : 'Saved.')} />
       <h2>Proton VPN</h2>
       <VpnConfig configured={view.vpnConfigured === true} onSave={(config) => run(() => api.setVpnConfig(config), config === null ? 'Removed.' : 'Saved.')} />
 
@@ -241,6 +243,21 @@ function SkillLibrary({ view, onChanged }: { view: AdminView; onChanged: () => P
             </div>
           </div>
         )}
+    </div>
+  )
+}
+
+/** The Home's Exa API key (rb-x8i3): write-only; Robots granted "exa" use it. */
+function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: string | null) => Promise<void> }) {
+  const [key, setKey] = useState('')
+  return (
+    <div className="form">
+      <p className="muted">{configured ? 'An Exa API key is stored. Robots granted Exa research or Exa agent runs use it; each call counts in their usage.' : 'Add an Exa API key (dashboard.exa.ai → API keys) so Robots granted Exa research can search with it. It is stored encrypted and never shown again.'}</p>
+      <div className="form inline">
+        <input type="password" aria-label="Exa API key" value={key} placeholder="Exa API key" onChange={(event) => setKey(event.target.value)} />
+        {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
+        <button type="button" className="button button-primary" disabled={key.trim() === ''} onClick={() => void onSave(key).then(() => setKey(''))}>Save</button>
+      </div>
     </div>
   )
 }
