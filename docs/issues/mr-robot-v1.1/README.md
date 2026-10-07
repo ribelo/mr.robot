@@ -12,7 +12,7 @@ Spec: ../mr-robot-v1.1.md. Work the frontier (all blockers done), browser ticket
 | 06 | [Asks in place of the composer](06-asks-in-composer.md) | — | done |
 | 07 | [Settings navigation, model search, list heights](07-settings-navigation.md) | — | done |
 | 08 | [Files view for workspace and memory](08-files-view.md) | — | done |
-| 09 | [Global and local skills, editable](09-global-and-local-skills.md) | 08 | ready-for-agent |
+| 09 | [Global and local skills, editable](09-global-and-local-skills.md) | 08 | done |
 | 10 | [Mr. Robot rights and defaults](10-mr-robot-chief-rights.md) | 05, 09 | ready-for-agent |
 | 11 | [Exa tools with a Home key](11-exa-tools.md) | — | ready-for-agent |
 | 12 | [TOTP codes list beside logins](12-totp-codes.md) | 05 | postponed |
