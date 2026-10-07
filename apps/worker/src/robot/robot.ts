@@ -781,19 +781,43 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const watch = this.store.get<WatchState>('watch')
     const sessionId = watch?.sessionId ?? takeover?.sessionId
     const backend = await this.chosenBackend()
+    const started = Date.now()
+    this.openTiming = { backend, startedAt: started, stages: {} }
+    const stage = (name: string) => { if (this.openTiming !== undefined) this.openTiming.stages[name] = Date.now() - started }
     // A session left running is reused only on the backend now chosen; a change applies on the next open.
     const attached = sessionId === undefined || this.sessionBackend() !== backend ? undefined : await this.browserDriver(backend).attach(sessionId)
+    stage('attach')
     if (attached !== undefined) {
       if (this.store.get('browser-session') === undefined) this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
       return attached
     }
     await this.accountBrowser(true)
+    this.viewerStatus(`Starting ${backendLabel(backend, this.knownHosts)}…`)
     // A new session with the saved cookies and storage (they follow the Robot across backends), back on the page it was on.
     const reopened = await this.browserDriver(backend).open(this.store.get<BrowserState>('browser-state') ?? null)
+    stage('backend')
     this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
     const url = watch?.url ?? takeover?.url ?? this.store.get<string>('browser-url')
-    if (url?.startsWith('http') === true) await reopened.goto(url).catch(() => undefined)
+    if (url?.startsWith('http') === true) {
+      this.viewerStatus(`Opening ${new URL(url).host}…`)
+      // A viewer sees the page while it loads; a Turn waits for it (pl-n2vs).
+      const navigation = reopened.goto(url).catch(() => undefined).finally(() => stage('page'))
+      if (this.liveWatchers() === 0 || this.store.activeTurn() !== undefined) await navigation
+    }
     return reopened
+  }
+
+  /** Where the last browser open spent its time (pl-n2vs): stage → ms since the open began. */
+  private openTiming: { backend: string; startedAt: number; stages: Record<string, number> } | undefined
+
+  /** What the takeover window is waiting for (pl-5agt). */
+  private viewerStatus(text: string): void {
+    const message = JSON.stringify({ type: 'status', text })
+    for (const socket of this.ctx.getWebSockets()) {
+      if ((socket.deserializeAttachment() as ViewerState | null)?.live === true) {
+        try { socket.send(message) } catch { /* closing */ }
+      }
+    }
   }
 
   // ---------------------------------------------------------------- wake on screen notifications (robot-lulc)
@@ -1113,8 +1137,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A Member who leaves without handing back releases the claim (another can take over).
     const viewer = socket.deserializeAttachment() as ViewerState | null
     const takeover = this.store.get<TakeoverState>('takeover')
-    if (viewer !== null && takeover?.claimedBy === viewer.memberId && this.ctx.getWebSockets(viewer.memberId).length === 0) {
-      this.store.set('takeover', { ...takeover, claimedBy: null })
+    // Closing the window hands the browser back (pl-glfh): the Robot resumes, or an idle browser closes.
+    if (viewer !== null && takeover?.claimedBy === viewer.memberId && this.ctx.getWebSockets(viewer.memberId).filter((other) => other !== socket).length === 0) {
+      await this.handBack(viewer.memberId)
     }
     await this.updateScreencast()
     await this.closeIfUnwatched()
@@ -1240,7 +1265,18 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.screencast !== undefined) return
     const cdp = await (await this.page()).cdp()
     if (cdp === undefined) return
+    const timing = this.openTiming
+    if (timing !== undefined) timing.stages['screencast'] = Date.now() - timing.startedAt
+    let first = true
     const onFrame = (frame: { data: string; sessionId: number; metadata: Record<string, number> }) => {
+      if (first && timing !== undefined) {
+        first = false
+        timing.stages['firstFrame'] = Date.now() - timing.startedAt
+        console.log('takeover open timing', JSON.stringify(timing))
+        this.viewerStatus('')
+        const report = JSON.stringify({ type: 'timing', backend: timing.backend, stages: timing.stages })
+        for (const socket of this.ctx.getWebSockets()) { try { socket.send(report) } catch { /* closing */ } }
+      }
       const text = JSON.stringify({ type: 'frame', data: frame.data, metadata: frame.metadata })
       for (const socket of this.ctx.getWebSockets()) {
         if ((socket.deserializeAttachment() as ViewerState | null)?.live === true) {
@@ -1808,9 +1844,13 @@ async function forwardInput(cdp: { send(method: string, params?: Record<string, 
       await cdp.send('Input.insertText', { text: String(input['text'] ?? '') })
       return
     case 'key': {
+      // A key pressed on the focused takeover screen (pl-485j): special keys and shortcuts with modifiers.
       const key = String(input['key'] ?? 'Enter')
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: KEY_CODES[key] ?? 0 })
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: KEY_CODES[key] ?? 0 })
+      const code = String(input['code'] ?? key)
+      const modifiers = Number(input['modifiers'] ?? 0)
+      const keyCode = KEY_CODES[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0)
+      await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code, modifiers, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, modifiers, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode })
       return
     }
     case 'scroll':
@@ -1819,7 +1859,7 @@ async function forwardInput(cdp: { send(method: string, params?: Record<string, 
   }
 }
 
-const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }
+const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32 }
 
 /** The tool running now: the latest call without a result (a code program's latest inner call wins). */
 

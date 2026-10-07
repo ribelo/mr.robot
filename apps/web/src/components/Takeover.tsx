@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react'
 
 export interface TakeoverProps {
   readonly robotId: string
@@ -8,31 +8,47 @@ export interface TakeoverProps {
   readonly onClose: () => void
 }
 
+/** Keys the browser page needs as key events; printable characters go as text. */
+const SPECIAL = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Delete', 'Home', 'End', 'PageUp', 'PageDown'])
+
+/** CDP modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8. */
+const modifiersOf = (event: KeyboardEvent) => (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)
+
 /**
- * The Robot's browser on the phone (robot-ksvy, robot-g6qb): live frames over the Robot's
- * WebSocket; after claiming, taps, text and keys go to the page; "Hand back" resumes the Robot.
+ * The Robot's browser (robot-ksvy, robot-g6qb, v1.3 ticket 04): live frames over the Robot's
+ * WebSocket. After claiming, the screen takes the keyboard: typing goes straight to the page
+ * (pl-485j), with a keyboard button for phones (pl-vwq6). Closing hands the browser back (pl-glfh).
  */
 export function Takeover({ robotId, robotName, requested, onClose }: TakeoverProps) {
   const socket = useRef<WebSocket | undefined>(undefined)
   const image = useRef<HTMLImageElement>(null)
+  const screen = useRef<HTMLDivElement>(null)
+  const phoneInput = useRef<HTMLInputElement>(null)
   const [frame, setFrame] = useState<{ src: string; width: number; height: number }>()
   const [claimed, setClaimed] = useState(false)
   const [message, setMessage] = useState<string>()
-  const [text, setText] = useState('')
+  const [status, setStatus] = useState('Connecting…')
+  const [timing, setTiming] = useState<string>()
+  const [focused, setFocused] = useState(false)
   const [logins, setLogins] = useState<Array<{ name: string; username: string }> | null>(null)
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${location.host}/api/robots/${encodeURIComponent(robotId)}/ws`)
     socket.current = ws
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'live', on: true }))
+    ws.onopen = () => { setStatus('Opening the browser at its last page…'); ws.send(JSON.stringify({ type: 'live', on: true })) }
     ws.onmessage = (event) => {
       if (typeof event.data !== 'string' || event.data === 'pong') return
-      const data = JSON.parse(event.data) as { type: string; data?: string; metadata?: { deviceWidth?: number; deviceHeight?: number }; message?: string }
+      const data = JSON.parse(event.data) as { type: string; data?: string; text?: string; metadata?: { deviceWidth?: number; deviceHeight?: number }; message?: string; stages?: Record<string, number>; backend?: string }
       if (data.type === 'frame' && data.data !== undefined) {
         setFrame({ src: `data:image/jpeg;base64,${data.data}`, width: data.metadata?.deviceWidth ?? 1280, height: data.metadata?.deviceHeight ?? 800 })
+      } else if (data.type === 'status') {
+        setStatus(data.text ?? '')
+      } else if (data.type === 'timing' && data.stages !== undefined) {
+        setTiming(`Opened in ${((data.stages['firstFrame'] ?? 0) / 1000).toFixed(1)} s`)
       } else if (data.type === 'claimed') {
         setClaimed(true)
+        screen.current?.focus()
       } else if (data.type === 'logins') {
         setLogins((data as unknown as { entries: Array<{ name: string; username: string }> }).entries)
       } else if (data.type === 'filled' && data.message !== undefined) {
@@ -44,8 +60,9 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
         setMessage(data.message)
       }
     }
+    // Closing the window (or the tab) hands the browser back: the server sees the socket close.
     return () => {
-      ws.send(JSON.stringify({ type: 'live', on: false }))
+      try { ws.send(JSON.stringify({ type: 'live', on: false })) } catch { /* not open */ }
       ws.close()
     }
   }, [robotId])
@@ -53,35 +70,72 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
   const send = (input: Record<string, unknown>) => socket.current?.send(JSON.stringify(input))
 
   /** Map a tap on the scaled picture to page coordinates. */
-  const tap = (event: PointerEvent<HTMLImageElement>) => {
-    if (!claimed || frame === undefined || image.current === null) return
+  const point = (clientX: number, clientY: number) => {
+    if (frame === undefined || image.current === null) return undefined
     const box = image.current.getBoundingClientRect()
-    send({ type: 'tap', x: ((event.clientX - box.left) / box.width) * frame.width, y: ((event.clientY - box.top) / box.height) * frame.height })
+    return { x: ((clientX - box.left) / box.width) * frame.width, y: ((clientY - box.top) / box.height) * frame.height }
+  }
+  const tap = (event: PointerEvent<HTMLImageElement>) => {
+    if (!claimed) return
+    const at = point(event.clientX, event.clientY)
+    if (at !== undefined) send({ type: 'tap', ...at })
+    screen.current?.focus()
+  }
+  const wheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!claimed) return
+    const at = point(event.clientX, event.clientY) ?? { x: (frame?.width ?? 0) / 2, y: 300 }
+    send({ type: 'scroll', ...at, dy: event.deltaY })
+  }
+  /** Keystrokes on the focused screen go to the page (pl-485j). */
+  const keyDown = (event: KeyboardEvent<HTMLDivElement | HTMLInputElement>) => {
+    if (!claimed) return
+    const modifiers = modifiersOf(event)
+    if (SPECIAL.has(event.key) || (modifiers & 0b0110) !== 0) {
+      event.preventDefault()
+      send({ type: 'key', key: event.key, code: event.code, modifiers })
+    } else if (event.key.length === 1) {
+      event.preventDefault()
+      send({ type: 'text', text: event.key })
+    }
   }
 
   return (
     <div className="takeover" role="dialog" aria-label={`${robotName}'s browser`}>
       <div className="takeover-bar">
         <span className="conversation-name">{robotName}’s browser</span>
+        {timing === undefined ? null : <span className="muted takeover-timing">{timing}</span>}
         <span className="spacer" />
         {!claimed ? <button type="button" className="button button-primary" onClick={() => send({ type: 'claim' })}>Take over</button> : null}
         {claimed ? <button type="button" className="button button-primary" onClick={() => { send({ type: 'handback' }); onClose() }}>Hand back</button> : null}
-        <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button>
+        <button type="button" className="icon-button" aria-label="Close and hand back" title="Close and hand back" onClick={onClose}>×</button>
       </div>
-      {requested === null ? null : <div className="muted" style={{ padding: '0 14px' }}>{requested.reason}</div>}
-      {message === undefined ? null : <div className="muted" style={{ padding: '0 14px' }}>{message}</div>}
-      <div className="takeover-screen">
+      <div className="takeover-note muted">
+        {requested === null ? null : <span>{requested.reason} · </span>}
+        Logins and cookies you enter here stay in {robotName}’s browser for its next tasks. Closing this window hands the browser back.
+      </div>
+      {message === undefined ? null : <div className="takeover-note">{message}</div>}
+      <div
+        ref={screen}
+        className={claimed ? (focused ? 'takeover-screen typing' : 'takeover-screen claimed') : 'takeover-screen'}
+        tabIndex={claimed ? 0 : -1}
+        onKeyDown={keyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onWheel={wheel}
+        aria-label={claimed ? 'Browser screen: click it and type' : 'Browser screen'}
+      >
         {frame === undefined
-          ? <div className="muted">Opening the browser at its last page…</div>
+          ? <div className="muted">{status || 'Opening the browser…'}</div>
           : <img ref={image} src={frame.src} alt="" onPointerUp={tap} draggable={false} />}
       </div>
       {claimed ? (
         <div className="takeover-keys">
-          <input value={text} placeholder="Type into the focused field" onChange={(event) => setText(event.target.value)} />
-          <button type="button" className="button" onClick={() => { send({ type: 'text', text }); setText('') }}>Send</button>
-          <button type="button" className="button" onClick={() => send({ type: 'key', key: 'Backspace' })}>⌫</button>
-          <button type="button" className="button" onClick={() => send({ type: 'key', key: 'Enter' })}>⏎</button>
-          <button type="button" className="button" onClick={() => send({ type: 'scroll', x: (frame?.width ?? 0) / 2, y: 300, dy: 500 })}>↓</button>
+          <span className="muted">{focused ? 'Typing goes to the page.' : 'Click the screen to type into the page.'}</span>
+          <span className="spacer" />
+          {/* Phones show no keyboard for a div; this field opens it and forwards every key. */}
+          <input ref={phoneInput} className="phone-keyboard" aria-label="Keyboard" value="" onChange={() => undefined} onKeyDown={keyDown}
+            onInput={(event) => { const value = (event.target as HTMLInputElement).value; if (value !== '') send({ type: 'text', text: value }); (event.target as HTMLInputElement).value = '' }} />
+          <button type="button" className="button" aria-label="Show the keyboard" onClick={() => phoneInput.current?.focus()}>⌨</button>
           <button type="button" className="button" aria-label="Logins for this page" onClick={() => send({ type: 'logins' })}>🔑</button>
         </div>
       ) : null}

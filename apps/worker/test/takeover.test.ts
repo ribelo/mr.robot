@@ -126,13 +126,15 @@ describe('live view and takeover', () => {
     void env
   })
 
-  it('releases a claim when its socket closes, and ends a removed Member\'s view', async () => {
+  it('hands back when the claimer\'s socket closes (pl-glfh), and ends a removed Member\'s view', async () => {
     const id = await shopperAtLogin()
     const anna = await connect(ANNA, id)
     await anna.send({ type: 'claim' })
+    scripts.set(id, [{ text: 'Continuing.' }])
     anna.socket.close()
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.takeover).toEqual({ reason: 'Please log in to the shop.', claimedBy: null })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await settle(id)
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.takeover).toBeNull()
 
     const ben = await connect(BEN, id)
     let closed = false
@@ -184,5 +186,25 @@ describe('live view and takeover', () => {
     await anna.send({ type: 'fill', name: 'shop' })
     expect(anna.received.find((message) => message.type === 'filled')).toMatchObject({ message: expect.stringContaining('Filled') })
     expect(browserLog).toContain('fill')
+  })
+
+  it('sends pressed keys to the page, reports open timings, and hands back when the window closes (pl-485j, pl-glfh, pl-n2vs)', async () => {
+    const id = await shopperAtLogin()
+    const viewer = await connect(ANNA, id)
+    await viewer.send({ type: 'live', on: true })
+    await viewer.send({ type: 'claim' })
+    await viewer.send({ type: 'text', text: 'a' })
+    await viewer.send({ type: 'key', key: 'Enter', code: 'Enter', modifiers: 0 })
+    await viewer.send({ type: 'key', key: 'a', code: 'KeyA', modifiers: 2 })
+    expect(cdpLog).toContainEqual({ method: 'Input.insertText', params: { text: 'a' } })
+    expect(cdpLog.find((entry) => entry.method === 'Input.dispatchKeyEvent' && entry.params?.['key'] === 'Enter')?.params).toMatchObject({ type: 'rawKeyDown', windowsVirtualKeyCode: 13 })
+    expect(cdpLog.find((entry) => entry.method === 'Input.dispatchKeyEvent' && entry.params?.['key'] === 'a')?.params).toMatchObject({ modifiers: 2, windowsVirtualKeyCode: 65 })
+    // Closing the window without "Hand back" resumes the Robot.
+    scripts.set(id, [{ text: 'Logged in, continuing.' }])
+    viewer.socket.close(1000)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await settle(id)
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.takeover).toBeNull()
+    expect(JSON.stringify(requests.get(id)!.at(-1)!.messages)).toContain('handed the browser back')
   })
 })
