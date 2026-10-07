@@ -111,9 +111,9 @@ Refactor the capabilities into Cordis plugins mounted by grant. Add a memory plu
 - Shared empty/loading/error components; a page-by-page pass against the Grok Bot screens (simple views) and the DSH conversation (tool cards); before/after screenshots recorded in the ticket.
 
 ## Testing Decisions
-1. **Robot DO API** (stub LLM, stub browser): composition from grants (pl-vfxd, pl-rsoy, pl-d1oz, pl-kdmm), memory scopes, injection, change notes, post-compaction refresh, budget (pl-w3n0, pl-9n7w, pl-552r, pl-o3ck, pl-fkg7, pl-yqno, pl-jsdm), deletion and reset (pl-mhyg, pl-p4eg, pl-3uoy, pl-05eu, pl-y228), unread (pl-n2vs, pl-b5vp), host log (pl-4nfk).
-2. **Live**: streaming and Markdown, Work details levels, takeover timings and close semantics, native notifications in the app, cache warming observed in provider usage (pl-6bop, pl-jzr7, pl-6eir, pl-s0hp, pl-etps, pl-0a2o, pl-485j, pl-vwq6, pl-glfh, pl-ju1l, pl-5agt, pl-s2d5).
-3. **PWA components**: Markdown renderer, tool cards per level, search, file preview, state components (pl-062x, pl-kehf, pl-8594, pl-ojbr, pl-vcy7).
+1. **Robot DO API** (stub LLM, stub browser): composition from grants (pl-vfxd, pl-rsoy, pl-d1oz, pl-kdmm), memory scopes, injection, change notes, post-compaction refresh, budget (pl-w3n0, pl-9n7w, pl-552r, pl-o3ck, pl-fkg7, pl-yqno, pl-jsdm), unread state (pl-mhyg, pl-p4eg), deletion and reset (pl-3uoy, pl-05eu, pl-y228, pl-062x, pl-kehf), host log (pl-vcy7).
+2. **Live**: Markdown, streaming, Work details levels (pl-6bop, pl-jzr7, pl-6eir, pl-s0hp, pl-etps, pl-0a2o), takeover input, close, note and timings (pl-485j, pl-vwq6, pl-glfh, pl-ju1l, pl-5agt, pl-n2vs), native notifications in the app (pl-b5vp), cache warming observed in provider usage (pl-s2d5).
+3. **PWA components**: search, list filter, file preview (pl-8594, pl-4nfk, pl-ojbr), state components and the polish pass (pl-fxge, pl-qdle).
 
 ## Out of Scope
 Keyboard shortcuts, time zone and language per user, app auto-update, and the postponed items of v1.1 and v1.2 stay postponed.
