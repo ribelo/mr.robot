@@ -10,7 +10,7 @@ export interface Env {
   readonly FILES: R2Bucket
   readonly BROWSER: Fetcher
   /** Chrome in Cloudflare Containers (v1.1 ticket 02); absent until deployed. */
-  readonly CHROME?: DurableObjectNamespace<import('./browser/chrome.ts').Chrome>
+  readonly CHROME?: DurableObjectNamespace<import('./browser/chrome.ts').ChromeContainer>
   readonly AI: Ai
   readonly LOADER: WorkerLoader
   readonly HOME_NAME: string

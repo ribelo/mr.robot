@@ -6,7 +6,7 @@
 import { Container } from '@cloudflare/containers'
 import type { Env } from '../env.ts'
 
-export class Chrome extends Container<Env> {
+export class ChromeContainer extends Container<Env> {
   override defaultPort = 9222
   /** The container sleeps when nothing reaches it for this long (the Robot also stops it at the end of a Turn). */
   override sleepAfter = '5m'
