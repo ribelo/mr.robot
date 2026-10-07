@@ -356,6 +356,8 @@ export interface AdminView {
   readonly modelLists?: ReadonlyArray<{ readonly provider: string; readonly count: number; readonly fetchedAt: number | null; readonly error: string | null }>
   readonly settings: { readonly defaultModel: ModelChoice; readonly defaultBrowserBackend: BrowserBackend; readonly robotSpendLimitUsd: number | null; readonly memberSpendLimitUsd: number | null; readonly models: readonly ModelOption[] }
   readonly browserBackends?: readonly BrowserBackendOption[]
+  /** Whether the Home's Proton VPN WireGuard configuration is stored (rb-rb1x); the value is never sent. */
+  readonly vpnConfigured?: boolean
 }
 
 // ---------------------------------------------------------------- Skills (robot-7qpi)

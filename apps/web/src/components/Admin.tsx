@@ -82,6 +82,8 @@ export function Admin() {
 
       <h2>Home settings</h2>
       <HomeSettings view={view} onSave={(patch) => run(() => api.updateHomeSettings(patch), 'Saved.')} />
+      <h2>Proton VPN</h2>
+      <VpnConfig configured={view.vpnConfigured === true} onSave={(config) => run(() => api.setVpnConfig(config), config === null ? 'Removed.' : 'Saved.')} />
 
       <h2>Model lists</h2>
       <div className="muted">Each Provider's own list of models, fetched with a connected key or subscription and refreshed daily. Robots choose from these.</div>
@@ -170,6 +172,21 @@ function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (i
       <div className="question-actions">
         <button type="button" className="button" onClick={() => void onSave({ repo, ref, path, ...(token === '' ? {} : { token }) })}>Save</button>
         <button type="button" className="button button-primary" disabled={view.skillRepository === null} onClick={() => void onSync()}>Sync now</button>
+      </div>
+    </div>
+  )
+}
+
+/** The Home's Proton VPN WireGuard configuration (rb-rb1x): write-only; robots on "Container Chrome via VPN" use it. */
+function VpnConfig({ configured, onSave }: { configured: boolean; onSave: (config: string | null) => Promise<void> }) {
+  const [config, setConfig] = useState('')
+  return (
+    <div className="form">
+      <p className="muted">{configured ? 'A WireGuard configuration is stored. Paste a new one to replace it.' : 'Paste the WireGuard configuration of a Proton VPN server in Poland (Proton account → Downloads → WireGuard configuration). It is stored encrypted and never shown again.'}</p>
+      <textarea aria-label="WireGuard configuration" rows={6} value={config} placeholder={'[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nEndpoint = …'} onChange={(event) => setConfig(event.target.value)} />
+      <div className="question-actions">
+        {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
+        <button type="button" className="button button-primary" disabled={config.trim() === ''} onClick={() => void onSave(config).then(() => setConfig(''))}>Save</button>
       </div>
     </div>
   )

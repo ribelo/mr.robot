@@ -365,6 +365,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     modelLists: yield* catalogStatus,
     settings: { ...current, models: yield* models(adminId) },
     browserBackends: yield* browserBackends,
+    vpnConfigured: (yield* setting<string>('vpn-config')) !== undefined,
   } as AdminView
 })
 
