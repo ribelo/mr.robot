@@ -85,6 +85,16 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
     expect(browserLog.filter((entry) => entry === 'act:click')).toHaveLength(1)
   })
 
+  it('refuses a plain "Finish" on a checkout page', async () => {
+    const id = await shopper()
+    await say(id, 'finish it', [
+      { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/checkout-step-two' } }] },
+      { calls: [{ name: 'browser_act', args: { action: 'click', index: 2 } }] },
+      { text: 'Ready for you.' },
+    ])
+    expect(toolResults(id)[1]).toContain('looks like the payment or final order step')
+  })
+
   it('wakes on a notification shown by a page left open, and stops when switched off (robot-lulc)', async () => {
     const id = await shopper()
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { wakeOnScreenNotifications: true } })

@@ -81,6 +81,12 @@ export class StubPage implements BrowserPage {
   }
 
   async observe(): Promise<Observation> {
+    if (this.current.endsWith('/checkout-step-two')) {
+      return {
+        url: this.current, title: 'Swag Labs', text: 'Checkout: Overview', canScrollUp: false, canScrollDown: false, challenge: null,
+        elements: [{ index: 1, role: 'button', label: 'Cancel', value: '', operations: ['CLICK'] }, { index: 2, role: 'button', label: 'Finish', value: '', operations: ['CLICK'] }],
+      }
+    }
     if (this.current.endsWith('/checkout')) {
       return {
         url: this.current, title: 'Shop: checkout', text: 'Cart: 1 item, 49 PLN', canScrollUp: false, canScrollDown: false, challenge: null,

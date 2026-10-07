@@ -782,8 +782,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const page = await this.page()
     if (action.action === 'click' || (action.action === 'type' && action.submit === true)) {
       // Payment stays with the owner (robot-ueh0): the final pay/order step is never clicked by a Robot.
-      const target = (await page.observe()).elements.find((element) => element.index === action.index)
-      if (target !== undefined && PAYMENT_STEP.test(target.label)) {
+      const observation = await page.observe()
+      const target = observation.elements.find((element) => element.index === action.index)
+      // On a checkout page the last button is often just "Finish" or "Confirm" (saucedemo.com, many shops).
+      const checkout = CHECKOUT_PAGE.test(`${observation.url} ${observation.title}`) && CHECKOUT_FINAL.test(target?.label ?? '')
+      if (target !== undefined && (PAYMENT_STEP.test(target.label) || checkout)) {
         throw new Error(`"${target.label}" looks like the payment or final order step. Stop here: tell your owner what is ready, or call browser_request_takeover so they pay themselves.`)
       }
     }
@@ -1528,6 +1531,11 @@ function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): st
 
 /** Labels of the final payment or order step, in English and Polish. */
 const PAYMENT_STEP = /\b(pay( now)?|place (your )?order|buy now|complete (purchase|order)|confirm (and pay|payment|purchase)|submit order)\b|zapłać|płacę|kupuję|kupuj i płać|zamawiam|złóż zamówienie|potwierdzam (zakup|płatność)|przejdź do płatności/i
+
+/** A checkout or payment page, by address or title. */
+const CHECKOUT_PAGE = /checkout|payment|kasa|platnosc|płatność|zamowienie|zamówienie/i
+/** The closing button on such a page. */
+const CHECKOUT_FINAL = /^\s*(finish|confirm|complete|submit|zakończ|potwierdź|zatwierdź)\b/i
 
 interface WatchState {
   readonly sessionId: string
