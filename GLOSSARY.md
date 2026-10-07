@@ -34,3 +34,5 @@ Vocabulary for Mr. Robot. Specs, code and tests use these words and no synonyms.
 - **Host** — a computer running the Mr. Robot desktop app, paired to a Member, private or shared with the Home; offers robots files, a shell and a Host browser on grant.
 - **Host browser** — the browser backend served by a Host: Chrome installed there, driven over CDP through the app, behind the same seam as cloud backends.
 - **Host tools** — host_read, host_write, host_run on a granted Host.
+- **Work details** — a per-Member setting (Compact, Standard, Detailed, Verbose) for how much of a Robot's tool work the Conversation shows; Compact is the default.
+- **Memory scope** — member (about the person), robot (the Robot's own), Home (shared household facts); each a set of files injected as the Robot's baseline message.
