@@ -318,3 +318,6 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .file-group summary { cursor: pointer; padding: 8px 0; color: var(--muted); }
 .file-editor-head { display: flex; align-items: center; gap: 12px; }
 .file-text { min-height: 60vh; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.5; }
+
+/* This computer (v1.2 ticket 08) */
+.status-card { padding: 12px 14px; border-radius: 12px; background: #ffffff0d; display: flex; flex-direction: column; gap: 4px; }

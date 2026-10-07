@@ -1,3 +1,4 @@
+import { ThisComputer } from './components/ThisComputer.tsx'
 import { PairHost } from './components/Hosts.tsx'
 import { FilesView } from './components/FilesView.tsx'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
@@ -23,6 +24,12 @@ export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; 
       <div className="page">
         <PageHead title="Admin" back={{ page: 'home' }} />
         {me.role === 'admin' ? <Admin /> : <div className="muted">Only the Home admin sees this page.</div>}
+      </div>
+    )
+    case 'this-computer': return (
+      <div className="page">
+        <PageHead title="This computer" back={{ page: 'profile' }} />
+        <ThisComputer />
       </div>
     )
     case 'pair': return (

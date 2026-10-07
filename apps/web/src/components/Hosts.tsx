@@ -1,3 +1,5 @@
+import { hostBridge } from './ThisComputer.tsx'
+import { go } from '../route.ts'
 import { useEffect, useState } from 'react'
 import type { HostView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
@@ -16,6 +18,7 @@ export function Hosts() {
   return (
     <>
       <h2>Hosts</h2>
+      {hostBridge() === undefined ? null : <div><button type="button" className="button" onClick={() => go({ page: 'this-computer' })}>This computer…</button></div>}
       <div className="muted">Computers running the Mr. Robot app. Install it, enter this server's address ({location.origin}), and approve the computer when the browser opens.</div>
       {hosts === undefined ? null : hosts.length === 0 ? <div className="muted">No computers paired yet.</div> : (
         <table className="grid"><tbody>{hosts.map((host) => (

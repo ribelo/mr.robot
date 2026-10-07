@@ -43,8 +43,8 @@ function changed(): void {
       { label: `${config.name}: ${state}`, enabled: false },
       ...(sessions > 0 ? [{ label: `${sessions} robot browser session(s)`, enabled: false }] : []),
       { type: 'separator' },
-      { label: 'Open Mr. Robot', enabled: config.server !== null, click: () => { if (config.server !== null) void shell.openExternal(config.server) } },
-      { label: 'Settings…', click: () => openWindow() },
+      { label: 'Open Mr. Robot', click: () => openWindow() },
+      { label: 'This computer…', enabled: config.server !== null, click: () => openWindow('#/this-computer') },
       { type: 'separator' },
       { label: 'Quit', click: () => { link?.stop(); app.quit() } },
     ]))
@@ -57,14 +57,26 @@ function setState(next: LinkState, why?: string): void {
   changed()
 }
 
-function openWindow(): void {
-  if (window !== undefined && !window.isDestroyed()) {
-    window.show()
-    window.focus()
-    return
+/** The app window is Mr. Robot (hs-pyn0): the server's interface, or the address prompt on first start. */
+function openWindow(path = ''): void {
+  if (window === undefined || window.isDestroyed()) {
+    window = new BrowserWindow({ width: 1280, height: 860, title: 'Mr. Robot', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true } })
+    // Links to other sites open in the browser, not in the app window.
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      void shell.openExternal(url)
+      return { action: 'deny' }
+    })
   }
-  window = new BrowserWindow({ width: 520, height: 520, title: 'Mr. Robot host', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true } })
-  void window.loadFile(join(__dirname, 'window.html'))
+  if (config.server === null) void window.loadFile(join(__dirname, 'window.html'))
+  else void window.loadURL(`${config.server}/${path}`)
+  window.show()
+  window.focus()
+}
+
+/** The bridge answers only pages of the configured server, or the local address prompt. */
+function trusted(event: { senderFrame?: { url: string } | null }): boolean {
+  const url = event.senderFrame?.url ?? ''
+  return url.startsWith('file://') || (config.server !== null && url.startsWith(`${config.server}/`))
 }
 
 function connect(): void {
@@ -105,27 +117,34 @@ function applyAutostart(enabled: boolean): void {
   writeFileSync(file, `[Desktop Entry]\nType=Application\nName=Mr. Robot host\nExec=${exec} --hidden\nX-GNOME-Autostart-enabled=true\n`)
 }
 
-ipcMain.handle('state', () => snapshot())
+ipcMain.handle('state', (event) => (trusted(event) ? snapshot() : null))
 
-ipcMain.handle('save', (_event, server: string, name: string, autostart: boolean) => {
-  let address: string
-  try {
-    address = normalizeServer(server)
-  } catch {
-    return { error: 'That is not a server address.' }
+ipcMain.handle('save', (event, change: { server?: string; name?: string; autostart?: boolean }) => {
+  if (!trusted(event)) return { error: 'not allowed' }
+  let server = config.server
+  if (change.server !== undefined) {
+    try {
+      server = normalizeServer(change.server)
+    } catch {
+      return { error: 'That is not a server address.' }
+    }
   }
-  if (name.trim() === '') return { error: 'Give this computer a name.' }
-  // A different server means a new pairing (hs-0cr2).
-  const moved = config.server !== null && config.server !== address
-  config = { ...config, server: address, name: name.trim(), autostart, ...(moved ? { hostId: null, token: null } : {}) }
+  if (change.name !== undefined && change.name.trim() === '') return { error: 'Give this computer a name.' }
+  // A different server means a new pairing there (hs-0cr2).
+  const moved = server !== config.server
+  config = { ...config, server, ...(change.name === undefined ? {} : { name: change.name.trim() }), ...(change.autostart === undefined ? {} : { autostart: change.autostart }), ...(moved ? { hostId: null, token: null } : {}) }
   configFile.write(config)
-  applyAutostart(autostart)
-  if (moved) connect()
+  if (change.autostart !== undefined) applyAutostart(change.autostart)
+  if (moved) {
+    connect()
+    openWindow(config.hostId === null ? '#/this-computer' : '')
+  }
   changed()
   return { ok: true }
 })
 
-ipcMain.handle('pair', async () => {
+ipcMain.handle('pair', async (event) => {
+  if (!trusted(event)) return { error: 'not allowed' }
   if (config.server === null) return { error: 'Enter the server address first.' }
   if (config.hostId !== null) {
     connect()
@@ -135,13 +154,18 @@ ipcMain.handle('pair', async () => {
   try {
     pairing = await startPairing(config.server, config.name)
     setState('pairing')
-    await shell.openExternal(pairing.approveUrl)
-    const paired = await waitForApproval(config.server, pairing.code, () => pairingCancelled)
-    config = { ...config, hostId: paired.hostId, token: paired.token }
-    configFile.write(config)
-    pairing = undefined
-    connect()
-    return { ok: true }
+    const code = pairing.code
+    // The signed-in page approves the code (hs-upeq); the token comes back here, never to the page.
+    void waitForApproval(config.server, code, () => pairingCancelled).then((paired) => {
+      config = { ...config, hostId: paired.hostId, token: paired.token }
+      configFile.write(config)
+      pairing = undefined
+      connect()
+    }).catch((error: unknown) => {
+      pairing = undefined
+      setState('unpaired', error instanceof Error ? error.message : String(error))
+    })
+    return { ok: true, code }
   } catch (error) {
     pairing = undefined
     setState('unpaired', error instanceof Error ? error.message : String(error))
@@ -149,13 +173,14 @@ ipcMain.handle('pair', async () => {
   }
 })
 
-ipcMain.handle('unpair', async () => {
+ipcMain.handle('unpair', async (event) => {
+  if (!trusted(event)) return { error: 'not allowed' }
   pairingCancelled = true
   link?.stop()
   link = undefined
   config = { ...config, hostId: null, token: null }
   configFile.write(config)
-  setState('unpaired', 'Unpaired here; remove it from your profile in Mr. Robot as well if it is still listed.')
+  setState('unpaired', 'Unpaired.')
   return { ok: true }
 })
 
@@ -168,6 +193,6 @@ void app.whenReady().then(() => {
   if (config.autostart) applyAutostart(true)
   connect()
   changed()
-  // First start, or not paired yet: the window asks for the server address (hs-ntbd).
-  if (config.server === null || config.hostId === null || !process.argv.includes('--hidden')) openWindow()
+  // At login it starts in the tray; otherwise (and on first start) the window opens.
+  if (config.server === null || !process.argv.includes('--hidden')) openWindow()
 })

@@ -3,55 +3,31 @@
 <head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'" />
-<title>Mr. Robot host</title>
+<title>Mr. Robot</title>
 <style>
-  body { font: 14px system-ui, sans-serif; background: #1d1d1f; color: #eee; margin: 0; padding: 22px; }
-  h1 { font-size: 17px; margin: 0 0 4px; }
-  p { color: #aaa; margin: 4px 0 14px; line-height: 1.4; }
-  label { display: block; margin: 12px 0 4px; color: #ccc; }
-  input[type=text] { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid #444; background: #2a2a2c; color: #eee; font: inherit; }
-  .row { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
-  button { padding: 8px 14px; border-radius: 8px; border: 1px solid #555; background: #333; color: #eee; font: inherit; cursor: pointer; }
-  button.primary { background: #eee; color: #111; border-color: #eee; }
-  .status { padding: 10px 12px; border-radius: 10px; background: #2a2a2c; margin-top: 16px; }
-  .code { font: 600 22px ui-monospace, monospace; letter-spacing: 2px; margin: 6px 0; }
-  .muted { color: #999; font-size: 12.5px; }
+  body { font: 15px system-ui, sans-serif; background: #1d1d1f; color: #eee; margin: 0; display: grid; place-items: center; height: 100vh; }
+  form { width: min(440px, 90vw); }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p { color: #aaa; margin: 0 0 18px; line-height: 1.45; }
+  input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid #444; background: #2a2a2c; color: #eee; font: inherit; }
+  button { margin-top: 14px; padding: 9px 16px; border-radius: 10px; border: 0; background: #eee; color: #111; font: inherit; cursor: pointer; }
+  .error { color: #f99; margin-top: 10px; min-height: 1em; }
 </style>
 </head>
 <body>
-<h1>Mr. Robot on this computer</h1>
-<p>Lets the robots you grant it use this computer: its files, a shell as you, and its Chrome. It connects out to your Mr. Robot server; nothing listens here.</p>
-<label for="server">Mr. Robot server address</label>
-<input id="server" type="text" placeholder="https://your-mr-robot.example" autocomplete="off" />
-<label for="name">Name of this computer</label>
-<input id="name" type="text" />
-<label class="muted"><input id="autostart" type="checkbox" /> Start when I log in</label>
-<div class="row"><button id="save" class="primary">Save and pair</button><button id="unpair">Unpair</button></div>
-<div id="status" class="status">…</div>
+<form id="form">
+  <h1>Mr. Robot</h1>
+  <p>Enter the address of your Mr. Robot server. You sign in on the next screen with your e-mail code, as on the web.</p>
+  <input id="server" type="text" placeholder="https://your-mr-robot.example" autocomplete="off" autofocus />
+  <button type="submit">Continue</button>
+  <div id="error" class="error"></div>
+</form>
 <script>
-  const $ = (id) => document.getElementById(id)
-  let filled = false
-  function render(state) {
-    if (!filled) { $('server').value = state.server ?? ''; $('name').value = state.name; $('autostart').checked = state.autostart; filled = true }
-    $('unpair').style.display = state.hostId ? '' : 'none'
-    const lines = {
-      unpaired: state.server ? 'Not paired yet.' : 'Enter the address of your Mr. Robot server to start.',
-      pairing: 'Approve this computer in the browser window that opened (sign in with your e-mail code if asked).',
-      connecting: 'Connecting…', online: 'Connected. Robots you grant this computer can use it.', offline: 'Offline, retrying…',
-    }
-    $('status').innerHTML = '<b>' + (lines[state.state] ?? state.state) + '</b>' +
-      (state.code ? '<div class="code">' + state.code + '</div><div class="muted">Opened ' + state.approveUrl + '</div>' : '') +
-      (state.detail ? '<div class="muted">' + state.detail + '</div>' : '') +
-      (state.sessions ? '<div class="muted">' + state.sessions + ' robot browser session(s) open</div>' : '')
+  document.getElementById('form').onsubmit = async (event) => {
+    event.preventDefault()
+    const result = await window.mrRobotHost.save({ server: document.getElementById('server').value })
+    if (result && result.error) document.getElementById('error').textContent = result.error
   }
-  $('save').onclick = async () => {
-    const result = await window.host.save($('server').value, $('name').value, $('autostart').checked)
-    if (result && result.error) { $('status').textContent = result.error; return }
-    await window.host.pair()
-  }
-  $('unpair').onclick = () => window.host.unpair()
-  window.host.onChange(render)
-  window.host.state().then(render)
 </script>
 </body>
 </html>
