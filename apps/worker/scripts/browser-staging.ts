@@ -15,7 +15,13 @@ try {
     if ((await fetch(`${url}/fixture`).catch(() => undefined))?.ok === true) break
     await new Promise((resolve) => setTimeout(resolve, 2000))
   }
-  const body = await (await fetch(`${url}/run`)).text()
+  // The edge can still answer "Script not found" right after the fixture did; try the run a few times.
+  let body = ''
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    body = await (await fetch(`${url}/run`)).text()
+    if (!body.includes('Script not found')) break
+    await new Promise((resolve) => setTimeout(resolve, 5000))
+  }
   let report: Record<string, unknown>
   try {
     report = JSON.parse(body) as Record<string, unknown>
