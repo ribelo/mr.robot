@@ -6,7 +6,7 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 92 works, 8 partial, 0 not done.
+Totals: 93 works, 7 partial, 0 not done.
 
 ## Partial or not done
 
@@ -17,7 +17,6 @@ Totals: 92 works, 8 partial, 0 not done.
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
 - 84 robot-naul, partial: Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23)
 - 95 robot-cmz9, partial (no images): Live; images not shown (Robots store no image attachments)
-- 96 robot-gq88, partial (search not tried live): robot-trajectory.test.tsx (real session fixture); search not tried live on a long session
 
 ## Broken until the review, fixed 2026-10-06/07
 
@@ -142,7 +141,7 @@ Suites on that build: worker 124, web 11, infra 1, dependency lint, and the stag
 | 93 | robot-qhll | Pause/Resume/Delete routine | Live | works |
 | 94 | robot-3ioa | DSH trajectory ledger and strip | Live | works |
 | 95 | robot-cmz9 | Record inspector | Live; images not shown (Robots store no image attachments) | partial (no images) |
-| 96 | robot-gq88 | Search and paging | robot-trajectory.test.tsx (real session fixture); search not tried live on a long session | partial (search not tried live) |
+| 96 | robot-gq88 | Search and paging | Live: searching "pong" in Mr. Robot's trajectory narrowed it to the Turn with Verifier's message and highlighted it in the strip; paging in robot-trajectory.test.tsx | works |
 | 97 | robot-s54i | Code program with nested calls | Live | works |
 | 98 | robot-gr94 | Collapsed tool activity and "Using … now" | Live: "Used a code program, routine create" lines | works |
 | 99 | robot-n7th | Failure as blocked state with plain line and Try again | list-and-routines.test.ts, settings-flow.test.ts (real DOs); the earlier live failure now shows the plain line | works |
