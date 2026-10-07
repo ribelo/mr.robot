@@ -1,6 +1,6 @@
 /**
  * Browser Rendering integration test on staging (ticket 08): deploy the staging Worker, run the
- * production driver there against a fixture page, check the result, delete the Worker.
+ * production driver there against a fixture page, check the result (the Worker stays deployed).
  * Needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
  */
 import { execFileSync } from 'node:child_process'
@@ -17,10 +17,11 @@ try {
   }
   // The edge can still answer "Script not found" right after the fixture did; try the run a few times.
   let body = ''
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  // Browser Rendering may still get "connection reset" from the new address for a while; retry that too.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     body = await (await fetch(`${url}/run`)).text()
-    if (!body.includes('Script not found')) break
-    await new Promise((resolve) => setTimeout(resolve, 5000))
+    if (!body.includes('Script not found') && !body.includes('ERR_CONNECTION_RESET')) break
+    await new Promise((resolve) => setTimeout(resolve, 20_000))
   }
   let report: Record<string, unknown>
   try {
@@ -39,8 +40,8 @@ try {
     ['streams screencast frames for the live view', Number(report['screencastFrames']) > 0],
     ['takeover typing reaches the page', report['takeoverTyped'] === 'Typed by a person'],
     ['takeover tap reaches the page', report['takeoverClicked'] === 'Signed in'],
-    ['a page left running is reattached and its notification read', report['watchReattached'] === true && JSON.stringify(report['watchNotifications']).includes('Out for delivery')],
-    ['a page opened after reattaching is watched too', JSON.stringify(report['watchAfterReattach']).includes('Out for delivery')],
+    ['a page left running is reattached and its notification read', report['watchReattached'] === true && String(JSON.stringify(report['watchNotifications'])).includes('Out for delivery')],
+    ['a page opened after reattaching is watched too', String(JSON.stringify(report['watchAfterReattach'])).includes('Out for delivery')],
     ['a block page is recognised', report['blockPage'] === true],
     ['a real bot check (DuckDuckGo) is recognised as a CAPTCHA', report['botCheck'] === 'bot check'],
     ['web search without a key returns real results', Number(report['searchCount']) >= 3 && /^https?:\/\/(?!www\.bing\.com)/.test(String(report['searchFirst']))],
@@ -48,5 +49,6 @@ try {
   for (const [name, ok] of checks) console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`)
   if (checks.some(([, ok]) => !ok)) process.exitCode = 1
 } finally {
-  execFileSync('pnpm', ['exec', 'wrangler', 'delete', '-c', config, '--force'], { stdio: 'ignore' })
+  // The staging Worker stays deployed between runs: a fresh workers.dev address is often not
+  // reachable from Browser Rendering for minutes, and an idle Worker costs nothing.
 }
