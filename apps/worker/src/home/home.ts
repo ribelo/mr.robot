@@ -340,8 +340,8 @@ const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ admin view (robot-x26m, robot-1rap, robot-bvme)
 
-type SkillSql = { name: string; description: string; source: 'git' | 'robot'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number }
-const skillFromSql = (row: SkillSql): SkillView => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at })
+type SkillSql = { name: string; description: string; source: 'git' | 'robot' | 'home'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number; edited?: number }
+const skillFromSql = (row: SkillSql): SkillView => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at, edited: row.edited === 1 })
 
 const adminView = (adminId: string) => Effect.gen(function* () {
   const sql = yield* Sql
@@ -446,7 +446,7 @@ const storeSkillFiles = (name: string, files: ReadonlyArray<{ path: string; body
   await Promise.all(files.map((file) => env.FILES.put(`skills/${name}/${file.path}`, file.body)))
 })
 
-const upsertSkill = (name: string, description: string, source: 'git' | 'robot', visibility: 'home' | 'private', ownerId: string | null) => Effect.gen(function* () {
+const upsertSkill = (name: string, description: string, source: 'git' | 'robot' | 'home', visibility: 'home' | 'private', ownerId: string | null) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run(
     `INSERT INTO skill (name, description, source, visibility, owner_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -467,11 +467,14 @@ const syncSkills = Effect.gen(function* () {
   const files = yield* fetchRepository(repository, token).pipe(Effect.mapError((error) => invalid(error.message)))
   const found = skillsInTree(files, repository.path)
   const previous = (yield* sql.all<{ name: string }>("SELECT name FROM skill WHERE source = 'git'")).map((row) => row.name)
+  // A skill edited here is never overwritten or removed by a sync (rb-t937).
+  const edited = new Set((yield* sql.all<{ name: string }>('SELECT name FROM skill WHERE edited = 1')).map((row) => row.name))
   for (const skill of found) {
+    if (edited.has(skill.name)) continue
     yield* storeSkillFiles(skill.name, skill.files)
     yield* upsertSkill(skill.name, skill.description, 'git', 'home', null)
   }
-  for (const gone of previous.filter((name) => !found.some((skill) => skill.name === name))) {
+  for (const gone of previous.filter((name) => !found.some((skill) => skill.name === name) && !edited.has(name))) {
     yield* sql.run("DELETE FROM skill WHERE name = ? AND source = 'git'", gone)
   }
   return { synced: found.map((skill) => skill.name) }
@@ -484,6 +487,28 @@ const publishSkill = (ownerId: string, name: string, description: string, conten
   if (existing !== undefined && (existing.source === 'git' || existing.owner_id !== ownerId)) return yield* invalid(`a skill named "${name}" already exists`)
   yield* storeSkillFiles(name, [{ path: 'SKILL.md', body: new TextEncoder().encode(content) }])
   yield* upsertSkill(name, description, 'robot', visibility, ownerId)
+})
+
+/** Write a global skill from the UI or Mr. Robot (rb-5ku3, rb-axxy); an imported one becomes "edited". */
+const saveSkill = (name: string, description: string, content: string, by: string | null) => Effect.gen(function* () {
+  const sql = yield* Sql
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) return yield* invalid('a skill name is lowercase letters, digits and dashes')
+  const existing = yield* sql.first<{ source: string; visibility: string; owner_id: string | null }>('SELECT source, visibility, owner_id FROM skill WHERE name = ?', name)
+  yield* storeSkillFiles(name, [{ path: 'SKILL.md', body: new TextEncoder().encode(content) }])
+  if (existing === undefined) {
+    yield* upsertSkill(name, description, 'home', 'home', by)
+  } else {
+    yield* sql.run('UPDATE skill SET description = ?, edited = CASE WHEN source = \'git\' THEN 1 ELSE edited END, updated_at = ? WHERE name = ?', description, Date.now(), name)
+  }
+})
+
+const deleteSkill = (name: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* sql.run('DELETE FROM skill WHERE name = ?', name)
+  yield* remote(async (env) => {
+    const existing = await env.FILES.list({ prefix: `skills/${name}/` })
+    if (existing.objects.length > 0) await env.FILES.delete(existing.objects.map((object) => object.key))
+  })
 })
 
 const skillContent = (memberId: string, name: string, path = 'SKILL.md') => Effect.gen(function* () {
@@ -752,9 +777,21 @@ export class Home extends DurableObject<Env> {
       name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
       owner_id TEXT, updated_at INTEGER NOT NULL
     )`)
+    try { sql.exec('ALTER TABLE skill ADD COLUMN edited INTEGER NOT NULL DEFAULT 0') } catch { /* added before */ }
     sql.exec('CREATE TABLE IF NOT EXISTS model_catalog (provider TEXT PRIMARY KEY, models TEXT, fetched_at INTEGER, error TEXT)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_secret (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
+    // v1.1 (rb-a70a): the library starts empty with no sync source; the source set before and its skills go, once.
+    if (sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'skills-reset-v1.1'").toArray().length === 0) {
+      const imported = sql.exec<{ name: string }>("SELECT name FROM skill WHERE source = 'git'").toArray().map((row) => row.name)
+      sql.exec("DELETE FROM skill WHERE source = 'git'")
+      sql.exec("DELETE FROM setting WHERE k IN ('skillRepository', 'skillRepositoryToken')")
+      sql.exec("INSERT INTO setting (k, v) VALUES ('skills-reset-v1.1', '1')")
+      if (imported.length > 0) ctx.waitUntil(Promise.all(imported.map(async (name) => {
+        const objects = await env.FILES.list({ prefix: `skills/${name}/` })
+        if (objects.objects.length > 0) await env.FILES.delete(objects.objects.map((object) => object.key))
+      })))
+    }
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map() })))
   }
 
@@ -788,6 +825,8 @@ export class Home extends DurableObject<Env> {
   syncSkills(): Promise<{ synced: string[] }> { return this.run(syncSkills) }
   publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private'): Promise<void> { return this.run(publishSkill(ownerId, name, description, content, visibility)) }
   skillContent(memberId: string, name: string, path = 'SKILL.md'): Promise<string | null> { return this.run(skillContent(memberId, name, path)) }
+  saveSkill(name: string, description: string, content: string, by: string | null): Promise<void> { return this.run(saveSkill(name, description, content, by)) }
+  deleteSkill(name: string): Promise<void> { return this.run(deleteSkill(name)) }
   sharedSecrets(): Promise<Array<{ name: string; ownerId: string; updatedAt: number }>> { return this.run(sharedSecrets) }
   putLogin(memberId: string, name: string, patch: Partial<LoginEntry>, shared: boolean): Promise<void> { return this.run(putLogin(memberId, name, patch, shared)) }
   resolveLogin(memberId: string, name: string): Promise<LoginEntry | null> { return this.run(resolveLogin(memberId, name)) }

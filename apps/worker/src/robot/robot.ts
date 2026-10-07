@@ -61,7 +61,7 @@ import { fileTools, memberFileTools } from '../agent/tools/files.ts'
 import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { webPlugin } from '../agent/web.ts'
-import { skillProposalTools, skillsPlugin } from '../agent/skills.ts'
+import { skillFrontmatter, skillProposalTools, skillsPlugin } from '../agent/skills.ts'
 import { browserTools, type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
 import { takeoverTools, type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
@@ -636,6 +636,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       plugins.push(skillsPlugin({
         granted: () => this.home().loadableSkills(config.ownerId, this.store.grants().skills),
         content: async (name) => this.store.grants().skills.includes(name) ? this.home().skillContent(config.ownerId, name) : null,
+        local: () => this.localSkills(),
+        localContent: (name) => this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null),
       }))
     }
     return plugins
@@ -1378,6 +1380,46 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${this.owner().name} edited ${path}.`, Date.now())
     await this.changed()
     return this.fileContent(path)
+  }
+
+/** The Robot's local skills: skills/<name>/SKILL.md in its Workspace (rb-dkt1). */
+  private async localSkills(): Promise<Array<{ name: string; description: string }>> {
+    const entries = await this.run(this.workspace.list('skills'))
+    const names = [...new Set(entries.flatMap((entry) => /^skills\/([a-z0-9][a-z0-9-]*)\/SKILL\.md$/.exec(entry.path)?.[1] ?? []))]
+    return Promise.all(names.map(async (name) => ({ name, description: skillFrontmatter((await this.run(this.workspace.readText(`skills/${name}/SKILL.md`))) ?? '').description })))
+  }
+
+  /** Whether this Robot may change the Home library directly (Mr. Robot, ticket 10). */
+  protected editsGlobalSkills(): boolean {
+    return false
+  }
+
+  async writeSkill(name: string, content: string): Promise<{ path: string; scope: 'local' | 'global' }> {
+    const config = this.store.requireConfig()
+    const global = (await this.home().skills(config.ownerId)).find((skill) => skill.name === name)
+    if (global !== undefined) {
+      if (!this.editsGlobalSkills()) throw new Error(`"${name}" is a skill from the Home library and is read-only for you (rb-krq2). Write a local skill with another name, or ask your owner to change it.`)
+      await this.home().saveSkill(name, skillFrontmatter(content).description || global.description, content, config.ownerId)
+      return { path: `library: ${name}`, scope: 'global' }
+    }
+    const path = `skills/${name}/SKILL.md`
+    await this.run(this.workspace.write(path, content, 'text/markdown; charset=utf-8'))
+    return { path, scope: 'local' }
+  }
+
+  async promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }> {
+    const content = await this.run(this.workspace.readText(`skills/${name}/SKILL.md`))
+    if (content === undefined) throw new Error(`You have no local skill "${name}". Write it with skill_write first.`)
+    const description = skillFrontmatter(content).description
+    const proposal = this.propose('skill', `Publish the skill "${name}"`, { skill: { name, description }, content, visibility })
+    return { proposalId: proposal.id }
+  }
+
+  /** The owner deleted a file (a local skill, an old note). */
+  async deleteFile(path: string): Promise<void> {
+    await this.run(this.workspace.remove(path))
+    const edits = this.store.get<string[]>('owner-edits') ?? []
+    this.store.set('owner-edits', [...new Set([...edits, `${path} (deleted)`])])
   }
 
   /** Granted login entries and whether each belongs to the open page (rb-vpes). */

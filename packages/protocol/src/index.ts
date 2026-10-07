@@ -408,10 +408,13 @@ export interface AdminView {
 export interface SkillView {
   readonly name: string
   readonly description: string
-  readonly source: 'git' | 'robot'
+  /** git: imported by sync; robot: promoted from a Robot's local skill; home: written in the UI or by Mr. Robot. */
+  readonly source: 'git' | 'robot' | 'home'
   readonly visibility: 'home' | 'private'
   readonly ownerId: string | null
   readonly updatedAt: number
+  /** An imported skill changed here; later syncs leave it as it is (rb-t937). */
+  readonly edited?: boolean
 }
 
 export const SkillRepositoryInput = Schema.Struct({

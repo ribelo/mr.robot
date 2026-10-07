@@ -104,8 +104,12 @@ export function Admin() {
       )}
 
       <h2>Skill library</h2>
-      <SkillRepository view={view} onSave={(input) => run(() => api.setSkillRepository(input), 'Saved.')} onSync={() => run(async () => { const result = await api.syncSkills(); setMessage(`Synced ${result.synced.length} skills.`) })} />
-      <table className="grid"><tbody>{view.skills.map((skill) => <tr key={skill.name}><td>{skill.name}</td><td className="muted">{skill.description}</td><td>{skill.source === 'git' ? 'from Git' : `from a Robot (${skill.visibility})`}</td></tr>)}</tbody></table>
+      <SkillLibrary view={view} onChanged={() => run(async () => undefined, 'Saved.')} />
+      <details className="prompt-section">
+        <summary>Sync from a Git repository (optional)</summary>
+        <SkillRepository view={view} onSave={(input) => run(() => api.setSkillRepository(input), 'Saved.')} onSync={() => run(async () => { const result = await api.syncSkills(); setMessage(`Synced ${result.synced.length} skills.`) })} />
+        <div className="muted">Imported skills stay editable; a skill you edit here is kept as it is by later syncs.</div>
+      </details>
     </div>
   )
 }
@@ -188,6 +192,55 @@ function VpnConfig({ configured, onSave }: { configured: boolean; onSave: (confi
         {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
         <button type="button" className="button button-primary" disabled={config.trim() === ''} onClick={() => void onSave(config).then(() => setConfig(''))}>Save</button>
       </div>
+    </div>
+  )
+}
+
+/** The Home library (rb-5ku3): every global skill opens in an editor; create and delete. */
+function SkillLibrary({ view, onChanged }: { view: AdminView; onChanged: () => Promise<void> }) {
+  const [editing, setEditing] = useState<{ name: string; description: string; content: string; isNew: boolean } | null>(null)
+  const [error, setError] = useState<string>()
+  const open = async (name: string, description: string) => setEditing({ name, description, content: (await api.skill(name)).content, isNew: false })
+  const save = async () => {
+    if (editing === null) return
+    try {
+      await api.saveSkill(editing.name, editing.description, editing.content)
+      setEditing(null)
+      setError(undefined)
+      await onChanged()
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'could not save')
+    }
+  }
+  return (
+    <div className="form">
+      {view.skills.length === 0 ? <div className="muted">The library is empty. Robots get only the skills you put here and grant them.</div> : (
+        <table className="grid"><tbody>{view.skills.map((skill) => (
+          <tr key={skill.name}>
+            <td>{skill.name}</td>
+            <td className="muted">{skill.description}</td>
+            <td className="muted">{skill.source === 'git' ? (skill.edited === true ? 'from Git, edited' : 'from Git') : skill.source === 'robot' ? `from a Robot (${skill.visibility})` : 'written here'}</td>
+            <td><span className="form inline">
+              <button type="button" className="link" onClick={() => void open(skill.name, skill.description)}>Edit</button>
+              <button type="button" className="link" onClick={() => { if (confirm(`Delete the skill ${skill.name}?`)) void api.deleteSkill(skill.name).then(onChanged) }}>Delete</button>
+            </span></td>
+          </tr>
+        ))}</tbody></table>
+      )}
+      {editing === null
+        ? <div><button type="button" className="button" onClick={() => setEditing({ name: '', description: '', content: '---\nname: \ndescription: \n---\n\n', isNew: true })}>New skill</button></div>
+        : (
+          <div className="form login-form">
+            <label>Name<input value={editing.name} disabled={!editing.isNew} placeholder="lowercase-with-dashes" onChange={(event) => setEditing({ ...editing, name: event.target.value })} /></label>
+            <label>Description<input value={editing.description} onChange={(event) => setEditing({ ...editing, description: event.target.value })} /></label>
+            <label>SKILL.md<textarea className="file-text" style={{ minHeight: '40vh' }} value={editing.content} spellCheck={false} onChange={(event) => setEditing({ ...editing, content: event.target.value })} /></label>
+            <div className="question-actions">
+              {error === undefined ? null : <span className="muted">{error}</span>}
+              <button type="button" className="button" onClick={() => setEditing(null)}>Cancel</button>
+              <button type="button" className="button button-primary" disabled={editing.name === '' || editing.description === ''} onClick={() => void save()}>Save</button>
+            </div>
+          </div>
+        )}
     </div>
   )
 }

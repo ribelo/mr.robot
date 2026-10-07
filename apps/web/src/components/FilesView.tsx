@@ -22,8 +22,17 @@ export function FilesView({ robotId, path, canEdit, onOpen }: { robotId: string;
   if (path !== null) return <FileEditor robotId={robotId} path={path} canEdit={canEdit} onBack={() => { onOpen(null); void refresh() }} />
   if (error !== undefined) return <div className="muted">{error}</div>
   if (files === undefined) return <div className="muted">Loading…</div>
+  const newSkill = async () => {
+    const name = prompt('Name of the new local skill (lowercase-with-dashes)')?.trim()
+    if (name === undefined || name === '') return
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) { setError('A skill name is lowercase letters, digits and dashes.'); return }
+    const path = `skills/${name}/SKILL.md`
+    await api.saveFile(robotId, path, `---\nname: ${name}\ndescription: What this skill is for, in one line.\n---\n\n# ${name}\n\nSteps the Robot follows.\n`)
+    onOpen(path)
+  }
   return (
     <div className="files">
+      {canEdit ? <div className="question-actions"><button type="button" className="button" onClick={() => void newSkill()}>New local skill</button></div> : null}
       {GROUPS.map(([group, title]) => {
         const inGroup = files.filter((file) => file.group === group)
         if (inGroup.length === 0) return null
@@ -77,6 +86,7 @@ function FileEditor({ robotId, path, canEdit, onBack }: { robotId: string; path:
           {editable ? (
             <div className="question-actions">
               {status === undefined ? null : <span className="muted">{status}</span>}
+              <button type="button" className="button" onClick={() => { if (confirm(`Delete ${path}?`)) void api.deleteFile(robotId, path).then(onBack) }}>Delete</button>
               <button type="button" className="button button-primary" disabled={text === file.text} onClick={() => void save()}>Save</button>
             </div>
           ) : <div className="muted">{canEdit ? file.note : 'Only the owner edits this Robot\'s files.'}</div>}

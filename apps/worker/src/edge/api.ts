@@ -125,6 +125,18 @@ export const api = new Router<ApiContext>()
     return { ok: true, configured: config !== null && config.trim() !== '' }
   }))
   .on('POST', '/api/admin/models/refresh', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).refreshCatalogs(c.member.id)))))
+  .on('GET', '/api/skills/:name', (c, { name }) => Effect.gen(function* () {
+    const content = yield* call(() => home(c.env).skillContent(c.member.id, name))
+    if (content === null) return yield* Effect.fail(notFound(`no skill "${name}"`))
+    return { name, content }
+  }))
+  .on('PUT', '/api/admin/skills/:name', (c, { name }) => Effect.gen(function* () {
+    yield* admin(c)
+    const input = yield* decodeBody(c.request, Schema.Struct({ description: Schema.String, content: Schema.String }))
+    yield* call(() => home(c.env).saveSkill(name, input.description, input.content, c.member.id)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return { ok: true }
+  }))
+  .on('DELETE', '/api/admin/skills/:name', (c, { name }) => admin(c).pipe(Effect.andThen(call(() => home(c.env).deleteSkill(name))), Effect.as({ ok: true })))
   .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message))))))
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
@@ -271,6 +283,13 @@ export const api = new Router<ApiContext>()
     if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
     const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
     return yield* call(() => robot(c, id).saveFile(path, content))
+  }))
+  .on('DELETE', '/api/robots/:id/file', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    yield* call(() => robot(c, id).deleteFile(path))
+    return { ok: true }
   }))
   .on('GET', '/api/robots/:id/prompt', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).promptPreview()))))
   .on('POST', '/api/robots/:id/retry', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).retry())), Effect.map((retried) => ({ retried }))))

@@ -94,7 +94,8 @@ describe('the Home skill library', () => {
   it('publishes a Robot-written skill once the owner approves it; a private one stays with its owner (robot-lszy, robot-jqfw)', async () => {
     const id = await robotWithSkills([])
     scripts.set(id, [
-      { calls: [{ name: 'propose_skill', args: { name: 'allegro-cart', description: 'Fill an Allegro cart', content: '---\nname: allegro-cart\n---\nSteps.', visibility: 'private' } }] },
+      { calls: [{ name: 'skill_write', args: { name: 'allegro-cart', content: '---\nname: allegro-cart\ndescription: Fill an Allegro cart\n---\nSteps.' } }] },
+      { calls: [{ name: 'propose_skill', args: { name: 'allegro-cart', visibility: 'private' } }] },
       { text: 'I proposed a skill.' },
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'remember how you did that' } })
@@ -109,5 +110,40 @@ describe('the Home skill library', () => {
     await settle(id)
     expect((await api<{ skills: SkillView[] }>(ANNA, '/api/skills')).body.skills).toEqual([expect.objectContaining({ name: 'allegro-cart', source: 'robot', visibility: 'private' })])
     expect((await api<{ skills: SkillView[] }>(BEN, '/api/skills')).body.skills).toEqual([])
+  })
+
+  it('lets a Robot write its own local skills and use them; a library skill is read-only for it (rb-dkt1, rb-kkqu, rb-krq2)', async () => {
+    await syncLibrary()
+    const id = await robotWithSkills(['tdd'])
+    scripts.set(id, [
+      { calls: [{ name: 'skill_write', args: { name: 'invoices', content: '---\nname: invoices\ndescription: Pay the monthly invoices\n---\nOpen the bank, pay each invoice.' } }] },
+      { calls: [{ name: 'skill_write', args: { name: 'tdd', content: '---\nname: tdd\ndescription: mine now\n---\nx' } }] },
+      { text: 'Done.' },
+    ])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'write the skills' } })
+    await settle(id)
+    const results = requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => JSON.stringify(message.content))
+    expect(results[0]).toContain('skills/invoices/SKILL.md')
+    expect(results[1]).toContain('read-only for you')
+    scripts.set(id, [{ text: 'ok' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'which skills?' } })
+    await settle(id)
+    const request = JSON.stringify(requests.get(id)!.at(-1))
+    expect(request).toContain('Pay the monthly invoices')
+    expect(request).toContain('Test-driven development')
+  })
+
+  it('keeps an edit made in the UI across later syncs; create and delete global skills (rb-5ku3, rb-t937)', async () => {
+    await syncLibrary()
+    await api(ANNA, '/api/admin/skills/tdd', { method: 'PUT', body: { description: 'My TDD', content: '---\nname: tdd\ndescription: My TDD\n---\nMy way.' } })
+    await syncLibrary()
+    const { skills } = (await api<{ skills: SkillView[] }>(ANNA, '/api/skills')).body
+    expect(skills.find((skill) => skill.name === 'tdd')).toMatchObject({ description: 'My TDD', edited: true })
+    expect((await api<{ content: string }>(ANNA, '/api/skills/tdd')).body.content).toContain('My way.')
+    await api(ANNA, '/api/admin/skills/checklist', { method: 'PUT', body: { description: 'A new one', content: '---\nname: checklist\ndescription: A new one\n---\n1.' } })
+    expect((await api<{ skills: SkillView[] }>(BEN, '/api/skills')).body.skills.map((skill) => skill.name)).toContain('checklist')
+    await api(ANNA, '/api/admin/skills/checklist', { method: 'DELETE' })
+    expect((await api<{ skills: SkillView[] }>(BEN, '/api/skills')).body.skills.map((skill) => skill.name)).not.toContain('checklist')
+    expect((await api(BEN, '/api/admin/skills/tdd', { method: 'PUT', body: { description: 'x', content: 'x' } })).status).toBe(403)
   })
 })
