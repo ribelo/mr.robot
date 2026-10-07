@@ -26,6 +26,7 @@ async function robotWith(tools: string[]): Promise<string> {
 describe('conversation: streaming and Work details (v1.3 ticket 03)', () => {
   it('pushes the reply text over the live socket while it is produced (pl-jzr7)', async () => {
     const id = await robotWith([])
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true } })
     const response = await SELF.fetch(`https://mr-robot.test/api/robots/${id}/ws`, { headers: { upgrade: 'websocket', 'x-dev-identity': ANNA } })
     const socket = response.webSocket!
     socket.accept()
