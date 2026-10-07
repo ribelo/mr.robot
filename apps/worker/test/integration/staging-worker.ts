@@ -99,7 +99,16 @@ export default {
       const again = await driver.attach(sessionId)
       report.watchReattached = again !== undefined
       report.watchNotifications = again === undefined ? [] : await again.takeNotifications()
-      await again?.close()
+      // A page opened after reattaching (as in the Robot's next Turn) must be watched too.
+      if (again !== undefined) {
+        await again.goto(`${url.origin}/notify`)
+        const id2 = again.sessionId()
+        await again.detach()
+        await new Promise((resolve) => setTimeout(resolve, 4000))
+        const third = await driver.attach(id2)
+        report.watchAfterReattach = third === undefined ? [] : await third.takeNotifications()
+        await third?.close()
+      }
     } catch (error) {
       report.watchError = error instanceof Error ? error.message : String(error)
     }

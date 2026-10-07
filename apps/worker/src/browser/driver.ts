@@ -81,6 +81,10 @@ export class RenderingDriver implements BrowserDriver {
         await browser.close().catch(() => undefined)
         return undefined
       }
+      // Scripts registered for new documents end with the connection that registered them: install
+      // the notification capture again for later navigations, and in the page already open.
+      await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
+      await page.evaluate(NOTIFICATION_CAPTURE).catch(() => undefined)
       return new RenderingPage(browser, page, {})
     } catch {
       return undefined
