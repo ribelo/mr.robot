@@ -136,6 +136,11 @@ const MIGRATIONS: Record<number, readonly string[]> = {
 
 export class RobotStore {
   constructor(private readonly storage: DurableObjectStorage) {
+    this.prepare()
+  }
+
+  /** Create the tables; also after a deletion wiped the storage, so the same object can be created again. */
+  prepare(): void {
     this.migrate()
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
   }

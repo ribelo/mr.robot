@@ -1,7 +1,7 @@
+import { ConfirmByName } from './ConfirmByName.tsx'
 import { useState, useEffect } from 'react'
 import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort, BrowserBackend } from '@mr-robot/protocol'
 import { ModelSelect } from './ModelSelect.tsx'
-import { ConfirmButton } from './RobotSheets.tsx'
 import { api } from '../api.ts'
 
 export interface AdvancedSettingsProps {
@@ -10,7 +10,8 @@ export interface AdvancedSettingsProps {
   readonly onSave: (patch: SettingsPatch) => Promise<void>
   readonly onPause: () => void
   readonly onResume: () => void
-  readonly onDelete: () => void
+  readonly onDelete: (confirm: string) => Promise<unknown>
+  readonly onClear: (confirm: string, memory: boolean) => Promise<unknown>
 }
 
 const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max']
@@ -19,8 +20,10 @@ const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max
  * What the Robot was given (robot-vqtw): model and effort, context budget, code mode,
  * compaction instruction, Grants, sharing, notifications and spend limit.
  */
-export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, onDelete }: AdvancedSettingsProps) {
+export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, onDelete, onClear }: AdvancedSettingsProps) {
   const settings = panel.settings
+  const [danger, setDanger] = useState<'delete' | 'clear'>()
+  const name = panel.summary.identity.name
   const [draft, setDraft] = useState(settings)
   const [saving, setSaving] = useState(false)
   const model = catalog.models.find((option) => option.provider === draft.model.provider && option.model === draft.model.model)
@@ -152,10 +155,22 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         {panel.summary.status === 'paused'
           ? <button type="button" className="button" onClick={onResume}>Resume</button>
           : <button type="button" className="button" onClick={onPause}>Pause</button>}
-        {mrRobot ? null : <ConfirmButton label="Delete" confirm="Delete this Robot" onConfirm={onDelete} />}
+        {panel.canEdit ? <button type="button" className="button button-danger" onClick={() => setDanger('clear')}>Clear history…</button> : null}
+        {mrRobot || !panel.canEdit ? null : <button type="button" className="button button-danger" onClick={() => setDanger('delete')}>Delete…</button>}
         <span className="spacer" />
         <button type="button" className="button button-primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
+      {danger === 'delete' ? (
+        <ConfirmByName title={`Delete ${name}`} name={name} action="Delete robot"
+          goes="The robot, its conversation, files, memory and routines are deleted, and other robots stop being able to message it."
+          onCancel={() => setDanger(undefined)} onConfirm={() => onDelete(name)} />
+      ) : danger === 'clear' ? (
+        <ConfirmByName title={`Clear ${name}'s history`} name={name} action="Clear history"
+          goes="The conversation and its history are deleted; the robot starts a fresh conversation."
+          stays="Its settings, grants, routines and files stay."
+          option={{ label: 'Also clear its memory', note: 'MEMORY.md, the memory bank and daily notes go back to empty.' }}
+          onCancel={() => setDanger(undefined)} onConfirm={async (memory) => { await onClear(name, memory); setDanger(undefined) }} />
+      ) : null}
     </div>
   )
 }

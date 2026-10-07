@@ -339,6 +339,54 @@ const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
   yield* syncMrRobots
 })
 
+// ------------------------------------------------------------------ deletion and reset (v1.3 ticket 06)
+
+/** Remove a Robot everywhere: its DO and files, its registry row, and every recipient grant naming it. */
+const destroyRobot = (robotId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* remote((env) => env.ROBOT.getByName(robotId).destroy())
+  yield* sql.run('DELETE FROM robot WHERE id = ?', robotId)
+  const others = yield* sql.all<{ id: string }>('SELECT id FROM robot')
+  yield* Effect.forEach(others, (other) => remote((env) => env.ROBOT.getByName(other.id).dropRecipient(robotId)).pipe(Effect.catch(() => Effect.void)), { concurrency: 8, discard: true })
+})
+
+/** The typed name must match exactly (pl-kehf). */
+const confirmed = (typed: string, name: string) => (typed.trim() === name.trim() ? Effect.void : invalid(`type "${name}" exactly to confirm`))
+
+/** Delete a Robot of this Member (pl-3uoy); Mr. Robot cannot be deleted. */
+const deleteRobot = (memberId: string, robotId: string, typed: string) => Effect.gen(function* () {
+  const found = yield* entry(robotId)
+  if (found === undefined || found.ownerId !== memberId) return yield* notFound('no such robot of yours')
+  if (found.kind === 'mr-robot') return yield* invalid('Mr. Robot cannot be deleted; clear its history instead')
+  yield* confirmed(typed, found.identity.name)
+  yield* destroyRobot(robotId)
+  yield* syncMrRobots
+})
+
+/** Clear a Robot's history (pl-05eu, pl-y228), memory too when asked. */
+const clearRobot = (memberId: string, robotId: string, typed: string, memory: boolean) => Effect.gen(function* () {
+  const found = yield* entry(robotId)
+  if (found === undefined || found.ownerId !== memberId) return yield* notFound('no such robot of yours')
+  yield* confirmed(typed, found.identity.name)
+  yield* remote((env) => env.ROBOT.getByName(robotId).clearHistory(memory))
+})
+
+/**
+ * Reset everything of this Member (pl-062x): every Robot (Mr. Robot is made again, fresh), their
+ * memory files, usage and list preferences. Logins, providers, hosts, members and the skill library stay.
+ */
+const resetMember = (memberId: string, typed: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const who = yield* member(memberId)
+  if (who === undefined) return yield* notFound('unknown member')
+  yield* confirmed(typed, who.name)
+  const own = yield* sql.all<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId)
+  yield* Effect.forEach(own, (robot) => destroyRobot(robot.id), { discard: true })
+  yield* remote((env) => env.MEMBER.getByName(memberId).resetData())
+  yield* bootstrapMrRobot(who)
+  yield* syncMrRobots
+})
+
 // ------------------------------------------------------------------ admin view (robot-x26m, robot-1rap, robot-bvme)
 
 type SkillSql = { name: string; description: string; source: 'git' | 'robot' | 'home'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number; edited?: number }
@@ -935,6 +983,9 @@ export class Home extends DurableObject<Env> {
   entry(robotId: string): Promise<RegistryEntry | undefined> { return this.run(entry(robotId)) }
   access(memberId: string, robotId: string): Promise<'owner' | 'shared' | null> { return this.run(access(memberId, robotId)) }
   robotChanged(changed: RegistryEntry): Promise<void> { return this.run(robotChanged(changed)) }
+  deleteRobot(memberId: string, robotId: string, typed: string): Promise<void> { return this.run(deleteRobot(memberId, robotId, typed)) }
+  clearRobot(memberId: string, robotId: string, typed: string, memory: boolean): Promise<void> { return this.run(clearRobot(memberId, robotId, typed, memory)) }
+  resetMember(memberId: string, typed: string): Promise<void> { return this.run(resetMember(memberId, typed)) }
   startingModel(memberId: string, wanted?: ModelChoice): Promise<ModelChoice> { return this.run(startingModel(memberId, wanted)) }
   createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> { return this.run(createRobot(ownerId, brief, model)) }
   syncMrRobots(): Promise<void> { return this.run(syncMrRobots) }

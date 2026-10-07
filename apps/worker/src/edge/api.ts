@@ -379,7 +379,21 @@ export const api = new Router<ApiContext>()
   .on('DELETE', '/api/robots/:id/routines/:routine', (c, { id, routine }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).removeRoutine(routine)))))
   .on('POST', '/api/robots/:id/pause', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).pause()))))
   .on('POST', '/api/robots/:id/resume', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).resume()))))
-  .on('DELETE', '/api/robots/:id', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).remove()))))
+  .on('DELETE', '/api/robots/:id', (c, { id }) => Effect.gen(function* () {
+    const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
+    yield* call(() => home(c.env).deleteRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return { ok: true }
+  }))
+  .on('POST', '/api/robots/:id/clear', (c, { id }) => Effect.gen(function* () {
+    const { confirm, memory } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String, memory: Schema.optional(Schema.Boolean) }))
+    yield* call(() => home(c.env).clearRobot(c.member.id, id, confirm, memory === true)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return { ok: true }
+  }))
+  .on('POST', '/api/me/reset', (c) => Effect.gen(function* () {
+    const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
+    yield* call(() => home(c.env).resetMember(c.member.id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return { ok: true }
+  }))
 
   // ------------------------------------------------------------ admin (robot-x26m, robot-1rap, robot-d2uv)
   .on('GET', '/api/admin', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).adminView(c.member.id)))))

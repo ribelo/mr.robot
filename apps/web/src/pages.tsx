@@ -162,9 +162,8 @@ function AdvancedPage({ id, onChanged }: { id: string; onChanged: () => void }) 
           onSave={(patch) => act(() => api.updateSettings(id, patch), 'Saved. Changes apply from the next Turn.')}
           onPause={() => void act(() => api.pause(id), 'Paused.')}
           onResume={() => void act(() => api.resume(id), 'Resumed.')}
-          onDelete={() => {
-            void act(() => api.remove(id)).then(() => go({ page: 'home' }))
-          }}
+          onDelete={async (confirm) => { await api.remove(id, confirm); onChanged(); go({ page: 'home' }) }}
+          onClear={async (confirm, memory) => { await api.clearHistory(id, confirm, memory); setMessage('History cleared.'); onChanged() }}
         />
       )}
     </div>

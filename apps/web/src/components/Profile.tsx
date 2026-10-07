@@ -1,3 +1,4 @@
+import { ConfirmByName } from './ConfirmByName.tsx'
 import { hostBridge } from './ThisComputer.tsx'
 import { WORK_DETAILS } from './WorkDetails.tsx'
 import { Hosts } from './Hosts.tsx'
@@ -18,6 +19,7 @@ export function Profile({ me, onChanged }: { me: Me; onChanged: () => void }) {
     <div className="form">
       <Preferences me={me} onChanged={onChanged} />
       <WorkDetailsSetting me={me} onChanged={onChanged} />
+      <ResetEverything me={me} />
       <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
       <Providers />
       <Secrets />
@@ -414,6 +416,29 @@ function WorkDetailsSetting({ me, onChanged }: { me: Me; onChanged: () => void }
         ))}
       </div>
       <div className="muted">{WORK_DETAILS.find((option) => option.id === value)?.note}</div>
+    </>
+  )
+}
+
+/** Reset everything (pl-062x): as if signing in for the first time, without entering credentials again. */
+function ResetEverything({ me }: { me: Me }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <h2>Reset everything</h2>
+      <div className="muted">Deletes all your robots, their conversations, files and memory, your memory files and usage, and starts a fresh Mr. Robot. Your logins, providers, computers, the Home's members and its skill library stay.</div>
+      <div><button type="button" className="button button-danger" onClick={() => setOpen(true)}>Reset everything…</button></div>
+      {open ? (
+        <ConfirmByName
+          title="Reset everything"
+          name={me.name}
+          goes="All your robots, conversations, robot files, memory files and usage are deleted. A fresh Mr. Robot starts."
+          stays="Logins, providers, computers, members and the skill library stay."
+          action="Reset everything"
+          onCancel={() => setOpen(false)}
+          onConfirm={async () => { await api.resetEverything(me.name); location.hash = '#/'; location.reload() }}
+        />
+      ) : null}
     </>
   )
 }

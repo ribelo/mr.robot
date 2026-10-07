@@ -7,6 +7,7 @@
  * armed while it runs; if the DO dies mid-Turn, the alarm brings it back and the
  * interrupted Turn resumes from the last persisted event.
  */
+import { workspacePrefix } from '../workspace/workspace.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
@@ -202,6 +203,58 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Delete: no more Wake-ups and gone from every list; the log and Workspace are kept as the archive. */
   remove(): Promise<void> {
     return this.program(Programs.remove)
+  }
+
+  // ---------------------------------------------------------------- deletion (v1.3 ticket 06)
+
+  /** Delete this Robot for good (pl-3uoy): its storage, alarm, browser and Workspace files. No undo. */
+  async destroy(): Promise<void> {
+    const id = this.store.config()?.id
+    await this.releaseComposition().catch(() => undefined)
+    await this.closeBrowser().catch(() => undefined)
+    for (const socket of this.ctx.getWebSockets()) {
+      try { socket.close(1000, 'robot deleted') } catch { /* closing */ }
+    }
+    if (id !== undefined) {
+      let cursor: string | undefined
+      do {
+        const page = await this.env.FILES.list({ prefix: workspacePrefix(id), ...(cursor === undefined ? {} : { cursor }) })
+        if (page.objects.length > 0) await this.env.FILES.delete(page.objects.map((object) => object.key))
+        cursor = page.truncated ? page.cursor : undefined
+      } while (cursor !== undefined)
+    }
+    await this.ctx.storage.deleteAlarm()
+    await this.ctx.storage.deleteAll()
+    this.store.prepare()
+  }
+
+  /** Another Robot was deleted: it is no longer a recipient (pl-3uoy). */
+  async dropRecipient(robotId: string): Promise<void> {
+    if (this.store.config() === undefined) return
+    const had = this.ctx.storage.sql.exec("SELECT 1 FROM grant_item WHERE kind = 'recipient' AND name = ?", robotId).toArray().length > 0
+    if (!had) return
+    this.ctx.storage.sql.exec("DELETE FROM grant_item WHERE kind = 'recipient' AND name = ?", robotId)
+    this.store.updateConfig(() => ({}))
+  }
+
+  /**
+   * Start the Conversation over (pl-05eu, pl-y228): a new session, without the old log, notices,
+   * rewinds or queued wake-ups. Configuration, routines and grants stay; memory too unless asked.
+   */
+  async clearHistory(memory: boolean): Promise<void> {
+    if (this.store.activeTurn() !== undefined) throw new Error('the Robot is working; wait for it to finish, then clear')
+    await this.releaseComposition()
+    const sql = this.ctx.storage.sql
+    for (const table of ['session_event', 'session_log', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
+    for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen']) this.store.delete(key)
+    this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
+    if (memory) {
+      const ws = this.workspace
+      const notes = await this.run(ws.list('memory')).catch(() => [])
+      for (const note of notes) if (/^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(note.path)) await this.run(ws.remove(note.path)).catch(() => undefined)
+      for (const [path, content] of Object.entries(ROBOT_FILES)) if (path === 'MEMORY.md' || path.startsWith('memory/')) await this.run(ws.write(path, content))
+    }
+    await this.changed()
   }
 
 

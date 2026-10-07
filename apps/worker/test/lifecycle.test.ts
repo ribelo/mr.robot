@@ -91,7 +91,7 @@ describe('sharing and lifecycle', () => {
     expect((await api(BEN, `/api/robots/${id}/settings`, { method: 'PATCH', body: { sharing: 'private' } })).status).toBe(403)
   })
 
-  it('pause stops Wake-ups, resume runs them, delete keeps the archive (robot-qo06)', async () => {
+  it('pause stops Wake-ups, resume runs them, delete removes it for good (robot-qo06, pl-3uoy)', async () => {
     const id = await newRobot(ANNA)
     await api(ANNA, `/api/robots/${id}/pause`, { body: {} })
     scripts.set(id, [{ text: 'Back again.' }])
@@ -106,11 +106,11 @@ describe('sharing and lifecycle', () => {
     conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'Back again.' })
 
-    await api(ANNA, `/api/robots/${id}`, { method: 'DELETE' })
+    await api(ANNA, `/api/robots/${id}`, { method: 'DELETE', body: { confirm: 'New robot' } })
     expect((await robots(ANNA)).some((robot) => robot.id === id)).toBe(false)
     expect((await api(ANNA, `/api/robots/${id}/conversation`)).status).toBe(404)
-    const archive = await env.ROBOT.getByName(id).trajectory()
-    expect(archive.length).toBeGreaterThan(0)
+    // Nothing is kept: no archive to restore (pl-kehf).
+    expect(await env.ROBOT.getByName(id).trajectory().then((events) => events.length, () => 0)).toBe(0)
   })
 
   it("keeps Mr. Robot's recipient Grants in step with what his Member can reach (robot-70kf)", async () => {
@@ -125,7 +125,7 @@ describe('sharing and lifecycle', () => {
     expect([...(await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients].sort()).toEqual([own, bens].sort())
     expect((await env.ROBOT.getByName(bensMrRobot.id).settings()).grants.recipients).toEqual([bens])
 
-    await api(ANNA, `/api/robots/${own}`, { method: 'DELETE' })
+    await api(ANNA, `/api/robots/${own}`, { method: 'DELETE', body: { confirm: 'New robot' } })
     expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([bens])
   })
 })

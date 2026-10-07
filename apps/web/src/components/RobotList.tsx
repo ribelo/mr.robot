@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { RobotSummary } from '@mr-robot/protocol'
 import { listTime } from '../time.ts'
 import { Avatar } from './Avatar.tsx'
+import { ConfirmByName } from './ConfirmByName.tsx'
+import { api } from '../api.ts'
 
 export interface RobotListProps {
   readonly robots: readonly RobotSummary[]
@@ -16,12 +18,17 @@ export interface RobotListProps {
   readonly onEditProfile: (id: string) => void
   readonly onAdvanced: (id: string) => void
   readonly onFiles: (id: string) => void
+  /** Only the owner may delete or clear a Robot. */
+  readonly meId?: string
+  /** A Robot was deleted or cleared. */
+  readonly onRemoved?: (id: string, deleted: boolean) => void
 }
 
 /** The robot list (robot-q4b2, robot-mktj): pinned first, unread marked, a menu on every Robot. */
-export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreate, onAdmin, onProfile, onListPref, onEditProfile, onAdvanced, onFiles }: RobotListProps) {
+export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreate, onAdmin, onProfile, onListPref, onEditProfile, onAdvanced, onFiles, meId, onRemoved }: RobotListProps) {
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<string>()
+  const [danger, setDanger] = useState<{ robot: RobotSummary; action: 'delete' | 'clear' }>()
   const [showHidden, setShowHidden] = useState(false)
   const matching = robots.filter((robot) => robot.identity.name.toLowerCase().includes(query.toLowerCase()))
   const visible = matching.filter((robot) => robot.hidden !== true).sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true))
@@ -47,12 +54,34 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
           onEditProfile={() => { setMenu(undefined); onEditProfile(robot.id) }}
           onAdvanced={() => { setMenu(undefined); onAdvanced(robot.id) }}
           onFiles={() => { setMenu(undefined); onFiles(robot.id) }}
+          {...(meId !== undefined && robot.ownerId === meId ? { onDanger: (action: 'delete' | 'clear') => { setMenu(undefined); setDanger({ robot, action }) } } : {})}
         />
       ) : null}
     </li>
   )
   return (
     <nav className="sidebar">
+      {danger === undefined ? null : danger.action === 'delete' ? (
+        <ConfirmByName
+          title={`Delete ${danger.robot.identity.name}`}
+          name={danger.robot.identity.name}
+          goes="The robot, its conversation, files, memory and routines are deleted, and other robots stop being able to message it."
+          action="Delete robot"
+          onCancel={() => setDanger(undefined)}
+          onConfirm={async () => { await api.remove(danger.robot.id, danger.robot.identity.name); setDanger(undefined); onRemoved?.(danger.robot.id, true) }}
+        />
+      ) : (
+        <ConfirmByName
+          title={`Clear ${danger.robot.identity.name}'s history`}
+          name={danger.robot.identity.name}
+          goes="The conversation and its history are deleted; the robot starts a fresh conversation."
+          stays="Its settings, grants, routines and files stay."
+          action="Clear history"
+          option={{ label: 'Also clear its memory', note: 'MEMORY.md, the memory bank and daily notes go back to empty.' }}
+          onCancel={() => setDanger(undefined)}
+          onConfirm={async (memory) => { await api.clearHistory(danger.robot.id, danger.robot.identity.name, memory); setDanger(undefined); onRemoved?.(danger.robot.id, false) }}
+        />
+      )}
       <div className="sidebar-head">
         <span className="brand">Mr. Robot</span>
         <button type="button" className="icon-button" aria-label="New robot" onClick={onCreate}>+</button>
@@ -81,13 +110,14 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
   )
 }
 
-function RowMenu({ robot, onClose, onListPref, onEditProfile, onAdvanced, onFiles }: {
+function RowMenu({ robot, onClose, onListPref, onEditProfile, onAdvanced, onFiles, onDanger }: {
   robot: RobotSummary
   onClose: () => void
   onListPref: (change: { pinned?: boolean; hidden?: boolean; unread?: boolean }) => void
   onEditProfile: () => void
   onAdvanced: () => void
   onFiles: () => void
+  onDanger?: (action: 'delete' | 'clear') => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -107,6 +137,13 @@ function RowMenu({ robot, onClose, onListPref, onEditProfile, onAdvanced, onFile
       <button type="button" role="menuitem" onClick={onFiles}>Files</button>
       <hr />
       <button type="button" role="menuitem" onClick={() => onListPref({ hidden: robot.hidden !== true })}>{robot.hidden === true ? 'Show in sidebar' : 'Hide from sidebar'}</button>
+      {onDanger === undefined ? null : (
+        <>
+          <hr />
+          <button type="button" role="menuitem" className="danger" onClick={() => onDanger('clear')}>Clear history…</button>
+          {robot.kind === 'mr-robot' ? null : <button type="button" role="menuitem" className="danger" onClick={() => onDanger('delete')}>Delete robot…</button>}
+        </>
+      )}
     </div>
   )
 }

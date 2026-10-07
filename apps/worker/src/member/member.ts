@@ -536,6 +536,15 @@ export class Member extends DurableObject<Env> {
   listPrefs(): Promise<Record<string, { pinned: boolean; hidden: boolean; markedUnread: boolean; seenAt: number | null }>> { return this.run(listPrefs) }
   setListPref(robotId: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }): Promise<void> { return this.run(setListPref(robotId, change)) }
   markSeen(robotId: string, at: number): Promise<void> { return this.run(markSeen(robotId, at)) }
+
+  /** Reset everything (pl-062x): memory files back to templates, usage and list preferences gone; credentials, logins and devices stay. */
+  async resetData(): Promise<void> {
+    const sql = this.ctx.storage.sql
+    sql.exec('DELETE FROM usage')
+    sql.exec('DELETE FROM list_pref')
+    sql.exec('DELETE FROM pending_notification')
+    for (const [name, content] of Object.entries(MEMBER_FILES)) sql.exec('INSERT INTO member_file (name, content, updated_at) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at', name, content, Date.now())
+  }
   setSecret(name: string, value: string): Promise<void> { return this.run(setSecret(name, value)) }
   secret(name: string): Promise<string | null> { return this.run(secret(name)) }
   takeSecret(name: string): Promise<string | null> { return this.run(takeSecret(name)) }

@@ -81,6 +81,8 @@ export function App() {
         onEditProfile={(id) => setSheet({ kind: 'profile', robotId: id })}
         onAdvanced={(id) => go({ page: 'advanced', id })}
         onFiles={(id) => go({ page: 'files', id, path: null })}
+        meId={me.id}
+        onRemoved={(id, deleted) => { void refreshRobots(); setSheetVersion((version) => version + 1); if (deleted && selected === id) go({ page: 'home' }) }}
       />
       <main className="main">
         {route.page === 'robot'
