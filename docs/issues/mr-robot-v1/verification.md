@@ -6,7 +6,7 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 93 works, 7 partial, 0 not done.
+Totals: 94 works, 6 partial, 0 not done.
 
 ## Partial or not done
 
@@ -16,7 +16,6 @@ Totals: 93 works, 7 partial, 0 not done.
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
 - 84 robot-naul, partial: Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23)
-- 95 robot-cmz9, partial (no images): Live; images not shown (Robots store no image attachments)
 
 ## Broken until the review, fixed 2026-10-06/07
 
@@ -31,6 +30,7 @@ These were marked done but did not hold:
 - Switching a Robot to Claude after Workers AI tool calls failed every Turn (tool id format); DSH's skill catalog showed as a chat bubble.
 - After a deploy a pending takeover lost its browser; messages during a takeover started Turns.
 - Compaction never completed at small budgets (checkpoint cap 400 tokens).
+- Robots never saw their screenshots (the tool returned a file path); the CAPTCHA advice to read an image puzzle from a screenshot could not work.
 - The spend-limit notice printed $0.0105 of $0.0001 as "0.01 of 0.00"; now shows the digits.
 
 ## End-to-end check after the last deploy (2026-10-07 03:20–03:45)
@@ -140,7 +140,7 @@ Suites on that build: worker 124, web 11, infra 1, dependency lint, and the stag
 | 92 | robot-l3gr | Routine detail with cron + TZ, runs | Live | works |
 | 93 | robot-qhll | Pause/Resume/Delete routine | Live | works |
 | 94 | robot-3ioa | DSH trajectory ledger and strip | Live | works |
-| 95 | robot-cmz9 | Record inspector | Live; images not shown (Robots store no image attachments) | partial (no images) |
+| 95 | robot-cmz9 | DSH record inspector; browser screenshots are DSH image attachments served from the Workspace, shown as thumbnails and sent to Claude and ChatGPT as images (other providers get a text placeholder) | Live: a Robot on Claude described the Cloudflare homepage from its screenshot (orange logo, cookie banner); the inspector showed the image. Tests: browser.test.ts, provider-images.test.ts | works |
 | 96 | robot-gq88 | Search and paging | Live: searching "pong" in Mr. Robot's trajectory narrowed it to the Turn with Verifier's message and highlighted it in the strip; paging in robot-trajectory.test.tsx | works |
 | 97 | robot-s54i | Code program with nested calls | Live | works |
 | 98 | robot-gr94 | Collapsed tool activity and "Using … now" | Live: "Used a code program, routine create" lines | works |

@@ -6,7 +6,7 @@
 
 **Blocked by:** 10 Trajectory view and rewind
 
-**Status:** in-progress
+**Status:** done
 
 - [x] Ledger groups records by turn and step like the DSH view, with role badges and nested subtools
 - [x] Timing overview strip renders with Duration, Turns and Calls modes
@@ -17,6 +17,6 @@
 
 Verified 2026-10-07 on the live deployment: Mr. Robot's trajectory renders through DSH's own ui-trajectory code (copied into apps/web/src/dsh, MIT) and ui-conversation assembler: turn ledger, Duration/Turns/Calls strip, inspector with Summary/Code/Result/Schema/Timing, the code-mode program with routine_create nested under it. Tests: apps/web robot-trajectory.test.tsx (a real anonymized session), code-mode-chat.test.ts.
 
-Differences from the DSH client: rewind is per Turn from a "Rewind…" sheet next to the view (DSH's view has no rewind); images in records are not shown because Robots do not store image attachments.
+Differences from the DSH client: rewind is per Turn from a "Rewind…" sheet next to the view (DSH's view has no rewind); images: screenshots are shown since 2026-10-07.
 
-Reopened 2026-10-07 by the story verification (verification.md): stories 95 (no images), 96 (search not tried live).
+Verified live 2026-10-07: images in the inspector (95) and search (96).
