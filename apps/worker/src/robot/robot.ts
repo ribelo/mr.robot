@@ -819,6 +819,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async observed(page: BrowserPage): Promise<Observation> {
     const observation = await page.observe()
+    // The last page the Robot saw: where its browser reopens for a viewer (rb-keaw).
+    if (observation.url.startsWith('http')) this.store.set('browser-url', observation.url)
     await this.loadSecretMasks()
     // The backend is named so a block page says which browser was blocked (rb-kank).
     return { ...observation, text: this.mask(observation.text), backend: BACKENDS[this.sessionBackend()].label }
