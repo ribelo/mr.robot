@@ -10,7 +10,7 @@ Spec: ../mr-robot-v1.1.md. Work the frontier (all blockers done), browser ticket
 | 04 | [Takeover and live view open the browser on demand](04-takeover-opens-browser.md) | 01 | done |
 | 05 | [Login entries replacing secrets](05-login-entries.md) | 01 | done |
 | 06 | [Asks in place of the composer](06-asks-in-composer.md) | — | done |
-| 07 | [Settings navigation, model search, list heights](07-settings-navigation.md) | — | ready-for-agent |
+| 07 | [Settings navigation, model search, list heights](07-settings-navigation.md) | — | done |
 | 08 | [Files view for workspace and memory](08-files-view.md) | — | ready-for-agent |
 | 09 | [Global and local skills, editable](09-global-and-local-skills.md) | 08 | ready-for-agent |
 | 10 | [Mr. Robot rights and defaults](10-mr-robot-chief-rights.md) | 05, 09 | ready-for-agent |
