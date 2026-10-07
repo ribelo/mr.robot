@@ -5,3 +5,5 @@ dist/
 .reference/
 .env
 *.tsbuildinfo
+*.tmp.mjs
+apps/host/dist/
