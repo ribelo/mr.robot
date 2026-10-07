@@ -57,6 +57,7 @@ export function replyTools(host: MessagingHost): ToolDefinition[] {
 
 export interface RobotsHost {
   createRobot(brief: string): Promise<{ id: string; status: string }>
+  proposeGrantsFor(robotId: string, purpose: string, grants: { tools: string[]; skills: string[]; recipients: string[]; secrets: string[] }): Promise<{ proposalId: string; status: string }>
   configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }>
 }
 
@@ -68,6 +69,19 @@ export function robotsTools(host: RobotsHost): ToolDefinition[] {
       description: 'Create a new Robot for your owner. It starts its own setup Conversation from your brief and proposes its Grants to your owner there.',
       parameters: { properties: { brief: { type: 'string', description: 'What the Robot is for, in a few sentences' } }, required: ['brief'] },
       execute: async ({ brief }) => host.createRobot(brief),
+    }),
+    tool<{ robot_id: string; purpose: string; tools?: string[]; skills?: string[]; logins?: string[]; recipients?: string[] }>({
+      name: 'robot_propose_grants',
+      description: "Ask your owner to grant one of their Robots tool groups, skills, logins or recipient Robots. It appears as a question in that Robot's chat; nothing is granted until your owner approves. You cannot grant anything yourself.",
+      parameters: {
+        properties: {
+          robot_id: { type: 'string' }, purpose: { type: 'string', description: 'Why that Robot needs it, in one sentence' },
+          tools: { type: 'array', items: { type: 'string' } }, skills: { type: 'array', items: { type: 'string' } },
+          logins: { type: 'array', items: { type: 'string' } }, recipients: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['robot_id', 'purpose'],
+      },
+      execute: async ({ robot_id, purpose, tools, skills, logins, recipients }) => host.proposeGrantsFor(robot_id, purpose, { tools: tools ?? [], skills: skills ?? [], recipients: recipients ?? [], secrets: logins ?? [] }),
     }),
     tool<{ robot_id: string; name?: string; title?: string; description?: string }>({
       name: 'robot_configure',

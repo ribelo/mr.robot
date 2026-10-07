@@ -3,6 +3,7 @@
  * single-writer, so the store is a plain object with synchronous methods; the
  * session log lives beside it (agent/session-log.ts).
  */
+import { TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { recordFromLegacy, type ScheduleRecord } from '../agent/schedule.ts'
 import type {
@@ -206,6 +207,31 @@ export class RobotStore {
 
   hasGrant(kind: GrantKind, name: string): boolean {
     return this.sql.exec('SELECT 1 FROM grant_item WHERE kind = ? AND name = ?', kind, name).toArray().length > 0
+  }
+
+  /** What Mr. Robot can reach without grants: every login and skill its owner can (rb-b0rs). Kept in memory, refreshed each Turn. */
+  private reach: { readonly secrets: readonly string[]; readonly skills: readonly string[] } = { secrets: [], skills: [] }
+
+  setReach(reach: { readonly secrets: readonly string[]; readonly skills: readonly string[] }): void {
+    this.reach = reach
+  }
+
+  /** The grants that apply: the stored set, or for Mr. Robot every tool group and everything its owner reaches. */
+  effectiveGrants(): GrantSet {
+    const stored = this.grants()
+    if (this.config()?.kind !== 'mr-robot') return stored
+    return {
+      tools: [...TOOL_GROUP_NAMES],
+      skills: [...new Set([...stored.skills, ...this.reach.skills])],
+      recipients: stored.recipients,
+      secrets: [...new Set([...stored.secrets, ...this.reach.secrets])],
+    }
+  }
+
+  mayUse(kind: GrantKind, name: string): boolean {
+    const grants = this.effectiveGrants()
+    const list = kind === 'tool' ? grants.tools : kind === 'skill' ? grants.skills : kind === 'secret' ? grants.secrets : grants.recipients
+    return list.includes(name)
   }
 
   // ------------------------------------------------------------ proposals

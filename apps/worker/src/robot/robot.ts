@@ -83,7 +83,7 @@ import * as Programs from './programs.ts'
 import * as Views from './views.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
-import { proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
+import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
 export type { AnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
@@ -117,6 +117,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.store = new RobotStore(ctx.storage)
+    // An existing Mr. Robot gets the default compaction instruction once, unless one was set (rb-yagl).
+    const existing = this.store.config()
+    if (existing?.kind === 'mr-robot' && this.store.get('mr-compaction-default') === undefined) {
+      if (existing.compactionInstruction.trim() === '') this.store.saveConfig({ ...existing, compactionInstruction: MR_ROBOT_COMPACTION, revision: existing.revision + 1 })
+      this.store.set('mr-compaction-default', true)
+    }
     // The Robot's state programs (programs.ts) run on Effect; this class adapts them to RPC,
     // the alarm and DSH's agent loop.
     this.runtime = new DurableRuntime(Layer.mergeAll(
@@ -220,7 +226,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return {
       sections: sections.map((section) => ({ ...section, text: this.mask(section.text) })),
       tools: config.codeMode && config.status !== 'setup' ? ['run_code (code mode), calling:', ...this.toolNames()] : this.toolNames(),
-      skills: config.status === 'setup' ? [] : [...this.store.grants().skills],
+      skills: config.status === 'setup' ? [] : [...this.store.effectiveGrants().skills],
     }
   }
 
@@ -604,7 +610,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const tools = [...conversationTools()]
     if (config.status === 'setup') return [...tools, ...setupTools(this), ...fileTools(this)]
     tools.push(...grantProposalTools(this), ...memberFileTools(this), ...replyTools(this))
-    for (const group of this.store.grants().tools.filter(isToolGroup)) tools.push(...this.groupTools(group, config))
+    for (const group of this.store.effectiveGrants().tools.filter(isToolGroup)) tools.push(...this.groupTools(group, config))
     return tools
   }
 
@@ -615,7 +621,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // DSH's schedule tools, attached by schedulePlugin (see plugins()).
       case 'routines': return []
       case 'notify': return notifyTools(this)
-      case 'secrets': return secretTools(this, this.store.grants().secrets)
+      case 'secrets': return secretTools(this, this.store.effectiveGrants().secrets)
       case 'messaging': return messagingTools(this)
       case 'skills': return skillProposalTools(this)
       case 'browser': return [...browserTools(this), ...takeoverTools(this)]
@@ -628,14 +634,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected plugins(config: RobotConfig): Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> {
     const plugins: Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> = [credentialsPlugin(this.credentials())]
     // Setup may write its own persona files; afterwards only a files Grant gives the file tools.
-    if (config.status === 'setup' || this.store.hasGrant('tool', 'files')) plugins.push(filesPlugin(this.workspace, (name) => this.memberFile(name)))
-    if (config.status !== 'setup' && this.store.hasGrant('tool', 'browser')) plugins.push(browserUsePlugin())
-    if (config.status !== 'setup' && this.store.hasGrant('tool', 'web')) plugins.push(webPlugin(this.credentials(), this.env.BROWSER))
-    if (config.status !== 'setup' && this.store.hasGrant('tool', 'routines')) plugins.push(schedulePlugin(this.schedule()))
-    if (config.status !== 'setup' && this.store.hasGrant('tool', 'skills')) {
+    if (config.status === 'setup' || this.store.mayUse('tool', 'files')) plugins.push(filesPlugin(this.workspace, (name) => this.memberFile(name)))
+    if (config.status !== 'setup' && this.store.mayUse('tool', 'browser')) plugins.push(browserUsePlugin())
+    if (config.status !== 'setup' && this.store.mayUse('tool', 'web')) plugins.push(webPlugin(this.credentials(), this.env.BROWSER))
+    if (config.status !== 'setup' && this.store.mayUse('tool', 'routines')) plugins.push(schedulePlugin(this.schedule()))
+    if (config.status !== 'setup' && this.store.mayUse('tool', 'skills')) {
       plugins.push(skillsPlugin({
-        granted: () => this.home().loadableSkills(config.ownerId, this.store.grants().skills),
-        content: async (name) => this.store.grants().skills.includes(name) ? this.home().skillContent(config.ownerId, name) : null,
+        granted: () => this.home().loadableSkills(config.ownerId, this.store.effectiveGrants().skills),
+        content: async (name) => this.store.effectiveGrants().skills.includes(name) ? this.home().skillContent(config.ownerId, name) : null,
         local: () => this.localSkills(),
         localContent: (name) => this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null),
       }))
@@ -888,7 +894,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       ws.stat(path).pipe(Effect.flatMap((existing): Effect.Effect<unknown, unknown> => existing === undefined ? ws.write(path, content) : Effect.void)), { concurrency: 4, discard: true }))
   }
 
+  /** Mr. Robot's reach: every login and skill its owner can grant (rb-b0rs). */
+  private async refreshReach(): Promise<void> {
+    const config = this.store.config()
+    if (config?.kind !== 'mr-robot') return
+    const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), this.home().skills(config.ownerId)])
+    this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name) })
+  }
+
   private async refreshPersona(): Promise<void> {
+    await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
     const config = this.store.requireConfig()
     const ws = this.workspace
     const own = [...PERSONA_FILES, ...dailyNotePaths(Date.now(), config.timeZone)]
@@ -1085,7 +1100,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         // Autofill in the takeover window (rb-o52a): the Robot's granted entries for the page shown.
         const page = await this.page()
         const config = this.store.requireConfig()
-        const entries = await Promise.all(this.store.grants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+        const entries = await Promise.all(this.store.effectiveGrants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
         socket.send(JSON.stringify({ type: 'logins', entries: entries.flatMap(([name, entry]) => entry !== null && entryMatches(entry, page.url()) ? [{ name, username: entry.username }] : []) }))
         return
       }
@@ -1093,7 +1108,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         const takeover = this.store.get<TakeoverState>('takeover')
         if (takeover?.claimedBy !== viewer.memberId) throw new Error('claim the browser first')
         const name = String(input['name'] ?? '')
-        if (!this.store.grants().secrets.includes(name)) throw new Error(`"${name}" is not granted to this Robot`)
+        if (!this.store.effectiveGrants().secrets.includes(name)) throw new Error(`"${name}" is not granted to this Robot`)
         const entry = await this.home().resolveLogin(this.store.requireConfig().ownerId, name)
         if (entry === null) throw new Error(`"${name}" no longer exists`)
         socket.send(JSON.stringify({ type: 'filled', message: await this.fillEntry(name, entry, await this.page()) }))
@@ -1273,6 +1288,22 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
+/** Mr. Robot asks the owner to grant another Robot something: an ask in that Robot's chat, never a grant (rb-598m). */
+  async proposeGrantsFor(robotId: string, purpose: string, grants: GrantSet): Promise<{ proposalId: string; status: string }> {
+    const config = this.store.requireConfig()
+    if (config.kind !== 'mr-robot') throw new Error('only Mr. Robot proposes Grants for other Robots')
+    if (robotId === config.id || (await this.home().access(config.ownerId, robotId)) === null) throw new Error(`no Robot ${robotId} your owner can reach`)
+    const proposal = await this.env.ROBOT.getByName(robotId).proposeFromChief(`${config.identity.name} asks: ${purpose}`, grants)
+    return { proposalId: proposal.id, status: 'asked your owner in that Robot\'s chat; nothing is granted until they approve' }
+  }
+
+  /** A grant proposal Mr. Robot made for this Robot; the owner answers it here like the Robot's own. */
+  async proposeFromChief(purpose: string, grants: GrantSet): Promise<ProposalView> {
+    const proposal = this.propose('grants', purpose, { grants })
+    await this.changed()
+    return proposal
+  }
+
   configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }> {
     return this.program(Programs.configureRobot(id, change))
   }
@@ -1391,7 +1422,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Whether this Robot may change the Home library directly (Mr. Robot, ticket 10). */
   protected editsGlobalSkills(): boolean {
-    return false
+    return this.store.requireConfig().kind === 'mr-robot'
   }
 
   async writeSkill(name: string, content: string): Promise<{ path: string; scope: 'local' | 'global' }> {
@@ -1426,7 +1457,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async logins(): Promise<Array<{ name: string; username: string; websites: readonly string[]; matchesPage: boolean; readable: boolean }>> {
     const config = this.store.requireConfig()
     const url = this.browserPage === undefined ? null : (await this.browserPage.catch(() => undefined))?.url() ?? null
-    const entries = await Promise.all(this.store.grants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+    const entries = await Promise.all(this.store.effectiveGrants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
     return entries.flatMap(([name, entry]) => entry === null ? [] : [{ name, username: entry.username, websites: entry.websites, matchesPage: url !== null && entryMatches(entry, url), readable: entry.allowRead }])
   }
 
@@ -1436,7 +1467,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    */
   async fillLogin(name: string): Promise<string> {
     const config = this.store.requireConfig()
-    if (!this.store.grants().secrets.includes(name)) throw new Error(`The login "${name}" is not granted to you. Ask with propose_grants.`)
+    if (!this.store.effectiveGrants().secrets.includes(name)) throw new Error(`The login "${name}" is not granted to you. Ask with propose_grants.`)
     const entry = await this.home().resolveLogin(config.ownerId, name)
     if (entry === null) throw new Error(`The login "${name}" no longer exists`)
     return this.fillEntry(name, entry, await this.page())
@@ -1470,7 +1501,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected async loadSecretMasks(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
-    const granted = this.store.grants().secrets
+    const granted = this.store.effectiveGrants().secrets
     const values = await Promise.all(granted.map(async (name) => [name, await this.home().resolveSecret(config.ownerId, name).catch(() => null)] as const))
     this.secretValues = values.filter((entry): entry is readonly [string, string] => entry[1] !== null)
   }
@@ -1535,7 +1566,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Names of the tools the current composition registers (what the model may call). */
   toolNames(): string[] {
     const config = this.store.requireConfig()
-    const routines = config.status !== 'setup' && this.store.hasGrant('tool', 'routines') ? [...SCHEDULE_TOOL_NAMES] : []
+    const routines = config.status !== 'setup' && this.store.mayUse('tool', 'routines') ? [...SCHEDULE_TOOL_NAMES] : []
     return [...this.tools(config).map((tool) => tool.name), ...routines]
   }
 

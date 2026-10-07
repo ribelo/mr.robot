@@ -498,7 +498,7 @@ export const answer = (proposalId: string, revision: number, approve: boolean) =
 export const secret = (name: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
-  const granted = store.grants().secrets
+  const granted = store.effectiveGrants().secrets
   if (!granted.includes(name)) return yield* invalid(`The secret "${name}" is not granted to you. Granted: ${granted.join(', ') || 'none'}. Ask with propose_grants.`)
   const ownerId = (yield* config).ownerId
   const entry = yield* promise(() => platform.env.HOME.getByName(HOME_ID).resolveLogin(ownerId, name))
@@ -576,6 +576,9 @@ export const undoRewind = (id: string) => Effect.gen(function* () {
 // ------------------------------------------------------------------ creation and the alarm (robot-qo06, robot-7j1a, robot-v1gb)
 
 export const HEARTBEAT_MS = 30_000
+
+/** Mr. Robot's compaction instruction, set at creation and editable (rb-yagl). */
+export const MR_ROBOT_COMPACTION = 'Keep, in this order: (1) every open commitment you or the owner made, with its deadline and who is waiting; (2) every robot you created or coordinate, what it is for, and anything you asked of it that has not come back; (3) decisions the owner made and his stated preferences, in his words where possible; (4) the state of each running errand (what is done, what is next, what is blocked and on whom); (5) facts you will need again (accounts, addresses, amounts, dates). Drop chit-chat, retries, tool output you already acted on, and anything already written to MEMORY.md or a robot\'s files — point to the file instead.'
 export const DEFAULT_CONTEXT_BUDGET = 128_000
 
 export interface RobotInit {
@@ -601,7 +604,7 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   if (existing !== undefined) return existing
   const config: RobotConfig = {
     id: init.id, ownerId: init.ownerId, kind: init.kind, identity: init.identity, sharing: init.sharing, status: init.status,
-    blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: '',
+    blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: init.kind === 'mr-robot' ? MR_ROBOT_COMPACTION : '',
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: init.spendLimitUsd, timeZone: init.timeZone,
     liveSessionId: `s-${crypto.randomUUID()}`, revision: 1, createdAt: Date.now(),
   }
