@@ -2,9 +2,11 @@
  * The HTTP API of the edge Worker. It holds no state: every call is routed to the
  * Durable Object that owns the data, after resolving the caller to a Member.
  */
+import { probe } from '../browser/probe.ts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import {
+  BrowserBackend,
   MemberPreferences,
   ApiKeyInput,
   HomeSettingsPatch,
@@ -108,6 +110,11 @@ export const api = new Router<ApiContext>()
     if (!/^[\w.-]+\/[\w.-]+$/.test(input.repo)) return yield* Effect.fail(badRequest('the repository is owner/name on GitHub'))
     yield* call(() => home(c.env).setSkillRepository({ repo: input.repo, ref: input.ref || 'main', path: input.path }, input.token))
     return { ok: true }
+  }))
+  .on('POST', '/api/admin/browser-probe', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const input = yield* decodeBody(c.request, Schema.Struct({ backend: BrowserBackend, url: Schema.String }))
+    return yield* call(() => probe(c.env, input.backend, input.url, () => home(c.env).vpnConfig()))
   }))
   .on('PUT', '/api/admin/vpn', (c) => Effect.gen(function* () {
     yield* admin(c)
