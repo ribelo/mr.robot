@@ -80,12 +80,31 @@ export class RenderingDriver implements BrowserDriver {
 }
 
 /** A new tab with the Robot's cookies, storage and notification capture. */
-export async function preparedPage(browser: Browser, state: BrowserState | null): Promise<Page> {
+export async function preparedPage(browser: Browser, state: BrowserState | null, mark: (name: string) => void = () => undefined): Promise<Page> {
   const page = await browser.newPage()
+  mark('page.new')
   await page.setViewport({ width: 1280, height: 800 })
+  mark('page.viewport')
   await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
+  mark('page.capture')
   if (state !== null) {
-    if (state.cookies.length > 0) await page.setCookie(...(state.cookies as never[]))
+    if (state.cookies.length > 0) {
+      // One CDP call for all cookies: puppeteer's setCookie costs a round trip each, seconds over a relay (pl-n2vs).
+      const cookies = (state.cookies as Array<Record<string, unknown>>).map((cookie) => Object.fromEntries(
+        ['name', 'value', 'domain', 'path', 'secure', 'httpOnly', 'sameSite', 'expires', 'priority', 'sameParty', 'sourceScheme', 'partitionKey']
+          .filter((key) => cookie[key] !== undefined && !(key === 'expires' && Number(cookie[key]) < 0))
+          .map((key) => [key, cookie[key]]),
+      ))
+      const session = await page.createCDPSession()
+      try {
+        await session.send('Network.setCookies', { cookies } as never)
+      } catch {
+        await page.setCookie(...(state.cookies as never[]))
+      } finally {
+        await session.detach().catch(() => undefined)
+      }
+    }
+    mark(`page.cookies(${state.cookies.length})`)
     await page.evaluateOnNewDocument(`(() => {
       const saved = (${JSON.stringify(state.storage)})[location.origin]
       if (saved === undefined || sessionStorage.getItem('__mr_restored') === '1') return
@@ -133,6 +152,9 @@ type ChromeStub = { fetch(input: RequestInfo, init?: RequestInit): Promise<Respo
  * Container Chrome (rb-wn96): one container per Robot and backend; its session id is the
  * container's name, so a session left running is reattached by name. Closing stops the container.
  */
+/** Where the last container open spent its time, in ms from its start (pl-n2vs). */
+export const containerOpenStages: Record<string, number> = {}
+
 /** Leave a warm container with one blank tab: no page keeps loading or holding state between uses. */
 async function closeTabs(browser: Browser): Promise<void> {
   const pages = await browser.pages().catch(() => [])
@@ -148,11 +170,19 @@ export class ContainerDriver implements BrowserDriver {
   ) {}
 
   async open(state: BrowserState | null): Promise<BrowserPage> {
+    const t0 = Date.now()
+    const mark = (name: string) => { containerOpenStages[name] = Date.now() - t0 }
+    for (const key of Object.keys(containerOpenStages)) delete containerOpenStages[key]
     const stub = this.chrome.getByName(this.name)
     // A container still running from the last open is reused: no boot, no VPN handshake (pl-n2vs).
-    if (!(await stub.running())) await stub.begin(await this.startEnv())
+    const warm = await stub.running()
+    mark(warm ? 'running-check(warm)' : 'running-check(cold)')
+    if (!warm) await stub.begin(await this.startEnv())
+    mark('container')
     const browser = await containerBrowser(stub)
-    const page = await preparedPage(browser, state)
+    mark('devtools')
+    const page = await preparedPage(browser, state, mark)
+    mark('page')
     // Closing closes the tab only; the container sleeps by itself after a few idle minutes (ChromeContainer.sleepAfter).
     return new RenderingPage(browser, page, state?.storage ?? {}, { id: this.name, close: () => closeTabs(browser) })
   }

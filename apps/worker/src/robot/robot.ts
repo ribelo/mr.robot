@@ -62,6 +62,7 @@ import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
+import { containerOpenStages } from '../browser/driver.ts'
 import { mount, type Mount } from '../plugins/define.ts'
 import { Memory, type MemoryHost, type SharedFile } from '../plugins/memory.ts'
 import { renderBaseline, type MemoryChange, type MemoryFile } from '../agent/memory.ts'
@@ -796,6 +797,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A new session with the saved cookies and storage (they follow the Robot across backends), back on the page it was on.
     const reopened = await this.browserDriver(backend).open(this.store.get<BrowserState>('browser-state') ?? null)
     stage('backend')
+    if (this.openTiming !== undefined) for (const [key, value] of Object.entries(containerOpenStages)) this.openTiming.stages[`backend.${key}`] = value
     this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
     const url = watch?.url ?? takeover?.url ?? this.store.get<string>('browser-url')
     if (url?.startsWith('http') === true) {
