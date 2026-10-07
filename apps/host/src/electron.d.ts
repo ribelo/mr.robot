@@ -12,6 +12,13 @@ declare module 'electron' {
     setLoginItemSettings(settings: { openAtLogin: boolean }): void
     getLoginItemSettings(): { openAtLogin: boolean }
     dock?: { hide(): void }
+    setBadgeCount(count: number): boolean
+  }
+  export class Notification {
+    constructor(options: { title: string; body: string; silent?: boolean })
+    static isSupported(): boolean
+    show(): void
+    on(event: 'click', listener: () => void): void
   }
   export class BrowserWindow {
     constructor(options: Record<string, unknown>)
@@ -34,6 +41,7 @@ declare module 'electron' {
     setToolTip(text: string): void
     setContextMenu(menu: unknown): void
     setImage(image: unknown): void
+    setTitle(title: string): void
     on(event: string, listener: () => void): void
   }
   export const Menu: { buildFromTemplate(template: Array<Record<string, unknown>>): unknown }

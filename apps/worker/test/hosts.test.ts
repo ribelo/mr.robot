@@ -172,4 +172,15 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     await settle(robot)
     expect((await member.deliveredForTest()).map((sent) => sent.body).join(' | ')).toContain('could not finish a routine: the host "Desk" is offline')
   })
+
+  it("shows a Robot's notification on the owner's paired computer (pl-b5vp)", async () => {
+    const desk = await fakeHost()
+    const frames: Array<{ t: string; d: { title?: string; body?: string; url?: string } }> = []
+    desk.socket.addEventListener('message', (event) => { const parsed = parseFrame(String(event.data)); if (parsed?.t === 'notify') frames.push(parsed as never) })
+    const id = await robotWith(ANNA, [])
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: ['notify'], skills: [], recipients: [], secrets: [], hosts: [] } } })
+    await say(ANNA, id, [{ calls: [{ name: 'notify_owner', args: { message: 'Done.' } }] }, { text: 'Told you.' }])
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(frames.some((entry) => entry.d.body === 'Done.' && entry.d.url === `/#/r/${encodeURIComponent(id)}`)).toBe(true)
+  })
 })

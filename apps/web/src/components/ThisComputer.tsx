@@ -17,6 +17,9 @@ interface HostBridge {
   pair(): Promise<{ ok?: boolean; code?: string; error?: string }>
   unpair(): Promise<{ ok?: boolean }>
   onChange(listener: (state: HostState) => void): void
+  /** Older apps lack these. */
+  setUnread?(count: number): Promise<unknown>
+  readonly nativeNotifications?: boolean
 }
 
 export const hostBridge = (): HostBridge | undefined => (globalThis as { mrRobotHost?: HostBridge }).mrRobotHost

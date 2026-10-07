@@ -502,7 +502,11 @@ export class Member extends DurableObject<Env> {
       send: (vapid, device, notification) => sendPush(vapid, device, notification),
       poolLock: Semaphore.makeUnsafe(1),
       refreshing: new Map(),
-      deliverNow: (notification) => Effect.promise(() => this.deliver(notification)),
+      // Devices by Web Push, and the desktop app over the host channel (pl-b5vp).
+      deliverNow: (notification) => Effect.promise(async () => {
+        try { this.hosts.notify({ title: notification.title, body: notification.body, url: notification.url, tag: notification.tag }) } catch (error) { console.warn('host notification failed', error) }
+        await this.deliver(notification)
+      }),
     }
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(MemberPlatform)(platform)))
   }

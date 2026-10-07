@@ -1,3 +1,4 @@
+import { hostBridge } from './components/ThisComputer.tsx'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { Conversation as ConversationData, Me, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { api, ApiError } from './api.ts'
@@ -20,6 +21,9 @@ export function App() {
   const [error, setError] = useState<string>()
 
   const refreshRobots = useCallback(() => api.robots().then(setRobots).catch(() => undefined), [])
+  // The desktop app's tray badge follows the list's unread robots (pl-mhyg).
+  const unreadCount = robots.filter((robot) => robot.unread).length
+  useEffect(() => { void hostBridge()?.setUnread?.(unreadCount) }, [unreadCount])
   useEffect(() => {
     api.me().then(setMe, (cause: unknown) => setError(cause instanceof ApiError ? cause.message : 'cannot reach Mr. Robot'))
     void refreshRobots()

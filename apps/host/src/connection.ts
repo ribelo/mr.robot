@@ -6,7 +6,7 @@
 import { hostname, platform } from 'node:os'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
-import { frame, HEARTBEAT_MS, parseFrame, serveHost } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, parseFrame, serveHost, type HostNotification } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import { findChrome, hasGraphicalSession, type HostChrome } from './chrome.ts'
 import { hostHandlers } from './handlers.ts'
@@ -18,6 +18,8 @@ export interface LinkEvents {
   paired(hostId: string, token: string): void
   unpaired(): void
   sessions(count: number): void
+  /** A Robot's notification for this Member (pl-b5vp). */
+  notify(notification: HostNotification): void
 }
 
 export async function startPairing(server: string, name: string): Promise<{ code: string; approveUrl: string }> {
@@ -91,6 +93,7 @@ export class HostLink {
     socket.on('message', (data) => {
       const parsed = parseFrame(data.toString())
       if (parsed?.t === 'rpc') Effect.runFork(host.deliver(parsed.d))
+      else if (parsed?.t === 'notify') this.events.notify(parsed.d)
     })
     socket.on('unexpected-response', (_request, response) => {
       // 401: the token is no longer valid (unpaired from the profile while this app was off).

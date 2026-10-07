@@ -5,7 +5,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
 import { HostChrome } from './chrome.ts'
 import { ConfigFile, normalizeServer, type HostConfig } from './config.ts'
 import { HostLink, startPairing, waitForApproval, type LinkState } from './connection.ts'
@@ -30,6 +30,8 @@ let pairingCancelled = false
 let sessions = 0
 let tray: Tray | undefined
 let window: BrowserWindow | undefined
+/** Robots with something unread for this Member (pl-mhyg): set by the page, raised by notifications. */
+let unread = 0
 
 function snapshot() {
   return { ...config, token: undefined, state, detail, code: pairing?.code, approveUrl: pairing?.approveUrl, sessions }
@@ -38,8 +40,12 @@ function snapshot() {
 function changed(): void {
   window?.webContents.send('changed', snapshot())
   if (tray !== undefined) {
-    tray.setToolTip(`Mr. Robot · ${config.name} · ${state}${sessions > 0 ? ` · ${sessions} robot session(s)` : ''}`)
+    tray.setToolTip(`Mr. Robot · ${unread > 0 ? `${unread} unread · ` : ''}${config.name} · ${state}${sessions > 0 ? ` · ${sessions} robot session(s)` : ''}`)
+    // The badge: a count beside the tray icon (macOS), on the app icon where the desktop supports it.
+    tray.setTitle(unread > 0 ? String(unread) : '')
+    app.setBadgeCount(unread)
     tray.setContextMenu(Menu.buildFromTemplate([
+      ...(unread > 0 ? [{ label: `${unread} robot(s) with unread messages`, click: () => openWindow() }, { type: 'separator' }] : []),
       { label: `${config.name}: ${state}`, enabled: false },
       ...(sessions > 0 ? [{ label: `${sessions} robot browser session(s)`, enabled: false }] : []),
       { type: 'separator' },
@@ -96,6 +102,15 @@ function connect(): void {
       setState('unpaired', 'This computer was unpaired.')
     },
     sessions: (count) => { sessions = count; changed() },
+    notify: (notification) => {
+      if (Notification.isSupported()) {
+        const shown = new Notification({ title: notification.title, body: notification.body })
+        shown.on('click', () => openWindow(notification.url.replace(/^\//, '')))
+        shown.show()
+      }
+      unread += 1
+      changed()
+    },
   })
   link.start()
 }
@@ -118,6 +133,14 @@ function applyAutostart(enabled: boolean): void {
 }
 
 ipcMain.handle('state', (event) => (trusted(event) ? snapshot() : null))
+
+/** The page knows the exact unread count; it reports it whenever its robot list changes. */
+ipcMain.handle('unread', (event, count: number) => {
+  if (!trusted(event) || !Number.isInteger(count) || count < 0) return null
+  unread = count
+  changed()
+  return { ok: true }
+})
 
 ipcMain.handle('save', (event, change: { server?: string; name?: string; autostart?: boolean }) => {
   if (!trusted(event)) return { error: 'not allowed' }

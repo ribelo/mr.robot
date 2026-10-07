@@ -1,3 +1,4 @@
+import { hostBridge } from './ThisComputer.tsx'
 import { WORK_DETAILS } from './WorkDetails.tsx'
 import { Hosts } from './Hosts.tsx'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
@@ -253,6 +254,12 @@ function MemberFile({ name }: { name: string }) {
 }
 /** Web Push on this device (robot-ajrp, robot-9xoj). On a phone, install the app first. */
 function DeviceNotifications({ vapidPublicKey }: { vapidPublicKey: string }) {
+  // In the desktop app notifications arrive over its own connection, natively (pl-b5vp).
+  if (hostBridge()?.nativeNotifications === true) {
+    return (
+      <div className="toggle-card"><div><div>Notifications on this computer</div><div className="muted">The Mr. Robot app shows them as system notifications while this computer is paired. Quiet hours hold them until morning.</div></div></div>
+    )
+  }
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
   const [subscription, setSubscription] = useState<PushSubscription | null>(null)
   const [error, setError] = useState<string>()

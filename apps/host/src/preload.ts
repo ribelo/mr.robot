@@ -11,5 +11,9 @@ contextBridge.exposeInMainWorld('mrRobotHost', {
   /** Start pairing; the signed-in page approves the returned code, the app picks up its token. */
   pair: () => ipcRenderer.invoke('pair'),
   unpair: () => ipcRenderer.invoke('unpair'),
+  /** The number of robots with unread messages, for the tray badge. */
+  setUnread: (count: number) => ipcRenderer.invoke('unread', count),
+  /** Notifications reach the app over the host channel, not Web Push. */
+  nativeNotifications: true,
   onChange: (listener: (state: unknown) => void) => ipcRenderer.on('changed', (_event, state) => listener(state)),
 })

@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { HostView } from '@mr-robot/protocol'
-import { HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, type Heartbeat } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, type Heartbeat, type HostNotification } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
 import { HOME_ID } from '../env.ts'
 
@@ -292,5 +292,18 @@ export class HostHub {
     }
     await this.run(id, robotId, 'browser', (client) => client.BrowserClose({ session }), 15_000).catch(() => undefined)
     await this.report(id)
+  }  /** Show a notification on every online computer of this Member (pl-b5vp). */
+  notify(notification: HostNotification): number {
+    const text = frame({ t: 'notify', d: notification })
+    let sent = 0
+    for (const host of this.list()) {
+      if (!host.online) continue
+      for (const socket of this.ctx.getWebSockets(`host:${host.id}`)) {
+        try { socket.send(text); sent++ } catch { /* closing */ }
+      }
+    }
+    return sent
   }
+
+
 }

@@ -73,7 +73,16 @@ export type Heartbeat = typeof Heartbeat.Type
 export const HEARTBEAT_MS = 15_000
 export const OFFLINE_AFTER_MS = 45_000
 
-export type Frame = { readonly t: 'rpc'; readonly d: string } | { readonly t: 'hb'; readonly d: Heartbeat }
+/** A notification for the person at this computer (v1.3, pl-b5vp): shown natively, never by Web Push. */
+export interface HostNotification {
+  readonly title: string
+  readonly body: string
+  /** The app path to open on click, e.g. "/#/r/<robot>". */
+  readonly url: string
+  readonly tag: string
+}
+
+export type Frame = { readonly t: 'rpc'; readonly d: string } | { readonly t: 'hb'; readonly d: Heartbeat } | { readonly t: 'notify'; readonly d: HostNotification }
 
 export function frame(value: Frame): string {
   return JSON.stringify(value)
@@ -82,7 +91,7 @@ export function frame(value: Frame): string {
 export function parseFrame(text: string): Frame | undefined {
   try {
     const value = JSON.parse(text) as Frame
-    return value.t === 'rpc' || value.t === 'hb' ? value : undefined
+    return value.t === 'rpc' || value.t === 'hb' || value.t === 'notify' ? value : undefined
   } catch {
     return undefined
   }
