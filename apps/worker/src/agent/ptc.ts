@@ -165,6 +165,6 @@ export function ptcPlugin(loader: WorkerLoader): (ctx: Context) => Promise<void>
  */
 export function callIfOnlyAFunction(program: string): string {
   const trimmed = program.trim().replace(/;$/, '')
-  const looksLikeFunction = /^(async\s+)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(trimmed) || /^(async\s+)?function\b/.test(trimmed)
+  const looksLikeFunction = /^(async\s*)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(trimmed) || /^(async\s+)?function\b/.test(trimmed)
   return looksLikeFunction ? `return await (${trimmed})()` : program
 }
