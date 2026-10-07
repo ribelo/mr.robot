@@ -6,9 +6,16 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A grant proposal appears in the composer area, not in the stream
-- [ ] Two pending asks show 1/2 then 2/2
-- [ ] Answering restores the composer; the stream shows the one-line record
-- [ ] Add button centred; thinking at full width (screenshot in ticket)
+- [x] A grant proposal appears in the composer area, not in the stream
+- [x] Two pending asks show 1/2 then 2/2
+- [x] Answering restores the composer; the stream shows the one-line record
+- [x] Add button centred; thinking at full width (screenshot in ticket)
+
+Verified live 2026-10-07 on Browser Check: a grant proposal and a USER.md edit proposal were pending at once; the composer was replaced by the first with "1/2", after rejecting it the second showed "2/2", after rejecting that the composer came back. The stream keeps one line per ask ("Asks for more Grants · Rejected", "Proposes an edit to USER.md · Rejected"); "Reply instead" opens the composer without answering. Component tests in chat-view.test.tsx.
+
+- Two asks: ![two asks](img/06-two-asks.png)
+- After answering, with the composer back (add button centred, the Robot's replies at the full message width): ![after](img/06-after-answers.png)
+
+"The robot's thinking" is read as the Robot's reply bubbles: the chat shows no separate reasoning, and replies were capped at 560 px; they now use the full message column (760 px, the composer's width). A second grant proposal still replaces an open one, as before.

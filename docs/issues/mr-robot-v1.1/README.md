@@ -9,7 +9,7 @@ Spec: ../mr-robot-v1.1.md. Work the frontier (all blockers done), browser ticket
 | 03 | [Container Chrome via Proton VPN](03-container-chrome-via-proton.md) | 02 | ready-for-agent |
 | 04 | [Takeover and live view open the browser on demand](04-takeover-opens-browser.md) | 01 | done |
 | 05 | [Login entries replacing secrets](05-login-entries.md) | 01 | done |
-| 06 | [Asks in place of the composer](06-asks-in-composer.md) | — | ready-for-agent |
+| 06 | [Asks in place of the composer](06-asks-in-composer.md) | — | done |
 | 07 | [Settings navigation, model search, list heights](07-settings-navigation.md) | — | ready-for-agent |
 | 08 | [Files view for workspace and memory](08-files-view.md) | — | ready-for-agent |
 | 09 | [Global and local skills, editable](09-global-and-local-skills.md) | 08 | ready-for-agent |
