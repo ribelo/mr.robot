@@ -56,6 +56,13 @@ A Mr. Robot desktop app (Electron, Linux and macOS) turns any computer the Membe
 26. As a person, I want one recorded Allegro run through a Polish residential proxy, so that we know whether the cloud can reach Allegro at all ^hs-800c
 27. As a person, I want proxy bandwidth and minutes in usage, so that a residential run shows its cost ^hs-c4lx
 
+### Added 2026-10-07 15:25 (micro-SaaS readiness)
+
+28. As a person, I want the app to require the Mr. Robot server address at first start (no built-in default), so that one app build serves any deployment ^hs-ntbd
+29. As an operator, I want each host to send a heartbeat with its version, platform and capabilities (graphical session, Chrome found) while connected, so that the server knows what each host can do and when it was last alive ^hs-7dlt
+30. As a Home admin, I want the admin view to list every host in the Home with owner, sharing, online/offline, last seen, version and the robots currently using it, so that I see what is connected ^hs-w8vi
+31. As a person, I want to change the server address in the app and re-pair, so that a host can move to another deployment ^hs-0cr2
+
 ## Implementation Decisions
 
 ### Vocabulary
@@ -65,6 +72,7 @@ GLOSSARY.md applies. New words: **Host** (a computer running the Mr. Robot app, 
 - Electron app in this repository (apps/host), Linux and macOS, Windows not built. Signs in with Cloudflare Access (system browser opens, one-time code), then holds a host token minted by the edge for that Member and host; the token is revoked on unpair.
 - The app keeps one outbound WebSocket to the edge Worker; the edge routes it to the Member DO, which owns the host registry (name, platform, online, last seen, sharing). No inbound ports, no tunnel daemon.
 - Protocol: Effect RPC with schemas shared between app and Worker (one package), multiplexed over the socket: host tool calls, browser CDP transport, screencast frames, health. Every call carries the robot id and the grant it runs under; the Member DO checks the grant before forwarding.
+- First start asks for the server address (the deployment URL); nothing is built in. The app keeps the address and the host token; both can be changed in the app window (re-pair). While connected the app heartbeats (version, platform, capabilities: graphical session, Chrome found); the Member DO records last seen and marks the host offline when heartbeats stop. The admin view lists all hosts of the Home.
 - Tray icon with status (connected, host name, robots currently using it); starts at login; a minimal window with sign-in, host name, unpair.
 - Distribution: Nix package (flake output) for NixOS; .dmg via electron-builder for macOS; no auto-update this round.
 
@@ -85,8 +93,8 @@ GLOSSARY.md applies. New words: **Host** (a computer running the Mr. Robot app, 
 
 ## Testing Decisions
 
-1. **Robot DO API** with a fake host attached to the Member DO (an in-process RPC peer): registry, sharing, grants, host tools, offline errors, trajectory records, Mr. Robot exemption (hs-ro43, hs-qwlq, hs-0eka, hs-rwxw, hs-xax9, hs-n34u, hs-5ktw, hs-i785, hs-bfr8, hs-869j, hs-44cm, hs-nwcl, hs-fnpy).
-2. **Host app integration**, manual on the owner's machine and on a Mac: pairing, tray, autostart, unpair, host browser with live view and takeover, the Allegro run (hs-vtg3, hs-hend, hs-5slg, hs-ebba, hs-7pcx, hs-mqwd, hs-3wqx, hs-zmbc, hs-43aj, hs-1fp6, hs-8teq).
+1. **Robot DO API** with a fake host attached to the Member DO (an in-process RPC peer): registry, sharing, grants, host tools, offline errors, trajectory records, Mr. Robot exemption, heartbeats and the admin host list (hs-7dlt, hs-w8vi, hs-ro43, hs-qwlq, hs-0eka, hs-rwxw, hs-xax9, hs-n34u, hs-5ktw, hs-i785, hs-bfr8, hs-869j, hs-44cm, hs-nwcl, hs-fnpy).
+2. **Host app integration**, manual on the owner's machine and on a Mac: server address prompt and re-pair (hs-ntbd, hs-0cr2), pairing, tray, autostart, unpair, host browser with live view and takeover, the Allegro run (hs-vtg3, hs-hend, hs-5slg, hs-ebba, hs-7pcx, hs-mqwd, hs-3wqx, hs-zmbc, hs-43aj, hs-1fp6, hs-8teq).
 3. **Browser backend integration** (staging, manual): proxy backend, Allegro run (hs-naw6, hs-800c, hs-c4lx).
 Prior art: v1 Robot DO tests with stub browser; v1.1 four-site probe.
 
