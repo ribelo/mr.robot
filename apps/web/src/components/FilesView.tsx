@@ -32,7 +32,7 @@ export function FilesView({ robotId, path, canEdit, onOpen }: { robotId: string;
   }
   return (
     <div className="files">
-      {canEdit ? <div className="question-actions"><button type="button" className="button" onClick={() => void newSkill()}>New local skill</button></div> : null}
+      {canEdit ? <div><button type="button" className="button" onClick={() => void newSkill()}>New local skill</button></div> : null}
       {GROUPS.map(([group, title]) => {
         const inGroup = files.filter((file) => file.group === group)
         if (inGroup.length === 0) return null

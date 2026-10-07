@@ -321,3 +321,51 @@ table.grid th { color: var(--faint); font-weight: 500; }
 
 /* This computer (v1.2 ticket 08) */
 .status-card { padding: 12px 14px; border-radius: 12px; background: #ffffff0d; display: flex; flex-direction: column; gap: 4px; }
+
+/* ---------------------------------------------------------------- Polish: one size and alignment system */
+/* Controls share one height so a row of input + buttons lines up. */
+.form input:not([type=checkbox]):not([type=radio]):not([type=range]), .form select, .settings input:not([type=checkbox]):not([type=radio]):not([type=range]), .settings select { min-height: 38px; box-sizing: border-box; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 16px; font-size: 14px; line-height: 1; white-space: nowrap; box-sizing: border-box; }
+.button-primary:disabled { background: #ffffff1a; color: var(--muted); opacity: 1; }
+/* A stand-alone button keeps its size instead of stretching across the form. */
+.form > .button, .form > div > .button:only-child { align-self: flex-start; }
+
+/* Inline rows: the input takes the room, controls stay centred on one line. */
+.form .inline { align-items: center; flex-wrap: wrap; }
+.form .inline > input:not([type=checkbox]):not([type=radio]) { flex: 1 1 260px; min-width: 0; }
+.form .inline > label:has(> input:not([type=checkbox]):not([type=radio])), .form .inline > label:has(> select) { flex: 0 1 220px; }
+.form .inline > label > input:not([type=checkbox]):not([type=radio]), .form .inline > label > select { width: 100%; }
+/* A label around a checkbox reads as one line: box, then text. */
+.form label:has(> input[type=checkbox]):not(.check) { flex-direction: row; align-items: center; gap: 7px; white-space: nowrap; color: var(--text); }
+
+/* Section headings: one gap before the section, a small one before its description. */
+.page h2 { margin: 30px 0 8px; }
+.form > h2 { margin: 18px 0 -4px; }
+.form > h2:first-child { margin-top: 0; }
+
+/* Tables span the column; cells are centred vertically; actions sit at the right edge. */
+table.grid { display: table; width: 100%; }
+table.grid th, table.grid td { vertical-align: middle; padding: 9px 10px; }
+table.grid th { white-space: nowrap; font-size: 12.5px; }
+/* Short values stay on one line; descriptive (muted) cells wrap. */
+table.grid td { white-space: nowrap; }
+table.grid td.muted, table.grid td.wrap { white-space: normal; }
+table.grid td:first-child, table.grid th:first-child { padding-left: 2px; }
+table.grid td:last-child, table.grid th:last-child { padding-right: 2px; text-align: right; }
+table.grid td:last-child .form.inline, table.grid td:last-child .inline { justify-content: flex-end; }
+table.grid button.link { text-align: left; font-size: inherit; color: var(--text); }
+table.grid select { min-height: 32px; padding: 5px 10px; width: auto; }
+table.grid .muted { margin-top: 2px; }
+@media (max-width: 700px) { table.grid { display: block; overflow-x: auto; } }
+
+/* Lists of rows with an action on the right: centre the action on the row. */
+.provider { align-items: center; }
+.login-row { align-items: center; }
+
+/* Checkboxes line up with the first line of their label, the same in every grid. */
+.check input[type=checkbox], .check input[type=radio] { margin: 2px 0 0; flex: none; width: 15px; height: 15px; }
+.check-grid { gap: 10px 18px; }
+.scroll-box { padding: 12px 14px; }
+/* File rows: text aligns with the headings; the hover background reaches past the edges. */
+.file-list { margin: 0 -10px; }
+.file-group > .panel-section, .file-group summary { margin-left: 0; }
