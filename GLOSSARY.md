@@ -25,3 +25,9 @@ Vocabulary for Mr. Robot. Specs, code and tests use these words and no synonyms.
 - **Skill library** — the Home's single collection of skills in R2, synchronised from a Git repository and extended by approved Robot proposals; granted per Robot.
 - **Robot message** — a work request from one Robot to a granted recipient Robot, or its reply, delivered through a durable outbox and shown as a labelled message.
 - **Code mode** — the default execution mode (DSH PTC): the model writes a program that calls its tools inside an isolate; the alternative is direct tool calls.
+- **Browser backend** — what runs a Robot's Chrome behind the browser seam: Browser Run, Container Chrome, Container Chrome via VPN; later Host browser. Chosen per Robot, defaulting to the Home's.
+- **Login entry** — name, username, password, websites, notes, scope; granted per Robot; filled into matching pages without the password reaching the Robot's program. Replaces Secret.
+- **Ask** — a pending decision a Robot puts to its owner (grant proposal, question, setup approval, member-file edit), shown in place of the composer.
+- **Global skill / Local skill** — a skill in the Home library (read-only for Robots except Mr. Robot) / a skill in one Robot's Workspace (the Robot edits it freely).
+- **Files view** — the per-Robot view of its Workspace with an editor.
+- **Composer** — the message input at the bottom of a Conversation.
