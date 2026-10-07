@@ -206,8 +206,12 @@ class RenderingPage implements BrowserPage {
   }
 
   async takeNotifications(): Promise<Array<{ title: string; body: string; at: number }>> {
-    return (await this.page.evaluate('(window.__mrNotifications || []).splice(0)').catch(() => [])) as Array<{ title: string; body: string; at: number }>
+    // Every tab of the session: a page the Robot left in another tab may be the one that notifies.
+    const pages = await this.browser.pages().catch(() => [this.page])
+    const found = await Promise.all(pages.map((page) => page.evaluate('(window.__mrNotifications || []).splice(0)').catch(() => []) as Promise<Array<{ title: string; body: string; at: number }>>))
+    return found.flat().sort((a, b) => a.at - b.at)
   }
+
 
   /** Give the page a moment to react: a short network quiet period, bounded. */
   private async settle(): Promise<void> {

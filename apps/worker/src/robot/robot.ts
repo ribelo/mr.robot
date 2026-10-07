@@ -742,7 +742,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     const notes = await page.takeNotifications()
     const url = page.url()
-    console.log('screen watch', { robot: config.id, notes: notes.length })
+    console.log('screen watch', { robot: config.id, notes: notes.length, url })
     await page.detach()
     for (const note of notes) {
       const line = [note.title, note.body].filter((part) => part.trim() !== '').join(': ')
