@@ -1141,7 +1141,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const takeover = this.store.get<TakeoverState>('takeover')
     // Closing the window hands the browser back (pl-glfh): the Robot resumes, or an idle browser closes.
     // The chat's own socket of the same Member does not count: only a still-open browser view keeps the claim.
-    const stillViewing = viewer === null ? 0 : this.ctx.getWebSockets(viewer.memberId).filter((other) => other !== socket && (other.deserializeAttachment() as ViewerState | null)?.live === true).length
+    // After hibernation getWebSockets returns new wrappers, so the closing socket is excluded by state, not identity.
+    if (viewer !== null) { try { socket.serializeAttachment({ ...viewer, live: false } satisfies ViewerState) } catch { /* closed */ } }
+    const stillViewing = viewer === null ? 0 : this.ctx.getWebSockets(viewer.memberId).filter((other) => other !== socket && other.readyState === WebSocket.OPEN && (other.deserializeAttachment() as ViewerState | null)?.live === true).length
     if (viewer !== null && takeover?.claimedBy === viewer.memberId && stillViewing === 0) {
       await this.handBack(viewer.memberId)
     }
