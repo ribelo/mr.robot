@@ -113,8 +113,8 @@ export const api = new Router<ApiContext>()
   }))
   .on('POST', '/api/admin/browser-probe', (c) => Effect.gen(function* () {
     yield* admin(c)
-    const input = yield* decodeBody(c.request, Schema.Struct({ backend: BrowserBackend, url: Schema.String }))
-    return yield* call(() => probe(c.env, input.backend, input.url, () => home(c.env).vpnConfig()))
+    const input = yield* decodeBody(c.request, Schema.Struct({ backend: BrowserBackend, url: Schema.String, waitMs: Schema.optional(Schema.Number) }))
+    return yield* call(() => probe(c.env, input.backend, input.url, () => home(c.env).vpnConfig(), input.waitMs))
   }))
   .on('PUT', '/api/admin/vpn', (c) => Effect.gen(function* () {
     yield* admin(c)

@@ -20,14 +20,14 @@ export interface ProbeResult {
   readonly ms: number
 }
 
-export async function probe(env: Env, backend: BrowserBackend, url: string, vpnConfig: () => Promise<string | null>): Promise<ProbeResult> {
+export async function probe(env: Env, backend: BrowserBackend, url: string, vpnConfig: () => Promise<string | null>, waitMs = 2500): Promise<ProbeResult> {
   const started = Date.now()
   const driver = driverFor(backend, env, { id: `probe-${crypto.randomUUID().slice(0, 8)}`, vpnConfig })
   let page: Awaited<ReturnType<typeof driver.open>> | undefined
   try {
     page = await driver.open(null)
     await page.goto(url)
-    await page.waitFor({ ms: 2500 }).catch(() => undefined)
+    await page.waitFor({ ms: Math.min(waitMs, 20_000) }).catch(() => undefined)
     const observation = await page.observe()
     const png = await page.screenshot().catch(() => undefined)
     let screenshot: string | null = null
