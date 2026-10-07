@@ -632,7 +632,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** The driver for a browser backend (rb-wgtd); tests substitute a stub browser. */
   protected browserDriver(backend: BrowserBackend): BrowserDriver {
-    return driverFor(backend, this.env)
+    return driverFor(backend, this.env, { id: this.store.requireConfig().id, vpnConfig: () => this.home().vpnConfig() })
   }
 
   /** This Robot's backend: its own choice, else the Home default (rb-ybt4). */

@@ -56,19 +56,7 @@ export class RenderingDriver implements BrowserDriver {
 
   async open(state: BrowserState | null): Promise<BrowserPage> {
     const browser = await puppeteer.launch(this.binding as never, { keep_alive: 600_000 })
-    const page = await browser.newPage()
-    await page.setViewport({ width: 1280, height: 800 })
-    await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
-    if (state !== null) {
-      if (state.cookies.length > 0) await page.setCookie(...(state.cookies as never[]))
-      await page.evaluateOnNewDocument(`(() => {
-        const saved = (${JSON.stringify(state.storage)})[location.origin]
-        if (saved === undefined || sessionStorage.getItem('__mr_restored') === '1') return
-        for (const [key, value] of Object.entries(saved)) localStorage.setItem(key, value)
-        sessionStorage.setItem('__mr_restored', '1')
-      })()`)
-    }
-    return new RenderingPage(browser, page, state?.storage ?? {})
+    return new RenderingPage(browser, await preparedPage(browser, state), state?.storage ?? {})
   }
 
   async attach(sessionId: string): Promise<BrowserPage | undefined> {
@@ -81,11 +69,88 @@ export class RenderingDriver implements BrowserDriver {
         await browser.close().catch(() => undefined)
         return undefined
       }
-      // Scripts registered for new documents end with the connection that registered them: install
-      // the notification capture again for later navigations, and in the page already open.
-      await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
-      await page.evaluate(NOTIFICATION_CAPTURE).catch(() => undefined)
+      await rearmed(page)
       return new RenderingPage(browser, page, {})
+    } catch {
+      return undefined
+    }
+  }
+}
+
+/** A new tab with the Robot's cookies, storage and notification capture. */
+async function preparedPage(browser: Browser, state: BrowserState | null): Promise<Page> {
+  const page = await browser.newPage()
+  await page.setViewport({ width: 1280, height: 800 })
+  await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
+  if (state !== null) {
+    if (state.cookies.length > 0) await page.setCookie(...(state.cookies as never[]))
+    await page.evaluateOnNewDocument(`(() => {
+      const saved = (${JSON.stringify(state.storage)})[location.origin]
+      if (saved === undefined || sessionStorage.getItem('__mr_restored') === '1') return
+      for (const [key, value] of Object.entries(saved)) localStorage.setItem(key, value)
+      sessionStorage.setItem('__mr_restored', '1')
+    })()`)
+  }
+  return page
+}
+
+/**
+ * Scripts registered for new documents end with the connection that registered them: install
+ * the notification capture again for later navigations, and in the page already open.
+ */
+async function rearmed(page: Page): Promise<void> {
+  await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
+  await page.evaluate(NOTIFICATION_CAPTURE).catch(() => undefined)
+}
+
+/** The Chrome container's DevTools, as a puppeteer transport over the Worker's WebSocket. */
+async function containerBrowser(stub: ChromeStub): Promise<Browser> {
+  const version = (await (await stub.fetch('http://localhost/json/version')).json()) as { webSocketDebuggerUrl: string }
+  const path = new URL(version.webSocketDebuggerUrl).pathname
+  const response = await stub.fetch(new Request(`http://localhost${path}`, { headers: { Upgrade: 'websocket' } }))
+  const socket = response.webSocket
+  if (socket === null) throw new Error(`the browser container refused DevTools (${response.status})`)
+  socket.accept()
+  const transport: { send(message: string): void; close(): void; onmessage?: (message: string) => void; onclose?: () => void } = {
+    send: (message) => socket.send(message),
+    close: () => socket.close(),
+  }
+  socket.addEventListener('message', (event) => transport.onmessage?.(typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)))
+  socket.addEventListener('close', () => transport.onclose?.())
+  return (await puppeteer.connect({ transport } as never)) as unknown as Browser
+}
+
+type ChromeStub = { fetch(input: RequestInfo, init?: RequestInit): Promise<Response>; begin(vpn: string | null): Promise<void>; running(): Promise<boolean>; end(): Promise<void> }
+
+/**
+ * Container Chrome (rb-wn96): one container per Robot and backend; its session id is the
+ * container's name, so a session left running is reattached by name. Closing stops the container.
+ */
+export class ContainerDriver implements BrowserDriver {
+  constructor(
+    private readonly chrome: { getByName(name: string): ChromeStub },
+    private readonly name: string,
+    private readonly vpnConfig: () => Promise<string | null>,
+  ) {}
+
+  async open(state: BrowserState | null): Promise<BrowserPage> {
+    const stub = this.chrome.getByName(this.name)
+    await stub.begin(await this.vpnConfig())
+    const browser = await containerBrowser(stub)
+    return new RenderingPage(browser, await preparedPage(browser, state), state?.storage ?? {}, { id: this.name, close: () => stub.end() })
+  }
+
+  async attach(sessionId: string): Promise<BrowserPage | undefined> {
+    if (sessionId !== this.name) return undefined
+    const stub = this.chrome.getByName(sessionId)
+    try {
+      if (!(await stub.running())) return undefined
+      const browser = await containerBrowser(stub)
+      const pages = await browser.pages()
+      const page = pages.filter((candidate) => candidate.url() !== 'about:blank').at(-1) ?? pages.at(-1)
+      if (page === undefined) return undefined
+      await rearmed(page)
+      return new RenderingPage(browser, page, {}, { id: sessionId, close: () => stub.end() })
     } catch {
       return undefined
     }
@@ -112,7 +177,13 @@ class RenderingPage implements BrowserPage {
   private cdpSession: CDPSession | undefined
   private readonly storage: Record<string, Readonly<Record<string, string>>>
 
-  constructor(private readonly browser: Browser, private readonly page: Page, storage: Readonly<Record<string, Readonly<Record<string, string>>>>) {
+  constructor(
+    private readonly browser: Browser,
+    private readonly page: Page,
+    storage: Readonly<Record<string, Readonly<Record<string, string>>>>,
+    /** A container session: its own id, and closing stops the container. */
+    private readonly session?: { readonly id: string; close(): Promise<void> },
+  ) {
     this.storage = { ...storage }
   }
 
@@ -204,10 +275,11 @@ class RenderingPage implements BrowserPage {
 
   async close(): Promise<void> {
     await this.browser.close().catch(() => undefined)
+    await this.session?.close()
   }
 
   sessionId(): string {
-    return this.browser.sessionId()
+    return this.session?.id ?? this.browser.sessionId()
   }
 
   async detach(): Promise<void> {

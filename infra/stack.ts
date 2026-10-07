@@ -8,8 +8,11 @@ import * as Output from 'alchemy/Output'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Redacted from 'effect/Redacted'
-import type { Home, Member, Robot } from '../apps/worker/src/index.ts'
+import type { Chrome, Home, Member, Robot } from '../apps/worker/src/index.ts'
 import { vapidPublicKey } from './vapid.ts'
+
+/** The pushed Chrome image (infra/chrome/push.sh prints it). */
+const CHROME_IMAGE_TAG = 'yihr03qchl7b'
 
 export const Files = Cloudflare.R2.Bucket('Files')
 
@@ -46,6 +49,14 @@ export const Edge = Effect.gen(function* () {
       HOME: Cloudflare.DurableObject<Home>('Home', { className: 'Home' }),
       FILES: files,
       BROWSER: Cloudflare.Browser('BROWSER'),
+      // Chrome in Cloudflare Containers (v1.1 ticket 02). The image is built with Nix and pushed by
+      // infra/chrome/push.sh; the tag is the Nix store hash of that build.
+      CHROME: Cloudflare.Container<Chrome>('Chrome', {
+        className: 'Chrome',
+        image: `registry.cloudflare.com/2c42f4960f9c28a9235cac01483bd626/mrrobot-chrome:${CHROME_IMAGE_TAG}`,
+        instanceType: 'standard-1',
+        maxInstances: 10,
+      }),
       AI: Cloudflare.Workers.AI('AI'),
       LOADER: Cloudflare.WorkerLoader('LOADER'),
       // The account's Zero Trust team (created when Zero Trust was enabled on 2026-10-06).

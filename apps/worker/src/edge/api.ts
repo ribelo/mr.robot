@@ -109,6 +109,12 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).setSkillRepository({ repo: input.repo, ref: input.ref || 'main', path: input.path }, input.token))
     return { ok: true }
   }))
+  .on('PUT', '/api/admin/vpn', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const { config } = yield* decodeBody(c.request, Schema.Struct({ config: Schema.NullOr(Schema.String) }))
+    yield* call(() => home(c.env).setVpnConfig(config))
+    return { ok: true, configured: config !== null && config.trim() !== '' }
+  }))
   .on('POST', '/api/admin/models/refresh', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).refreshCatalogs(c.member.id)))))
   .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message))))))
 

@@ -13,6 +13,7 @@ import type { SignIn } from './home/home.ts'
 export { Robot } from './robot/robot.ts'
 export { Member } from './member/member.ts'
 export { Home } from './home/home.ts'
+export { Chrome } from './browser/chrome.ts'
 
 const WS_PATH = new URLPattern({ pathname: '/api/robots/:id/ws' })
 

@@ -6,6 +6,8 @@ export function useOfflineCloudflare(): void {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input instanceof Request ? input.url : input)
     if (!url.startsWith('https://api.cloudflare.com/')) throw new Error(`unexpected request during planning: ${url}`)
+    // Container applications are looked up by listing them; a clean account has none.
+    if (/\/containers\/applications(\?|$)/.test(url)) return json(200, { success: true, errors: [], messages: [], result: [] })
     if (url.includes('page=')) {
       return json(200, { success: true, errors: [], messages: [], result: [], result_info: { page: 1, per_page: 50, count: 0, total_count: 0, total_pages: 1 } })
     }

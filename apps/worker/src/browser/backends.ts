@@ -5,7 +5,7 @@
  */
 import type { BrowserBackend, BrowserBackendOption } from '@mr-robot/protocol'
 import type { Env } from '../env.ts'
-import { RenderingDriver, type BrowserDriver } from './driver.ts'
+import { ContainerDriver, RenderingDriver, type BrowserDriver } from './driver.ts'
 
 export interface BackendInfo {
   readonly label: string
@@ -48,10 +48,16 @@ export function backendOptions(env: Env, vpnConfigured: boolean): BrowserBackend
 
 export class BackendUnavailable extends Error {}
 
-/** The driver for a backend in this deployment. */
-export function driverFor(backend: BrowserBackend, env: Env): BrowserDriver {
+/** The driver for a backend in this deployment; a container session is named per Robot and backend. */
+export function driverFor(backend: BrowserBackend, env: Env, robot: { id: string; vpnConfig: () => Promise<string | null> }): BrowserDriver {
   if (backend === 'browser-run') return new RenderingDriver(env.BROWSER)
-  throw new BackendUnavailable(`${BACKENDS[backend].label} is not deployed in this Home yet; choose Browser Run in this Robot's Advanced settings.`)
+  const chrome = (env as { CHROME?: { getByName(name: string): never } }).CHROME
+  if (chrome === undefined) throw new BackendUnavailable(`${BACKENDS[backend].label} is not deployed in this Home yet; choose Browser Run in this Robot's Advanced settings.`)
+  return new ContainerDriver(chrome, `${backend}:${robot.id}`, backend === 'container' ? async () => null : async () => {
+    const config = await robot.vpnConfig()
+    if (config === null) throw new BackendUnavailable('Container Chrome via VPN needs the Home\'s Proton VPN configuration (Admin → Home settings).')
+    return config
+  })
 }
 
 /** The cost of browser time on a backend. */

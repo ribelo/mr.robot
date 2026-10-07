@@ -370,6 +370,21 @@ const adminView = (adminId: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ settings catalog (robot-vqtw)
 
+/** The Home's Proton VPN WireGuard configuration (rb-rb1x), sealed; never shown back or logged. */
+const vpnConfig = Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  const sealed = yield* setting<string>('vpn-config')
+  return sealed === undefined ? null : yield* platform.secrets.open(sealed)
+})
+
+const setVpnConfig = (config: string | null) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* HomePlatform
+  if (config === null || config.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'vpn-config'")
+  if (!/\[Interface\][\s\S]*PrivateKey[\s\S]*\[Peer\][\s\S]*Endpoint/i.test(config)) return yield* invalid('This is not a WireGuard configuration: it needs [Interface] with PrivateKey and [Peer] with Endpoint.')
+  yield* putSetting('vpn-config', yield* platform.secrets.seal(config.trim()))
+})
+
 /** Browser backends this Home can run; the VPN one needs the Home's WireGuard configuration (rb-rb1x). */
 const browserBackends = Effect.gen(function* () {
   const platform = yield* HomePlatform
@@ -758,6 +773,8 @@ export class Home extends DurableObject<Env> {
   refreshCatalogs(memberId: string): Promise<Array<{ provider: string; count: number; error: string | null }>> { return this.run(refreshCatalogs(memberId)) }
   unavailableModels(memberId: string): Promise<ModelOption[]> { return this.run(unavailableModels(memberId)) }
   modelList(): Promise<ModelOption[]> { return this.run(modelList) }
+  vpnConfig(): Promise<string | null> { return this.run(vpnConfig) }
+  setVpnConfig(config: string | null): Promise<void> { return this.run(setVpnConfig(config)) }
   credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }
   providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> { return this.run(providerCredential(memberId, provider)) }
   opencodePoolOwner(memberId: string): Promise<{ ownerId: string; forHome: boolean } | null> { return this.run(opencodePoolOwner(memberId)) }
