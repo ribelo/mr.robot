@@ -107,6 +107,17 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           ))}
         </div>
       )}
+      <h2>Hosts</h2>
+      {(catalog.hosts ?? []).length === 0 ? <div className="muted">No computers yet: install the Mr. Robot app on one and pair it (your name → Hosts).</div> : (
+        <div className="check-grid">
+          {(catalog.hosts ?? []).flatMap((host) => (['browser', 'files', 'shell'] as const).map((kind) => (
+            <label key={`${host.id}:${kind}`} className="check">
+              <input type="checkbox" checked={(draft.grants.hosts ?? []).includes(`${host.id}:${kind}`)} onChange={() => toggle('hosts', `${host.id}:${kind}`)} />
+              <span>{host.name}: {kind === 'browser' ? 'browser' : kind === 'files' ? 'files' : 'shell'}<small>{kind === 'browser' ? 'Its Chrome, when chosen as this Robot\'s browser above' : kind === 'files' ? 'host_read, host_write as the host owner' : 'host_run as the host owner, in their shell'} · {host.online ? 'online' : 'offline'}{host.mine ? '' : ` · ${host.ownerName}'s`}</small></span>
+            </label>
+          )))}
+        </div>
+      )}
       <h2>Logins</h2>
       {catalog.secrets.length === 0 ? <div className="muted">No logins yet: add them under your name → Logins.</div> : (
         <div className="check-grid">

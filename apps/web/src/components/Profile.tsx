@@ -1,3 +1,4 @@
+import { Hosts } from './Hosts.tsx'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { Me, ProvidersView, LoginView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
@@ -17,6 +18,7 @@ export function Profile({ me, onChanged }: { me: Me; onChanged: () => void }) {
       <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
       <Providers />
       <Secrets />
+      <Hosts />
       <MemberFiles />
     </div>
   )

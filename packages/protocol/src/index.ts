@@ -473,6 +473,8 @@ export interface SettingsCatalog {
   /** Browser backends and whether this Home can use them (rb-wgtd). */
   readonly browserBackends?: readonly BrowserBackendOption[]
   readonly defaultBrowserBackend?: BrowserBackend
+  /** Hosts the owner reaches, for per-host grants (hs-5ktw). */
+  readonly hosts?: readonly HostView[]
 }
 
 // ---------------------------------------------------------------- Notifications (robot-9xoj)

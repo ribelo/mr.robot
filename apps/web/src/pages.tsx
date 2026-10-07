@@ -1,3 +1,4 @@
+import { PairHost } from './components/Hosts.tsx'
 import { FilesView } from './components/FilesView.tsx'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { Me, RobotPanel, RobotSummary, SettingsCatalog, Trajectory } from '@mr-robot/protocol'
@@ -22,6 +23,12 @@ export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; 
       <div className="page">
         <PageHead title="Admin" back={{ page: 'home' }} />
         {me.role === 'admin' ? <Admin /> : <div className="muted">Only the Home admin sees this page.</div>}
+      </div>
+    )
+    case 'pair': return (
+      <div className="page">
+        <PageHead title="Pair a computer" back={{ page: 'home' }} />
+        <PairHost code={route.code} />
       </div>
     )
     case 'files': return <FilesPage id={route.id} path={route.path} robot={robots.find((robot) => robot.id === route.id)} me={me} />

@@ -533,6 +533,7 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
     models: yield* models(memberId),
     unavailableModels: yield* unavailableModels(memberId),
     browserBackends: yield* browserBackendsFor(memberId),
+    hosts: yield* hostsFor(memberId),
     defaultBrowserBackend: (yield* settings).defaultBrowserBackend,
   } as SettingsCatalog
 })

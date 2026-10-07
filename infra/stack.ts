@@ -71,3 +71,17 @@ export const Edge = Effect.gen(function* () {
     },
   })
 })
+
+/**
+ * The desktop app's channel (v1.2 ticket 01): /api/host/* is outside the Access login (a bypass
+ * application on that path); the Worker checks the host's own token there.
+ */
+export const HostChannel = Effect.gen(function* () {
+  const edge = yield* Edge
+  return yield* Cloudflare.Access.Application('HostChannel', {
+    type: 'self_hosted',
+    name: 'Mr. Robot host channel',
+    domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/api/host`)),
+    policies: [{ name: 'Host token checked by the Worker', decision: 'bypass', include: ['everyone'] }],
+  })
+})

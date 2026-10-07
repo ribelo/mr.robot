@@ -6,7 +6,7 @@ import * as Core from 'alchemy/Test/Core'
 import * as Effect from 'effect/Effect'
 import { expect, it } from 'vitest'
 import { useOfflineCloudflare } from './offline-cloudflare.ts'
-import { Edge, Files } from './stack.ts'
+import { Edge, Files, HostChannel } from './stack.ts'
 
 useOfflineCloudflare()
 
@@ -16,6 +16,7 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
   const stack = Alchemy.Stack('MrRobot', { providers, state }, Effect.gen(function* () {
     yield* Files
     const edge = yield* Edge
+    yield* HostChannel
     return { url: edge.url }
   }))
   const plan: any = await Effect.runPromise(
@@ -27,6 +28,7 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     OneTimePin: 'Cloudflare.Access.IdentityProvider',
     Edge: 'Cloudflare.Worker',
     'Edge/Access': 'Cloudflare.Access.Application',
+    HostChannel: 'Cloudflare.Access.Application',
   })
   const bindings = plan.resources.Edge.bindings.flatMap((b: any) => b.data.bindings ?? [])
     .filter((b: any) => typeof b.type === 'string' && typeof b.name === 'string')

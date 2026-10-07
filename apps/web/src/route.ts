@@ -9,6 +9,7 @@ export type Route =
   | { readonly page: 'files'; readonly id: string; readonly path: string | null }
   | { readonly page: 'admin' }
   | { readonly page: 'profile' }
+  | { readonly page: 'pair'; readonly code: string }
 
 export function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
@@ -22,6 +23,7 @@ export function parse(hash: string): Route {
   }
   if (parts[0] === 'admin') return { page: 'admin' }
   if (parts[0] === 'me') return { page: 'profile' }
+  if (parts[0] === 'pair' && parts[1] !== undefined) return { page: 'pair', code: decodeURIComponent(parts[1]) }
   return { page: 'home' }
 }
 
@@ -35,6 +37,7 @@ export function href(route: Route): string {
     case 'files': return `#/r/${encodeURIComponent(route.id)}/files${route.path === null ? '' : `/${route.path.split('/').map(encodeURIComponent).join('/')}`}`
     case 'admin': return '#/admin'
     case 'profile': return '#/me'
+    case 'pair': return `#/pair/${encodeURIComponent(route.code)}`
   }
 }
 

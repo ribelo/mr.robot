@@ -82,6 +82,19 @@ export function Admin() {
 
       <h2>Home settings</h2>
       <HomeSettings view={view} onSave={(patch) => run(() => api.updateHomeSettings(patch), 'Saved.')} />
+      <h2>Hosts</h2>
+      {(view.hosts ?? []).length === 0 ? <div className="muted">No computers paired in this Home.</div> : (
+        <table className="grid"><tbody>{(view.hosts ?? []).map((host) => (
+          <tr key={host.id}>
+            <td><b>{host.name}</b><div className="muted">{host.ownerName} · {host.sharing === 'home' ? 'shared with the Home' : 'private'}</div></td>
+            <td>{host.online ? '● online' : 'offline'}<div className="muted">last seen {host.lastSeen === null ? 'never' : new Date(host.lastSeen).toLocaleString()}</div></td>
+            <td className="muted">{host.platform}{host.version === null ? '' : ` · app ${host.version}`}{host.capabilities === null ? '' : ` · ${host.capabilities.chrome ?? 'no Chrome'}${host.capabilities.graphical ? '' : ' · no display'}`}</td>
+            <td className="muted">{host.users.length === 0 ? 'not in use' : `used by ${host.users.join(', ')}`}</td>
+          </tr>
+        ))}</tbody></table>
+      )}
+      <h2>Proxy</h2>
+      <ProxyConfig configured={view.proxyConfigured === true} onSave={(url) => run(() => api.setProxy(url), url === null ? 'Removed.' : 'Saved.')} />
       <h2>Exa</h2>
       <ExaKey configured={view.exaConfigured === true} onSave={(key) => run(() => api.setExaKey(key), key === null ? 'Removed.' : 'Saved.')} />
       <h2>Proton VPN</h2>
@@ -257,6 +270,21 @@ function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: str
         <input type="password" aria-label="Exa API key" value={key} placeholder="Exa API key" onChange={(event) => setKey(event.target.value)} />
         {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
         <button type="button" className="button button-primary" disabled={key.trim() === ''} onClick={() => void onSave(key).then(() => setKey(''))}>Save</button>
+      </div>
+    </div>
+  )
+}
+
+/** The proxy address for "Container Chrome via proxy" (v1.2 ticket 05): write-only. */
+function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url: string | null) => Promise<void> }) {
+  const [url, setUrl] = useState('')
+  return (
+    <div className="form">
+      <p className="muted">{configured ? 'A proxy address is stored; "Container Chrome via proxy" is available.' : 'A proxy address (for example from a residential proxy provider) makes "Container Chrome via proxy" available. Format: http://user:password@host:port or socks5://user:password@host:port. Stored encrypted.'}</p>
+      <div className="form inline">
+        <input type="password" aria-label="Proxy address" value={url} placeholder="http://user:password@host:port" onChange={(event) => setUrl(event.target.value)} />
+        {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
+        <button type="button" className="button button-primary" disabled={url.trim() === ''} onClick={() => void onSave(url).then(() => setUrl(''))}>Save</button>
       </div>
     </div>
   )
