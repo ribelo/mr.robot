@@ -190,6 +190,8 @@ describe('live view and takeover', () => {
 
   it('sends pressed keys to the page, reports open timings, and hands back when the window closes (pl-485j, pl-glfh, pl-n2vs)', async () => {
     const id = await shopperAtLogin()
+    // The chat keeps its own socket open; it must not hold the claim.
+    const chat = await connect(ANNA, id)
     const viewer = await connect(ANNA, id)
     await viewer.send({ type: 'live', on: true })
     await viewer.send({ type: 'claim' })
@@ -206,5 +208,6 @@ describe('live view and takeover', () => {
     await settle(id)
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.takeover).toBeNull()
     expect(JSON.stringify(requests.get(id)!.at(-1)!.messages)).toContain('handed the browser back')
+    chat.socket.close()
   })
 })
