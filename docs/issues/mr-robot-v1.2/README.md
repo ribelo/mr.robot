@@ -11,3 +11,4 @@ Spec: ../mr-robot-v1.2.md. Work the frontier; 01 first, 05 in parallel.
 | 05 | [Container Chrome via proxy and the Allegro trial](05-residential-proxy-trial.md) | — | in-progress (needs a residential proxy address) |
 | 06 | [Virtual display for monitor-less hosts](06-virtual-display-host.md) | 03 | postponed |
 | 07 | [Host app window with local activity and takeover](07-host-app-window.md) | 03 | postponed |
+| 08 | [The desktop app shows the Mr. Robot interface](08-app-shows-the-web-interface.md) | 01 | ready-for-agent |

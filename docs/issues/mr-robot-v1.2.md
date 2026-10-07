@@ -63,6 +63,12 @@ A Mr. Robot desktop app (Electron, Linux and macOS) turns any computer the Membe
 30. As a Home admin, I want the admin view to list every host in the Home with owner, sharing, online/offline, last seen, version and the robots currently using it, so that I see what is connected ^hs-w8vi
 31. As a person, I want to change the server address in the app and re-pair, so that a host can move to another deployment ^hs-0cr2
 
+### Added 2026-10-07 17:50 (the app is the product, not a pairing form)
+
+32. As a person, I want the desktop app to show the same Mr. Robot interface as the web app (robot list, conversations, panel, settings, admin), so that the app on my computer is Mr. Robot, as Grok Bot's desktop app is Grok Bot ^hs-pyn0
+33. As a person, I want the host pairing (server address, computer name, autostart, status, unpair) to live as one page inside that interface ("This computer"), so that pairing is a setting, not the whole app ^hs-p0jr
+34. As a person, I want the app signed in with the same account as the web, so that the host and my conversations belong to one person without a second login ^hs-upeq
+
 ## Implementation Decisions
 
 ### Vocabulary
@@ -75,6 +81,9 @@ GLOSSARY.md applies. New words: **Host** (a computer running the Mr. Robot app, 
 - First start asks for the server address (the deployment URL); nothing is built in. The app keeps the address and the host token; both can be changed in the app window (re-pair). While connected the app heartbeats (version, platform, capabilities: graphical session, Chrome found); the Member DO records last seen and marks the host offline when heartbeats stop. The admin view lists all hosts of the Home.
 - Tray icon with status (connected, host name, robots currently using it); starts at login; a minimal window with sign-in, host name, unpair.
 - Distribution: Nix package (flake output) for NixOS; .dmg via electron-builder for macOS; no auto-update this round.
+
+### The app's interface
+- The Electron window loads the web app from the configured server address (the same PWA bundle, same Access session; the app holds the session cookie), so every view is identical to the web. Pairing, status, autostart and unpair are one page in that interface, "This computer", reachable from the profile and the tray; the current bare pairing form is replaced by it. Tray stays.
 
 ### Hosts, sharing, grants
 - A Host belongs to the Member who paired it; scope private or Home, like login entries. Any number of hosts per Member.
