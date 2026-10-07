@@ -1,3 +1,4 @@
+import { FilesView } from './components/FilesView.tsx'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { Me, RobotPanel, RobotSummary, SettingsCatalog, Trajectory } from '@mr-robot/protocol'
 import { api, ApiError } from './api.ts'
@@ -23,6 +24,7 @@ export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; 
         {me.role === 'admin' ? <Admin /> : <div className="muted">Only the Home admin sees this page.</div>}
       </div>
     )
+    case 'files': return <FilesPage id={route.id} path={route.path} robot={robots.find((robot) => robot.id === route.id)} me={me} />
     case 'takeover': return <TakeoverPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} />
     case 'profile': return (
       <div className="page">
@@ -165,5 +167,14 @@ function TakeoverPage({ id, robot }: { id: string; robot: RobotSummary | undefin
       requested={panel.takeover === null || !panel.canEdit ? null : { reason: panel.takeover.reason }}
       onClose={() => go({ page: 'robot', id, panel: true })}
     />
+  )
+}
+
+function FilesPage({ id, path, robot, me }: { id: string; path: string | null; robot: RobotSummary | undefined; me: Me }) {
+  return (
+    <div className="page">
+      <PageHead title={`${robot?.identity.name ?? 'Robot'} · Files`} back={{ page: 'robot', id, panel: true }} />
+      <FilesView robotId={id} path={path} canEdit={robot === undefined || robot.ownerId === me.id} onOpen={(next) => go({ page: 'files', id, path: next })} />
+    </div>
   )
 }

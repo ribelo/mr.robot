@@ -8,11 +8,12 @@ export interface PanelProps {
   readonly onOpenScreen: () => void
   readonly onAdvanced: () => void
   readonly onTrajectory: () => void
+  readonly onFiles: () => void
   readonly onClose: () => void
 }
 
 /** The robot panel (robot-z3ud): screen thumbnail, Routines, simple settings. */
-export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onClose }: PanelProps) {
+export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose }: PanelProps) {
   const name = panel.summary.identity.name
   return (
     <aside className="panel">
@@ -39,6 +40,7 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
           <h3 className="panel-section">Routines</h3>
           <RoutineList routines={panel.routines} onOpen={(routine) => onOpenRoutine(routine.id)} />
           <div className="panel-links">
+            <button type="button" className="link" onClick={onFiles}>Files</button>
             <button type="button" className="link" onClick={onTrajectory}>Trajectory</button>
             {panel.canEdit ? <button type="button" className="link" onClick={onAdvanced}>Advanced settings</button> : null}
           </div>

@@ -25,7 +25,7 @@ import {
   type RobotPanel,
 } from '@mr-robot/protocol'
 import { HOME_ID, type Env } from '../env.ts'
-import { makeWorkspace } from '../workspace/workspace.ts'
+import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import type { AnswerResult } from '../robot/robot.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
@@ -253,6 +253,24 @@ export const api = new Router<ApiContext>()
     const file = yield* makeWorkspace(c.env.FILES, id).read(path).pipe(Effect.mapError(() => notFound('no screen yet')))
     if (file === undefined) return yield* Effect.fail(notFound('no screen yet'))
     return new Response(file.body, { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=31536000, immutable' } })
+  }))
+  // ------------------------------------------------------------ Files view (v1.1 ticket 08)
+  .on('GET', '/api/robots/:id/files', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    return yield* call(() => robot(c, id).files())
+  }))
+  .on('GET', '/api/robots/:id/file', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    return yield* call(() => robot(c, id).fileContent(path))
+  }))
+  .on('PUT', '/api/robots/:id/file', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
+    return yield* call(() => robot(c, id).saveFile(path, content))
   }))
   .on('GET', '/api/robots/:id/prompt', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).promptPreview()))))
   .on('POST', '/api/robots/:id/retry', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).retry())), Effect.map((retried) => ({ retried }))))

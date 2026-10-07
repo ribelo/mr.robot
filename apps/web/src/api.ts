@@ -17,6 +17,8 @@ import type {
   SettingsPatch,
   Trajectory,
   LoginView,
+  WorkspaceFileContent,
+  WorkspaceFileView,
 } from '@mr-robot/protocol'
 
 export class ApiError extends Error {
@@ -76,6 +78,9 @@ export const api = {
   unsubscribePush: (endpoint: string) => request('/api/push/subscriptions', { method: 'DELETE', body: { endpoint } }),
   secrets: () => request<LoginView[]>('/api/secrets'),
   putLogin: (name: string, input: { username?: string; password?: string; websites?: readonly string[]; notes?: string; allowRead?: boolean; shared: boolean }) => request(`/api/secrets/${encodeURIComponent(name)}`, { method: 'PUT', body: input }),
+  files: (id: string) => request<WorkspaceFileView[]>(`/api/robots/${encodeURIComponent(id)}/files`),
+  file: (id: string, path: string) => request<WorkspaceFileContent>(`/api/robots/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`),
+  saveFile: (id: string, path: string, content: string) => request<WorkspaceFileContent>(`/api/robots/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`, { method: 'PUT', body: { content } }),
   revealLogin: (name: string) => request<{ password: string }>(`/api/secrets/${encodeURIComponent(name)}/reveal`),
   deleteSecret: (name: string) => request(`/api/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   providers: () => request<ProvidersView>('/api/providers'),

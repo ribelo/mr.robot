@@ -85,6 +85,24 @@ export const NotificationSettings = Schema.Struct({
 })
 export type NotificationSettings = typeof NotificationSettings.Type
 
+/** One file in a Robot's Workspace, as the Files view lists it (v1.1 ticket 08). */
+export interface WorkspaceFileView {
+  readonly path: string
+  readonly size: number
+  readonly updatedAt: number
+  /** persona and memory files pinned first, then daily notes, local skills, screenshots, the rest. */
+  readonly group: 'persona' | 'daily' | 'skills' | 'screens' | 'other'
+}
+
+/** A file opened in the Files view; text is null for a file shown read-only (binary or too large). */
+export interface WorkspaceFileContent {
+  readonly path: string
+  readonly size: number
+  readonly text: string | null
+  readonly readOnly: boolean
+  readonly note: string | null
+}
+
 /** A login entry in the Member's settings (v1.1 ticket 05); never carries the password. */
 export interface LoginView {
   readonly name: string

@@ -15,6 +15,8 @@ import type { OpencodePool } from '../providers/opencode-go.ts'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
+  WorkspaceFileContent,
+  WorkspaceFileView,
   Attachment,
   BrowserBackend,
   ChatItem,
@@ -307,6 +309,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
       this.store.beginTurn(wakeup.id, agent.session.id, startSeq, Date.now())
       this.store.set(`turn-start:${wakeup.id}`, startSeq)
+      // Files the owner edited since the last Turn: the Robot must not overwrite them from stale context (rb-xwks).
+      const edits = this.store.get<string[]>('owner-edits') ?? []
+      if (edits.length > 0) {
+        this.store.delete('owner-edits')
+        agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: `Your owner edited ${edits.join(', ')} in your Workspace since your last Turn. Read the current version before you rely on or change it.`, summary: '' }))
+      }
       agent.followup(wakeupMessage({
         sender: wakeup.sender,
         text: wakeup.text,
@@ -1329,6 +1337,49 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return maskSecrets(text, [...this.secretValues, ...this.turnSecrets])
   }
 
+  /** The Workspace as the Files view lists it (rb-1miy): persona and memory first, then the rest. */
+  async files(): Promise<WorkspaceFileView[]> {
+    const entries = await this.run(this.workspace.list(''))
+    const order = (path: string) => { const index = (PERSONA_FILES as readonly string[]).indexOf(path); return index === -1 ? PERSONA_FILES.length : index }
+    const group = (path: string): WorkspaceFileView['group'] =>
+      (PERSONA_FILES as readonly string[]).includes(path) ? 'persona'
+        : /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path) ? 'daily'
+          : path.startsWith('skills/') ? 'skills'
+            : path.startsWith('screens/') ? 'screens'
+              : 'other'
+    return entries
+      .map((entry) => ({ path: entry.path, size: entry.size, updatedAt: entry.uploaded, group: group(entry.path) }))
+      .sort((a, b) => order(a.path) - order(b.path) || (a.group === 'daily' && b.group === 'daily' ? b.path.localeCompare(a.path) : a.path.localeCompare(b.path)))
+  }
+
+  /** One file for the editor; binary and large files are read-only (rb-q5eb). */
+  async fileContent(path: string): Promise<WorkspaceFileContent> {
+    const file = await this.run(this.workspace.read(path))
+    if (file === undefined) throw Object.assign(new Error(`no file "${path}"`), { name: 'NotFound', status: 404 })
+    if (file.size > MAX_EDITABLE_BYTES) return { path, size: file.size, text: null, readOnly: true, note: `${formatBytes(file.size)}: too large to edit here.` }
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })
+    try {
+      const decoded = text.decode(file.body)
+      if (decoded.includes('\u0000')) throw new Error('binary')
+      return { path, size: file.size, text: decoded, readOnly: false, note: null }
+    } catch {
+      return { path, size: file.size, text: null, readOnly: true, note: `${formatBytes(file.size)} binary file (${file.contentType || 'unknown type'}): shown read-only.` }
+    }
+  }
+
+  /** The owner saved a file; the Robot hears about it at its next Turn (rb-xwks). */
+  async saveFile(path: string, content: string): Promise<WorkspaceFileContent> {
+    const current = await this.run(this.workspace.stat(path))
+    if (current !== undefined && current.size > MAX_EDITABLE_BYTES) throw Object.assign(new Error('this file is too large to edit here'), { name: 'Invalid', status: 400 })
+    await this.run(this.workspace.write(path, content, path.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8'))
+    const edits = this.store.get<string[]>('owner-edits') ?? []
+    this.store.set('owner-edits', [...new Set([...edits, path])])
+    const config = this.store.requireConfig()
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${this.owner().name} edited ${path}.`, Date.now())
+    await this.changed()
+    return this.fileContent(path)
+  }
+
   /** Granted login entries and whether each belongs to the open page (rb-vpes). */
   async logins(): Promise<Array<{ name: string; username: string; websites: readonly string[]; matchesPage: boolean; readable: boolean }>> {
     const config = this.store.requireConfig()
@@ -1525,6 +1576,13 @@ const WATCH_INTERVAL_MS = 60_000
 
 function runnable(config: RobotConfig): boolean {
   return config.status === 'active' || config.status === 'setup'
+}
+
+/** Files above this size open read-only in the Files view. */
+const MAX_EDITABLE_BYTES = 256 * 1024
+
+function formatBytes(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} kB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function optionalString(payload: Record<string, unknown>, key: string): Record<string, string> {

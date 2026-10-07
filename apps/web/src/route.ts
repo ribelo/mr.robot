@@ -6,6 +6,7 @@ export type Route =
   | { readonly page: 'trajectory'; readonly id: string }
   | { readonly page: 'advanced'; readonly id: string }
   | { readonly page: 'takeover'; readonly id: string }
+  | { readonly page: 'files'; readonly id: string; readonly path: string | null }
   | { readonly page: 'admin' }
   | { readonly page: 'profile' }
 
@@ -16,6 +17,7 @@ export function parse(hash: string): Route {
     if (parts[2] === 'trajectory') return { page: 'trajectory', id }
     if (parts[2] === 'settings') return { page: 'advanced', id }
     if (parts[2] === 'takeover') return { page: 'takeover', id }
+    if (parts[2] === 'files') return { page: 'files', id, path: parts.length > 3 ? parts.slice(3).map(decodeURIComponent).join('/') : null }
     return { page: 'robot', id, panel: parts[2] === 'panel' }
   }
   if (parts[0] === 'admin') return { page: 'admin' }
@@ -30,6 +32,7 @@ export function href(route: Route): string {
     case 'trajectory': return `#/r/${encodeURIComponent(route.id)}/trajectory`
     case 'advanced': return `#/r/${encodeURIComponent(route.id)}/settings`
     case 'takeover': return `#/r/${encodeURIComponent(route.id)}/takeover`
+    case 'files': return `#/r/${encodeURIComponent(route.id)}/files${route.path === null ? '' : `/${route.path.split('/').map(encodeURIComponent).join('/')}`}`
     case 'admin': return '#/admin'
     case 'profile': return '#/me'
   }

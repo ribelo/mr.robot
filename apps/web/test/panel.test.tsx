@@ -30,7 +30,7 @@ const panel: RobotPanel = {
 }
 
 const handlers = () => ({
-  onOpenRoutine: vi.fn(), onEditProfile: vi.fn(), onOpenScreen: vi.fn(), onAdvanced: vi.fn(), onTrajectory: vi.fn(), onClose: vi.fn(),
+  onOpenRoutine: vi.fn(), onEditProfile: vi.fn(), onOpenScreen: vi.fn(), onAdvanced: vi.fn(), onTrajectory: vi.fn(), onFiles: vi.fn(), onClose: vi.fn(),
 })
 
 describe('Panel (robot-z3ud)', () => {

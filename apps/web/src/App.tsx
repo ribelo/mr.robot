@@ -75,6 +75,7 @@ export function App() {
         onListPref={(id, change) => void api.listPref(id, change).then(refreshRobots)}
         onEditProfile={(id) => setSheet({ kind: 'profile', robotId: id })}
         onAdvanced={(id) => go({ page: 'advanced', id })}
+        onFiles={(id) => go({ page: 'files', id, path: null })}
       />
       <main className="main">
         {route.page === 'robot'
@@ -192,6 +193,7 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
           onOpenScreen={() => go({ page: 'takeover', id })}
           onAdvanced={() => go({ page: 'advanced', id })}
           onTrajectory={() => go({ page: 'trajectory', id })}
+          onFiles={() => go({ page: 'files', id, path: null })}
         />
       ) : null}
     </div>

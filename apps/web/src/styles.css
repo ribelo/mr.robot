@@ -307,3 +307,14 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .model-option { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 7px 10px; border-radius: 8px; }
 .model-option:hover:not(:disabled), .model-option.selected { background: #ffffff12; }
 .model-option:disabled { color: var(--muted); }
+
+/* Files view (v1.1 ticket 08) */
+.files { display: flex; flex-direction: column; gap: 6px; }
+.file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.file-row { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 8px 10px; border-radius: 8px; }
+.file-row:hover { background: #ffffff0e; }
+.file-name { font-family: ui-monospace, monospace; font-size: 13px; overflow-wrap: anywhere; }
+.file-row .muted { font-size: 12px; white-space: nowrap; }
+.file-group summary { cursor: pointer; padding: 8px 0; color: var(--muted); }
+.file-editor-head { display: flex; align-items: center; gap: 12px; }
+.file-text { min-height: 60vh; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.5; }

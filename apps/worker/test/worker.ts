@@ -96,6 +96,11 @@ export class Robot extends ProductionRobot {
     return id
   }
 
+  /** A PNG screenshot in the Workspace, as a Turn with the browser leaves one. */
+  async saveScreenForTest(): Promise<void> {
+    await this.saveScreen(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 5, 0, 0, 0, 3, 32, 0, 255]))
+  }
+
   async outboxForTest(): Promise<Array<{ id: string; status: string }>> {
     return this.store.sql.exec<{ id: string; status: string }>('SELECT id, status FROM outbox').toArray()
   }
