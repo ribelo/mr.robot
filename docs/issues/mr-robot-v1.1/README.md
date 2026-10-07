@@ -4,7 +4,7 @@ Spec: ../mr-robot-v1.1.md. Work the frontier (all blockers done), browser ticket
 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
-| 01 | [Browser backend seam and per-robot backend choice](01-browser-backend-seam.md) | — | ready-for-agent |
+| 01 | [Browser backend seam and per-robot backend choice](01-browser-backend-seam.md) | — | done |
 | 02 | [Chrome in Cloudflare Containers backend](02-container-chrome-backend.md) | 01 | ready-for-agent |
 | 03 | [Container Chrome via Proton VPN](03-container-chrome-via-proton.md) | 02 | ready-for-agent |
 | 04 | [Takeover and live view open the browser on demand](04-takeover-opens-browser.md) | 01 | ready-for-agent |
