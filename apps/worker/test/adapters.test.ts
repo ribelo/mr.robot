@@ -90,8 +90,25 @@ describe('Provider adapters', () => {
     }))
     expect(second.requests[0]!.body.messages.slice(1)).toEqual([
       { role: 'assistant', content: [{ type: 'thinking', thinking: 'hmm', signature: 'sig-1' }, { type: 'tool_use', id: 't1', name: 'read', input: {} }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'file' }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'file', cache_control: { type: 'ephemeral', ttl: '1h' } }] },
     ])
+  })
+
+  it('Anthropic: one-hour prompt cache on the system prompt, the tools and the latest message; cache writes counted (pl-s2d5)', async () => {
+    const { requests } = serve([
+      sse({ type: 'message_start', message: { usage: { input_tokens: 4, cache_read_input_tokens: 9000, cache_creation_input_tokens: 300 } } }),
+      sse({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } }),
+    ])
+    const adapter = new AnthropicAdapter(claudeSubscription(async () => 'oauth-token'), 200_000)
+    const chunks = await collect(adapter.stream({ ...base('anthropic'), tools: [{ name: 'read', description: 'r', parameters: { type: 'object' } }, { name: 'write', description: 'w', parameters: { type: 'object' } }] as never }))
+    const body = requests[0]!.body
+    const hour = { type: 'ephemeral', ttl: '1h' }
+    expect(body.system.at(-1).cache_control).toEqual(hour)
+    expect(body.system[0].cache_control).toBeUndefined()
+    expect(body.tools.at(-1).cache_control).toEqual(hour)
+    expect(body.messages.at(-1).content.at(-1).cache_control).toEqual(hour)
+    expect(requests[0]!.headers.get('anthropic-beta')).toContain('extended-cache-ttl-2025-04-11')
+    expect(chunks).toContainEqual({ type: 'usage', usage: { inputTokens: 9304, outputTokens: 2, cacheReadTokens: 9000, cacheWriteTokens: 300 } })
   })
 
   it('Codex: Responses input items and encrypted reasoning for replay', async () => {
