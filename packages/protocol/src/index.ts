@@ -57,7 +57,7 @@ export const Identity = Schema.Struct({
 })
 export type Identity = typeof Identity.Type
 
-export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret'])
+export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret', 'host'])
 export type GrantKind = typeof GrantKind.Type
 
 export const GrantSet = Schema.Struct({
@@ -65,6 +65,8 @@ export const GrantSet = Schema.Struct({
   skills: Schema.Array(Schema.String),
   recipients: Schema.Array(Schema.String),
   secrets: Schema.Array(Schema.String),
+  /** Host grants (v1.2, hs-5ktw): "<hostId>:browser", "<hostId>:files", "<hostId>:shell". */
+  hosts: Schema.optional(Schema.Array(Schema.String)),
 })
 export type GrantSet = typeof GrantSet.Type
 export const emptyGrants: GrantSet = { tools: [], skills: [], recipients: [], secrets: [] }
@@ -103,6 +105,24 @@ export interface WorkspaceFileContent {
   readonly note: string | null
 }
 
+/** A Host: a computer running the Mr. Robot app, paired to a Member (v1.2, hs-ro43). */
+export interface HostView {
+  readonly id: string
+  readonly name: string
+  readonly platform: string
+  readonly ownerId: string
+  readonly ownerName: string
+  readonly sharing: 'private' | 'home'
+  readonly online: boolean
+  readonly lastSeen: number | null
+  readonly version: string | null
+  readonly capabilities: { readonly graphical: boolean; readonly chrome: string | null } | null
+  /** The caller paired it (may share and unpair it). */
+  readonly mine: boolean
+  /** Robots using it right now (its browser). */
+  readonly users: readonly string[]
+}
+
 /** A login entry in the Member's settings (v1.1 ticket 05); never carries the password. */
 export interface LoginView {
   readonly name: string
@@ -129,7 +149,7 @@ export const LoginInput = Schema.Struct({
 })
 
 /** Where a Robot's Chrome runs (rb-wgtd). */
-export const BrowserBackend = Schema.Literals(['browser-run', 'container', 'container-vpn'])
+export const BrowserBackend = Schema.Union([Schema.Literals(['browser-run', 'container', 'container-vpn', 'container-proxy']), Schema.TemplateLiteral(['host:', Schema.String])])
 export type BrowserBackend = typeof BrowserBackend.Type
 
 /** A backend as the settings show it: whether this Home can use it and why not. */
@@ -403,6 +423,9 @@ export interface AdminView {
   readonly vpnConfigured?: boolean
   /** Whether the Home has an Exa API key (rb-x8i3); the key is never sent. */
   readonly exaConfigured?: boolean
+  /** Every Host of the Home (hs-w8vi). */
+  readonly hosts?: readonly HostView[]
+  readonly proxyConfigured?: boolean
 }
 
 // ---------------------------------------------------------------- Skills (robot-7qpi)

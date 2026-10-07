@@ -96,10 +96,21 @@ export function makeHostClient(send: (text: string) => void) {
   const serialization = RpcSerialization.json
   const parser = serialization.makeUnsafe()
   let write: ((response: unknown) => Effect.Effect<void>) | undefined
+  // Client ids are numbered across the process; each response goes back to the client that asked.
+  const clientOf = new Map<string, number>()
+  let lastClient = 0
   const protocol = RpcClient.Protocol.make(Effect.fnUntraced(function* (writeResponse) {
-    write = (response) => writeResponse(0, response as never)
+    write = (response) => {
+      const requestId = (response as { requestId?: unknown }).requestId
+      const clientId = requestId === undefined ? lastClient : (clientOf.get(String(requestId)) ?? lastClient)
+      if ((response as { _tag?: string })._tag === 'Exit') clientOf.delete(String(requestId))
+      return writeResponse(clientId, response as never)
+    }
     return {
-      send: (_clientId: number, request: unknown) => Effect.sync(() => {
+      send: (clientId: number, request: unknown) => Effect.sync(() => {
+        lastClient = clientId
+        const id = (request as { id?: unknown }).id
+        if (id !== undefined) clientOf.set(String(id), clientId)
         const encoded = parser.encode(request)
         if (encoded !== undefined) send(frame({ t: 'rpc', d: typeof encoded === 'string' ? encoded : String.fromCharCode(...encoded) }))
       }),

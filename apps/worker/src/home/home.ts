@@ -3,7 +3,8 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { LoginView } from '@mr-robot/protocol'
+import type { HostView, LoginView } from '@mr-robot/protocol'
+import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import type {
@@ -369,6 +370,8 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     browserBackends: yield* browserBackends,
     vpnConfigured: (yield* setting<string>('vpn-config')) !== undefined,
     exaConfigured: (yield* setting<string>('exa-key')) !== undefined,
+    proxyConfigured: (yield* setting<string>('proxy-config')) !== undefined,
+    hosts: yield* allHosts,
   } as AdminView
 })
 
@@ -403,11 +406,109 @@ const setExaKey = (key: string | null) => Effect.gen(function* () {
   yield* putSetting('exa-key', yield* platform.secrets.seal(key.trim()))
 })
 
-/** Browser backends this Home can run; the VPN one needs the Home's WireGuard configuration (rb-rb1x). */
-const browserBackends = Effect.gen(function* () {
+/** The proxy address for "Container Chrome via proxy" (v1.2 ticket 05, hs-naw6), sealed. */
+const proxyConfig = Effect.gen(function* () {
   const platform = yield* HomePlatform
-  return backendOptions(platform.env, (yield* setting<string>('vpn-config')) !== undefined)
+  const sealed = yield* setting<string>('proxy-config')
+  return sealed === undefined ? null : yield* platform.secrets.open(sealed)
 })
+
+const setProxyConfig = (url: string | null) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* HomePlatform
+  if (url === null || url.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'proxy-config'")
+  let parsed: URL
+  try { parsed = new URL(url.trim()) } catch { return yield* invalid('a proxy address looks like http://user:password@host:port or socks5://user:password@host:port') }
+  if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol) || parsed.port === '') return yield* invalid('a proxy address looks like http://user:password@host:port or socks5://user:password@host:port')
+  yield* putSetting('proxy-config', yield* platform.secrets.seal(url.trim()))
+})
+
+// ------------------------------------------------------------------ Hosts (v1.2): index, sharing, pairing
+
+type HostSql = { id: string; owner_id: string; name: string; platform: string; sharing: 'private' | 'home'; online: number; last_seen: number | null; version: string | null; capabilities: string | null; users: string }
+
+/** The Member DO reports each host; the Home keeps the index for sharing and the admin view. */
+const hostChanged = (entry: HostEntry | { id: string; removed: true }) => Effect.gen(function* () {
+  const sql = yield* Sql
+  if ('removed' in entry) return yield* sql.run('DELETE FROM host WHERE id = ?', entry.id)
+  yield* sql.run(
+    `INSERT INTO host (id, owner_id, name, platform, sharing, online, last_seen, version, capabilities, users) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (id) DO UPDATE SET name = excluded.name, platform = excluded.platform, sharing = excluded.sharing, online = excluded.online,
+       last_seen = excluded.last_seen, version = excluded.version, capabilities = excluded.capabilities, users = excluded.users`,
+    entry.id, entry.ownerId, entry.name, entry.platform, entry.sharing, entry.online ? 1 : 0, entry.lastSeen, entry.version,
+    entry.capabilities === null ? null : JSON.stringify(entry.capabilities), JSON.stringify(entry.users),
+  )
+})
+
+const hostViews = (rows: readonly HostSql[], memberId: string | null) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const names = new Map((yield* sql.all<{ id: string; name: string }>('SELECT id, name FROM member')).map((row) => [row.id, row.name]))
+  return rows.map((row): HostView => ({
+    id: row.id, name: row.name, platform: row.platform, ownerId: row.owner_id, ownerName: names.get(row.owner_id) ?? 'someone', sharing: row.sharing,
+    online: row.online === 1, lastSeen: row.last_seen, version: row.version, capabilities: row.capabilities === null ? null : JSON.parse(row.capabilities),
+    mine: row.owner_id === memberId, users: JSON.parse(row.users) as string[],
+  }))
+})
+
+/** Hosts a Member's robots can reach: their own, and those shared with the Home (hs-0eka). */
+const hostsFor = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  return yield* hostViews(yield* sql.all<HostSql>("SELECT * FROM host WHERE owner_id = ? OR sharing = 'home' ORDER BY name", memberId), memberId)
+})
+
+const allHosts = Effect.gen(function* () {
+  const sql = yield* Sql
+  return yield* hostViews(yield* sql.all<HostSql>('SELECT * FROM host ORDER BY name'), null)
+})
+
+const hostOwner = (id: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.first<{ owner_id: string }>('SELECT owner_id FROM host WHERE id = ?', id))?.owner_id ?? null
+})
+
+/** Device pairing (hs-hend): the app gets a code, the Member approves it signed in, the app picks up its token. */
+const startPairing = (name: string, platform: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const code = [...crypto.getRandomValues(new Uint8Array(5))].map((byte) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[byte % 32]).join('') + '-' + [...crypto.getRandomValues(new Uint8Array(4))].map((byte) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[byte % 32]).join('')
+  yield* sql.run("DELETE FROM host_pairing WHERE created_at < ?", Date.now() - 15 * 60_000)
+  yield* sql.run('INSERT INTO host_pairing (code, name, platform, created_at) VALUES (?, ?, ?, ?)', code, name.trim().slice(0, 80) || 'Host', platform.slice(0, 40), Date.now())
+  return { code }
+})
+
+const pairingView = (code: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<{ name: string; platform: string; host_id: string | null; created_at: number }>('SELECT name, platform, host_id, created_at FROM host_pairing WHERE code = ?', code)
+  if (row === undefined || row.created_at < Date.now() - 15 * 60_000) return yield* notFound('this pairing code is unknown or expired; start pairing again in the app')
+  return { name: row.name, platform: row.platform, approved: row.host_id !== null }
+})
+
+const approvePairing = (code: string, memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const pending = yield* pairingView(code)
+  if (pending.approved) return yield* invalid('this computer is already paired')
+  const paired = yield* remote((env) => env.MEMBER.getByName(memberId).pairHost(pending.name, pending.platform))
+  yield* sql.run('UPDATE host_pairing SET host_id = ?, token = ?, member_id = ? WHERE code = ?', paired.hostId, paired.token, memberId, code)
+  return { hostId: paired.hostId, name: pending.name }
+})
+
+/** The app's poll: the token is handed over once, then the pairing is forgotten. */
+const pollPairing = (code: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<{ host_id: string | null; token: string | null; created_at: number }>('SELECT host_id, token, created_at FROM host_pairing WHERE code = ?', code)
+  if (row === undefined || row.created_at < Date.now() - 15 * 60_000) return { status: 'expired' as const }
+  if (row.host_id === null || row.token === null) return { status: 'pending' as const }
+  yield* sql.run('DELETE FROM host_pairing WHERE code = ?', code)
+  return { status: 'paired' as const, hostId: row.host_id, token: row.token }
+})
+
+/** Browser backends this Home can run, with the host browsers this Member reaches. */
+const browserBackendsFor = (memberId: string | null) => Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  const hosts = memberId === null ? [] : yield* hostsFor(memberId)
+  return backendOptions(platform.env, { vpn: (yield* setting<string>('vpn-config')) !== undefined, proxy: (yield* setting<string>('proxy-config')) !== undefined }, hosts)
+})
+
+const browserBackends = browserBackendsFor(null)
 
 const sharedSecrets = Effect.gen(function* () {
   const sql = yield* Sql
@@ -431,7 +532,7 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
     secrets: yield* grantableSecrets(memberId),
     models: yield* models(memberId),
     unavailableModels: yield* unavailableModels(memberId),
-    browserBackends: yield* browserBackends,
+    browserBackends: yield* browserBackendsFor(memberId),
     defaultBrowserBackend: (yield* settings).defaultBrowserBackend,
   } as SettingsCatalog
 })
@@ -795,6 +896,11 @@ export class Home extends DurableObject<Env> {
     try { sql.exec('ALTER TABLE skill ADD COLUMN edited INTEGER NOT NULL DEFAULT 0') } catch { /* added before */ }
     sql.exec('CREATE TABLE IF NOT EXISTS model_catalog (provider TEXT PRIMARY KEY, models TEXT, fetched_at INTEGER, error TEXT)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_secret (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
+    sql.exec(`CREATE TABLE IF NOT EXISTS host (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, platform TEXT NOT NULL, sharing TEXT NOT NULL, online INTEGER NOT NULL,
+      last_seen INTEGER, version TEXT, capabilities TEXT, users TEXT NOT NULL DEFAULT '[]'
+    )`)
+    sql.exec('CREATE TABLE IF NOT EXISTS host_pairing (code TEXT PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL, created_at INTEGER NOT NULL, host_id TEXT, token TEXT, member_id TEXT)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
     // v1.1 (rb-a70a): the library starts empty with no sync source; the source set before and its skills go, once.
     if (sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'skills-reset-v1.1'").toArray().length === 0) {
@@ -858,6 +964,15 @@ export class Home extends DurableObject<Env> {
   modelList(): Promise<ModelOption[]> { return this.run(modelList) }
   vpnConfig(): Promise<string | null> { return this.run(vpnConfig) }
   exaKey(): Promise<string | null> { return this.run(exaKey) }
+  proxyConfig(): Promise<string | null> { return this.run(proxyConfig) }
+  setProxyConfig(url: string | null): Promise<void> { return this.run(setProxyConfig(url)) }
+  hostChanged(entry: HostEntry | { id: string; removed: true }): Promise<void> { return this.run(hostChanged(entry)) }
+  hostsFor(memberId: string): Promise<HostView[]> { return this.run(hostsFor(memberId)) }
+  hostOwner(id: string): Promise<string | null> { return this.run(hostOwner(id)) }
+  startPairing(name: string, platform: string): Promise<{ code: string }> { return this.run(startPairing(name, platform)) }
+  pairingView(code: string): Promise<{ name: string; platform: string; approved: boolean }> { return this.run(pairingView(code)) }
+  approvePairing(code: string, memberId: string): Promise<{ hostId: string; name: string }> { return this.run(approvePairing(code, memberId)) }
+  pollPairing(code: string): Promise<{ status: 'expired' | 'pending' } | { status: 'paired'; hostId: string; token: string }> { return this.run(pollPairing(code)) }
   setExaKey(key: string | null): Promise<void> { return this.run(setExaKey(key)) }
   setVpnConfig(config: string | null): Promise<void> { return this.run(setVpnConfig(config)) }
   credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }

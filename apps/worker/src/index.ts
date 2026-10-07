@@ -17,8 +17,37 @@ export { ChromeContainer } from './browser/chrome.ts'
 
 const WS_PATH = new URLPattern({ pathname: '/api/robots/:id/ws' })
 
+/**
+ * The Host channel (v1.2): the desktop app is not a browser session, so these paths are outside
+ * Cloudflare Access (a bypass application in infra/stack.ts) and carry the host's own token instead.
+ */
+async function hostChannel(request: Request, env: Env, path: string): Promise<Response> {
+  const home = env.HOME.getByName(HOME_ID)
+  if (path === '/api/host/pair/start' && request.method === 'POST') {
+    const body = (await request.json().catch(() => ({}))) as { name?: unknown; platform?: unknown }
+    if (typeof body.name !== 'string' || body.name.trim() === '') return json({ error: 'give the host a name' }, 400)
+    const { code } = await home.startPairing(body.name, typeof body.platform === 'string' ? body.platform : 'unknown')
+    return json({ code, approveUrl: `${new URL(request.url).origin}/#/pair/${code}` })
+  }
+  if (path === '/api/host/pair/poll') return json(await home.pollPairing(new URL(request.url).searchParams.get('code') ?? ''))
+  if (path === '/api/host/connect' || path === '/api/host/relay') {
+    if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket', { status: 426 })
+    const hostId = request.headers.get('x-host-id') ?? ''
+    const owner = await home.hostOwner(hostId)
+    if (owner === null) return new Response('unknown host', { status: 401 })
+    const url = new URL(request.url)
+    const headers = new Headers(request.headers)
+    headers.set('x-origin', url.origin)
+    const target = path === '/api/host/connect' ? 'https://member/host/connect' : `https://member/host/relay?session=${encodeURIComponent(url.searchParams.get('session') ?? '')}&side=host`
+    return env.MEMBER.getByName(owner).fetch(new Request(target, { headers }))
+  }
+  return json({ error: 'no such endpoint' }, 404)
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const path = new URL(request.url).pathname
+    if (path.startsWith('/api/host/')) return hostChannel(request, env, path)
     const program = Effect.gen(function* () {
       const email = yield* identityEmail(request, env, ctx)
       const signIn = yield* call((): Promise<SignIn> => env.HOME.getByName(HOME_ID).signIn(email))

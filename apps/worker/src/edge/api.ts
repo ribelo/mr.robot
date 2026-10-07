@@ -116,7 +116,28 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/admin/browser-probe', (c) => Effect.gen(function* () {
     yield* admin(c)
     const input = yield* decodeBody(c.request, Schema.Struct({ backend: BrowserBackend, url: Schema.String, waitMs: Schema.optional(Schema.Number) }))
-    return yield* call(() => probe(c.env, input.backend, input.url, () => home(c.env).vpnConfig(), input.waitMs))
+    return yield* call(() => probe(c.env, input.backend, input.url, { vpn: () => home(c.env).vpnConfig(), proxy: () => home(c.env).proxyConfig() }, input.waitMs))
+  }))
+  // ------------------------------------------------------------ Hosts (v1.2)
+  .on('GET', '/api/hosts', (c) => call(() => home(c.env).hostsFor(c.member.id)))
+  .on('GET', '/api/hosts/pair/:code', (c, { code }) => call(() => home(c.env).pairingView(code)))
+  .on('POST', '/api/hosts/pair/:code', (c, { code }) => call(() => home(c.env).approvePairing(code, c.member.id)))
+  .on('PATCH', '/api/hosts/:id', (c, { id }) => Effect.gen(function* () {
+    const { sharing } = yield* decodeBody(c.request, Schema.Struct({ sharing: Schema.Literals(['private', 'home']) }))
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).setHostSharing(id, sharing))
+    return { ok: true }
+  }))
+  .on('DELETE', '/api/hosts/:id', (c, { id }) => Effect.gen(function* () {
+    const owner = yield* call(() => home(c.env).hostOwner(id))
+    if (owner !== c.member.id && c.member.role !== 'admin') return yield* Effect.fail(forbidden('only the person who paired this host can unpair it'))
+    yield* call(() => c.env.MEMBER.getByName(owner ?? c.member.id).unpairHost(id))
+    return { ok: true }
+  }))
+  .on('PUT', '/api/admin/proxy', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const { url } = yield* decodeBody(c.request, Schema.Struct({ url: Schema.NullOr(Schema.String) }))
+    yield* call(() => home(c.env).setProxyConfig(url)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return { ok: true, configured: url !== null && url.trim() !== '' }
   }))
   .on('PUT', '/api/admin/exa', (c) => Effect.gen(function* () {
     yield* admin(c)

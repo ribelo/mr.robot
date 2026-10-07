@@ -3,6 +3,7 @@
  * PROACTIVE_PREFERENCES.md, mounted read-only into each of their Robots), and the
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
+import { HostHub, type HostEntry } from './hosts.ts'
 import { metaOf, parseEntry, type LoginMeta } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Context from 'effect/Context'
@@ -549,6 +550,55 @@ export class Member extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     await this.run(deliverDue(Date.now()))
+    await this.sweepHosts(Date.now())
+  }
+
+  /** Hosts whose heartbeats stopped go offline; the alarm comes back for the next check. */
+  async sweepHosts(now: number): Promise<void> {
+    const next = await this.hosts.sweep(now)
+    if (next !== null) {
+      const alarm = await this.ctx.storage.getAlarm()
+      if (alarm === null || alarm > next) await this.ctx.storage.setAlarm(next)
+    }
+  }
+
+  // ---------------------------------------------------------------- Hosts (v1.2)
+
+  /** The Member's computers; built lazily so the tables exist before the first host call. */
+  private hostHub: HostHub | undefined
+  private get hosts(): HostHub {
+    this.hostHub ??= new HostHub(this.ctx, this.env, () => this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = 'profile'").toArray().map((row) => (JSON.parse(row.v) as { id: string }).id)[0] ?? '')
+    return this.hostHub
+  }
+
+  pairHost(name: string, platform: string): Promise<{ hostId: string; token: string }> { return this.hosts.pair(name, platform) }
+  hostList(): HostEntry[] { return this.hosts.list() }
+  setHostSharing(id: string, sharing: 'private' | 'home'): Promise<void> { return this.hosts.setSharing(id, sharing) }
+  unpairHost(id: string): Promise<void> { return this.hosts.unpair(id) }
+
+  hostRead(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client) => client.Read({ path })) }
+  hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }) { return this.hosts.run(id, robotId, 'files', (client) => client.Write(input)) }
+  hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number }) {
+    return this.hosts.run(id, robotId, 'shell', (client) => client.Run(input), Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000)
+  }
+  hostBrowserOpen(id: string, robotId: string, robotName: string): Promise<string> { return this.hosts.openBrowser(id, robotId, robotName) }
+  hostBrowserClose(id: string, robotId: string, session: string): Promise<void> { return this.hosts.closeBrowser(id, robotId, session) }
+
+  /** WebSockets: a host's channel, a relay end of a host browser session. */
+  override async fetch(request: Request): Promise<Response> {
+    const path = new URL(request.url).pathname
+    if (path.endsWith('/host/connect')) return this.hosts.connect(request)
+    if (path.endsWith('/host/relay')) return this.hosts.relay(request)
+    return new Response('not found', { status: 404 })
+  }
+
+  override async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.hosts.message(socket, message)
+  }
+
+  override async webSocketClose(socket: WebSocket, code: number): Promise<void> {
+    try { socket.close(code === 1005 ? 1000 : code) } catch { /* closed */ }
+    await this.hosts.closed(socket)
   }
 
   /** Delivery to devices; a test subclass records instead of sending. */

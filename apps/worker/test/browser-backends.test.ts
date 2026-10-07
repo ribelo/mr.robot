@@ -39,7 +39,7 @@ describe('browser backends (rb-wgtd, rb-ybt4, rb-bcui, rb-y50l, rb-kank)', () =>
     const id = await browsingRobot()
     const catalog = (await api<SettingsCatalog>(ANNA, `/api/robots/${id}/catalog`)).body
     expect(catalog.defaultBrowserBackend).toBe('browser-run')
-    expect(catalog.browserBackends?.map((option) => [option.id, option.available])).toEqual([['browser-run', true], ['container', false], ['container-vpn', false]])
+    expect(catalog.browserBackends?.map((option) => [option.id, option.available])).toEqual([['browser-run', true], ['container', false], ['container-vpn', false], ['container-proxy', false]])
 
     await say(id, 'log in', [
       { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] },

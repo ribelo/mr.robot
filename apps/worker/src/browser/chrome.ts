@@ -11,9 +11,9 @@ export class ChromeContainer extends Container<Env> {
   /** The container sleeps when nothing reaches it for this long (the Robot also stops it at the end of a Turn). */
   override sleepAfter = '5m'
 
-  /** Start Chrome, through the VPN when a WireGuard configuration is given. */
-  async begin(vpnConfig: string | null): Promise<void> {
-    await this.startAndWaitForPorts({ ports: 9222, startOptions: { envVars: vpnConfig === null ? {} : { WG_CONFIG: vpnConfig } } })
+  /** Start Chrome; WG_CONFIG routes it through the VPN, PROXY_URL through a proxy (v1.2 ticket 05). */
+  async begin(envVars: Record<string, string>): Promise<void> {
+    await this.startAndWaitForPorts({ ports: 9222, startOptions: { envVars } })
   }
 
   async running(): Promise<boolean> {

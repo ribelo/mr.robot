@@ -190,7 +190,7 @@ export class RobotStore {
   grants(): GrantSet {
     const rows = this.sql.exec<{ kind: GrantKind; name: string }>('SELECT kind, name FROM grant_item ORDER BY kind, name').toArray()
     const pick = (kind: GrantKind) => rows.filter((row) => row.kind === kind).map((row) => row.name)
-    return { tools: pick('tool'), skills: pick('skill'), recipients: pick('recipient'), secrets: pick('secret') }
+    return { tools: pick('tool'), skills: pick('skill'), recipients: pick('recipient'), secrets: pick('secret'), hosts: pick('host') }
   }
 
   /** Replace the whole grant set exactly. */
@@ -204,6 +204,7 @@ export class RobotStore {
       insert('skill', grants.skills)
       insert('recipient', grants.recipients)
       insert('secret', grants.secrets)
+      insert('host', grants.hosts ?? [])
     })
   }
 
@@ -212,9 +213,9 @@ export class RobotStore {
   }
 
   /** What Mr. Robot can reach without grants: every login and skill its owner can (rb-b0rs). Kept in memory, refreshed each Turn. */
-  private reach: { readonly secrets: readonly string[]; readonly skills: readonly string[] } = { secrets: [], skills: [] }
+  private reach: { readonly secrets: readonly string[]; readonly skills: readonly string[]; readonly hosts?: readonly string[] } = { secrets: [], skills: [] }
 
-  setReach(reach: { readonly secrets: readonly string[]; readonly skills: readonly string[] }): void {
+  setReach(reach: { readonly secrets: readonly string[]; readonly skills: readonly string[]; readonly hosts?: readonly string[] }): void {
     this.reach = reach
   }
 
@@ -227,12 +228,13 @@ export class RobotStore {
       skills: [...new Set([...stored.skills, ...this.reach.skills])],
       recipients: stored.recipients,
       secrets: [...new Set([...stored.secrets, ...this.reach.secrets])],
+      hosts: [...new Set([...(stored.hosts ?? []), ...(this.reach.hosts ?? []).flatMap((id) => [`${id}:browser`, `${id}:files`, `${id}:shell`])])],
     }
   }
 
   mayUse(kind: GrantKind, name: string): boolean {
     const grants = this.effectiveGrants()
-    const list = kind === 'tool' ? grants.tools : kind === 'skill' ? grants.skills : kind === 'secret' ? grants.secrets : grants.recipients
+    const list = kind === 'tool' ? grants.tools : kind === 'skill' ? grants.skills : kind === 'secret' ? grants.secrets : kind === 'host' ? (grants.hosts ?? []) : grants.recipients
     return list.includes(name)
   }
 

@@ -80,7 +80,7 @@ export class RenderingDriver implements BrowserDriver {
 }
 
 /** A new tab with the Robot's cookies, storage and notification capture. */
-async function preparedPage(browser: Browser, state: BrowserState | null): Promise<Page> {
+export async function preparedPage(browser: Browser, state: BrowserState | null): Promise<Page> {
   const page = await browser.newPage()
   await page.setViewport({ width: 1280, height: 800 })
   await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
@@ -100,7 +100,7 @@ async function preparedPage(browser: Browser, state: BrowserState | null): Promi
  * Scripts registered for new documents end with the connection that registered them: install
  * the notification capture again for later navigations, and in the page already open.
  */
-async function rearmed(page: Page): Promise<void> {
+export async function rearmed(page: Page): Promise<void> {
   await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
   await page.evaluate(NOTIFICATION_CAPTURE).catch(() => undefined)
 }
@@ -112,6 +112,11 @@ async function containerBrowser(stub: ChromeStub): Promise<Browser> {
   const response = await stub.fetch(new Request(`http://localhost${path}`, { headers: { Upgrade: 'websocket' } }))
   const socket = response.webSocket
   if (socket === null) throw new Error(`the browser container refused DevTools (${response.status})`)
+  return socketBrowser(socket)
+}
+
+/** A browser-level DevTools WebSocket as a puppeteer Browser (containers, host relays). */
+export async function socketBrowser(socket: WebSocket): Promise<Browser> {
   socket.accept()
   const transport: { send(message: string): void; close(): void; onmessage?: (message: string) => void; onclose?: () => void } = {
     send: (message) => socket.send(message),
@@ -122,7 +127,7 @@ async function containerBrowser(stub: ChromeStub): Promise<Browser> {
   return (await puppeteer.connect({ transport } as never)) as unknown as Browser
 }
 
-type ChromeStub = { fetch(input: RequestInfo, init?: RequestInit): Promise<Response>; begin(vpn: string | null): Promise<void>; running(): Promise<boolean>; end(): Promise<void> }
+type ChromeStub = { fetch(input: RequestInfo, init?: RequestInit): Promise<Response>; begin(envVars: Record<string, string>): Promise<void>; running(): Promise<boolean>; end(): Promise<void> }
 
 /**
  * Container Chrome (rb-wn96): one container per Robot and backend; its session id is the
@@ -132,12 +137,12 @@ export class ContainerDriver implements BrowserDriver {
   constructor(
     private readonly chrome: { getByName(name: string): ChromeStub },
     private readonly name: string,
-    private readonly vpnConfig: () => Promise<string | null>,
+    private readonly startEnv: () => Promise<Record<string, string>>,
   ) {}
 
   async open(state: BrowserState | null): Promise<BrowserPage> {
     const stub = this.chrome.getByName(this.name)
-    await stub.begin(await this.vpnConfig())
+    await stub.begin(await this.startEnv())
     const browser = await containerBrowser(stub)
     return new RenderingPage(browser, await preparedPage(browser, state), state?.storage ?? {}, { id: this.name, close: () => stub.end() })
   }
@@ -175,7 +180,7 @@ const NOTIFICATION_CAPTURE = `(() => {
   }
 })()`
 
-class RenderingPage implements BrowserPage {
+export class RenderingPage implements BrowserPage {
   private cdpSession: CDPSession | undefined
   private readonly storage: Record<string, Readonly<Record<string, string>>>
 
@@ -276,8 +281,11 @@ class RenderingPage implements BrowserPage {
   }
 
   async close(): Promise<void> {
-    await this.browser.close().catch(() => undefined)
-    await this.session?.close()
+    if (this.session === undefined) await this.browser.close().catch(() => undefined)
+    else {
+      await this.session.close()
+      await this.browser.disconnect().catch(() => undefined)
+    }
   }
 
   sessionId(): string {

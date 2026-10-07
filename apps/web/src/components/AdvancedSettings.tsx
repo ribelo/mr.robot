@@ -26,7 +26,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const model = catalog.models.find((option) => option.provider === draft.model.provider && option.model === draft.model.model)
   const maxBudget = model?.contextWindow ?? 1_000_000
   const toggle = (kind: keyof GrantSet, name: string) => {
-    const current = draft.grants[kind]
+    const current = draft.grants[kind] ?? []
     const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name]
     setDraft({ ...draft, grants: { ...draft.grants, [kind]: next } })
   }

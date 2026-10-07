@@ -4,7 +4,7 @@
  */
 import type { BrowserBackend } from '@mr-robot/protocol'
 import type { Env } from '../env.ts'
-import { BACKENDS, driverFor } from './backends.ts'
+import { backendLabel, driverFor } from './backends.ts'
 
 export interface ProbeResult {
   readonly backend: BrowserBackend
@@ -20,9 +20,9 @@ export interface ProbeResult {
   readonly ms: number
 }
 
-export async function probe(env: Env, backend: BrowserBackend, url: string, vpnConfig: () => Promise<string | null>, waitMs = 2500): Promise<ProbeResult> {
+export async function probe(env: Env, backend: BrowserBackend, url: string, configs: { vpn: () => Promise<string | null>; proxy: () => Promise<string | null> }, waitMs = 2500): Promise<ProbeResult> {
   const started = Date.now()
-  const driver = driverFor(backend, env, { id: `probe-${crypto.randomUUID().slice(0, 8)}`, vpnConfig })
+  const driver = driverFor(backend, env, { id: `probe-${crypto.randomUUID().slice(0, 8)}`, vpnConfig: configs.vpn, proxyConfig: configs.proxy, hostBrowser: { open: async () => { throw new Error('the probe runs cloud backends only') }, close: async () => undefined } })
   let page: Awaited<ReturnType<typeof driver.open>> | undefined
   try {
     page = await driver.open(null)
@@ -42,7 +42,7 @@ export async function probe(env: Env, backend: BrowserBackend, url: string, vpnC
       title: observation.title, text: observation.text.slice(0, 600), challenge: observation.challenge, screenshot, ms: Date.now() - started,
     }
   } catch (error) {
-    return { backend, url, finalUrl: url, result: 'error', title: '', text: '', challenge: null, screenshot: null, error: `${BACKENDS[backend].label}: ${error instanceof Error ? error.message : String(error)}`, ms: Date.now() - started }
+    return { backend, url, finalUrl: url, result: 'error', title: '', text: '', challenge: null, screenshot: null, error: `${backendLabel(backend)}: ${error instanceof Error ? error.message : String(error)}`, ms: Date.now() - started }
   } finally {
     await page?.close().catch(() => undefined)
   }

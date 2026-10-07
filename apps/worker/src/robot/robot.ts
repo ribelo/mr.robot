@@ -16,6 +16,7 @@ import type { OpencodePool } from '../providers/opencode-go.ts'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
+  HostView,
   WorkspaceFileContent,
   WorkspaceFileView,
   Attachment,
@@ -67,7 +68,8 @@ import { browserTools, type BrowserHost, type ScreenshotImage } from '../agent/t
 import { takeoverTools, type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
-import { BACKENDS, browserCost, driverFor } from '../browser/backends.ts'
+import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
+import { hostTools } from '../agent/tools/host.ts'
 import { type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
@@ -103,6 +105,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The wake-up a Turn is being started for, so a failure before the Turn begins can still be retried. */
   private starting: Wakeup | undefined
   private handingBack = false
+  /** The hosts this Robot's owner reaches, refreshed each Turn (names for tools and labels). */
+  private knownHosts: HostView[] = []
+  /** The kind of the wake-up the running Turn serves. */
+  private currentWakeup: string | undefined
   /** The browser was opened for a viewer (live view or takeover), not by a Turn (rb-keaw). */
   private openedForViewer = false
   /** Values of granted secrets, kept only in memory to mask views (never stored by the Robot). */
@@ -310,6 +316,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   private async runTurn(wakeup: Wakeup, resuming: boolean): Promise<void> {
+    this.currentWakeup = wakeup.kind
+    // Hosts and Mr. Robot's reach decide which tools exist, so they are known before the composition.
+    await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
     const { agent, ctx } = await this.agent()
     await this.refreshPersona()
     if (!resuming) {
@@ -612,6 +621,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config.status === 'setup') return [...tools, ...setupTools(this), ...fileTools(this)]
     tools.push(...grantProposalTools(this), ...memberFileTools(this), ...replyTools(this))
     for (const group of this.store.effectiveGrants().tools.filter(isToolGroup)) tools.push(...this.groupTools(group, config))
+    // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
+    const hostGrants = this.store.effectiveGrants().hosts ?? []
+    const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
+    tools.push(...hostTools(this, { files: names('files'), shell: names('shell') }))
     return tools
   }
 
@@ -656,7 +669,76 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** The driver for a browser backend (rb-wgtd); tests substitute a stub browser. */
   protected browserDriver(backend: BrowserBackend): BrowserDriver {
-    return driverFor(backend, this.env, { id: this.store.requireConfig().id, vpnConfig: () => this.home().vpnConfig() })
+    return driverFor(backend, this.env, {
+      id: this.store.requireConfig().id,
+      vpnConfig: () => this.home().vpnConfig(),
+      proxyConfig: () => this.home().proxyConfig(),
+      hostBrowser: {
+        open: async (hostId) => {
+          const owner = await this.hostOwnerStub(hostId)
+          const session = await this.hostCall(() => owner.hostBrowserOpen(hostId, this.store.requireConfig().id, this.store.requireConfig().identity.name))
+          const response = await owner.fetch(new Request(`https://member/host/relay?session=${encodeURIComponent(session)}&side=robot`, { headers: { Upgrade: 'websocket' } }))
+          if (response.webSocket === null) throw new Error(`the host browser relay refused (${response.status})`)
+          return { socket: response.webSocket, session }
+        },
+        close: async (hostId, session) => {
+          await (await this.hostOwnerStub(hostId)).hostBrowserClose(hostId, this.store.requireConfig().id, session)
+        },
+      },
+    })
+  }
+
+  // ---------------------------------------------------------------- Hosts (v1.2)
+
+  /** For the host owner's Member DO: who this Robot is and whether it holds the grant (hs-5ktw, hs-44cm). */
+  async hostAccess(hostId: string, grant: 'browser' | 'files' | 'shell'): Promise<{ ownerId: string; name: string; granted: boolean; mrRobot: boolean }> {
+    const config = this.store.requireConfig()
+    return { ownerId: config.ownerId, name: config.identity.name, granted: this.store.hasGrant('host', `${hostId}:${grant}`), mrRobot: config.kind === 'mr-robot' }
+  }
+
+  private async hostOwnerStub(hostId: string) {
+    const owner = await this.home().hostOwner(hostId)
+    if (owner === null) throw Object.assign(new Error(`there is no host ${hostId} any more`), { name: 'HostOffline' })
+    return this.env.MEMBER.getByName(owner)
+  }
+
+  /** A host the Robot names, by name or id, among those its owner reaches. */
+  private async resolveHost(name: string): Promise<HostView> {
+    const hosts = await this.home().hostsFor(this.store.requireConfig().ownerId)
+    const found = hosts.find((host) => host.id === name) ?? hosts.find((host) => host.name.toLowerCase() === name.trim().toLowerCase())
+    if (found === undefined) throw new Error(`no host named "${name}"; your owner's hosts: ${hosts.map((host) => host.name).join(', ') || 'none'}`)
+    return found
+  }
+
+  /** Host calls fail clearly (hs-bfr8); a Routine that hits an offline host tells the owner (hs-nwcl). */
+  private async hostCall<A>(call: () => Promise<A>): Promise<A> {
+    try {
+      return await call()
+    } catch (error) {
+      if (error instanceof Error && error.name === 'HostOffline' && this.currentWakeup === 'routine') {
+        await this.notifyMembers('needs you', `could not finish a routine: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
+      }
+      throw error instanceof Error && error.name === 'HostOffline' ? new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running; do not switch to a cloud browser.`) : error
+    }
+  }
+
+  async hostRead(name: string, path: string): Promise<unknown> {
+    const host = await this.resolveHost(name)
+    const result = await this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRead(host.id, this.store.requireConfig().id, path))
+    return { host: host.name, ...result }
+  }
+
+  async hostWrite(name: string, path: string, content: string, encoding: 'text' | 'base64'): Promise<unknown> {
+    const host = await this.resolveHost(name)
+    const result = await this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostWrite(host.id, this.store.requireConfig().id, encoding === 'base64' ? { path, base64: content } : { path, text: content }))
+    return { host: host.name, ...result }
+  }
+
+  async hostRun(name: string, command: string, cwd: string | undefined, timeoutSeconds: number | undefined): Promise<unknown> {
+    const host = await this.resolveHost(name)
+    const timeoutMs = Math.min(Math.max(timeoutSeconds ?? 120, 1), 600) * 1000
+    const result = await this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRun(host.id, this.store.requireConfig().id, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs }))
+    return { host: host.name, command, ...result }
   }
 
   /** This Robot's backend: its own choice, else the Home default (rb-ybt4). */
@@ -843,7 +925,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (observation.url.startsWith('http')) this.store.set('browser-url', observation.url)
     await this.loadSecretMasks()
     // The backend is named so a block page says which browser was blocked (rb-kank).
-    return { ...observation, text: this.mask(observation.text), backend: BACKENDS[this.sessionBackend()].label }
+    return { ...observation, text: this.mask(observation.text), backend: backendLabel(this.sessionBackend(), this.knownHosts) }
   }
 
   /** A screenshot becomes the panel's screen thumbnail (robot-ksvy). */
@@ -900,9 +982,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Mr. Robot's reach: every login and skill its owner can grant (rb-b0rs). */
   private async refreshReach(): Promise<void> {
     const config = this.store.config()
-    if (config?.kind !== 'mr-robot') return
+    if (config === undefined) return
+    this.knownHosts = await this.home().hostsFor(config.ownerId)
+    if (config.kind !== 'mr-robot') return
     const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), this.home().skills(config.ownerId)])
-    this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name) })
+    this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name), hosts: this.knownHosts.map((host) => host.id) })
   }
 
   private async refreshPersona(): Promise<void> {
