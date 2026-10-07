@@ -135,6 +135,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         stopWatching: () => Effect.promise(() => this.stopWatching()),
         notifyMembers: (kind, body) => Effect.promise(() => this.notifyMembers(kind, body).catch(() => 0)),
         rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
+        working: () => Effect.sync(() => this.store.activeTurn() !== undefined || this.pumping !== undefined),
+        releaseAgent: () => Effect.promise(() => this.releaseComposition()),
+        seedSession: (sessionId, seed, note) => Effect.promise(async () => {
+          this.pendingSeed = { sessionId, ...seed }
+          const { agent, ctx } = await this.agent()
+          // The notice the program adds tells the owner; the instruction itself stays out of the chat.
+          agent.inject(wakeupMessage({ sender: { kind: 'platform' }, text: note, summary: '' }))
+          await ctx.sessions.flush(agent.session)
+        }),
       }),
     ))
   }
@@ -1343,65 +1352,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Rewind to before Turn n: before the inbox events that delivered its message too, so the
    * message is gone with the Turn (it is not delivered again).
    */
-  async rewindBeforeTurn(turn: number): Promise<RewindView> {
-    const config = this.store.requireConfig()
-    const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
-    const start = events.findIndex((event) => event.type === 'turn/start' && (event.data as { turn?: number }).turn === turn)
-    if (start < 0) throw new Error(`no Turn ${turn} in this Conversation`)
-    let first = start
-    while (first > 0 && events[first - 1]!.type === 'agent/inbox/spliced') first -= 1
-    return this.rewind(Math.max(0, events[first]!.seq - 1))
+  rewindBeforeTurn(turn: number): Promise<RewindView> {
+    return this.program(Programs.rewindBeforeTurn(turn))
   }
 
-  async rewind(atSeq: number): Promise<RewindView> {
-    const config = this.store.requireConfig()
-    if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw new Error('the Robot is working; rewind when it is done')
-    const events = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
-    if (!Number.isInteger(atSeq) || atSeq < 0 || atSeq >= events.length) throw new Error(`no event ${atSeq} in this Conversation`)
-    const dropped = events.slice(atSeq + 1)
-    const toolsAfter = [...new Set(dropped.filter((event) => event.type === 'tool/call').map((event) => String((event.data as { name?: unknown }).name)))]
-    const seed = buildForkSeed(events, SessionSeq(atSeq))
-    const sessionId = `s-${crypto.randomUUID()}`
-    const now = Date.now()
-    const rewind = { id: `rw-${crypto.randomUUID().slice(0, 8)}`, atSeq, archivedSessionId: config.liveSessionId, liveSessionId: sessionId, at: now }
 
-    await this.releaseComposition()
-    this.pendingSeed = { sessionId, events: seed, inheritedEventCount: atSeq + 1, parentSession: config.liveSessionId }
-    this.store.transaction(() => {
-      this.store.addRewind(rewind)
-      this.store.updateConfig(() => ({ liveSessionId: sessionId }))
-    })
-    const { agent, ctx } = await this.agent()
-    agent.inject(wakeupMessage({
-      sender: { kind: 'platform' },
-      text: [
-        'Your owner rewound this Conversation to an earlier point. Everything after that point is gone from your memory of the Conversation, but its external effects still stand: messages already sent, files written, carts filled, orders placed stay as they are.',
-        toolsAfter.length === 0 ? 'No tools were used after the rewind point.' : `After the rewind point you had used: ${toolsAfter.join(', ')}. Check the real state before you repeat or contradict anything.`,
-      ].join('\n'),
-      // The notice below tells the owner; the instruction itself stays out of the chat.
-      summary: '',
-    }))
-    await ctx.sessions.flush(agent.session)
-    this.store.addNotice(sessionId, storedLength(this.ctx.storage.sql, sessionId), `Rewound to an earlier point. The previous Conversation is kept in the archive.`, now)
-    await this.changed()
-    return { ...rewind, undone: false }
+  rewind(atSeq: number): Promise<RewindView> {
+    return this.program(Programs.rewind(atSeq))
   }
+
 
   /** Undo the latest rewind: its archived log becomes live again (robot-8v1t). */
-  async undoRewind(id: string): Promise<RewindView> {
-    const config = this.store.requireConfig()
-    if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw new Error('the Robot is working; undo when it is done')
-    const rewind = this.store.rewinds().find((entry) => entry.id === id)
-    if (rewind === undefined || rewind.undone) throw new Error('no such rewind')
-    if (rewind.liveSessionId !== config.liveSessionId) throw new Error('only the latest rewind can be undone')
-    await this.releaseComposition()
-    this.store.transaction(() => {
-      this.store.markRewindUndone(id, Date.now())
-      this.store.updateConfig(() => ({ liveSessionId: rewind.archivedSessionId }))
-    })
-    await this.changed()
-    return { ...rewind, undone: true }
+  undoRewind(id: string): Promise<RewindView> {
+    return this.program(Programs.undoRewind(id))
   }
+
 
   /** An archived log, read-only (the rewind archive). */
   archivedTrajectory(sessionId: string): TrajectoryEvent[] {

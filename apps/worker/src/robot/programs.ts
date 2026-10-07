@@ -9,11 +9,13 @@ import type { DirectoryEntry } from '../agent/tools/messaging.ts'
 import type { NotificationKind, ProposalView, RobotSettings, RoutineSchedule, RoutineView, SettingsPatch } from '@mr-robot/protocol'
 import type { MemberFileName } from '../member/member.ts'
 import { currentMonth } from '../home/home.ts'
-import { storedLength } from '../agent/session-log.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.ts'
 import type { ProposalRow, RobotStore, RoutineRow, WakeupKind } from './store.ts'
+import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { readStoredEvents, storedLength } from '../agent/session-log.ts'
+import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 
 export const MAX_CHAIN_HOPS = 8
@@ -61,6 +63,12 @@ export interface RobotPlatformShape {
   notifyMembers(kind: NotificationKind, body: string): Effect.Effect<number>
   /** Keep a fetched secret's value in memory to mask it (never stored). */
   rememberSecret(name: string, value: string): Effect.Effect<void>
+  /** A Turn is running or about to run. */
+  working(): Effect.Effect<boolean>
+  /** Dispose the DSH agent so the next Turn composes over the current live session. */
+  releaseAgent(): Effect.Effect<void>
+  /** Start the DSH session seeded from a prefix of the old one, with a platform note for the model. */
+  seedSession(sessionId: string, seed: { readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string }, note: string): Effect.Effect<void>
 }
 
 export class RobotPlatform extends Context.Service<RobotPlatform, RobotPlatformShape>()('mr-robot/RobotPlatform') {}
@@ -545,4 +553,68 @@ export const secret = (name: string) => Effect.gen(function* () {
   if (value === null) return yield* notFound(`The secret "${name}" no longer exists`)
   yield* platform.rememberSecret(name, value)
   return value
+})
+
+// ------------------------------------------------------------------ rewind (robot-0q6a, robot-8v1t, robot-acr3)
+
+/**
+ * Make a new live session seeded from the log up to and including `atSeq`. The old log
+ * stays in this Robot's SQLite as the archive, with a rewind record; nothing is rewritten.
+ * The Robot is told that external effects after the point still stand.
+ */
+export const rewind = (atSeq: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  if (yield* platform.working()) return yield* conflict('the Robot is working; rewind when it is done')
+  const events = readStoredEvents(store.sql, current.liveSessionId)
+  if (!Number.isInteger(atSeq) || atSeq < 0 || atSeq >= events.length) return yield* invalid(`no event ${atSeq} in this Conversation`)
+  const toolsAfter = [...new Set(events.slice(atSeq + 1).filter((event) => event.type === 'tool/call').map((event) => String((event.data as { name?: unknown }).name)))]
+  const sessionId = `s-${crypto.randomUUID()}`
+  const now = Date.now()
+  const record = { id: `rw-${crypto.randomUUID().slice(0, 8)}`, atSeq, archivedSessionId: current.liveSessionId, liveSessionId: sessionId, at: now }
+  yield* platform.releaseAgent()
+  store.transaction(() => {
+    store.addRewind(record)
+    store.updateConfig(() => ({ liveSessionId: sessionId }))
+  })
+  yield* platform.seedSession(sessionId, { events: buildForkSeed(events, SessionSeq(atSeq)), inheritedEventCount: atSeq + 1, parentSession: current.liveSessionId }, [
+    'Your owner rewound this Conversation to an earlier point. Everything after that point is gone from your memory of the Conversation, but its external effects still stand: messages already sent, files written, carts filled, orders placed stay as they are.',
+    toolsAfter.length === 0 ? 'No tools were used after the rewind point.' : `After the rewind point you had used: ${toolsAfter.join(', ')}. Check the real state before you repeat or contradict anything.`,
+  ].join('\n'))
+  store.addNotice(sessionId, storedLength(store.sql, sessionId), 'Rewound to an earlier point. The previous Conversation is kept in the archive.', now)
+  yield* platform.changed()
+  return { ...record, undone: false } as RewindView
+})
+
+/**
+ * Rewind to before Turn n: before the inbox events that delivered its message too, so the
+ * message is gone with the Turn (it is not delivered again).
+ */
+export const rewindBeforeTurn = (turn: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const events = readStoredEvents(store.sql, (yield* config).liveSessionId)
+  const start = events.findIndex((event) => event.type === 'turn/start' && (event.data as { turn?: number }).turn === turn)
+  if (start < 0) return yield* notFound(`no Turn ${turn} in this Conversation`)
+  let first = start
+  while (first > 0 && events[first - 1]!.type === 'agent/inbox/spliced') first -= 1
+  return yield* rewind(Math.max(0, events[first]!.seq - 1))
+})
+
+/** Undo the latest rewind: its archived log becomes live again (robot-8v1t). */
+export const undoRewind = (id: string) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  if (yield* platform.working()) return yield* conflict('the Robot is working; undo when it is done')
+  const record = store.rewinds().find((entry) => entry.id === id)
+  if (record === undefined || record.undone) return yield* notFound('no such rewind')
+  if (record.liveSessionId !== current.liveSessionId) return yield* conflict('only the latest rewind can be undone')
+  yield* platform.releaseAgent()
+  store.transaction(() => {
+    store.markRewindUndone(id, Date.now())
+    store.updateConfig(() => ({ liveSessionId: record.archivedSessionId }))
+  })
+  yield* platform.changed()
+  return { ...record, undone: true } as RewindView
 })
