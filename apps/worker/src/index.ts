@@ -47,7 +47,13 @@ async function hostChannel(request: Request, env: Env, path: string): Promise<Re
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname
-    if (path.startsWith('/api/host/')) return hostChannel(request, env, path)
+    if (path.startsWith('/api/host/')) {
+      return hostChannel(request, env, path).catch((error: unknown) => {
+        const status = typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : 500
+        if (status === 500) console.error('host channel failed', error)
+        return json({ error: error instanceof Error ? error.message : String(error) }, status)
+      })
+    }
     const program = Effect.gen(function* () {
       const email = yield* identityEmail(request, env, ctx)
       const signIn = yield* call((): Promise<SignIn> => env.HOME.getByName(HOME_ID).signIn(email))
