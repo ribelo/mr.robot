@@ -6,13 +6,12 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 91 works, 9 partial, 0 not done.
+Totals: 92 works, 8 partial, 0 not done.
 
 ## Partial or not done
 
 - 5 robot-d2uv, partial (not tried live): home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home)
 - 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
-- 43 robot-ueh0, partial (stub-only): browser.test.ts (stub browser); not tried on a real shop
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
@@ -90,7 +89,7 @@ Suites on that build: worker 124, web 11, infra 1, dependency lint, and the stag
 | 40 | robot-g6qb | Takeover input | Live: Take over, tapped a link in the streamed page, the real browser navigated to iana.org | works |
 | 41 | robot-doqx | Takeover request suspends the Robot and pushes "needs you" | Live: takeover request suspended Verifier; a message sent meanwhile now waits for the hand-back (fixed live: it used to start a Turn). "Needs you" push: push.test.ts; push itself proven live (71) | works |
 | 42 | robot-j4ll | Hand back resumes with URL and screenshot | Live: Hand back woke Verifier, which reported the new URL iana.org/help/example-domains | works |
-| 43 | robot-ueh0 | Pay/order clicks refused (English and Polish labels) | browser.test.ts (stub browser); not tried on a real shop | partial (stub-only) |
+| 43 | robot-ueh0 | Prompt rule plus a guard: a click on a pay/order button (English and Polish), or on "Finish"/"Confirm" on a checkout page, is refused with a pointer to a takeover | Live on saucedemo.com: Verifier logged in, filled the cart and checkout, was refused at "Finish" and asked for a takeover. browser.test.ts. Also found: a hung click stalled the Turn; browser actions now fail after 30 s | works |
 | 44 | robot-b49q | CAPTCHA vendor detection with guidance | Live: Verifier on DuckDuckGo's bot check named it a CAPTCHA and stopped; the staging test checks that a real site's own bot check is reported (DuckDuckGo, 2026-10-07) | works |
 | 45 | robot-5ewr | Code mode default, Worker Loader isolate | Live: every Verifier and Mr. Robot Turn ran as code programs on Claude | works |
 | 46 | robot-ax7s | Direct tool calls switch | Live: with code mode off Verifier called routine_list directly | works |

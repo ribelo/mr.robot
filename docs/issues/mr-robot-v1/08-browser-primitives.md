@@ -6,11 +6,11 @@
 
 **Blocked by:** 07 Code mode executor, tool grants, advanced settings
 
-**Status:** in-progress
+**Status:** done
 
 - [x] Integration test on staging: open, observe, act, screenshot against a fixture site
 - [x] Login state survives DO hibernation and a new browser session
 - [x] Browser session is closed when the turn ends and no browser-use call is pending
 - [x] Thumbnail in the panel updates after each screenshot
 
-Reopened 2026-10-07 by the story verification (verification.md): stories 43 (payment guard stub-only), 44 (CAPTCHA untested).
+Verified live 2026-10-07: the payment stop on a real shop (43) and a real bot check (44).
