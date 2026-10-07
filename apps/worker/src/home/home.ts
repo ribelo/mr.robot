@@ -21,12 +21,15 @@ import type {
   Sharing,
   SkillView,
 } from '@mr-robot/protocol'
+import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { liveModels, type ListingAccess } from '../providers/live-catalog.ts'
 import { fetchMetadata, type MetadataIndex } from '../providers/model-metadata.ts'
 import { PROVIDER_IDS } from '../agent/providers.ts'
-import { makeVault } from '../platform/vault.ts'
+import { makeVault, type VaultShape } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
@@ -67,7 +70,612 @@ type RobotSql = {
   fleet_state: FleetState; last_line: string; last_at: number
 }
 
+/** The Home's reach beyond its SQLite: the other Durable Objects, R2, Workers AI and the secret vault. */
+export interface HomePlatformShape {
+  readonly env: Env
+  readonly secrets: VaultShape
+  /** When each Provider's list was last tried, so a failing Provider is not asked on every request. */
+  readonly catalogTries: Map<string, number>
+}
+
+export class HomePlatform extends Context.Service<HomePlatform, HomePlatformShape>()('mr-robot/HomePlatform') {}
+
+type R = Sql | HomePlatform
+
+/** An RPC to another Durable Object (or R2), awaited as an Effect; its failure is a defect here. */
+const remote = <A>(call: (env: Env) => Promise<A>): Effect.Effect<A, never, HomePlatform> => Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  return yield* Effect.promise(() => call(platform.env))
+})
+
+const setting = <T>(key: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<{ v: string }>('SELECT v FROM setting WHERE k = ?', key)
+  return row === undefined ? undefined : (JSON.parse(row.v) as T)
+})
+
+const putSetting = (key: string, value: unknown) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* sql.run('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(value))
+})
+
+// ------------------------------------------------------------------ Members
+
+const memberByEmail = (email: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<MemberSql>('SELECT * FROM member WHERE email = ?', email)
+  return row === undefined ? undefined : memberFromSql(row)
+})
+
+const member = (id: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<MemberSql>('SELECT * FROM member WHERE id = ?', id)
+  return row === undefined ? undefined : memberFromSql(row)
+})
+
+const members = Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.all<MemberSql>('SELECT * FROM member ORDER BY created_at')).map(memberFromSql)
+})
+
+/**
+ * Sign a verified e-mail in (robot-7v5x). The first person becomes the admin; later
+ * people need an invite; a removed Member stays out. A new Member gets Mr. Robot.
+ */
+const signIn = (email: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const normalized = email.trim().toLowerCase()
+  const existing = yield* memberByEmail(normalized)
+  if (existing?.status === 'active') return { ok: true, member: existing, created: false } as SignIn
+  if (existing?.status === 'removed') return { ok: false, reason: 'removed' } as SignIn
+  const first = ((yield* sql.first<{ n: number }>('SELECT COUNT(*) AS n FROM member'))?.n ?? 0) === 0
+  if (existing === undefined && !first) return { ok: false, reason: 'not-invited' } as SignIn
+  const joined: MemberView = existing === undefined
+    ? { id: `m-${crypto.randomUUID()}`, email: normalized, name: nameFromEmail(normalized), role: 'admin', status: 'active' }
+    : { ...existing, status: 'active' }
+  yield* sql.run(
+    `INSERT INTO member (id, email, name, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (id) DO UPDATE SET status = excluded.status`,
+    joined.id, joined.email, joined.name, joined.role, joined.status, Date.now(),
+  )
+  yield* remote((env) => env.MEMBER.getByName(joined.id).init({ id: joined.id, email: joined.email, name: joined.name }))
+  yield* bootstrapMrRobot(joined)
+  return { ok: true, member: joined, created: true } as SignIn
+})
+
+/** Admin: invite an e-mail; the Member becomes active on first sign-in (robot-d2uv). */
+const invite = (email: string, role: MemberRole = 'member') => Effect.gen(function* () {
+  const sql = yield* Sql
+  const normalized = email.trim().toLowerCase()
+  const existing = yield* memberByEmail(normalized)
+  if (existing !== undefined && existing.status !== 'removed') return existing
+  const invited: MemberView = existing === undefined
+    ? { id: `m-${crypto.randomUUID()}`, email: normalized, name: nameFromEmail(normalized), role, status: 'invited' }
+    : { ...existing, role, status: 'invited' }
+  yield* sql.run(
+    `INSERT INTO member (id, email, name, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (id) DO UPDATE SET status = excluded.status, role = excluded.role`,
+    invited.id, invited.email, invited.name, invited.role, invited.status, Date.now(),
+  )
+  return invited
+})
+
+/** Admin: remove a Member; their access ends and their Robots are paused (robot-d2uv). */
+const remove = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* sql.run("UPDATE member SET status = 'removed' WHERE id = ?", memberId)
+  const owned = yield* sql.all<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId)
+  yield* Effect.forEach(owned, ({ id }) => remote((env) => env.ROBOT.getByName(id).pause()), { concurrency: 'unbounded', discard: true })
+  const viewed = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home')", memberId)
+  yield* Effect.forEach(viewed, ({ id }) => remote((env) => env.ROBOT.getByName(id).disconnectMember(memberId)), { concurrency: 'unbounded', discard: true })
+})
+
+const rename = (memberId: string, name: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* sql.run('UPDATE member SET name = ? WHERE id = ?', name, memberId)
+})
+
+// ------------------------------------------------------------------ settings
+
+const settings = Effect.gen(function* () {
+  return {
+    defaultModel: (yield* setting<ModelChoice>('defaultModel')) ?? DEFAULT_MODEL,
+    robotSpendLimitUsd: (yield* setting<number | null>('robotSpendLimitUsd')) ?? null,
+    memberSpendLimitUsd: (yield* setting<number | null>('memberSpendLimitUsd')) ?? null,
+  } as HomeSettings
+})
+
+/** Admin settings; a raised spend limit unblocks Robots stopped by the old one (robot-8gag). */
+const updateSettings = (patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }) => Effect.gen(function* () {
+  const sql = yield* Sql
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) yield* putSetting(key, value)
+  }
+  if (patch.robotSpendLimitUsd !== undefined || patch.memberSpendLimitUsd !== undefined) {
+    const blocked = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status = 'blocked'")
+    yield* Effect.forEach(blocked, ({ id }) => remote((env) => env.ROBOT.getByName(id).recheckLimits()), { concurrency: 'unbounded', discard: true })
+  }
+  return yield* settings
+})
+
+/** Spend limits a Robot's Turns are held to. */
+const limitsFor = (memberId: string) => Effect.gen(function* () {
+  const current = yield* settings
+  const usage = yield* remote((env) => env.MEMBER.getByName(memberId).usage(currentMonth()))
+  return { robotDefaultUsd: current.robotSpendLimitUsd, memberUsd: current.memberSpendLimitUsd, memberSpentUsd: usage.costUsd }
+})
+
+// ------------------------------------------------------------------ Robot registry
+
+const summary = (row: RobotSql) => Effect.gen(function* () {
+  const entry = entryFromSql(row)
+  return { ...entry, ownerName: (yield* member(entry.ownerId))?.name ?? '', unread: false } as RobotSummary
+})
+
+/** Robots a Member can reach: their own, and everything shared with the Home (robot-hpj1, robot-bld3). */
+const reachable = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const rows = yield* sql.all<RobotSql>("SELECT * FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home') ORDER BY last_at DESC", memberId)
+  return yield* Effect.forEach(rows, summary)
+})
+
+/** Every Robot, for the admin fleet view. */
+const fleet = Effect.gen(function* () {
+  const sql = yield* Sql
+  return yield* Effect.forEach(yield* sql.all<RobotSql>("SELECT * FROM robot WHERE status != 'deleted' ORDER BY last_at DESC"), summary)
+})
+
+const entry = (robotId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<RobotSql>('SELECT * FROM robot WHERE id = ?', robotId)
+  return row === undefined ? undefined : entryFromSql(row)
+})
+
+/** Whether a Member may use a Robot: 'owner', 'shared', or null. */
+const access = (memberId: string, robotId: string) => Effect.gen(function* () {
+  const found = yield* entry(robotId)
+  if (found === undefined || found.status === 'deleted') return null
+  if (found.ownerId === memberId) return 'owner' as const
+  if (found.sharing === 'home' && (yield* member(memberId))?.status === 'active') return 'shared' as const
+  return null
+})
+
+/** Recipient Grants of every Mr. Robot: all Robots its Member can reach, except itself. */
+const syncMrRobots = Effect.gen(function* () {
+  const sql = yield* Sql
+  const mrRobots = yield* sql.all<RobotSql>("SELECT * FROM robot WHERE kind = 'mr-robot' AND status != 'deleted'")
+  yield* Effect.forEach(mrRobots, (mrRobot) => Effect.gen(function* () {
+    const recipients = (yield* reachable(mrRobot.owner_id)).filter((robot) => robot.kind === 'robot').map((robot) => robot.id)
+    yield* remote((env) => env.ROBOT.getByName(mrRobot.id).setRecipients(recipients))
+  }), { concurrency: 'unbounded', discard: true })
+})
+
+/**
+ * A Robot reports its registry row after anything visible changed. Sharing,
+ * creation and deletion change who can reach it, so Mr. Robot's recipients follow (robot-70kf).
+ */
+const robotChanged = (changed: RegistryEntry) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const before = yield* entry(changed.id)
+  yield* sql.run(
+    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (id) DO UPDATE SET identity = excluded.identity, sharing = excluded.sharing, status = excluded.status,
+       fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at`,
+    changed.id, changed.ownerId, changed.kind, JSON.stringify(changed.identity), changed.sharing, changed.status,
+    changed.fleetState, changed.lastLine, changed.lastAt,
+  )
+  const reach = (value: RegistryEntry | undefined) => value === undefined ? 'none' : `${value.sharing}:${value.status === 'deleted'}`
+  if (changed.kind === 'robot' && reach(before) !== reach(changed)) yield* syncMrRobots
+})
+
+/** The model a new Robot of this Member starts on: the Home default if they can use it, else one they can. */
+const startingModel = (memberId: string, wanted?: ModelChoice) => Effect.gen(function* () {
+  const usable = yield* models(memberId)
+  const pick = wanted ?? (yield* settings).defaultModel
+  // Only a known Provider can be missing a connection; anything else (an admin's own entry) is kept.
+  if (!(PROVIDER_IDS as readonly string[]).includes(pick.provider) || usable.some((option) => option.provider === pick.provider && option.model === pick.model)) return pick
+  const fallback = usable.find((option) => option.provider === 'workers-ai') ?? usable[0]
+  if (fallback === undefined) return yield* invalid('Connect a Provider first: open your name → Providers and add a key or a subscription.')
+  return { provider: fallback.provider, model: fallback.model, effort: 'off' } as ModelChoice
+})
+
+/**
+ * Create a Robot in setup (robot-btct): its Conversation opens with the kickoff Turn in
+ * which it interviews its owner. Used by "New robot" and by Mr. Robot (robot-hk2s).
+ */
+const createRobot = (ownerId: string, brief?: string, model?: ModelChoice) => Effect.gen(function* () {
+  const owner = yield* member(ownerId)
+  if (owner === undefined || owner.status !== 'active') return yield* notFound('unknown member')
+  const id = `r-${crypto.randomUUID()}`
+  const profile = yield* remote((env) => env.MEMBER.getByName(ownerId).profile())
+  const starting = yield* startingModel(ownerId, model)
+  yield* remote((env) => env.ROBOT.getByName(id).create({
+    id,
+    ownerId,
+    ownerName: owner.name,
+    kind: 'robot',
+    identity: { name: 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]! },
+    sharing: 'private',
+    status: 'setup',
+    model: starting,
+    timeZone: profile.timeZone,
+    spendLimitUsd: null,
+    ...(brief === undefined || brief.trim() === '' ? {} : { brief }),
+  }))
+  const created = yield* entry(id)
+  if (created === undefined) return yield* Effect.die(new Error('robot did not register'))
+  return created
+})
+
+const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
+  const id = `mr-robot-${owner.id}`
+  if ((yield* entry(id)) !== undefined) return
+  // Mr. Robot exists from the first sign-in; with nothing connected his first Turn points to Providers.
+  const model = yield* startingModel(owner.id).pipe(Effect.catch(() => Effect.map(settings, (current) => current.defaultModel)))
+  yield* remote((env) => env.ROBOT.getByName(id).create({
+    id,
+    ownerId: owner.id,
+    ownerName: owner.name,
+    kind: 'mr-robot',
+    identity: { name: 'Mr. Robot', title: '', description: `${owner.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
+    sharing: 'private',
+    status: 'active',
+    model,
+    timeZone: 'Europe/Warsaw',
+    spendLimitUsd: null,
+  }))
+  yield* syncMrRobots
+})
+
+// ------------------------------------------------------------------ admin view (robot-x26m, robot-1rap, robot-bvme)
+
+type SkillSql = { name: string; description: string; source: 'git' | 'robot'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number }
+const skillFromSql = (row: SkillSql): SkillView => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at })
+
+const adminView = (adminId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const month = currentMonth()
+  const current = yield* settings
+  const rows = yield* Effect.forEach(yield* fleet, (row) => Effect.map(remote((env) => env.ROBOT.getByName(row.id).adminRow()), (admin) => (admin === null ? null : { summary: row, row: admin })), { concurrency: 'unbounded' })
+  const live = rows.filter((value): value is NonNullable<typeof value> => value !== null)
+  const everyone = yield* members
+  const memberRows = yield* Effect.forEach(everyone, (person) => Effect.gen(function* () {
+    const usage = person.status === 'invited' ? { inputTokens: 0, outputTokens: 0, costUsd: 0 } : yield* remote((env) => env.MEMBER.getByName(person.id).usage(month))
+    return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limitUsd: current.memberSpendLimitUsd } }
+  }), { concurrency: 'unbounded' })
+  const providers = (yield* Effect.forEach(everyone.filter((person) => person.status === 'active'), (person) =>
+    Effect.map(remote((env) => env.MEMBER.getByName(person.id).providers()), (views) => views.map((view) => ({ provider: view.provider, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
+  return {
+    fleet: live.map(({ summary: row, row: admin }) => ({ ...row, fleetState: admin.fleetState, status: admin.status, grants: admin.grants, model: admin.model, usage: admin.usage })),
+    routines: live.flatMap(({ summary: row, row: admin }) => admin.routines.map((routine) => ({ ...routine, robotName: row.identity.name, ownerName: row.ownerName })))
+      .sort((a, b) => (a.nextRun ?? Infinity) - (b.nextRun ?? Infinity)),
+    members: memberRows,
+    skills: (yield* sql.all<SkillSql>('SELECT * FROM skill ORDER BY name')).map(skillFromSql),
+    skillRepository: yield* skillRepository,
+    providers,
+    modelLists: yield* catalogStatus,
+    settings: { ...current, models: yield* models(adminId) },
+  } as AdminView
+})
+
+// ------------------------------------------------------------------ settings catalog (robot-vqtw)
+
+const sharedSecrets = Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.all<{ name: string; owner_id: string; updated_at: number }>('SELECT name, owner_id, updated_at FROM shared_secret ORDER BY name'))
+    .map((row) => ({ name: row.name, ownerId: row.owner_id, updatedAt: row.updated_at }))
+})
+
+const grantableSecrets = (memberId: string) => Effect.gen(function* () {
+  const own = (yield* remote((env) => env.MEMBER.getByName(memberId).secretNames())).map(({ name }) => ({ name, scope: 'member' as const }))
+  const shared = (yield* sharedSecrets).filter(({ name }) => !own.some((secret) => secret.name === name)).map(({ name }) => ({ name, scope: 'home' as const }))
+  return [...own, ...shared] as SettingsCatalog['secrets']
+})
+
+/** What a Member can grant a Robot and which models it can run on. */
+const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
+  return {
+    toolGroups: Object.entries(TOOL_GROUPS).filter(([name]) => name !== 'robots').map(([name, description]) => ({ name, description })),
+    skills: (yield* skills(memberId)).map(({ name, description }) => ({ name, description })),
+    robots: (yield* reachable(memberId)).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
+    secrets: yield* grantableSecrets(memberId),
+    models: yield* models(memberId),
+    unavailableModels: yield* unavailableModels(memberId),
+  } as SettingsCatalog
+})
+
+// ------------------------------------------------------------------ the skill library (robot-7qpi, robot-qjvu, robot-lszy, robot-jqfw)
+
+/** Skills a Member can see: every Home skill, and private skills of their own Robots. */
+const skills = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.all<SkillSql>("SELECT * FROM skill WHERE visibility = 'home' OR owner_id = ? ORDER BY name", memberId)).map(skillFromSql)
+})
+
+/** Which of these names a Robot of this owner may load. */
+const loadableSkills = (memberId: string, names: readonly string[]) => Effect.map(skills(memberId), (all) => all.filter((skill) => names.includes(skill.name)))
+
+const skillRepository = Effect.map(setting<SkillRepository>('skillRepository'), (value) => value ?? null)
+
+const setSkillRepository = (repository: SkillRepository, token: string | undefined) => Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  yield* putSetting('skillRepository', repository)
+  if (token !== undefined) yield* putSetting('skillRepositoryToken', yield* platform.secrets.seal(token))
+})
+
+const storeSkillFiles = (name: string, files: ReadonlyArray<{ path: string; body: Uint8Array }>) => remote(async (env) => {
+  const existing = await env.FILES.list({ prefix: `skills/${name}/` })
+  if (existing.objects.length > 0) await env.FILES.delete(existing.objects.map((object) => object.key))
+  await Promise.all(files.map((file) => env.FILES.put(`skills/${name}/${file.path}`, file.body)))
+})
+
+const upsertSkill = (name: string, description: string, source: 'git' | 'robot', visibility: 'home' | 'private', ownerId: string | null) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* sql.run(
+    `INSERT INTO skill (name, description, source, visibility, owner_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (name) DO UPDATE SET description = excluded.description, source = excluded.source,
+       visibility = excluded.visibility, owner_id = excluded.owner_id, updated_at = excluded.updated_at`,
+    name, description, source, visibility, ownerId, Date.now(),
+  )
+})
+
+/** Pull the configured repository; its skills replace the previous Git skills (robot-qjvu). */
+const syncSkills = Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* HomePlatform
+  const repository = yield* skillRepository
+  if (repository === null) return yield* invalid('set the skills repository first')
+  const sealed = yield* setting<string>('skillRepositoryToken')
+  const token = sealed === undefined ? null : yield* platform.secrets.open(sealed)
+  const files = yield* fetchRepository(repository, token).pipe(Effect.mapError((error) => invalid(error.message)))
+  const found = skillsInTree(files, repository.path)
+  const previous = (yield* sql.all<{ name: string }>("SELECT name FROM skill WHERE source = 'git'")).map((row) => row.name)
+  for (const skill of found) {
+    yield* storeSkillFiles(skill.name, skill.files)
+    yield* upsertSkill(skill.name, skill.description, 'git', 'home', null)
+  }
+  for (const gone of previous.filter((name) => !found.some((skill) => skill.name === name))) {
+    yield* sql.run("DELETE FROM skill WHERE name = ? AND source = 'git'", gone)
+  }
+  return { synced: found.map((skill) => skill.name) }
+})
+
+/** An approved Robot proposal enters the library (robot-jqfw). */
+const publishSkill = (ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private') => Effect.gen(function* () {
+  const sql = yield* Sql
+  const existing = yield* sql.first<{ source: string; owner_id: string | null }>('SELECT source, owner_id FROM skill WHERE name = ?', name)
+  if (existing !== undefined && (existing.source === 'git' || existing.owner_id !== ownerId)) return yield* invalid(`a skill named "${name}" already exists`)
+  yield* storeSkillFiles(name, [{ path: 'SKILL.md', body: new TextEncoder().encode(content) }])
+  yield* upsertSkill(name, description, 'robot', visibility, ownerId)
+})
+
+const skillContent = (memberId: string, name: string, path = 'SKILL.md') => Effect.gen(function* () {
+  if (!(yield* skills(memberId)).some((skill) => skill.name === name)) return null
+  return yield* remote(async (env) => {
+    const object = await env.FILES.get(`skills/${name}/${path.replace(/\.\.\//g, '')}`)
+    return object === null ? null : object.text()
+  })
+})
+
+// ------------------------------------------------------------------ secrets (robot-vplt, robot-0bde)
+
+const sharedSecret = (name: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* HomePlatform
+  const row = yield* sql.first<{ sealed: string }>('SELECT sealed FROM shared_secret WHERE name = ?', name)
+  return row === undefined ? null : yield* platform.secrets.open(row.sealed)
+})
+
+/**
+ * Store a secret: private ones stay in the Member DO, Home-shared ones live here. Changing
+ * the scope moves the value; a shared secret is changed only by the Member who shared it.
+ */
+const putSecret = (memberId: string, name: string, value: string | undefined, shared: boolean) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* HomePlatform
+  const existing = yield* sql.first<{ owner_id: string }>('SELECT owner_id FROM shared_secret WHERE name = ?', name)
+  if (existing !== undefined && existing.owner_id !== memberId) return yield* invalid(`"${name}" is shared by another Member`)
+  const holder = () => platform.env.MEMBER.getByName(memberId)
+  if (shared) {
+    const plaintext = value ?? (yield* Effect.promise(() => holder().takeSecret(name))) ?? (existing === undefined ? null : yield* sharedSecret(name))
+    if (plaintext === null) return yield* notFound(`no secret "${name}"`)
+    yield* Effect.promise(() => holder().takeSecret(name))
+    const sealed = yield* platform.secrets.seal(plaintext)
+    yield* sql.run('INSERT INTO shared_secret (name, owner_id, sealed, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET sealed = excluded.sealed, updated_at = excluded.updated_at', name, memberId, sealed, Date.now())
+    return
+  }
+  const plaintext = value ?? (existing === undefined ? yield* Effect.promise(() => holder().secret(name)) : yield* sharedSecret(name))
+  if (plaintext === null) return yield* notFound(`no secret "${name}"`)
+  yield* Effect.promise(() => holder().setSecret(name, plaintext))
+  if (existing !== undefined) yield* sql.run('DELETE FROM shared_secret WHERE name = ?', name)
+})
+
+const deleteSecret = (memberId: string, name: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* sql.run('DELETE FROM shared_secret WHERE name = ? AND owner_id = ?', name, memberId)
+  yield* remote((env) => env.MEMBER.getByName(memberId).takeSecret(name))
+})
+
+/** The value a Robot's secret_get receives: its owner's private secret, else the Home's. */
+const resolveSecret = (memberId: string, name: string) => Effect.gen(function* () {
+  return (yield* remote((env) => env.MEMBER.getByName(memberId).secret(name))) ?? (yield* sharedSecret(name))
+})
+
+const secretsView = (memberId: string) => Effect.gen(function* () {
+  const own = (yield* remote((env) => env.MEMBER.getByName(memberId).secretNames())).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
+  const shared = (yield* sharedSecrets).map((secret) => ({ name: secret.name, updatedAt: secret.updatedAt, scope: 'home' as const, mine: secret.ownerId === memberId }))
+  return [...own, ...shared]
+})
+
+// ------------------------------------------------------------------ live model lists (robot-82r5, robot-d994)
+
+/** Providers this Member's Robots can run on: Workers AI, their own credentials, Home-shared ones. */
+const usableProviders = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const usable = new Set<string>(['workers-ai'])
+  for (const view of yield* remote((env) => env.MEMBER.getByName(memberId).providers())) usable.add(view.provider)
+  for (const row of yield* sql.all<{ provider: string }>('SELECT DISTINCT provider FROM shared_credential')) usable.add(row.provider)
+  return usable
+})
+
+const catalogRow = (provider: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<{ models: string | null; fetched_at: number | null; error: string | null }>('SELECT models, fetched_at, error FROM model_catalog WHERE provider = ?', provider)
+  return row === undefined ? undefined : { models: row.models === null ? null : JSON.parse(row.models) as ModelOption[], fetchedAt: row.fetched_at, error: row.error }
+})
+
+/** models.dev metadata, refreshed daily; a failed refresh keeps the last copy (or none). */
+const metadata = Effect.gen(function* () {
+  const stored = yield* setting<{ data: MetadataIndex; fetchedAt: number }>('model-metadata')
+  if (stored !== undefined && Date.now() - stored.fetchedAt < CATALOG_TTL_MS) return stored.data
+  const fresh = yield* Effect.tryPromise(() => fetchMetadata()).pipe(Effect.option)
+  if (fresh._tag === 'None') {
+    console.warn('models.dev metadata unavailable')
+    return stored?.data ?? {}
+  }
+  yield* putSetting('model-metadata', { data: fresh.value, fetchedAt: Date.now() })
+  return fresh.value
+})
+
+/** The credential a Member's Robot uses: the Member's own, else one shared with the Home. */
+const providerCredential = (memberId: string, provider: ProviderId) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const own = (yield* remote((env) => env.MEMBER.getByName(memberId).credential(provider, false) as Promise<ProviderCredential | null>))
+  if (own !== null) return own
+  const sharers = yield* sql.all<{ member_id: string }>('SELECT member_id FROM shared_credential WHERE provider = ? AND member_id != ?', provider, memberId)
+  for (const { member_id } of sharers) {
+    if ((yield* member(member_id))?.status !== 'active') continue
+    const shared = yield* remote((env) => env.MEMBER.getByName(member_id).credential(provider, true) as Promise<ProviderCredential | null>)
+    if (shared !== null) return shared
+  }
+  return null as ProviderCredential | null
+})
+
+/** Whose OpenCode Go pool a Member's Robots use: their own, else the first one shared with the Home. */
+const opencodePoolOwner = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const own = yield* remote((env) => env.MEMBER.getByName(memberId).opencodeKeys())
+  if (own.keys.length > 0) return { ownerId: memberId, forHome: false }
+  for (const { member_id } of yield* sql.all<{ member_id: string }>("SELECT member_id FROM shared_credential WHERE provider = 'opencode-go' AND member_id != ?", memberId)) {
+    if ((yield* member(member_id))?.status === 'active') return { ownerId: member_id, forHome: true }
+  }
+  return null as { ownerId: string; forHome: boolean } | null
+})
+
+const listingAccess = (provider: string, memberId: string) => Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  if (provider === 'workers-ai') return (platform.env.AI === undefined ? {} : { ai: platform.env.AI }) as ListingAccess
+  if (provider === 'openrouter') return {} as ListingAccess
+  if (provider === 'opencode-go') {
+    const owner = yield* opencodePoolOwner(memberId)
+    if (owner === null) return yield* invalid('no OpenCode Go key')
+    const pool = yield* remote((env) => env.MEMBER.getByName(owner.ownerId).opencodeCandidates(null, owner.forHome))
+    const key = pool.keys[0]?.key
+    if (key === undefined) return yield* invalid('no OpenCode Go key')
+    return { key } as ListingAccess
+  }
+  const credential = yield* providerCredential(memberId, provider as ProviderId)
+  if (credential === null) return yield* invalid(`no ${provider} credential`)
+  return (credential.kind === 'api-key' ? { key: credential.key } : { oauth: { access: credential.access, ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }) } }) as ListingAccess
+})
+
+/** Fetch one Provider's live list with a credential this Member can use; a failure keeps the last list. */
+const refreshCatalog = (provider: string, memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* HomePlatform
+  const services = yield* Effect.context<R>()
+  platform.catalogTries.set(provider, Date.now())
+  const fetched = yield* listingAccess(provider, memberId).pipe(
+    Effect.flatMap((listing) => Effect.tryPromise(() => liveModels(provider, listing, () => Effect.runPromise(Effect.provideContext(metadata, services))))),
+    Effect.result,
+  )
+  if (fetched._tag === 'Success') {
+    yield* sql.run('INSERT INTO model_catalog (provider, models, fetched_at, error) VALUES (?, ?, ?, NULL) ON CONFLICT (provider) DO UPDATE SET models = excluded.models, fetched_at = excluded.fetched_at, error = NULL', provider, JSON.stringify(fetched.success), Date.now())
+    return { provider, count: fetched.success.length, error: null as string | null }
+  }
+  const failure = fetched.failure as { message?: string; error?: unknown }
+  const message = failure.message ?? String(failure.error ?? failure)
+  yield* sql.run('INSERT INTO model_catalog (provider, error) VALUES (?, ?) ON CONFLICT (provider) DO UPDATE SET error = excluded.error', provider, message)
+  return { provider, count: (yield* catalogRow(provider))?.models?.length ?? 0, error: message as string | null }
+})
+
+const ensureCatalog = (provider: string, memberId: string) => Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  const row = yield* catalogRow(provider)
+  if (row?.models != null && row.fetchedAt !== null && Date.now() - row.fetchedAt < CATALOG_TTL_MS) return
+  if (row?.error != null && Date.now() - (platform.catalogTries.get(provider) ?? 0) < 60_000) return
+  yield* refreshCatalog(provider, memberId)
+})
+
+/**
+ * Every known model: each Provider's last live list (nothing for a Provider never listed
+ * successfully), with the admin's entries on top: an entry for a listed model overrides
+ * its label and price, any other entry adds a model.
+ */
+const modelList = Effect.gen(function* () {
+  const stored = (yield* setting<ModelOption[]>('models')) ?? []
+  const same = (a: ModelOption, b: ModelOption) => a.provider === b.provider && a.model === b.model
+  const live = (yield* Effect.forEach(PROVIDER_IDS, (provider) => Effect.map(catalogRow(provider), (row) => row?.models ?? []))).flat()
+  return [
+    ...live.map((model) => stored.find((entry) => same(entry, model)) ?? model),
+    ...stored.filter((entry) => !live.some((model) => same(entry, model))),
+  ]
+})
+
+/** The models a Member can choose: the live lists of the Providers they can use (refreshed daily). */
+const models = (memberId: string): Effect.Effect<ModelOption[], never, R> => Effect.gen(function* () {
+  const usable = yield* usableProviders(memberId)
+  yield* Effect.forEach([...usable].filter((provider) => (PROVIDER_IDS as readonly string[]).includes(provider)), (provider) => ensureCatalog(provider, memberId), { concurrency: 'unbounded', discard: true })
+  return (yield* modelList).filter((option) => usable.has(option.provider))
+})
+
+const unavailableModels = (memberId: string) => Effect.gen(function* () {
+  const usable = yield* models(memberId)
+  return (yield* modelList).filter((option) => !usable.some((entry) => entry.provider === option.provider && entry.model === option.model))
+})
+
+/** Each Provider's list status, for the admin view. */
+const catalogStatus = Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.all<{ provider: string; models: string | null; fetched_at: number | null; error: string | null }>('SELECT * FROM model_catalog ORDER BY provider'))
+    .map((row) => ({ provider: row.provider, count: row.models === null ? 0 : (JSON.parse(row.models) as unknown[]).length, fetchedAt: row.fetched_at, error: row.error }))
+})
+
+/** Refresh every Provider this Member can use (the admin's "Refresh models"). */
+const refreshCatalogs = (memberId: string) => Effect.gen(function* () {
+  const usable = [...(yield* usableProviders(memberId))].filter((provider) => (PROVIDER_IDS as readonly string[]).includes(provider))
+  return yield* Effect.forEach(usable, (provider) => refreshCatalog(provider, memberId), { concurrency: 'unbounded' })
+})
+
+// ------------------------------------------------------------------ Providers (robot-dic7)
+
+const credentialShared = (memberId: string, provider: ProviderId, shared: boolean) => Effect.gen(function* () {
+  const sql = yield* Sql
+  if (shared) yield* sql.run('INSERT INTO shared_credential (provider, member_id) VALUES (?, ?) ON CONFLICT DO NOTHING', provider, memberId)
+  else yield* sql.run('DELETE FROM shared_credential WHERE provider = ? AND member_id = ?', provider, memberId)
+})
+
+const providersView = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const mine = yield* remote((env) => env.MEMBER.getByName(memberId).providers())
+  const others = yield* sql.all<{ provider: ProviderId; member_id: string }>('SELECT provider, member_id FROM shared_credential WHERE member_id != ?', memberId)
+  const shared: ProviderView[] = []
+  for (const { provider, member_id } of others) {
+    const sharer = yield* member(member_id)
+    if (sharer === undefined || sharer.status !== 'active') continue
+    shared.push({ provider, kind: provider === 'openai' || provider === 'anthropic' ? 'oauth' : 'api-key', shared: true, connectedAt: 0, ownerId: sharer.id, ownerName: sharer.name })
+  }
+  return { mine, shared, models: yield* models(memberId), defaultModel: (yield* settings).defaultModel } as ProvidersView
+})
+
+/** Failures the caller should see stay typed; anything else (vault, network) is a defect, i.e. a 500. */
+const orDie = <A, E, X>(effect: Effect.Effect<A, E, X>) => effect.pipe(Effect.catch((error: unknown) => (error !== null && typeof error === 'object' && '_tag' in error && ['NotFound', 'Invalid', 'Conflict'].includes((error as { _tag: string })._tag) ? Effect.fail(error as never) : Effect.die(error)))) as Effect.Effect<A, never, X>
+
+/** The Durable Object: tables, the platform layer, and one RPC method per program. */
 export class Home extends DurableObject<Env> {
+  private readonly runtime: DurableRuntime<R>
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     const sql = ctx.storage.sql
@@ -88,571 +696,55 @@ export class Home extends DurableObject<Env> {
     sql.exec('CREATE TABLE IF NOT EXISTS model_catalog (provider TEXT PRIMARY KEY, models TEXT, fetched_at INTEGER, error TEXT)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_secret (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
+    this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map() })))
   }
 
-  private get sql(): SqlStorage {
-    return this.ctx.storage.sql
+  private run<A, E>(program: Effect.Effect<A, E, R>): Promise<A> {
+    return this.runtime.run(orDie(program))
   }
 
-  // ---------------------------------------------------------------- Members
-
-  /**
-   * Sign a verified e-mail in (robot-7v5x). The first person becomes the admin; later
-   * people need an invite; a removed Member stays out. A new Member gets Mr. Robot.
-   */
-  async signIn(email: string): Promise<SignIn> {
-    const normalized = email.trim().toLowerCase()
-    const existing = this.memberByEmail(normalized)
-    if (existing?.status === 'active') return { ok: true, member: existing, created: false }
-    if (existing?.status === 'removed') return { ok: false, reason: 'removed' }
-    const first = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM member').one().n === 0
-    if (existing === undefined && !first) return { ok: false, reason: 'not-invited' }
-    const member: MemberView = existing === undefined
-      ? { id: `m-${crypto.randomUUID()}`, email: normalized, name: nameFromEmail(normalized), role: 'admin', status: 'active' }
-      : { ...existing, status: 'active' }
-    this.sql.exec(
-      `INSERT INTO member (id, email, name, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET status = excluded.status`,
-      member.id, member.email, member.name, member.role, member.status, Date.now(),
-    )
-    await this.env.MEMBER.getByName(member.id).init({ id: member.id, email: member.email, name: member.name })
-    await this.bootstrapMrRobot(member)
-    return { ok: true, member, created: true }
-  }
-
-  member(id: string): MemberView | undefined {
-    const row = this.sql.exec<MemberSql>('SELECT * FROM member WHERE id = ?', id).toArray()[0]
-    return row === undefined ? undefined : memberFromSql(row)
-  }
-
-  members(): MemberView[] {
-    return this.sql.exec<MemberSql>('SELECT * FROM member ORDER BY created_at').toArray().map(memberFromSql)
-  }
-
-  /** Admin: invite an e-mail; the Member becomes active on first sign-in (robot-d2uv). */
-  invite(email: string, role: MemberRole = 'member'): MemberView {
-    const normalized = email.trim().toLowerCase()
-    const existing = this.memberByEmail(normalized)
-    if (existing !== undefined && existing.status !== 'removed') return existing
-    const member: MemberView = existing === undefined
-      ? { id: `m-${crypto.randomUUID()}`, email: normalized, name: nameFromEmail(normalized), role, status: 'invited' }
-      : { ...existing, role, status: 'invited' }
-    this.sql.exec(
-      `INSERT INTO member (id, email, name, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET status = excluded.status, role = excluded.role`,
-      member.id, member.email, member.name, member.role, member.status, Date.now(),
-    )
-    return member
-  }
-
-  /** Admin: remove a Member; their access ends and their Robots are paused (robot-d2uv). */
-  async remove(memberId: string): Promise<void> {
-    this.sql.exec("UPDATE member SET status = 'removed' WHERE id = ?", memberId)
-    const owned = this.sql.exec<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId).toArray()
-    await Promise.all(owned.map(({ id }) => this.env.ROBOT.getByName(id).pause()))
-    const viewed = this.sql.exec<{ id: string }>("SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home')", memberId).toArray()
-    await Promise.all(viewed.map(({ id }) => this.env.ROBOT.getByName(id).disconnectMember(memberId)))
-  }
-
-  rename(memberId: string, name: string): void {
-    this.sql.exec('UPDATE member SET name = ? WHERE id = ?', name, memberId)
-  }
-
-  private memberByEmail(email: string): MemberView | undefined {
-    const row = this.sql.exec<MemberSql>('SELECT * FROM member WHERE email = ?', email).toArray()[0]
-    return row === undefined ? undefined : memberFromSql(row)
-  }
-
-  // ---------------------------------------------------------------- settings
-
-  settings(): HomeSettings {
-    return {
-      defaultModel: this.setting('defaultModel') ?? DEFAULT_MODEL,
-      robotSpendLimitUsd: this.setting<number | null>('robotSpendLimitUsd') ?? null,
-      memberSpendLimitUsd: this.setting<number | null>('memberSpendLimitUsd') ?? null,
-    }
-  }
-
-  /** Admin settings; a raised spend limit unblocks Robots stopped by the old one (robot-8gag). */
-  async updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }): Promise<HomeSettings> {
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined) continue
-      this.sql.exec('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(value))
-    }
-    if (patch.robotSpendLimitUsd !== undefined || patch.memberSpendLimitUsd !== undefined) {
-      const blocked = this.sql.exec<{ id: string }>("SELECT id FROM robot WHERE status = 'blocked'").toArray()
-      await Promise.all(blocked.map(({ id }) => this.env.ROBOT.getByName(id).recheckLimits()))
-    }
-    return this.settings()
-  }
-
-  /** Spend limits a Robot's Turns are held to. */
-  async limitsFor(memberId: string): Promise<{ robotDefaultUsd: number | null; memberUsd: number | null; memberSpentUsd: number }> {
-    const settings = this.settings()
-    const usage = await this.env.MEMBER.getByName(memberId).usage(currentMonth())
-    return { robotDefaultUsd: settings.robotSpendLimitUsd, memberUsd: settings.memberSpendLimitUsd, memberSpentUsd: usage.costUsd }
-  }
-
-  private setting<T>(key: string): T | undefined {
-    const row = this.sql.exec<{ v: string }>('SELECT v FROM setting WHERE k = ?', key).toArray()[0]
-    return row === undefined ? undefined : (JSON.parse(row.v) as T)
-  }
-
-  // ---------------------------------------------------------------- Robot registry
-
-  /** Robots a Member can reach: their own, and everything shared with the Home (robot-hpj1, robot-bld3). */
-  reachable(memberId: string): RobotSummary[] {
-    const rows = this.sql.exec<RobotSql>(
-      "SELECT * FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home') ORDER BY last_at DESC",
-      memberId,
-    ).toArray()
-    return rows.map((row) => this.summary(row))
-  }
-
-  /** Every Robot, for the admin fleet view. */
-  fleet(): RobotSummary[] {
-    return this.sql.exec<RobotSql>("SELECT * FROM robot WHERE status != 'deleted' ORDER BY last_at DESC").toArray().map((row) => this.summary(row))
-  }
-
-  entry(robotId: string): RegistryEntry | undefined {
-    const row = this.sql.exec<RobotSql>('SELECT * FROM robot WHERE id = ?', robotId).toArray()[0]
-    return row === undefined ? undefined : entryFromSql(row)
-  }
-
-  /** Whether a Member may use a Robot: 'owner', 'shared', or null. */
-  access(memberId: string, robotId: string): 'owner' | 'shared' | null {
-    const entry = this.entry(robotId)
-    if (entry === undefined || entry.status === 'deleted') return null
-    if (entry.ownerId === memberId) return 'owner'
-    if (entry.sharing === 'home' && this.member(memberId)?.status === 'active') return 'shared'
-    return null
-  }
-
-  /**
-   * A Robot reports its registry row after anything visible changed. Sharing,
-   * creation and deletion change who can reach it, so Mr. Robot's recipients follow (robot-70kf).
-   */
-  async robotChanged(entry: RegistryEntry): Promise<void> {
-    const before = this.entry(entry.id)
-    this.sql.exec(
-      `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET identity = excluded.identity, sharing = excluded.sharing, status = excluded.status,
-         fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at`,
-      entry.id, entry.ownerId, entry.kind, JSON.stringify(entry.identity), entry.sharing, entry.status,
-      entry.fleetState, entry.lastLine, entry.lastAt,
-    )
-    const reach = (value: RegistryEntry | undefined) => value === undefined ? 'none' : `${value.sharing}:${value.status === 'deleted'}`
-    if (entry.kind === 'robot' && reach(before) !== reach(entry)) await this.syncMrRobots()
-  }
-
-  /**
-   * Create a Robot in setup (robot-btct): its Conversation opens with the kickoff Turn in
-   * which it interviews its owner. Used by "New robot" and by Mr. Robot (robot-hk2s).
-   */
-  /** The model a new Robot of this Member starts on: the Home default if they can use it, else one they can. */
-  async startingModel(memberId: string, wanted?: ModelChoice): Promise<ModelChoice> {
-    const usable = await this.models(memberId)
-    const pick = wanted ?? this.settings().defaultModel
-    // Only a known Provider can be missing a connection; anything else (an admin's own entry) is kept.
-    if (!(PROVIDER_IDS as readonly string[]).includes(pick.provider) || usable.some((option) => option.provider === pick.provider && option.model === pick.model)) return pick
-    const fallback = usable.find((option) => option.provider === 'workers-ai') ?? usable[0]
-    if (fallback === undefined) throw new Error('Connect a Provider first: open your name → Providers and add a key or a subscription.')
-    return { provider: fallback.provider, model: fallback.model, effort: 'off' }
-  }
-
-  async createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> {
-    const owner = this.member(ownerId)
-    if (owner === undefined || owner.status !== 'active') throw new Error('unknown member')
-    const id = `r-${crypto.randomUUID()}`
-    const profile = await this.env.MEMBER.getByName(ownerId).profile()
-    await this.env.ROBOT.getByName(id).create({
-      id,
-      ownerId,
-      ownerName: owner.name,
-      kind: 'robot',
-      identity: { name: 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]! },
-      sharing: 'private',
-      status: 'setup',
-      model: await this.startingModel(ownerId, model),
-      timeZone: profile.timeZone,
-      spendLimitUsd: null,
-      ...(brief === undefined || brief.trim() === '' ? {} : { brief }),
-    })
-    const entry = this.entry(id)
-    if (entry === undefined) throw new Error('robot did not register')
-    return entry
-  }
-
-  /** Recipient Grants of every Mr. Robot: all Robots its Member can reach, except itself. */
-  async syncMrRobots(): Promise<void> {
-    const mrRobots = this.sql.exec<RobotSql>("SELECT * FROM robot WHERE kind = 'mr-robot' AND status != 'deleted'").toArray()
-    await Promise.all(mrRobots.map((mrRobot) => {
-      const recipients = this.reachable(mrRobot.owner_id).filter((robot) => robot.kind === 'robot').map((robot) => robot.id)
-      return this.env.ROBOT.getByName(mrRobot.id).setRecipients(recipients)
-    }))
-  }
-
-  private async bootstrapMrRobot(member: MemberView): Promise<void> {
-    const id = `mr-robot-${member.id}`
-    if (this.entry(id) !== undefined) return
-    const robot = this.env.ROBOT.getByName(id)
-    await robot.create({
-      id,
-      ownerId: member.id,
-      ownerName: member.name,
-      kind: 'mr-robot',
-      identity: { name: 'Mr. Robot', title: '', description: `${member.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
-      sharing: 'private',
-      status: 'active',
-      // Mr. Robot exists from the first sign-in; with nothing connected his first Turn points to Providers.
-      model: await this.startingModel(member.id).catch(() => this.settings().defaultModel),
-      timeZone: 'Europe/Warsaw',
-      spendLimitUsd: null,
-    })
-    await this.syncMrRobots()
-  }
-
-  private summary(row: RobotSql): RobotSummary {
-    const entry = entryFromSql(row)
-    return { ...entry, ownerName: this.member(entry.ownerId)?.name ?? '', unread: false }
-  }
-
-  // ---------------------------------------------------------------- admin view (robot-x26m, robot-1rap, robot-bvme)
-
-  async adminView(adminId: string): Promise<AdminView> {
-    const month = currentMonth()
-    const fleet = await Promise.all(this.fleet().map(async (summary) => {
-      const row = await this.env.ROBOT.getByName(summary.id).adminRow()
-      return row === null ? null : { summary, row }
-    }))
-    const live = fleet.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    const members = await Promise.all(this.members().map(async (member) => {
-      const usage = member.status === 'invited' ? { inputTokens: 0, outputTokens: 0, costUsd: 0 } : await this.env.MEMBER.getByName(member.id).usage(month)
-      return { ...member, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limitUsd: this.settings().memberSpendLimitUsd } }
-    }))
-    const providers = (await Promise.all(this.members().filter((member) => member.status === 'active').map(async (member) =>
-      (await this.env.MEMBER.getByName(member.id).providers()).map((view) => ({ provider: view.provider, ownerName: member.name, shared: view.shared }))))).flat()
-    return {
-      fleet: live.map(({ summary, row }) => ({ ...summary, fleetState: row.fleetState, status: row.status, grants: row.grants, model: row.model, usage: row.usage })),
-      routines: live.flatMap(({ summary, row }) => row.routines.map((routine) => ({ ...routine, robotName: summary.identity.name, ownerName: summary.ownerName })))
-        .sort((a, b) => (a.nextRun ?? Infinity) - (b.nextRun ?? Infinity)),
-      members,
-      skills: this.sql.exec<{ name: string; description: string; source: 'git' | 'robot'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number }>('SELECT * FROM skill ORDER BY name').toArray()
-        .map((row) => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at })),
-      skillRepository: await this.skillRepository(),
-      providers,
-      modelLists: this.catalogStatus(),
-      settings: { ...this.settings(), models: await this.models(adminId) },
-    }
-  }
-
-  // ---------------------------------------------------------------- settings catalog (robot-vqtw)
-
-  /** What a Member can grant a Robot and which models it can run on. */
-  async catalog(memberId: string, robotId: string): Promise<SettingsCatalog> {
-    return {
-      toolGroups: Object.entries(TOOL_GROUPS).filter(([name]) => name !== 'robots').map(([name, description]) => ({ name, description })),
-      skills: await this.grantableSkills(memberId),
-      robots: this.reachable(memberId).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
-      secrets: await this.grantableSecrets(memberId),
-      models: await this.models(memberId),
-      unavailableModels: await this.unavailableModels(memberId),
-    }
-  }
-
-  protected async grantableSkills(memberId: string): Promise<SettingsCatalog['skills']> {
-    return this.skills(memberId).map(({ name, description }) => ({ name, description }))
-  }
-
-  // ---------------------------------------------------------------- the skill library (robot-7qpi, robot-qjvu, robot-lszy, robot-jqfw)
-
-  /** Skills a Member can see: every Home skill, and private skills of their own Robots. */
-  skills(memberId: string): SkillView[] {
-    return this.sql.exec<{ name: string; description: string; source: 'git' | 'robot'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number }>(
-      "SELECT * FROM skill WHERE visibility = 'home' OR owner_id = ? ORDER BY name", memberId,
-    ).toArray().map((row) => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at }))
-  }
-
-  /** Which of these names a Robot of this owner may load. */
-  loadableSkills(memberId: string, names: readonly string[]): SkillView[] {
-    return this.skills(memberId).filter((skill) => names.includes(skill.name))
-  }
-
-  async skillRepository(): Promise<SkillRepository | null> {
-    return this.setting<SkillRepository>('skillRepository') ?? null
-  }
-
-  async setSkillRepository(repository: SkillRepository, token: string | undefined): Promise<void> {
-    this.sql.exec("INSERT INTO setting (k, v) VALUES ('skillRepository', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(repository))
-    if (token !== undefined) {
-      const sealed = await Effect.runPromise(this.secretVault().seal(token))
-      this.sql.exec("INSERT INTO setting (k, v) VALUES ('skillRepositoryToken', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(sealed))
-    }
-  }
-
-  /** Pull the configured repository; its skills replace the previous Git skills (robot-qjvu). */
-  async syncSkills(): Promise<{ synced: string[] }> {
-    const repository = await this.skillRepository()
-    if (repository === null) throw new Error('set the skills repository first')
-    const sealed = this.setting<string>('skillRepositoryToken')
-    const token = sealed === undefined ? null : await Effect.runPromise(this.secretVault().open(sealed))
-    const files = await Effect.runPromise(fetchRepository(repository, token))
-    const skills = skillsInTree(files, repository.path)
-    const previous = this.sql.exec<{ name: string }>("SELECT name FROM skill WHERE source = 'git'").toArray().map((row) => row.name)
-    for (const skill of skills) {
-      await this.storeSkillFiles(skill.name, skill.files)
-      this.upsertSkill(skill.name, skill.description, 'git', 'home', null)
-    }
-    for (const gone of previous.filter((name) => !skills.some((skill) => skill.name === name))) {
-      this.sql.exec("DELETE FROM skill WHERE name = ? AND source = 'git'", gone)
-    }
-    return { synced: skills.map((skill) => skill.name) }
-  }
-
-  /** An approved Robot proposal enters the library (robot-jqfw). */
-  async publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private'): Promise<void> {
-    const existing = this.sql.exec<{ source: string; owner_id: string | null }>('SELECT source, owner_id FROM skill WHERE name = ?', name).toArray()[0]
-    if (existing !== undefined && (existing.source === 'git' || existing.owner_id !== ownerId)) throw new Error(`a skill named "${name}" already exists`)
-    await this.storeSkillFiles(name, [{ path: 'SKILL.md', body: new TextEncoder().encode(content) }])
-    this.upsertSkill(name, description, 'robot', visibility, ownerId)
-  }
-
-  async skillContent(memberId: string, name: string, path = 'SKILL.md'): Promise<string | null> {
-    if (!this.skills(memberId).some((skill) => skill.name === name)) return null
-    const object = await this.env.FILES.get(`skills/${name}/${path.replace(/\.\.\//g, '')}`)
-    return object === null ? null : object.text()
-  }
-
-  private async storeSkillFiles(name: string, files: ReadonlyArray<{ path: string; body: Uint8Array }>): Promise<void> {
-    const existing = await this.env.FILES.list({ prefix: `skills/${name}/` })
-    if (existing.objects.length > 0) await this.env.FILES.delete(existing.objects.map((object) => object.key))
-    await Promise.all(files.map((file) => this.env.FILES.put(`skills/${name}/${file.path}`, file.body)))
-  }
-
-  private upsertSkill(name: string, description: string, source: 'git' | 'robot', visibility: 'home' | 'private', ownerId: string | null): void {
-    this.sql.exec(
-      `INSERT INTO skill (name, description, source, visibility, owner_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (name) DO UPDATE SET description = excluded.description, source = excluded.source,
-         visibility = excluded.visibility, owner_id = excluded.owner_id, updated_at = excluded.updated_at`,
-      name, description, source, visibility, ownerId, Date.now(),
-    )
-  }
-
-  protected async grantableSecrets(memberId: string): Promise<SettingsCatalog['secrets']> {
-    const own = (await this.env.MEMBER.getByName(memberId).secretNames()).map(({ name }) => ({ name, scope: 'member' as const }))
-    const shared = this.sharedSecrets().filter(({ name }) => !own.some((secret) => secret.name === name)).map(({ name }) => ({ name, scope: 'home' as const }))
-    return [...own, ...shared]
-  }
-
-  // ---------------------------------------------------------------- secrets (robot-vplt, robot-0bde)
-
-  private secretVault() {
-    return makeVault(this.env.DATA_KEY, 'secrets')
-  }
-
-  sharedSecrets(): Array<{ name: string; ownerId: string; updatedAt: number }> {
-    return this.sql.exec<{ name: string; owner_id: string; updated_at: number }>('SELECT name, owner_id, updated_at FROM shared_secret ORDER BY name').toArray()
-      .map((row) => ({ name: row.name, ownerId: row.owner_id, updatedAt: row.updated_at }))
-  }
-
-  /**
-   * Store a secret: private ones stay in the Member DO, Home-shared ones live here. Changing
-   * the scope moves the value; a shared secret is changed only by the Member who shared it.
-   */
-  async putSecret(memberId: string, name: string, value: string | undefined, shared: boolean): Promise<void> {
-    const existing = this.sql.exec<{ owner_id: string }>('SELECT owner_id FROM shared_secret WHERE name = ?', name).toArray()[0]
-    if (existing !== undefined && existing.owner_id !== memberId) throw new Error(`"${name}" is shared by another Member`)
-    const member = this.env.MEMBER.getByName(memberId)
-    if (shared) {
-      const plaintext = value ?? (await member.takeSecret(name)) ?? (existing === undefined ? null : await this.sharedSecret(name))
-      if (plaintext === null) throw new Error(`no secret "${name}"`)
-      await member.takeSecret(name)
-      const sealed = await Effect.runPromise(this.secretVault().seal(plaintext))
-      this.sql.exec(
-        'INSERT INTO shared_secret (name, owner_id, sealed, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET sealed = excluded.sealed, updated_at = excluded.updated_at',
-        name, memberId, sealed, Date.now(),
-      )
-      return
-    }
-    const plaintext = value ?? (existing === undefined ? await member.secret(name) : await this.sharedSecret(name))
-    if (plaintext === null) throw new Error(`no secret "${name}"`)
-    await member.setSecret(name, plaintext)
-    if (existing !== undefined) this.sql.exec('DELETE FROM shared_secret WHERE name = ?', name)
-  }
-
-  async deleteSecret(memberId: string, name: string): Promise<void> {
-    this.sql.exec('DELETE FROM shared_secret WHERE name = ? AND owner_id = ?', name, memberId)
-    await this.env.MEMBER.getByName(memberId).takeSecret(name)
-  }
-
-  private async sharedSecret(name: string): Promise<string | null> {
-    const row = this.sql.exec<{ sealed: string }>('SELECT sealed FROM shared_secret WHERE name = ?', name).toArray()[0]
-    return row === undefined ? null : Effect.runPromise(this.secretVault().open(row.sealed))
-  }
-
-  /** The value a Robot's secret_get receives: its owner's private secret, else the Home's. */
-  async resolveSecret(memberId: string, name: string): Promise<string | null> {
-    return (await this.env.MEMBER.getByName(memberId).secret(name)) ?? this.sharedSecret(name)
-  }
-
-  async secretsView(memberId: string): Promise<Array<{ name: string; scope: 'member' | 'home'; mine: boolean; updatedAt: number }>> {
-    const own = (await this.env.MEMBER.getByName(memberId).secretNames()).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
-    const shared = this.sharedSecrets().map((secret) => ({ name: secret.name, updatedAt: secret.updatedAt, scope: 'home' as const, mine: secret.ownerId === memberId }))
-    return [...own, ...shared]
-  }
-
-  /** Models a Member's Robots can run on: the Home's model list, for Providers they can use. */
-  /** Providers this Member's Robots can run on: Workers AI, their own credentials, Home-shared ones. */
-  async usableProviders(memberId: string): Promise<Set<string>> {
-    const usable = new Set<string>(['workers-ai'])
-    for (const provider of (await this.env.MEMBER.getByName(memberId).providers()).map((view) => view.provider)) usable.add(provider)
-    for (const row of this.sql.exec<{ provider: string }>('SELECT DISTINCT provider FROM shared_credential').toArray()) usable.add(row.provider)
-    return usable
-  }
-
-  /** The models a Member can choose: the live lists of the Providers they can use (refreshed daily). */
-  async models(memberId: string): Promise<ModelOption[]> {
-    const usable = await this.usableProviders(memberId)
-    await Promise.all([...usable].filter((provider) => (PROVIDER_IDS as readonly string[]).includes(provider)).map((provider) => this.ensureCatalog(provider, memberId)))
-    return this.modelList().filter((option) => usable.has(option.provider))
-  }
-
-  // ---------------------------------------------------------------- live model lists (robot-82r5)
-
-  /** When each Provider's list was last tried, so a failing Provider is not asked on every request. */
-  private readonly catalogTries = new Map<string, number>()
-
-  private catalogRow(provider: string): { models: ModelOption[] | null; fetchedAt: number | null; error: string | null } | undefined {
-    const row = this.sql.exec<{ models: string | null; fetched_at: number | null; error: string | null }>('SELECT models, fetched_at, error FROM model_catalog WHERE provider = ?', provider).toArray()[0]
-    return row === undefined ? undefined : { models: row.models === null ? null : JSON.parse(row.models) as ModelOption[], fetchedAt: row.fetched_at, error: row.error }
-  }
-
-  private async ensureCatalog(provider: string, memberId: string): Promise<void> {
-    const row = this.catalogRow(provider)
-    if (row?.models != null && row.fetchedAt !== null && Date.now() - row.fetchedAt < CATALOG_TTL_MS) return
-    if (row?.error != null && Date.now() - (this.catalogTries.get(provider) ?? 0) < 60_000) return
-    await this.refreshCatalog(provider, memberId)
-  }
-
-  /** Fetch one Provider's live list with a credential this Member can use; a failure keeps the last list. */
-  async refreshCatalog(provider: string, memberId: string): Promise<{ provider: string; count: number; error: string | null }> {
-    this.catalogTries.set(provider, Date.now())
-    try {
-      const access = await this.listingAccess(provider, memberId)
-      const models = await liveModels(provider, access, () => this.metadata())
-      this.sql.exec(
-        'INSERT INTO model_catalog (provider, models, fetched_at, error) VALUES (?, ?, ?, NULL) ON CONFLICT (provider) DO UPDATE SET models = excluded.models, fetched_at = excluded.fetched_at, error = NULL',
-        provider, JSON.stringify(models), Date.now(),
-      )
-      return { provider, count: models.length, error: null }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.sql.exec('INSERT INTO model_catalog (provider, error) VALUES (?, ?) ON CONFLICT (provider) DO UPDATE SET error = excluded.error', provider, message)
-      return { provider, count: this.catalogRow(provider)?.models?.length ?? 0, error: message }
-    }
-  }
-
-  private async listingAccess(provider: string, memberId: string): Promise<ListingAccess> {
-    if (provider === 'workers-ai') return this.env.AI === undefined ? {} : { ai: this.env.AI }
-    if (provider === 'openrouter') return {}
-    if (provider === 'opencode-go') {
-      const owner = await this.opencodePoolOwner(memberId)
-      if (owner === null) throw new Error('no OpenCode Go key')
-      const pool = await this.env.MEMBER.getByName(owner.ownerId).opencodeCandidates(null, owner.forHome)
-      const key = pool.keys[0]?.key
-      if (key === undefined) throw new Error('no OpenCode Go key')
-      return { key }
-    }
-    const credential = await this.providerCredential(memberId, provider as ProviderId)
-    if (credential === null) throw new Error(`no ${provider} credential`)
-    return credential.kind === 'api-key' ? { key: credential.key } : { oauth: { access: credential.access, ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }) } }
-  }
-
-  /** models.dev metadata, refreshed daily; a failed refresh keeps the last copy (or none). */
-  private async metadata(): Promise<MetadataIndex> {
-    const stored = this.setting<{ data: MetadataIndex; fetchedAt: number }>('model-metadata')
-    if (stored !== undefined && Date.now() - stored.fetchedAt < CATALOG_TTL_MS) return stored.data
-    try {
-      const data = await fetchMetadata()
-      this.sql.exec("INSERT INTO setting (k, v) VALUES ('model-metadata', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify({ data, fetchedAt: Date.now() }))
-      return data
-    } catch (error) {
-      console.warn('models.dev metadata unavailable', error)
-      return stored?.data ?? {}
-    }
-  }
-
-  /** Each Provider's list status, for the admin view. */
-  catalogStatus(): Array<{ provider: string; count: number; fetchedAt: number | null; error: string | null }> {
-    return this.sql.exec<{ provider: string; models: string | null; fetched_at: number | null; error: string | null }>('SELECT * FROM model_catalog ORDER BY provider').toArray()
-      .map((row) => ({ provider: row.provider, count: row.models === null ? 0 : (JSON.parse(row.models) as unknown[]).length, fetchedAt: row.fetched_at, error: row.error }))
-  }
-
-  /** Refresh every Provider this Member can use (the admin's "Refresh models"). */
-  async refreshCatalogs(memberId: string): Promise<Array<{ provider: string; count: number; error: string | null }>> {
-    const usable = [...(await this.usableProviders(memberId))].filter((provider) => (PROVIDER_IDS as readonly string[]).includes(provider))
-    return Promise.all(usable.map((provider) => this.refreshCatalog(provider, memberId)))
-  }
-
-  async unavailableModels(memberId: string): Promise<ModelOption[]> {
-    const usable = await this.models(memberId)
-    return this.modelList().filter((option) => !usable.some((entry) => entry.provider === option.provider && entry.model === option.model))
-  }
-
-  /**
-   * Every known model: each Provider's last live list (nothing for a Provider never listed
-   * successfully), with the admin's entries on top: an entry for a listed model overrides
-   * its label and price, any other entry adds a model.
-   */
-  modelList(): ModelOption[] {
-    const stored = this.setting<ModelOption[]>('models') ?? []
-    const same = (a: ModelOption, b: ModelOption) => a.provider === b.provider && a.model === b.model
-    const live = PROVIDER_IDS.flatMap((provider) => this.catalogRow(provider)?.models ?? [])
-    return [
-      ...live.map((model) => stored.find((entry) => same(entry, model)) ?? model),
-      ...stored.filter((entry) => !live.some((model) => same(entry, model))),
-    ]
-  }
-
-  // ---------------------------------------------------------------- Providers (robot-dic7)
-
-  credentialShared(memberId: string, provider: ProviderId, shared: boolean): void {
-    if (shared) this.sql.exec('INSERT INTO shared_credential (provider, member_id) VALUES (?, ?) ON CONFLICT DO NOTHING', provider, memberId)
-    else this.sql.exec('DELETE FROM shared_credential WHERE provider = ? AND member_id = ?', provider, memberId)
-  }
-
-  /** The credential a Member's Robot uses: the Member's own, else one shared with the Home. */
-  async providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> {
-    const own = await this.env.MEMBER.getByName(memberId).credential(provider, false)
-    if (own !== null) return own
-    const sharers = this.sql.exec<{ member_id: string }>('SELECT member_id FROM shared_credential WHERE provider = ? AND member_id != ?', provider, memberId).toArray()
-    for (const { member_id } of sharers) {
-      if (this.member(member_id)?.status !== 'active') continue
-      const shared = await this.env.MEMBER.getByName(member_id).credential(provider, true)
-      if (shared !== null) return shared
-    }
-    return null
-  }
-
-  /** Whose OpenCode Go pool a Member's Robots use: their own, else the first one shared with the Home. */
-  async opencodePoolOwner(memberId: string): Promise<{ ownerId: string; forHome: boolean } | null> {
-    const own = await this.env.MEMBER.getByName(memberId).opencodeKeys()
-    if (own.keys.length > 0) return { ownerId: memberId, forHome: false }
-    const sharer = this.sql.exec<{ member_id: string }>("SELECT member_id FROM shared_credential WHERE provider = 'opencode-go' AND member_id != ?", memberId).toArray()
-      .find(({ member_id }) => this.member(member_id)?.status === 'active')
-    return sharer === undefined ? null : { ownerId: sharer.member_id, forHome: true }
-  }
-
-  async providersView(memberId: string): Promise<ProvidersView> {
-    const mine = await this.env.MEMBER.getByName(memberId).providers()
-    const others = this.sql.exec<{ provider: ProviderId; member_id: string }>('SELECT provider, member_id FROM shared_credential WHERE member_id != ?', memberId).toArray()
-    const shared: ProviderView[] = others.flatMap(({ provider, member_id }) => {
-      const member = this.member(member_id)
-      return member === undefined || member.status !== 'active' ? [] : [{ provider, kind: provider === 'openai' || provider === 'anthropic' ? 'oauth' as const : 'api-key' as const, shared: true, connectedAt: 0, ownerId: member.id, ownerName: member.name }]
-    })
-    return { mine, shared, models: await this.models(memberId), defaultModel: this.settings().defaultModel }
-  }
+  signIn(email: string): Promise<SignIn> { return this.run(signIn(email)) }
+  member(id: string): Promise<MemberView | undefined> { return this.run(member(id)) }
+  members(): Promise<MemberView[]> { return this.run(members) }
+  invite(email: string, role: MemberRole = 'member'): Promise<MemberView> { return this.run(invite(email, role)) }
+  remove(memberId: string): Promise<void> { return this.run(remove(memberId)) }
+  rename(memberId: string, name: string): Promise<void> { return this.run(rename(memberId, name)) }
+  settings(): Promise<HomeSettings> { return this.run(settings) }
+  updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }): Promise<HomeSettings> { return this.run(updateSettings(patch)) }
+  limitsFor(memberId: string): Promise<{ robotDefaultUsd: number | null; memberUsd: number | null; memberSpentUsd: number }> { return this.run(limitsFor(memberId)) }
+  reachable(memberId: string): Promise<RobotSummary[]> { return this.run(reachable(memberId)) }
+  fleet(): Promise<RobotSummary[]> { return this.run(fleet) }
+  entry(robotId: string): Promise<RegistryEntry | undefined> { return this.run(entry(robotId)) }
+  access(memberId: string, robotId: string): Promise<'owner' | 'shared' | null> { return this.run(access(memberId, robotId)) }
+  robotChanged(changed: RegistryEntry): Promise<void> { return this.run(robotChanged(changed)) }
+  startingModel(memberId: string, wanted?: ModelChoice): Promise<ModelChoice> { return this.run(startingModel(memberId, wanted)) }
+  createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> { return this.run(createRobot(ownerId, brief, model)) }
+  syncMrRobots(): Promise<void> { return this.run(syncMrRobots) }
+  adminView(adminId: string): Promise<AdminView> { return this.run(adminView(adminId)) }
+  catalog(memberId: string, robotId: string): Promise<SettingsCatalog> { return this.run(catalog(memberId, robotId)) }
+  skills(memberId: string): Promise<SkillView[]> { return this.run(skills(memberId)) }
+  loadableSkills(memberId: string, names: readonly string[]): Promise<SkillView[]> { return this.run(loadableSkills(memberId, names)) }
+  skillRepository(): Promise<SkillRepository | null> { return this.run(skillRepository) }
+  setSkillRepository(repository: SkillRepository, token: string | undefined): Promise<void> { return this.run(setSkillRepository(repository, token)) }
+  syncSkills(): Promise<{ synced: string[] }> { return this.run(syncSkills) }
+  publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private'): Promise<void> { return this.run(publishSkill(ownerId, name, description, content, visibility)) }
+  skillContent(memberId: string, name: string, path = 'SKILL.md'): Promise<string | null> { return this.run(skillContent(memberId, name, path)) }
+  sharedSecrets(): Promise<Array<{ name: string; ownerId: string; updatedAt: number }>> { return this.run(sharedSecrets) }
+  putSecret(memberId: string, name: string, value: string | undefined, shared: boolean): Promise<void> { return this.run(putSecret(memberId, name, value, shared)) }
+  deleteSecret(memberId: string, name: string): Promise<void> { return this.run(deleteSecret(memberId, name)) }
+  resolveSecret(memberId: string, name: string): Promise<string | null> { return this.run(resolveSecret(memberId, name)) }
+  secretsView(memberId: string): Promise<Array<{ name: string; scope: 'member' | 'home'; mine: boolean; updatedAt: number }>> { return this.run(secretsView(memberId)) }
+  usableProviders(memberId: string): Promise<Set<string>> { return this.run(usableProviders(memberId)) }
+  models(memberId: string): Promise<ModelOption[]> { return this.run(models(memberId)) }
+  refreshCatalog(provider: string, memberId: string): Promise<{ provider: string; count: number; error: string | null }> { return this.run(refreshCatalog(provider, memberId)) }
+  catalogStatus(): Promise<Array<{ provider: string; count: number; fetchedAt: number | null; error: string | null }>> { return this.run(catalogStatus) }
+  refreshCatalogs(memberId: string): Promise<Array<{ provider: string; count: number; error: string | null }>> { return this.run(refreshCatalogs(memberId)) }
+  unavailableModels(memberId: string): Promise<ModelOption[]> { return this.run(unavailableModels(memberId)) }
+  modelList(): Promise<ModelOption[]> { return this.run(modelList) }
+  credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }
+  providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> { return this.run(providerCredential(memberId, provider)) }
+  opencodePoolOwner(memberId: string): Promise<{ ownerId: string; forHome: boolean } | null> { return this.run(opencodePoolOwner(memberId)) }
+  providersView(memberId: string): Promise<ProvidersView> { return this.run(providersView(memberId)) }
 }
 
 export function currentMonth(at = Date.now()): string {
