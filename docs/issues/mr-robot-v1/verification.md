@@ -13,7 +13,7 @@ Totals: 95 works, 5 partial, 0 not done.
 - 5 robot-d2uv, partial (not tried live): home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home)
 - 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
-- 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
+- 65 robot-7v9s, partial (DeepSeek not tried against the real service): Live: Workers AI (Turns on the deployment). Against the real services from this machine: OpenCode Go, and OpenRouter (2026-10-07, the adapter got a real tool call from openai/gpt-4o-mini). DeepSeek only against a faked API: no DeepSeek key exists here or in the Home
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
 
 ## Broken until the review, fixed 2026-10-06/07
@@ -109,7 +109,7 @@ Suites on that build: worker 124, web 11, infra 1, dependency lint, and the stag
 | 62 | robot-eiin | No helper creation; only Mr. Robot creates top-level Robots | Live prompt preview: no create tool for Verifier | works |
 | 63 | robot-82r5 | One model and effort per Robot from live lists | Live: Mr. Robot and Verifier on Claude Sonnet 5.5 | works |
 | 64 | robot-lzu3 | ChatGPT device flow, Claude paste flow | Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried | partial (ChatGPT sign-in not tried live) |
-| 65 | robot-7v9s | DeepSeek, OpenRouter, Workers AI, OpenCode Go | Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home) | partial (DeepSeek, OpenRouter not tried live) |
+| 65 | robot-7v9s | DeepSeek, OpenRouter, Workers AI, OpenCode Go | Live: Workers AI (Turns on the deployment). Against the real services from this machine: OpenCode Go, and OpenRouter (2026-10-07, the adapter got a real tool call from openai/gpt-4o-mini). DeepSeek only against a faked API: no DeepSeek key exists here or in the Home | partial (DeepSeek not tried against the real service) |
 | 66 | robot-6nkv | Home default model | settings-flow.test.ts (real DOs); not changed live | works |
 | 67 | robot-6jqh | Token meter per Robot and Member | Live: Verifier's tokens grew from 330,767 to 345,032 input across a Turn; cost 0 on the subscription | works |
 | 68 | robot-8gag | Monthly limits | Live: Verifier on Workers AI with a $0.0001 limit blocked after one Turn with a notice | works |
