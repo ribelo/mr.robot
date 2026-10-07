@@ -19,6 +19,7 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
   const [claimed, setClaimed] = useState(false)
   const [message, setMessage] = useState<string>()
   const [text, setText] = useState('')
+  const [logins, setLogins] = useState<Array<{ name: string; username: string }> | null>(null)
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -32,6 +33,11 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
         setFrame({ src: `data:image/jpeg;base64,${data.data}`, width: data.metadata?.deviceWidth ?? 1280, height: data.metadata?.deviceHeight ?? 800 })
       } else if (data.type === 'claimed') {
         setClaimed(true)
+      } else if (data.type === 'logins') {
+        setLogins((data as unknown as { entries: Array<{ name: string; username: string }> }).entries)
+      } else if (data.type === 'filled' && data.message !== undefined) {
+        setMessage(data.message)
+        setLogins(null)
       } else if (data.type === 'claim-refused') {
         setMessage('Someone else is using this browser right now.')
       } else if (data.type === 'error' && data.message !== undefined) {
@@ -76,6 +82,15 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
           <button type="button" className="button" onClick={() => send({ type: 'key', key: 'Backspace' })}>⌫</button>
           <button type="button" className="button" onClick={() => send({ type: 'key', key: 'Enter' })}>⏎</button>
           <button type="button" className="button" onClick={() => send({ type: 'scroll', x: (frame?.width ?? 0) / 2, y: 300, dy: 500 })}>↓</button>
+          <button type="button" className="button" aria-label="Logins for this page" onClick={() => send({ type: 'logins' })}>🔑</button>
+        </div>
+      ) : null}
+      {claimed && logins !== null ? (
+        <div className="takeover-logins">
+          {logins.length === 0 ? <span className="muted">No login granted to this Robot matches this page.</span> : logins.map((login) => (
+            <button key={login.name} type="button" className="button" onClick={() => send({ type: 'fill', name: login.name })}>{login.name}{login.username === '' ? '' : ` (${login.username})`}</button>
+          ))}
+          <button type="button" className="link" onClick={() => setLogins(null)}>Close</button>
         </div>
       ) : null}
     </div>

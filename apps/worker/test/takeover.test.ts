@@ -172,4 +172,17 @@ describe('live view and takeover', () => {
     expect(browserLog.at(-1)).toBe('close')
     expect((requests.get(body.id) ?? []).length).toBe(before)
   })
+
+  it('offers the granted logins for the page and fills the chosen one (rb-o52a)', async () => {
+    await api(ANNA, '/api/secrets/shop', { method: 'PUT', body: { username: 'anna', password: 'right-password', websites: ['shop.test'], shared: false } })
+    const id = await shopperAtLogin()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: ['browser', 'secrets'], skills: [], recipients: [], secrets: ['shop'] } } })
+    const anna = await connect(ANNA, id)
+    await anna.send({ type: 'claim' })
+    await anna.send({ type: 'logins' })
+    expect(anna.received.find((message) => message.type === 'logins')).toEqual({ type: 'logins', entries: [{ name: 'shop', username: 'anna' }] })
+    await anna.send({ type: 'fill', name: 'shop' })
+    expect(anna.received.find((message) => message.type === 'filled')).toMatchObject({ message: expect.stringContaining('Filled') })
+    expect(browserLog).toContain('fill')
+  })
 })

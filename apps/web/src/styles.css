@@ -277,3 +277,12 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .dsh-record-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
 .dsh-record-image { max-width: 240px; max-height: 160px; border-radius: 6px; border: 1px solid var(--line); display: block; }
 .dsh-record-image.loading { width: 120px; height: 80px; background: #ffffff10; }
+
+/* Logins (v1.1 ticket 05) */
+.login-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.login-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.login-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.login-main .muted { font-size: 12px; overflow-wrap: anywhere; }
+.login-revealed { font-size: 12px; user-select: all; }
+.login-form { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.takeover-logins { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 14px; }

@@ -501,10 +501,12 @@ export const secret = (name: string) => Effect.gen(function* () {
   const granted = store.grants().secrets
   if (!granted.includes(name)) return yield* invalid(`The secret "${name}" is not granted to you. Granted: ${granted.join(', ') || 'none'}. Ask with propose_grants.`)
   const ownerId = (yield* config).ownerId
-  const value = yield* promise(() => platform.env.HOME.getByName(HOME_ID).resolveSecret(ownerId, name))
-  if (value === null) return yield* notFound(`The secret "${name}" no longer exists`)
-  yield* platform.rememberSecret(name, value)
-  return value
+  const entry = yield* promise(() => platform.env.HOME.getByName(HOME_ID).resolveLogin(ownerId, name))
+  if (entry === null) return yield* notFound(`The secret "${name}" no longer exists`)
+  // A website login is filled into the page, not read (rb-e1ic); only entries marked "allow reading" give their value.
+  if (!entry.allowRead) return yield* invalid(`"${name}" is a website login: use login_fill on its login page instead of reading it.`)
+  yield* platform.rememberSecret(name, entry.password)
+  return entry.password
 })
 
 // ------------------------------------------------------------------ rewind (robot-0q6a, robot-8v1t, robot-acr3)

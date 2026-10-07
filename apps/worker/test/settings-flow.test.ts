@@ -61,7 +61,7 @@ describe('configuring a Robot', () => {
   it('shows the prompt, tools and skills the model gets, without secret values', async () => {
     await stubModels()
     scripts.set('*', [{ text: 'Hello.' }])
-    await api(ANNA, '/api/secrets/bank', { method: 'PUT', body: { value: 'very-secret-pin-123', shared: false } })
+    await api(ANNA, '/api/secrets/bank', { method: 'PUT', body: { password: 'very-secret-pin-123', allowRead: true, shared: false } })
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
     await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['web', 'secrets'], skills: [], recipients: [], secrets: ['bank'] } } })

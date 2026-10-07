@@ -107,11 +107,11 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           ))}
         </div>
       )}
-      <h2>Secrets</h2>
-      {catalog.secrets.length === 0 ? <div className="muted">No secrets in your vault.</div> : (
+      <h2>Logins</h2>
+      {catalog.secrets.length === 0 ? <div className="muted">No logins yet: add them under your name → Logins.</div> : (
         <div className="check-grid">
           {catalog.secrets.map((secret) => (
-            <label key={secret.name} className="check"><input type="checkbox" checked={draft.grants.secrets.includes(secret.name)} onChange={() => toggle('secrets', secret.name)} /><span>{secret.name}<small>{secret.scope === 'home' ? 'shared with the Home' : 'yours'}</small></span></label>
+            <label key={secret.name} className="check"><input type="checkbox" checked={draft.grants.secrets.includes(secret.name)} onChange={() => toggle('secrets', secret.name)} /><span>{secret.name}<small>{[secret.username, (secret.websites ?? []).join(', '), secret.scope === 'home' ? 'shared with the Home' : 'yours'].filter((part) => part !== undefined && part !== '').join(' · ')}</small></span></label>
           ))}
         </div>
       )}

@@ -9,7 +9,7 @@ export const TOOL_GROUPS = {
   browser: 'Use a headless browser: open, observe, act, screenshot; ask the owner for a takeover.',
   routines: 'Create, update and delete its own Routines.',
   messaging: 'List and message the Robots it has recipient Grants for.',
-  secrets: 'Read the secrets granted to it with secret.get.',
+  secrets: 'Use the logins granted to it: list them, fill one into its website (the password stays hidden), read values marked "allow reading".',
   skills: 'Load the skills granted to it and propose new skills to the library.',
   notify: 'Send its owner a push notification.',
   robots: 'Create Robots and configure the Robots its owner can reach (Mr. Robot only).',

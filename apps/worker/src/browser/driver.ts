@@ -36,6 +36,8 @@ export interface BrowserPage {
   detach(): Promise<void>
   /** Notifications pages showed since the last call (Notification and showNotification). */
   takeNotifications(): Promise<Array<{ title: string; body: string; at: number }>>
+  /** Type a username and password into the page's login fields (ticket 05). */
+  fillLogin(username: string, password: string): Promise<{ username: boolean; password: boolean }>
 }
 
 export interface BrowserDriver {
@@ -282,6 +284,25 @@ class RenderingPage implements BrowserPage {
     return this.session?.id ?? this.browser.sessionId()
   }
 
+  async fillLogin(username: string, password: string): Promise<{ username: boolean; password: boolean }> {
+    // Mark the visible password field and the username field before it (or an email/username field).
+    const found = (await this.page.evaluate(LOGIN_FIELDS)) as { username: boolean; password: boolean }
+    const type = async (selector: string, value: string) => {
+      const handle = await this.page.$(selector)
+      if (handle === null) return false
+      await handle.click({ clickCount: 3 })
+      await this.page.evaluate(`(() => { const el = document.querySelector('${selector}'); if (el) el.value = '' })()`)
+      await handle.type(value, { delay: 15 })
+      return true
+    }
+    const result = {
+      username: found.username && username !== '' ? await type('[data-mr-fill="u"]', username) : false,
+      password: found.password ? await type('[data-mr-fill="p"]', password) : false,
+    }
+    await this.page.evaluate(`document.querySelectorAll('[data-mr-fill]').forEach((el) => el.removeAttribute('data-mr-fill'))`)
+    return result
+  }
+
   async detach(): Promise<void> {
     await this.browser.disconnect().catch(() => undefined)
   }
@@ -311,3 +332,18 @@ function bounded<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
     new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms) }),
   ]).finally(() => clearTimeout(timer))
 }
+
+/** Finds the login form's fields: the visible password input and the username input that goes with it. */
+const LOGIN_FIELDS = `(() => {
+  const visible = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled }
+  document.querySelectorAll('[data-mr-fill]').forEach((el) => el.removeAttribute('data-mr-fill'))
+  const password = [...document.querySelectorAll('input[type=password]')].find(visible)
+  const scope = (password && password.form) || document
+  const inputs = [...scope.querySelectorAll('input')].filter((el) => visible(el) && ['text', 'email', 'tel', ''].includes((el.getAttribute('type') || '').toLowerCase()))
+  const byHint = inputs.find((el) => /username|email|login|user|nik|pesel/i.test([el.autocomplete, el.name, el.id, el.placeholder, el.getAttribute('aria-label')].join(' ')))
+  const before = password ? inputs.filter((el) => el.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING).at(-1) : undefined
+  const user = byHint || before || (password ? undefined : inputs[0])
+  if (password) password.setAttribute('data-mr-fill', 'p')
+  if (user) user.setAttribute('data-mr-fill', 'u')
+  return { username: Boolean(user), password: Boolean(password) }
+})()`

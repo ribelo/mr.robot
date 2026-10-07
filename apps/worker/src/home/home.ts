@@ -3,6 +3,8 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
+import type { LoginView } from '@mr-robot/protocol'
+import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import type {
   FleetState,
@@ -394,13 +396,14 @@ const browserBackends = Effect.gen(function* () {
 
 const sharedSecrets = Effect.gen(function* () {
   const sql = yield* Sql
-  return (yield* sql.all<{ name: string; owner_id: string; updated_at: number }>('SELECT name, owner_id, updated_at FROM shared_secret ORDER BY name'))
-    .map((row) => ({ name: row.name, ownerId: row.owner_id, updatedAt: row.updated_at }))
+  const platform = yield* HomePlatform
+  const rows = yield* sql.all<{ name: string; owner_id: string; sealed: string; updated_at: number }>('SELECT name, owner_id, sealed, updated_at FROM shared_secret ORDER BY name')
+  return yield* Effect.forEach(rows, (row) => Effect.map(platform.secrets.open(row.sealed), (text) => ({ name: row.name, ownerId: row.owner_id, updatedAt: row.updated_at, ...metaOf(parseEntry(text)) })))
 })
 
 const grantableSecrets = (memberId: string) => Effect.gen(function* () {
-  const own = (yield* remote((env) => env.MEMBER.getByName(memberId).secretNames())).map(({ name }) => ({ name, scope: 'member' as const }))
-  const shared = (yield* sharedSecrets).filter(({ name }) => !own.some((secret) => secret.name === name)).map(({ name }) => ({ name, scope: 'home' as const }))
+  const own = (yield* remote((env) => env.MEMBER.getByName(memberId).logins())).map(({ name, username, websites }) => ({ name, scope: 'member' as const, username, websites }))
+  const shared = (yield* sharedSecrets).filter(({ name }) => !own.some((secret) => secret.name === name)).map(({ name, username, websites }) => ({ name, scope: 'home' as const, username, websites }))
   return [...own, ...shared] as SettingsCatalog['secrets']
 })
 
@@ -500,28 +503,36 @@ const sharedSecret = (name: string) => Effect.gen(function* () {
   return row === undefined ? null : yield* platform.secrets.open(row.sealed)
 })
 
+/** An entry the Member may change: their private one, or a Home one they shared. */
+const ownLogin = (memberId: string, name: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const shared = yield* sql.first<{ owner_id: string }>('SELECT owner_id FROM shared_secret WHERE name = ?', name)
+  if (shared !== undefined && shared.owner_id !== memberId) return yield* invalid(`"${name}" is shared by another Member`)
+  const text = shared !== undefined ? yield* sharedSecret(name) : yield* remote((env) => env.MEMBER.getByName(memberId).secret(name))
+  return { entry: text === null ? null : parseEntry(text), shared: shared !== undefined }
+})
+
 /**
- * Store a secret: private ones stay in the Member DO, Home-shared ones live here. Changing
- * the scope moves the value; a shared secret is changed only by the Member who shared it.
+ * Store a login entry (rb-4dxe): private ones stay in the Member DO, Home ones live here (rb-ob2g).
+ * Changing the scope moves the entry; fields left out keep their value (the password is not resent).
  */
-const putSecret = (memberId: string, name: string, value: string | undefined, shared: boolean) => Effect.gen(function* () {
+const putLogin = (memberId: string, name: string, patch: Partial<LoginEntry>, shared: boolean) => Effect.gen(function* () {
   const sql = yield* Sql
   const platform = yield* HomePlatform
-  const existing = yield* sql.first<{ owner_id: string }>('SELECT owner_id FROM shared_secret WHERE name = ?', name)
-  if (existing !== undefined && existing.owner_id !== memberId) return yield* invalid(`"${name}" is shared by another Member`)
+  const current = yield* ownLogin(memberId, name)
+  const base = current.entry ?? { username: '', password: '', websites: [], notes: '', allowRead: false }
+  const entry: LoginEntry = { ...base, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) }
+  if (entry.password === '') return yield* invalid('a login needs a password')
   const holder = () => platform.env.MEMBER.getByName(memberId)
+  const text = serializeEntry(entry)
   if (shared) {
-    const plaintext = value ?? (yield* Effect.promise(() => holder().takeSecret(name))) ?? (existing === undefined ? null : yield* sharedSecret(name))
-    if (plaintext === null) return yield* notFound(`no secret "${name}"`)
     yield* Effect.promise(() => holder().takeSecret(name))
-    const sealed = yield* platform.secrets.seal(plaintext)
+    const sealed = yield* platform.secrets.seal(text)
     yield* sql.run('INSERT INTO shared_secret (name, owner_id, sealed, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET sealed = excluded.sealed, updated_at = excluded.updated_at', name, memberId, sealed, Date.now())
     return
   }
-  const plaintext = value ?? (existing === undefined ? yield* Effect.promise(() => holder().secret(name)) : yield* sharedSecret(name))
-  if (plaintext === null) return yield* notFound(`no secret "${name}"`)
-  yield* Effect.promise(() => holder().setSecret(name, plaintext))
-  if (existing !== undefined) yield* sql.run('DELETE FROM shared_secret WHERE name = ?', name)
+  yield* Effect.promise(() => holder().setSecret(name, text))
+  if (current.shared) yield* sql.run('DELETE FROM shared_secret WHERE name = ?', name)
 })
 
 const deleteSecret = (memberId: string, name: string) => Effect.gen(function* () {
@@ -530,15 +541,30 @@ const deleteSecret = (memberId: string, name: string) => Effect.gen(function* ()
   yield* remote((env) => env.MEMBER.getByName(memberId).takeSecret(name))
 })
 
-/** The value a Robot's secret_get receives: its owner's private secret, else the Home's. */
-const resolveSecret = (memberId: string, name: string) => Effect.gen(function* () {
-  return (yield* remote((env) => env.MEMBER.getByName(memberId).secret(name))) ?? (yield* sharedSecret(name))
+/** The entry a Robot of this owner uses: the owner's private one, else the Home's. */
+const resolveLogin = (memberId: string, name: string) => Effect.gen(function* () {
+  const text = (yield* remote((env) => env.MEMBER.getByName(memberId).secret(name))) ?? (yield* sharedSecret(name))
+  return text === null ? null : parseEntry(text)
 })
 
+/** The password, for masking what a Robot shows. */
+const resolveSecret = (memberId: string, name: string) => Effect.map(resolveLogin(memberId, name), (entry) => entry?.password ?? null)
+
+/** Reveal (rb-4dxe): only the Member's own entries. */
+const revealLogin = (memberId: string, name: string) => Effect.gen(function* () {
+  const current = yield* ownLogin(memberId, name)
+  if (current.entry === null) return yield* notFound(`no login "${name}"`)
+  return current.entry.password
+})
+
+/** The Logins section: own and Home entries, and which of the Member's Robots hold each (rb-4dxe, rb-2myk). */
 const secretsView = (memberId: string) => Effect.gen(function* () {
-  const own = (yield* remote((env) => env.MEMBER.getByName(memberId).secretNames())).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
-  const shared = (yield* sharedSecrets).map((secret) => ({ name: secret.name, updatedAt: secret.updatedAt, scope: 'home' as const, mine: secret.ownerId === memberId }))
-  return [...own, ...shared]
+  const sql = yield* Sql
+  const own = (yield* remote((env) => env.MEMBER.getByName(memberId).logins())).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
+  const shared = (yield* sharedSecrets).map(({ ownerId, ...secret }) => ({ ...secret, scope: 'home' as const, mine: ownerId === memberId }))
+  const robots = yield* sql.all<{ id: string; name: string }>("SELECT id, json_extract(identity, '$.name') AS name FROM robot WHERE owner_id = ? AND status != 'deleted'", memberId)
+  const grants = yield* Effect.forEach(robots, (robot) => Effect.map(remote((env) => env.ROBOT.getByName(robot.id).grants()), (granted) => ({ name: robot.name, secrets: granted.secrets })).pipe(Effect.orElseSucceed(() => ({ name: robot.name, secrets: [] as readonly string[] }))), { concurrency: 8 })
+  return [...own, ...shared].map((entry) => ({ ...entry, robots: grants.filter((robot) => robot.secrets.includes(entry.name)).map((robot) => robot.name) }))
 })
 
 // ------------------------------------------------------------------ live model lists (robot-82r5, robot-d994)
@@ -763,10 +789,12 @@ export class Home extends DurableObject<Env> {
   publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private'): Promise<void> { return this.run(publishSkill(ownerId, name, description, content, visibility)) }
   skillContent(memberId: string, name: string, path = 'SKILL.md'): Promise<string | null> { return this.run(skillContent(memberId, name, path)) }
   sharedSecrets(): Promise<Array<{ name: string; ownerId: string; updatedAt: number }>> { return this.run(sharedSecrets) }
-  putSecret(memberId: string, name: string, value: string | undefined, shared: boolean): Promise<void> { return this.run(putSecret(memberId, name, value, shared)) }
+  putLogin(memberId: string, name: string, patch: Partial<LoginEntry>, shared: boolean): Promise<void> { return this.run(putLogin(memberId, name, patch, shared)) }
+  resolveLogin(memberId: string, name: string): Promise<LoginEntry | null> { return this.run(resolveLogin(memberId, name)) }
+  revealLogin(memberId: string, name: string): Promise<string> { return this.run(revealLogin(memberId, name)) }
   deleteSecret(memberId: string, name: string): Promise<void> { return this.run(deleteSecret(memberId, name)) }
   resolveSecret(memberId: string, name: string): Promise<string | null> { return this.run(resolveSecret(memberId, name)) }
-  secretsView(memberId: string): Promise<Array<{ name: string; scope: 'member' | 'home'; mine: boolean; updatedAt: number }>> { return this.run(secretsView(memberId)) }
+  secretsView(memberId: string): Promise<LoginView[]> { return this.run(secretsView(memberId)) as Promise<LoginView[]> }
   usableProviders(memberId: string): Promise<Set<string>> { return this.run(usableProviders(memberId)) }
   models(memberId: string): Promise<ModelOption[]> { return this.run(models(memberId)) }
   refreshCatalog(provider: string, memberId: string): Promise<{ provider: string; count: number; error: string | null }> { return this.run(refreshCatalog(provider, memberId)) }

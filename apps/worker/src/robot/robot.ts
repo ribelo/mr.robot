@@ -7,6 +7,7 @@
  * armed while it runs; if the DO dies mid-Turn, the alarm brings it back and the
  * interrupted Turn resumes from the last persisted event.
  */
+import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
 import { LlmError, type LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -1070,6 +1071,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         await forwardInput(cdp, input)
         return
       }
+      case 'logins': {
+        // Autofill in the takeover window (rb-o52a): the Robot's granted entries for the page shown.
+        const page = await this.page()
+        const config = this.store.requireConfig()
+        const entries = await Promise.all(this.store.grants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+        socket.send(JSON.stringify({ type: 'logins', entries: entries.flatMap(([name, entry]) => entry !== null && entryMatches(entry, page.url()) ? [{ name, username: entry.username }] : []) }))
+        return
+      }
+      case 'fill': {
+        const takeover = this.store.get<TakeoverState>('takeover')
+        if (takeover?.claimedBy !== viewer.memberId) throw new Error('claim the browser first')
+        const name = String(input['name'] ?? '')
+        if (!this.store.grants().secrets.includes(name)) throw new Error(`"${name}" is not granted to this Robot`)
+        const entry = await this.home().resolveLogin(this.store.requireConfig().ownerId, name)
+        if (entry === null) throw new Error(`"${name}" no longer exists`)
+        socket.send(JSON.stringify({ type: 'filled', message: await this.fillEntry(name, entry, await this.page()) }))
+        return
+      }
       case 'handback': {
         const takeover = this.store.get<TakeoverState>('takeover')
         if (takeover === undefined) return
@@ -1308,6 +1327,39 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Replace secret values with a mask (robot-4zi6); stored history is already redacted at write. */
   protected mask(text: string): string {
     return maskSecrets(text, [...this.secretValues, ...this.turnSecrets])
+  }
+
+  /** Granted login entries and whether each belongs to the open page (rb-vpes). */
+  async logins(): Promise<Array<{ name: string; username: string; websites: readonly string[]; matchesPage: boolean; readable: boolean }>> {
+    const config = this.store.requireConfig()
+    const url = this.browserPage === undefined ? null : (await this.browserPage.catch(() => undefined))?.url() ?? null
+    const entries = await Promise.all(this.store.grants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+    return entries.flatMap(([name, entry]) => entry === null ? [] : [{ name, username: entry.username, websites: entry.websites, matchesPage: url !== null && entryMatches(entry, url), readable: entry.allowRead }])
+  }
+
+  /**
+   * Fill a granted entry into the open page (rb-e1ic): the Robot DO types it over CDP, so the password
+   * never passes through the model's program or the conversation, and it is masked if a page echoes it.
+   */
+  async fillLogin(name: string): Promise<string> {
+    const config = this.store.requireConfig()
+    if (!this.store.grants().secrets.includes(name)) throw new Error(`The login "${name}" is not granted to you. Ask with propose_grants.`)
+    const entry = await this.home().resolveLogin(config.ownerId, name)
+    if (entry === null) throw new Error(`The login "${name}" no longer exists`)
+    return this.fillEntry(name, entry, await this.page())
+  }
+
+  private async fillEntry(name: string, entry: LoginEntry, page: BrowserPage): Promise<string> {
+    const url = page.url()
+    if (!entryMatches(entry, url)) {
+      throw new Error(entry.websites.length === 0
+        ? `"${name}" has no websites, so it cannot be filled anywhere. Ask your owner to add the site's address to it in their Logins.`
+        : `"${name}" belongs to ${entry.websites.join(', ')}, not to ${url}. Open its own login page first.`)
+    }
+    this.remember(name, entry.password)
+    const filled = await page.fillLogin(entry.username, entry.password)
+    if (!filled.password) return `No password field is visible on ${url}. Open the login form (or its next step) and try again.`
+    return `Filled ${filled.username && entry.username !== '' ? 'the username and ' : ''}the password of "${name}". Submit the form yourself.`
   }
 
   /** secret.get: a granted name only, resolved from the owner or the Home (robot-0bde). */

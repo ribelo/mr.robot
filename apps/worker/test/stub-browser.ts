@@ -135,6 +135,13 @@ export class StubPage implements BrowserPage {
     }
   }
 
+  async fillLogin(_username: string, password: string): Promise<{ username: boolean; password: boolean }> {
+    browserLog.push('fill')
+    if (!this.current.endsWith('/login') || this.loggedIn) return { username: false, password: false }
+    this.typed = password
+    return { username: false, password: true }
+  }
+
   async waitFor(): Promise<void> {}
 
   async screenshot(): Promise<Uint8Array> {

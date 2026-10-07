@@ -16,6 +16,7 @@ import type {
   SettingsCatalog,
   SettingsPatch,
   Trajectory,
+  LoginView,
 } from '@mr-robot/protocol'
 
 export class ApiError extends Error {
@@ -73,8 +74,9 @@ export const api = {
   },
   subscribePush: (subscription: PushSubscriptionJSON, device: string) => request('/api/push/subscriptions', { body: { ...subscription, device } }),
   unsubscribePush: (endpoint: string) => request('/api/push/subscriptions', { method: 'DELETE', body: { endpoint } }),
-  secrets: () => request<Array<{ name: string; scope: 'member' | 'home'; mine: boolean; updatedAt: number }>>('/api/secrets'),
-  putSecret: (name: string, shared: boolean, value?: string) => request(`/api/secrets/${encodeURIComponent(name)}`, { method: 'PUT', body: value === undefined ? { shared } : { shared, value } }),
+  secrets: () => request<LoginView[]>('/api/secrets'),
+  putLogin: (name: string, input: { username?: string; password?: string; websites?: readonly string[]; notes?: string; allowRead?: boolean; shared: boolean }) => request(`/api/secrets/${encodeURIComponent(name)}`, { method: 'PUT', body: input }),
+  revealLogin: (name: string) => request<{ password: string }>(`/api/secrets/${encodeURIComponent(name)}/reveal`),
   deleteSecret: (name: string) => request(`/api/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   providers: () => request<ProvidersView>('/api/providers'),
   setApiKey: (provider: string, key: string, shared: boolean) => request(`/api/providers/${provider}`, { method: 'PUT', body: { key, shared } }),

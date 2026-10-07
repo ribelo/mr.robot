@@ -8,7 +8,7 @@ const grantSchema = {
   tools: { type: 'array', items: { type: 'string', enum: TOOL_GROUP_NAMES }, description: 'Tool groups' },
   skills: { type: 'array', items: { type: 'string' }, description: 'Skill names from the Home library' },
   recipients: { type: 'array', items: { type: 'string' }, description: 'Robot ids to message' },
-  secrets: { type: 'array', items: { type: 'string' }, description: 'Secret names' },
+  secrets: { type: 'array', items: { type: 'string' }, description: 'Login entry names (see login_list)' },
 }
 
 function grantSet(input: Partial<Record<keyof GrantSet, unknown>>): GrantSet {

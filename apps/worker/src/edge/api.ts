@@ -6,6 +6,7 @@ import { probe } from '../browser/probe.ts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import {
+  LoginInput,
   BrowserBackend,
   MemberPreferences,
   ApiKeyInput,
@@ -95,11 +96,12 @@ export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ secrets (robot-vplt)
   .on('GET', '/api/secrets', (c) => call(() => home(c.env).secretsView(c.member.id)))
   .on('PUT', '/api/secrets/:name', (c, { name }) => Effect.gen(function* () {
-    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) return yield* Effect.fail(badRequest('secret names use letters, digits, ".", "_" and "-"'))
-    const input = yield* decodeBody(c.request, Schema.Struct({ value: Schema.optional(Schema.String), shared: Schema.Boolean }))
-    yield* call(() => home(c.env).putSecret(c.member.id, name, input.value, input.shared)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) return yield* Effect.fail(badRequest('login names use letters, digits, ".", "_" and "-"'))
+    const { shared, ...patch } = yield* decodeBody(c.request, LoginInput)
+    yield* call(() => home(c.env).putLogin(c.member.id, name, { ...patch, ...(patch.websites === undefined ? {} : { websites: patch.websites.map((site) => site.trim()).filter((site) => site !== '') }) }, shared)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
+  .on('GET', '/api/secrets/:name/reveal', (c, { name }) => Effect.map(call(() => home(c.env).revealLogin(c.member.id, name)), (password) => ({ password })))
   .on('DELETE', '/api/secrets/:name', (c, { name }) => call(() => home(c.env).deleteSecret(c.member.id, name)))
 
   // ------------------------------------------------------------ skill library (robot-7qpi, robot-qjvu)

@@ -3,6 +3,7 @@
  * PROACTIVE_PREFERENCES.md, mounted read-only into each of their Robots), and the
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
+import { metaOf, parseEntry, type LoginMeta } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -249,6 +250,14 @@ const secretNames = Effect.gen(function* () {
   return (yield* sql.all<{ name: string; updated_at: number }>('SELECT name, updated_at FROM secret ORDER BY name')).map((row) => ({ name: row.name, updatedAt: row.updated_at }))
 })
 
+/** The Member's login entries without passwords (ticket 05). */
+const logins = Effect.gen(function* () {
+  const sql = yield* Sql
+  const platform = yield* MemberPlatform
+  const rows = yield* sql.all<{ name: string; sealed: string; updated_at: number }>('SELECT name, sealed, updated_at FROM secret ORDER BY name')
+  return yield* Effect.forEach(rows, (row) => Effect.map(platform.secrets.open(row.sealed), (text) => ({ name: row.name, updatedAt: row.updated_at, ...metaOf(parseEntry(text)) })))
+})
+
 // ------------------------------------------------------------------ usage (robot-6jqh)
 
 const addUsage = (month: string, robotId: string, inputTokens: number, outputTokens: number, costUsd: number) => Effect.gen(function* () {
@@ -455,7 +464,7 @@ const deliverDue = (now: number) => Effect.gen(function* () {
 /** The Member's programs, as run by the Durable Object. */
 export const MemberProgram = {
   profile, init, updateProfile, file, files, writeFile, providers, setApiKey, startOAuth, finishOAuth, setShared, removeCredential, credential,
-  listPrefs, setListPref, markSeen, setSecret, secret, takeSecret, secretNames, addUsage, usage,
+  listPrefs, setListPref, markSeen, setSecret, secret, takeSecret, secretNames, logins, addUsage, usage,
   opencodeKeys, addOpencodeKey, activateOpencodeKey, removeOpencodeKey, opencodeCandidates, opencodePromote, opencodeStick,
   addPushDevice, removePushDevice, pushDevices, notify, deliver, deliverDue,
 }
@@ -520,6 +529,7 @@ export class Member extends DurableObject<Env> {
   secret(name: string): Promise<string | null> { return this.run(secret(name)) }
   takeSecret(name: string): Promise<string | null> { return this.run(takeSecret(name)) }
   secretNames(): Promise<Array<{ name: string; updatedAt: number }>> { return this.run(secretNames) }
+  logins(): Promise<Array<{ name: string; updatedAt: number } & LoginMeta>> { return this.run(logins) }
   async sealedSecretForTest(name: string): Promise<string | undefined> {
     return this.ctx.storage.sql.exec<{ sealed: string }>('SELECT sealed FROM secret WHERE name = ?', name).toArray()[0]?.sealed
   }

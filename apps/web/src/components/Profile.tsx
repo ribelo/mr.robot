@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { Me, ProvidersView } from '@mr-robot/protocol'
+import type { Me, ProvidersView, LoginView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
 
 const PROVIDERS = [
@@ -295,11 +295,11 @@ function base64urlToBytes(text: string): Uint8Array<ArrayBuffer> {
   return bytes
 }
 /** The vault (robot-vplt): values go in, never come back out to the browser. */
+/** Logins (v1.1 ticket 05, rb-4dxe): entries with username, password, websites and notes; granted per Robot. */
 function Secrets() {
-  const [list, setList] = useState<Awaited<ReturnType<typeof api.secrets>>>()
-  const [name, setName] = useState('')
-  const [value, setValue] = useState('')
-  const [shared, setShared] = useState(false)
+  const [list, setList] = useState<LoginView[]>()
+  const [editing, setEditing] = useState<LoginDraft | null>(null)
+  const [revealed, setRevealed] = useState<Record<string, string>>({})
   const [error, setError] = useState<string>()
   const refresh = useCallback(() => api.secrets().then(setList), [])
   useEffect(() => { void refresh() }, [refresh])
@@ -307,38 +307,83 @@ function Secrets() {
     try {
       await action()
       setError(undefined)
+      return true
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'failed')
+      return false
+    } finally {
+      await refresh()
     }
-    await refresh()
+  }
+  const save = async (draft: LoginDraft) => {
+    const ok = await run(() => api.putLogin(draft.name, {
+      username: draft.username,
+      ...(draft.password === '' ? {} : { password: draft.password }),
+      websites: draft.websites.split(/[\n,]/).map((site) => site.trim()).filter((site) => site !== ''),
+      notes: draft.notes,
+      allowRead: draft.allowRead,
+      shared: draft.shared,
+    }))
+    if (ok) setEditing(null)
   }
   return (
     <>
-      <h2>Secrets</h2>
-      <div className="muted">Site passwords and codes your Robots may read with secret_get once you grant them. Values are encrypted and never shown again.</div>
-      <table className="grid">
-        <tbody>
-          {(list ?? []).map((secret) => (
-            <tr key={`${secret.scope}-${secret.name}`}>
-              <td>{secret.name}</td>
-              <td>{secret.scope === 'home' ? 'shared with the Home' : 'yours'}</td>
-              <td>{secret.mine ? (
-                <span className="form inline">
-                  <button type="button" className="link" onClick={() => void run(() => api.putSecret(secret.name, secret.scope !== 'home'))}>{secret.scope === 'home' ? 'Make private' : 'Share with the Home'}</button>
-                  <button type="button" className="link" onClick={() => void run(() => api.deleteSecret(secret.name))}>Delete</button>
-                </span>
-              ) : null}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="form inline">
-        <input value={name} placeholder="name, e.g. allegro" onChange={(event) => setName(event.target.value)} />
-        <input type="password" value={value} placeholder="value" onChange={(event) => setValue(event.target.value)} />
-        <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /> share</label>
-        <button type="button" className="button" disabled={name === '' || value === ''} onClick={() => void run(async () => { await api.putSecret(name, shared, value); setName(''); setValue('') })}>Save</button>
+      <h2>Logins</h2>
+      <div className="muted">Accounts your Robots may use once you grant them in a Robot's Advanced settings. A Robot fills the username and password into the matching website without seeing the password; "allow reading" lets it read the value (for API keys).</div>
+      <div className="login-list">
+        {(list ?? []).map((login) => (
+          <div key={`${login.scope}-${login.name}`} className="login-row">
+            <div className="login-main">
+              <strong>{login.name}</strong>
+              <span className="muted">{[login.username, login.websites.join(', ')].filter((part) => part !== '').join(' · ') || 'no username or website yet'}</span>
+              <span className="muted">{login.scope === 'home' ? 'Shared with the Home' : 'Private'}{login.allowRead ? ' · allow reading' : ''}{login.robots.length === 0 ? '' : ` · granted to ${login.robots.join(', ')}`}</span>
+              {revealed[login.name] === undefined ? null : <code className="login-revealed">{revealed[login.name]}</code>}
+            </div>
+            {login.mine ? (
+              <span className="form inline">
+                <button type="button" className="link" onClick={() => revealed[login.name] === undefined
+                  ? void api.revealLogin(login.name).then(({ password }) => setRevealed({ ...revealed, [login.name]: password }))
+                  : setRevealed(Object.fromEntries(Object.entries(revealed).filter(([name]) => name !== login.name)))}>{revealed[login.name] === undefined ? 'Reveal' : 'Hide'}</button>
+                <button type="button" className="link" onClick={() => setEditing({ name: login.name, username: login.username, password: '', websites: login.websites.join('\n'), notes: login.notes, allowRead: login.allowRead, shared: login.scope === 'home', existing: true })}>Edit</button>
+                <button type="button" className="link" onClick={() => void run(() => api.deleteSecret(login.name))}>Delete</button>
+              </span>
+            ) : null}
+          </div>
+        ))}
       </div>
+      {editing === null
+        ? <button type="button" className="button" onClick={() => setEditing({ name: '', username: '', password: '', websites: '', notes: '', allowRead: false, shared: false, existing: false })}>Add login</button>
+        : <LoginForm draft={editing} onChange={setEditing} onSave={save} onCancel={() => setEditing(null)} />}
       {error === undefined ? null : <div className="muted">{error}</div>}
     </>
+  )
+}
+
+interface LoginDraft {
+  readonly name: string
+  readonly username: string
+  readonly password: string
+  readonly websites: string
+  readonly notes: string
+  readonly allowRead: boolean
+  readonly shared: boolean
+  readonly existing: boolean
+}
+
+function LoginForm({ draft, onChange, onSave, onCancel }: { draft: LoginDraft; onChange: (draft: LoginDraft) => void; onSave: (draft: LoginDraft) => Promise<void>; onCancel: () => void }) {
+  return (
+    <div className="form login-form">
+      <label>Name<input value={draft.name} disabled={draft.existing} placeholder="e.g. allegro" onChange={(event) => onChange({ ...draft, name: event.target.value })} /></label>
+      <label>Username<input value={draft.username} autoComplete="off" onChange={(event) => onChange({ ...draft, username: event.target.value })} /></label>
+      <label>Password<input type="password" value={draft.password} autoComplete="new-password" placeholder={draft.existing ? 'unchanged' : ''} onChange={(event) => onChange({ ...draft, password: event.target.value })} /></label>
+      <label>Websites<textarea rows={2} value={draft.websites} placeholder="https://allegro.pl (one per line)" onChange={(event) => onChange({ ...draft, websites: event.target.value })} /></label>
+      <label>Notes<textarea rows={2} value={draft.notes} onChange={(event) => onChange({ ...draft, notes: event.target.value })} /></label>
+      <label className="check"><input type="checkbox" checked={draft.allowRead} onChange={(event) => onChange({ ...draft, allowRead: event.target.checked })} /><span>Allow reading<small>The Robot may read the value itself (API keys). Leave off for website passwords.</small></span></label>
+      <label className="check"><input type="checkbox" checked={draft.shared} onChange={(event) => onChange({ ...draft, shared: event.target.checked })} /><span>Share with the Home<small>Other Members can grant it to their Robots.</small></span></label>
+      <div className="question-actions">
+        <button type="button" className="button" onClick={onCancel}>Cancel</button>
+        <button type="button" className="button button-primary" disabled={draft.name === '' || (!draft.existing && draft.password === '')} onClick={() => void onSave(draft)}>Save</button>
+      </div>
+    </div>
   )
 }

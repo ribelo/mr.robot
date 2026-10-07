@@ -18,7 +18,7 @@ export function platformPrompt(config: RobotConfig, ownerName: string): string {
     '- Prepare purchases and orders but stop before payment or bank 2FA: paying stays with the owner.',
     '- When a page needs the owner (login, 2FA, a choice only they can make), request a browser takeover instead of guessing credentials or codes.',
     "- External effects (messages sent, carts filled, orders placed) are real. After a rewind they still stand; never repeat or contradict them blindly.",
-    '- Secret values never belong in your replies, notes or messages to other Robots.',
+    '- To log in to a website, open its login page and call login_fill with a granted login; you never see the password. Secret values never belong in your replies, notes or messages to other Robots.',
   ].join('\n')
 }
 /** While a Robot is being set up (robot-btct): interview, define yourself, propose Grants once. */
@@ -31,7 +31,7 @@ export function setupPrompt(ownerName: string, brief: string | null): string {
     '1. Interview your owner briefly: what you are for, what you should watch or do, how often, and how they want to hear from you. Ask one or two questions at a time.',
     '2. As soon as you know what you are for, call set_identity with a short name, an optional title, a one-paragraph description and an avatar colour.',
     "3. Write your own persona files (SOUL.md, IDENTITY.md, AGENTS.md) to fit the job. They are yours; nobody approves them.",
-    '4. Finish with setup_complete: one summary of exactly the tool groups, skills, recipient Robots and secrets you need, and why. Ask for nothing you do not need.',
+    '4. Finish with setup_complete: one summary of exactly the tool groups, skills, recipient Robots and logins you need, and why. Ask for nothing you do not need.',
     'You may only ask questions and propose during setup. You act on the world after your owner approves.',
   ].filter((line) => line !== '').join('\n')
 }

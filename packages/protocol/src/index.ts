@@ -85,6 +85,31 @@ export const NotificationSettings = Schema.Struct({
 })
 export type NotificationSettings = typeof NotificationSettings.Type
 
+/** A login entry in the Member's settings (v1.1 ticket 05); never carries the password. */
+export interface LoginView {
+  readonly name: string
+  readonly username: string
+  readonly websites: readonly string[]
+  readonly notes: string
+  readonly allowRead: boolean
+  readonly scope: 'member' | 'home'
+  /** The Member may edit, reveal and delete it (their own, or a Home entry they shared). */
+  readonly mine: boolean
+  readonly updatedAt: number
+  /** The Member's Robots that hold a grant for it. */
+  readonly robots: readonly string[]
+}
+
+export const LoginInput = Schema.Struct({
+  username: Schema.optional(Schema.String),
+  /** Left out when editing: the stored password stays. */
+  password: Schema.optional(Schema.String),
+  websites: Schema.optional(Schema.Array(Schema.String)),
+  notes: Schema.optional(Schema.String),
+  allowRead: Schema.optional(Schema.Boolean),
+  shared: Schema.Boolean,
+})
+
 /** Where a Robot's Chrome runs (rb-wgtd). */
 export const BrowserBackend = Schema.Literals(['browser-run', 'container', 'container-vpn'])
 export type BrowserBackend = typeof BrowserBackend.Type
@@ -395,7 +420,7 @@ export interface SettingsCatalog {
   readonly toolGroups: ReadonlyArray<{ readonly name: string; readonly description: string }>
   readonly skills: ReadonlyArray<{ readonly name: string; readonly description: string }>
   readonly robots: ReadonlyArray<{ readonly id: string; readonly name: string }>
-  readonly secrets: ReadonlyArray<{ readonly name: string; readonly scope: 'member' | 'home' }>
+  readonly secrets: ReadonlyArray<{ readonly name: string; readonly scope: 'member' | 'home'; readonly username?: string; readonly websites?: readonly string[] }>
   readonly models: readonly ModelOption[]
   /** Models of Providers this Member has not connected; shown so the list explains itself. */
   readonly unavailableModels?: readonly ModelOption[]
