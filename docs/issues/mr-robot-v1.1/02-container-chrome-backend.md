@@ -6,12 +6,12 @@
 
 **Blocked by:** 01 Browser backend seam and per-robot backend choice
 
-**Status:** in-progress
+**Status:** done
 
 - [x] Container image declared in Alchemy and deployed
 - [x] A robot set to this backend opens, observes, acts and screenshots on the live deployment
 - [x] Takeover and live view work on it
-- [ ] Results for the four sites recorded below this list
+- [x] Results for the four sites recorded below this list
 - [x] Container sleeps after the browser closes; minutes appear in usage
 
 ## How it is built
@@ -36,6 +36,6 @@ Both backends leave from Cloudflare addresses (IP echo: Browser Run 104.28.161.1
 | eZUS login (zus.pl/ezus/logowanie) | pass: login form shown | blocked (silent): title "eZUS", empty page after 2.5 s and 15 s waits |
 | Bank login: mBank (online.mbank.pl/pl/Login) | pass | pass |
 | Bank login: PKO BP iPKO (ipko.pl) | pass | pass |
-| Owner's invoicing service | not run: address needed from the owner | not run: address needed from the owner |
+| Owner's invoicing service: Scanye (app.scanye.pl, 2026-10-07 14:17) | pass: login form "Zaloguj się" | pass: login form "Zaloguj się" |
 
 Allegro's cart flow (add to cart, stop before payment) could not be attempted on either backend: the first page is the block page. Without the bot signature Allegro still blocks Cloudflare addresses, which is what ticket 03 (Polish VPN address) is for.
