@@ -160,7 +160,8 @@ const screen = Effect.gen(function* () {
 const usage = Effect.gen(function* () {
   const store = yield* RobotState
   const month = currentMonth()
-  return { month, ...store.usage(month), limitUsd: (yield* config).spendLimitUsd } as UsageView
+  const browser = store.browserUsage(month).map((row) => ({ backend: row.backend, minutes: Math.round(row.ms / 6_000) / 10, costUsd: row.costUsd }))
+  return { month, ...store.usage(month), limitUsd: (yield* config).spendLimitUsd, ...(browser.length === 0 ? {} : { browser }) } as UsageView
 })
 
 interface TakeoverRow { readonly reason: string; readonly claimedBy: string | null }

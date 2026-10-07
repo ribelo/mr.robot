@@ -85,6 +85,18 @@ export const NotificationSettings = Schema.Struct({
 })
 export type NotificationSettings = typeof NotificationSettings.Type
 
+/** Where a Robot's Chrome runs (rb-wgtd). */
+export const BrowserBackend = Schema.Literals(['browser-run', 'container', 'container-vpn'])
+export type BrowserBackend = typeof BrowserBackend.Type
+
+/** A backend as the settings show it: whether this Home can use it and why not. */
+export interface BrowserBackendOption {
+  readonly id: BrowserBackend
+  readonly label: string
+  readonly note: string
+  readonly available: boolean
+}
+
 /** Everything the advanced settings page edits. */
 export interface RobotSettings {
   readonly identity: Identity
@@ -99,6 +111,8 @@ export interface RobotSettings {
   readonly spendLimitUsd: number | null
   /** Keep the Robot's browser open between Turns and wake it when a page shows a notification (robot-lulc). */
   readonly wakeOnScreenNotifications: boolean
+  /** This Robot's browser backend; null follows the Home default (rb-wgtd). */
+  readonly browserBackend: BrowserBackend | null
 }
 
 export const SettingsPatch = Schema.Struct({
@@ -108,6 +122,7 @@ export const SettingsPatch = Schema.Struct({
   contextBudget: Schema.optional(Schema.Number),
   codeMode: Schema.optional(Schema.Boolean),
   wakeOnScreenNotifications: Schema.optional(Schema.Boolean),
+  browserBackend: Schema.optional(Schema.NullOr(BrowserBackend)),
   compactionInstruction: Schema.optional(Schema.String),
   grants: Schema.optional(GrantSet),
   notifications: Schema.optional(NotificationSettings),
@@ -310,6 +325,7 @@ export const OAuthFinish = Schema.Struct({ pasted: Schema.optional(Schema.String
 export const ShareInput = Schema.Struct({ shared: Schema.Boolean })
 export const HomeSettingsPatch = Schema.Struct({
   defaultModel: Schema.optional(ModelChoice),
+  defaultBrowserBackend: Schema.optional(BrowserBackend),
   robotSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
   memberSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
   models: Schema.optional(Schema.Array(Schema.Struct({
@@ -338,7 +354,8 @@ export interface AdminView {
   readonly providers: ReadonlyArray<{ readonly provider: string; readonly ownerName: string; readonly shared: boolean }>
   /** Each Provider's live model list: how many models, when fetched, and the last error. */
   readonly modelLists?: ReadonlyArray<{ readonly provider: string; readonly count: number; readonly fetchedAt: number | null; readonly error: string | null }>
-  readonly settings: { readonly defaultModel: ModelChoice; readonly robotSpendLimitUsd: number | null; readonly memberSpendLimitUsd: number | null; readonly models: readonly ModelOption[] }
+  readonly settings: { readonly defaultModel: ModelChoice; readonly defaultBrowserBackend: BrowserBackend; readonly robotSpendLimitUsd: number | null; readonly memberSpendLimitUsd: number | null; readonly models: readonly ModelOption[] }
+  readonly browserBackends?: readonly BrowserBackendOption[]
 }
 
 // ---------------------------------------------------------------- Skills (robot-7qpi)
@@ -380,6 +397,9 @@ export interface SettingsCatalog {
   readonly models: readonly ModelOption[]
   /** Models of Providers this Member has not connected; shown so the list explains itself. */
   readonly unavailableModels?: readonly ModelOption[]
+  /** Browser backends and whether this Home can use them (rb-wgtd). */
+  readonly browserBackends?: readonly BrowserBackendOption[]
+  readonly defaultBrowserBackend?: BrowserBackend
 }
 
 // ---------------------------------------------------------------- Notifications (robot-9xoj)
@@ -400,6 +420,8 @@ export interface UsageView {
   readonly outputTokens: number
   readonly costUsd: number
   readonly limitUsd: number | null
+  /** Browser time this month per backend (rb-y50l); its cost is included in costUsd. */
+  readonly browser?: ReadonlyArray<{ readonly backend: BrowserBackend; readonly minutes: number; readonly costUsd: number }>
 }
 
 /** One row of the cost table: a Robot's or a Member's month. */

@@ -16,6 +16,7 @@ import type {
   RewindView,
   RobotStatus,
   RoutineSchedule,
+  BrowserBackend,
   Sender,
   Sharing,
 } from '@mr-robot/protocol'
@@ -33,6 +34,8 @@ export interface RobotConfig {
   readonly codeMode: boolean
   /** Absent in Robots created before the setting existed: off. */
   readonly wakeOnScreenNotifications?: boolean
+  /** Absent or null: the Home default backend. */
+  readonly browserBackend?: BrowserBackend | null
   readonly compactionInstruction: string
   readonly notifications: NotificationSettings
   readonly spendLimitUsd: number | null
@@ -85,9 +88,11 @@ export interface NoticeRow {
   readonly sessionId: string
 }
 
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 const MIGRATIONS: Record<number, readonly string[]> = {
+  // Browser time per backend (rb-y50l).
+  4: ['CREATE TABLE browser_usage (month TEXT NOT NULL, backend TEXT NOT NULL, ms INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, backend)) WITHOUT ROWID'],
   // The DSH schedule record each Routine now is (robot-c8hq) and the session that made it.
   3: ['ALTER TABLE routine ADD COLUMN record TEXT', 'ALTER TABLE routine ADD COLUMN session_id TEXT'],
   2: [
@@ -389,6 +394,18 @@ export class RobotStore {
          output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd`,
       month, inputTokens, outputTokens, costUsd,
     )
+  }
+
+  addBrowserUsage(month: string, backend: string, ms: number, costUsd: number): void {
+    this.sql.exec(
+      'INSERT INTO browser_usage (month, backend, ms, cost_usd) VALUES (?, ?, ?, ?) ON CONFLICT (month, backend) DO UPDATE SET ms = ms + excluded.ms, cost_usd = cost_usd + excluded.cost_usd',
+      month, backend, Math.max(0, Math.round(ms)), costUsd,
+    )
+  }
+
+  browserUsage(month: string): Array<{ backend: string; ms: number; costUsd: number }> {
+    return this.sql.exec<{ backend: string; ms: number; cost_usd: number }>('SELECT backend, ms, cost_usd FROM browser_usage WHERE month = ? ORDER BY backend', month).toArray()
+      .map((row) => ({ backend: row.backend, ms: row.ms, costUsd: row.cost_usd }))
   }
 
   usage(month: string): { inputTokens: number; outputTokens: number; costUsd: number } {

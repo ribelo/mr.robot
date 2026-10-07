@@ -122,10 +122,12 @@ function HomeSettings({ view, onSave }: { view: AdminView; onSave: (patch: Recor
   const [model, setModel] = useState(`${view.settings.defaultModel.provider}/${view.settings.defaultModel.model}`)
   const [robotLimit, setRobotLimit] = useState(view.settings.robotSpendLimitUsd?.toString() ?? '')
   const [memberLimit, setMemberLimit] = useState(view.settings.memberSpendLimitUsd?.toString() ?? '')
+  const [backend, setBackend] = useState(view.settings.defaultBrowserBackend ?? 'browser-run')
   const save = () => {
     const option = view.settings.models.find((entry) => `${entry.provider}/${entry.model}` === model)
     void onSave({
       ...(option === undefined ? {} : { defaultModel: { provider: option.provider, model: option.model, effort: view.settings.defaultModel.effort } }),
+      defaultBrowserBackend: backend,
       robotSpendLimitUsd: robotLimit === '' ? null : Number(robotLimit),
       memberSpendLimitUsd: memberLimit === '' ? null : Number(memberLimit),
     })
@@ -136,6 +138,12 @@ function HomeSettings({ view, onSave }: { view: AdminView; onSave: (patch: Recor
         <select value={model} onChange={(event) => setModel(event.target.value)}>
           {view.settings.models.map((option) => <option key={`${option.provider}/${option.model}`} value={`${option.provider}/${option.model}`}>{option.label}</option>)}
         </select>
+      </label>
+      <label>Default browser for Robots
+        <select aria-label="Default browser backend" value={backend} onChange={(event) => setBackend(event.target.value as typeof backend)}>
+          {(view.browserBackends ?? []).map((option) => <option key={option.id} value={option.id} disabled={!option.available}>{option.label}{option.available ? '' : ' (not available)'}</option>)}
+        </select>
+        <small className="muted">{(view.browserBackends ?? []).find((option) => option.id === backend)?.note ?? ''}</small>
       </label>
       <div className="form inline">
         <label>Robot limit, USD/month<input type="number" min={0} value={robotLimit} onChange={(event) => setRobotLimit(event.target.value)} /></label>

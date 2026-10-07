@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort } from '@mr-robot/protocol'
+import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort, BrowserBackend } from '@mr-robot/protocol'
 import { ModelSelect } from './ModelSelect.tsx'
 import { ConfirmButton } from './RobotSheets.tsx'
 import { api } from '../api.ts'
@@ -37,6 +37,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         model: draft.model,
         contextBudget: draft.contextBudget,
         codeMode: draft.codeMode,
+        browserBackend: draft.browserBackend,
         compactionInstruction: draft.compactionInstruction,
         grants: draft.grants,
         sharing: draft.sharing,
@@ -69,6 +70,13 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </label>
       <label className="check"><input type="checkbox" checked={draft.codeMode} onChange={(event) => setDraft({ ...draft, codeMode: event.target.checked })} />
         <span>Code mode<small>The Robot writes one program that calls its tools; off means direct tool calls.</small></span>
+      </label>
+      <label>Browser
+        <select aria-label="Browser backend" value={draft.browserBackend ?? ''} onChange={(event) => setDraft({ ...draft, browserBackend: event.target.value === '' ? null : (event.target.value as BrowserBackend) })}>
+          <option value="">Home default ({(catalog.browserBackends ?? []).find((option) => option.id === catalog.defaultBrowserBackend)?.label ?? 'Browser Run'})</option>
+          {(catalog.browserBackends ?? []).map((option) => <option key={option.id} value={option.id} disabled={!option.available}>{option.label}{option.available ? '' : ' (not available)'}</option>)}
+        </select>
+        <small className="muted">{(catalog.browserBackends ?? []).find((option) => option.id === (draft.browserBackend ?? catalog.defaultBrowserBackend))?.note ?? ''} Takes effect the next time the Robot opens its browser; cookies and logins carry over.</small>
       </label>
       <label>Compaction instruction
         <textarea rows={3} value={draft.compactionInstruction} placeholder="What must survive when the conversation is compacted" onChange={(event) => setDraft({ ...draft, compactionInstruction: event.target.value })} />

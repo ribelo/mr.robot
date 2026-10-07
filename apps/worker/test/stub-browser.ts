@@ -32,9 +32,15 @@ class StubCdp {
 /** Sessions left running between Turns, by id (the stub's Browser Rendering). */
 export const runningSessions = new Map<string, StubPage>()
 
+/** Which backend each open went to, in order (rb-wgtd). */
+export const backendLog: string[] = []
+
 export class StubDriver implements BrowserDriver {
+  constructor(private readonly backend = 'browser-run') {}
+
   async open(state: BrowserState | null): Promise<BrowserPage> {
     browserLog.push('open')
+    backendLog.push(this.backend)
     return new StubPage(state)
   }
 
@@ -81,6 +87,10 @@ export class StubPage implements BrowserPage {
   }
 
   async observe(): Promise<Observation> {
+    if (this.current.endsWith('/blocked')) {
+      // What a bot-protected shop answers (Allegro's DataDome page).
+      return { url: this.current, title: 'allegro.pl', text: 'You have been blocked.\nAccess to this page has been denied.', canScrollUp: false, canScrollDown: false, challenge: null, blocked: true, elements: [] }
+    }
     if (this.current.endsWith('/checkout-step-two')) {
       return {
         url: this.current, title: 'Swag Labs', text: 'Checkout: Overview', canScrollUp: false, canScrollDown: false, challenge: null,

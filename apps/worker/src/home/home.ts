@@ -20,11 +20,13 @@ import type {
   SettingsCatalog,
   Sharing,
   SkillView,
+  BrowserBackend,
 } from '@mr-robot/protocol'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/durable.ts'
+import { backendOptions } from '../browser/backends.ts'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { liveModels, type ListingAccess } from '../providers/live-catalog.ts'
 import { fetchMetadata, type MetadataIndex } from '../providers/model-metadata.ts'
@@ -46,6 +48,8 @@ const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#
 
 export interface HomeSettings {
   readonly defaultModel: ModelChoice
+  /** The browser backend new and unset Robots use (rb-ybt4). */
+  readonly defaultBrowserBackend: BrowserBackend
   readonly robotSpendLimitUsd: number | null
   readonly memberSpendLimitUsd: number | null
 }
@@ -182,6 +186,7 @@ const rename = (memberId: string, name: string) => Effect.gen(function* () {
 const settings = Effect.gen(function* () {
   return {
     defaultModel: (yield* setting<ModelChoice>('defaultModel')) ?? DEFAULT_MODEL,
+    defaultBrowserBackend: (yield* setting<BrowserBackend>('defaultBrowserBackend')) ?? 'browser-run',
     robotSpendLimitUsd: (yield* setting<number | null>('robotSpendLimitUsd')) ?? null,
     memberSpendLimitUsd: (yield* setting<number | null>('memberSpendLimitUsd')) ?? null,
   } as HomeSettings
@@ -359,10 +364,17 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     providers,
     modelLists: yield* catalogStatus,
     settings: { ...current, models: yield* models(adminId) },
+    browserBackends: yield* browserBackends,
   } as AdminView
 })
 
 // ------------------------------------------------------------------ settings catalog (robot-vqtw)
+
+/** Browser backends this Home can run; the VPN one needs the Home's WireGuard configuration (rb-rb1x). */
+const browserBackends = Effect.gen(function* () {
+  const platform = yield* HomePlatform
+  return backendOptions(platform.env, (yield* setting<string>('vpn-config')) !== undefined)
+})
 
 const sharedSecrets = Effect.gen(function* () {
   const sql = yield* Sql
@@ -385,6 +397,8 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
     secrets: yield* grantableSecrets(memberId),
     models: yield* models(memberId),
     unavailableModels: yield* unavailableModels(memberId),
+    browserBackends: yield* browserBackends,
+    defaultBrowserBackend: (yield* settings).defaultBrowserBackend,
   } as SettingsCatalog
 })
 

@@ -6,6 +6,7 @@ import { StubDriver } from './stub-browser.ts'
 import { FakeChannel } from './fake-channel.ts'
 import type { ChannelAdapter, InboundEvent } from '../src/channels/channel.ts'
 import type { BrowserDriver } from '../src/browser/driver.ts'
+import type { BrowserBackend } from '@mr-robot/protocol'
 
 import { Member as ProductionMember } from '../src/member/member.ts'
 import type { PushNotification } from '../src/platform/push.ts'
@@ -64,8 +65,8 @@ export class Robot extends ProductionRobot {
     return super.channelEvent(event)
   }
 
-  protected override browserDriver(): BrowserDriver {
-    return new StubDriver()
+  protected override browserDriver(backend: BrowserBackend): BrowserDriver {
+    return new StubDriver(backend)
   }
 
   /** Skip the setup interview: the Robot becomes active with its current Grants. */

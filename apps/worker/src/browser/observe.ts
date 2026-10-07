@@ -25,6 +25,10 @@ export interface Observation {
   readonly canScrollDown: boolean
   /** A CAPTCHA vendor is on the page (Turnstile, hCaptcha, reCAPTCHA). */
   readonly challenge: string | null
+  /** The page is a block page ("You have been blocked", "Access denied"): the site refuses this browser (rb-kank). */
+  readonly blocked?: boolean
+  /** The backend that saw the page, for the block report. */
+  readonly backend?: string
 }
 
 export const MAX_TEXT = 6_000
@@ -97,6 +101,9 @@ export const OBSERVE_SCRIPT = `(() => {
       : frames.some((src) => /recaptcha/.test(src)) ? 'recaptcha'
         // Sites' own bot checks (seen on DuckDuckGo, Google and Brave from Browser Rendering, 2026-10-07).
         : /confirm (that )?(this search was made by|you are) a human|verify (that )?you are (a )?human|unusual traffic from your computer|not a robot|verifying you('|’)re not a bot|complete the security check/i.test(text) ? 'bot check' : null
+  // A block page: short, and its title or opening says the visitor is blocked (Allegro, Cloudflare WAF, Akamai).
+  const head = ((document.title || '') + '\\n' + text.slice(0, 600))
+  const blocked = text.length < 4000 && /you( have|'ve|’ve) been blocked|sorry, you have been blocked|access (to this page )?(has been )?denied|(your |this )?request (has been |was )?blocked|you don't have permission to access|403 forbidden/i.test(head)
   const scroller = document.scrollingElement || document.documentElement
   return {
     url: location.href,
@@ -106,6 +113,7 @@ export const OBSERVE_SCRIPT = `(() => {
     canScrollUp: scroller.scrollTop > 0,
     canScrollDown: scroller.scrollTop + innerHeight < scroller.scrollHeight - 4,
     challenge,
+    blocked,
   }
 })()`
 
@@ -114,6 +122,7 @@ export function renderObservation(observation: Observation): string {
   const lines = [
     `URL: ${observation.url}`,
     `Title: ${observation.title}`,
+    observation.blocked === true ? `This page blocks your browser (${observation.backend ?? 'this backend'}). Do not retry or work around it: tell your owner the site blocked the ${observation.backend ?? 'current'} browser and suggest switching this Robot's browser backend in Advanced settings.` : '',
     observation.challenge === null ? '' : `A ${observation.challenge} CAPTCHA is on this page. Solve an ordinary one yourself (click its checkbox, take a screenshot to read an image puzzle); if it needs your owner, call browser_request_takeover.`,
     `Scroll: ${observation.canScrollUp ? 'more above' : 'top'}, ${observation.canScrollDown ? 'more below' : 'bottom'}`,
     '',

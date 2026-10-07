@@ -15,6 +15,7 @@ import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-s
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
   Attachment,
+  BrowserBackend,
   ChatItem,
   Conversation,
   FleetState,
@@ -62,7 +63,8 @@ import { browserTools, type BrowserHost, type ScreenshotImage } from '../agent/t
 import { takeoverTools, type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
-import { RenderingDriver, type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
+import { BACKENDS, browserCost, driverFor } from '../browser/backends.ts'
+import { type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
@@ -101,6 +103,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private secretValues: Array<readonly [string, string]> = []
   /** Secret values fetched during the running Turn; redacted from everything stored. */
   private turnSecrets: Array<readonly [string, string]> = []
+  /** backend|host pairs that showed a block page in the running Turn. */
+  private readonly blockedThisTurn = new Set<string>()
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
 
   private readonly runtime: DurableRuntime<RobotState | RobotPlatform>
@@ -324,6 +328,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // The in-memory session still holds plaintext; the next Turn starts from the redacted log.
       await this.releaseComposition()
       this.turnSecrets = []
+      this.blockedThisTurn.clear()
     }
     this.store.endTurn(wakeup.id)
     await this.afterTurn(wakeup)
@@ -625,9 +630,40 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- browser (robot-l9te, robot-t0vc, robot-0eew)
 
-  /** Browser Rendering in production; tests substitute a stub browser. */
-  protected browserDriver(): BrowserDriver {
-    return new RenderingDriver(this.env.BROWSER)
+  /** The driver for a browser backend (rb-wgtd); tests substitute a stub browser. */
+  protected browserDriver(backend: BrowserBackend): BrowserDriver {
+    return driverFor(backend, this.env)
+  }
+
+  /** This Robot's backend: its own choice, else the Home default (rb-ybt4). */
+  private async chosenBackend(): Promise<BrowserBackend> {
+    return this.store.requireConfig().browserBackend ?? (await this.home().settings()).defaultBrowserBackend
+  }
+
+  /** The backend of the session that is open now (attached or left running). */
+  private sessionBackend(): BrowserBackend {
+    return this.store.get<BrowserSession>('browser-session')?.backend ?? 'browser-run'
+  }
+
+  /**
+   * Browser time into usage and spend limits, per backend (rb-y50l): from the session's start
+   * (or the last account) until now. A session left running for screen watching is billed too.
+   */
+  private async accountBrowser(end: boolean): Promise<void> {
+    const session = this.store.get<BrowserSession>('browser-session')
+    if (session === undefined) return
+    const now = Date.now()
+    const ms = now - session.since
+    if (ms > 0) {
+      const config = this.store.requireConfig()
+      const month = currentMonth()
+      const cost = browserCost(session.backend, ms)
+      this.store.addBrowserUsage(month, session.backend, ms, cost)
+      this.store.addUsage(month, 0, 0, cost)
+      await this.env.MEMBER.getByName(config.ownerId).addUsage(month, config.id, 0, 0, cost).catch(() => undefined)
+    }
+    if (end) this.store.delete('browser-session')
+    else this.store.set('browser-session', { ...session, since: now } satisfies BrowserSession)
   }
 
   /** The Robot's one browser session: the watched one if it still runs, else a new one with saved cookies and storage. */
@@ -643,10 +679,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const takeover = this.store.get<TakeoverState>('takeover')
     const watch = this.store.get<WatchState>('watch')
     const sessionId = watch?.sessionId ?? takeover?.sessionId
-    const attached = sessionId === undefined ? undefined : await this.browserDriver().attach(sessionId)
-    if (attached !== undefined) return attached
-    // The session ended: a new one with the saved cookies, back on the page the Robot was on.
-    const reopened = await this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
+    const backend = await this.chosenBackend()
+    // A session left running is reused only on the backend now chosen; a change applies on the next open.
+    const attached = sessionId === undefined || this.sessionBackend() !== backend ? undefined : await this.browserDriver(backend).attach(sessionId)
+    if (attached !== undefined) {
+      if (this.store.get('browser-session') === undefined) this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
+      return attached
+    }
+    await this.accountBrowser(true)
+    // A new session with the saved cookies and storage (they follow the Robot across backends), back on the page it was on.
+    const reopened = await this.browserDriver(backend).open(this.store.get<BrowserState>('browser-state') ?? null)
+    this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
     const url = watch?.url ?? takeover?.url
     if (url?.startsWith('http') === true) await reopened.goto(url).catch(() => undefined)
     return reopened
@@ -673,6 +716,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.set('watch', { sessionId: page.sessionId(), url: page.url() } satisfies WatchState)
     this.store.set('watch-next', Date.now() + WATCH_INTERVAL_MS)
     await page.detach()
+    await this.accountBrowser(false)
     await this.rearm()
   }
 
@@ -684,10 +728,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.set('watch-next', now + WATCH_INTERVAL_MS)
     const config = this.store.requireConfig()
     if (config.wakeOnScreenNotifications !== true || config.status !== 'active') return this.stopWatching()
-    let page = await this.browserDriver().attach(watch.sessionId)
-    console.log('screen watch', { robot: config.id, attached: page !== undefined })
+    const backend = this.sessionBackend()
+    let page = await this.browserDriver(backend).attach(watch.sessionId)
+    console.log('screen watch', { robot: config.id, backend, attached: page !== undefined })
     if (page === undefined) {
-      page = await this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
+      await this.accountBrowser(true)
+      page = await this.browserDriver(backend).open(this.store.get<BrowserState>('browser-state') ?? null)
+      this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
       if (watch.url.startsWith('http')) await page.goto(watch.url).catch(() => undefined)
       this.store.set('watch', { sessionId: page.sessionId(), url: page.url() } satisfies WatchState)
     }
@@ -695,6 +742,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const url = page.url()
     console.log('screen watch', { robot: config.id, notes: notes.length, url })
     await page.detach()
+    await this.accountBrowser(false)
     for (const note of notes) {
       const line = [note.title, note.body].filter((part) => part.trim() !== '').join(': ')
       await this.wake({
@@ -712,8 +760,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.delete('watch')
     this.store.delete('watch-next')
     if (watch !== undefined && this.browserPage === undefined) {
-      const page = await this.browserDriver().attach(watch.sessionId)
+      const page = await this.browserDriver(this.sessionBackend()).attach(watch.sessionId)
       await page?.close()
+      await this.accountBrowser(true)
     }
     await this.rearm()
   }
@@ -748,6 +797,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       page: () => Effect.promise(() => this.page()),
       observed: (page) => Effect.promise(() => this.observed(page)),
       saveScreen: (png) => Effect.promise(() => this.saveScreen(png)),
+      blockedThisTurn: this.blockedThisTurn,
     }))
   }
 
@@ -766,7 +816,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async observed(page: BrowserPage): Promise<Observation> {
     const observation = await page.observe()
     await this.loadSecretMasks()
-    return { ...observation, text: this.mask(observation.text) }
+    // The backend is named so a block page says which browser was blocked (rb-kank).
+    return { ...observation, text: this.mask(observation.text), backend: BACKENDS[this.sessionBackend()].label }
   }
 
   /** A screenshot becomes the panel's screen thumbnail (robot-ksvy). */
@@ -793,6 +844,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       console.warn('browser state was not saved', error)
     } finally {
       await page.close()
+      await this.accountBrowser(true)
     }
   }
 
@@ -1354,6 +1406,12 @@ const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Esc
 /** The tool running now: the latest call without a result (a code program's latest inner call wins). */
 
 
+
+/** The browser session open now, on which backend, and since when its time is unbilled. */
+interface BrowserSession {
+  readonly backend: BrowserBackend
+  readonly since: number
+}
 
 interface WatchState {
   readonly sessionId: string

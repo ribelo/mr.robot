@@ -43,13 +43,15 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
             {panel.canEdit ? <button type="button" className="link" onClick={onAdvanced}>Advanced settings</button> : null}
           </div>
           <div className="usage muted">
-            {panel.usage.month}: {formatTokens(panel.usage.inputTokens + panel.usage.outputTokens)} tokens · ${panel.usage.costUsd.toFixed(2)}
+            {panel.usage.month}: {formatTokens(panel.usage.inputTokens + panel.usage.outputTokens)} tokens{(panel.usage.browser ?? []).map((row) => ` · ${row.minutes} browser min (${BACKEND_LABELS[row.backend] ?? row.backend})`).join('')} · ${panel.usage.costUsd.toFixed(2)}
             {panel.usage.limitUsd === null ? '' : ` of $${panel.usage.limitUsd.toFixed(2)}`}
           </div>
       </div>
     </aside>
   )
 }
+
+const BACKEND_LABELS: Record<string, string> = { 'browser-run': 'Browser Run', container: 'Container Chrome', 'container-vpn': 'Container Chrome via VPN' }
 
 function formatTokens(count: number): string {
   return count >= 1_000_000 ? `${(count / 1_000_000).toFixed(1)}M` : count >= 1000 ? `${Math.round(count / 1000)}k` : String(count)

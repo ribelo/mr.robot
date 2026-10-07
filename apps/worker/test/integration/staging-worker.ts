@@ -17,6 +17,7 @@ export default {
     const url = new URL(request.url)
     if (url.pathname === '/fixture') return new Response(FIXTURE, { headers: { 'content-type': 'text/html' } })
     if (url.pathname === '/cookie') return new Response(`<!doctype html><title>Cookie</title><p>${request.headers.get('cookie') ?? 'none'}</p>`, { headers: { 'content-type': 'text/html' } })
+    if (url.pathname === '/blocked') return new Response('<!doctype html><title>allegro.pl</title><h1>You have been blocked</h1><p>Access to this page has been denied.</p>', { status: 403, headers: { 'content-type': 'text/html' } })
     if (url.pathname === '/notify') return new Response('<!doctype html><title>Notifier</title><p>Waiting</p><script>setTimeout(() => { Notification.requestPermission().then(() => new Notification("Order 1042", { body: "Out for delivery" })) }, 1500)</script>', { headers: { 'content-type': 'text/html' } })
     if (url.pathname !== '/run') return new Response('not found', { status: 404 })
     const report: Record<string, unknown> = {}
@@ -77,6 +78,15 @@ export default {
     } catch (error) {
       report.error = error instanceof Error ? error.message : String(error)
       await page.close()
+    }
+    try {
+      // A block page is classified by the real observe step (rb-kank).
+      const blockedPage = await driver.open(null)
+      await blockedPage.goto(`${url.origin}/blocked`)
+      report.blockPage = (await blockedPage.observe()).blocked
+      await blockedPage.close()
+    } catch (error) {
+      report.blockPageError = error instanceof Error ? error.message : String(error)
     }
     try {
       // A real site's own bot check is recognised (robot-b49q).
