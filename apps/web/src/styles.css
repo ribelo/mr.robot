@@ -77,6 +77,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .row-own { align-items: flex-end; }
 .bubble { max-width: min(560px, 86%); padding: 9px 13px; border-radius: 18px; white-space: normal; overflow-wrap: anywhere; }
 .bubble-robot { background: var(--bubble); }
+/* The Robot's own words use the whole message column (rb-14cp). */
+.row:not(.row-own) > .bubble-robot { max-width: min(760px, 100%); }
 .bubble-own { background: var(--bubble-own); color: #121212; }
 .reaction { margin-top: -10px; margin-right: 6px; background: #2c2c2c; border: 2px solid var(--bg); border-radius: 999px; font-size: 12px; padding: 1px 5px; }
 .chat-separator { text-align: center; color: var(--muted); font-size: 13.5px; margin: 8px 0; }
@@ -107,7 +109,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .button-danger { color: #ff9a9d; }
 
 .composer { padding: 8px 16px calc(12px + env(safe-area-inset-bottom)); }
-.composer-row { display: flex; align-items: flex-end; gap: 8px; border: 1px solid var(--line); background: #242424; border-radius: 22px; padding: 6px 6px 6px 8px; max-width: 760px; margin: 0 auto; }
+.composer-row { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: #242424; border-radius: 22px; padding: 6px 6px 6px 8px; max-width: 760px; margin: 0 auto; }
 .composer-row textarea { flex: 1; resize: none; background: none; border: 0; outline: none; padding: 6px 2px; max-height: 160px; field-sizing: content; }
 .composer-files { display: flex; flex-wrap: wrap; gap: 6px; max-width: 760px; margin: 0 auto 6px; }
 .send-button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--bubble-own); color: #111; flex: none; }
@@ -286,3 +288,10 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .login-revealed { font-size: 12px; user-select: all; }
 .login-form { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
 .takeover-logins { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 14px; }
+
+/* Asks in place of the composer (v1.1 ticket 06) */
+.ask-bar { padding: 8px 16px calc(12px + env(safe-area-inset-bottom)); max-width: 760px; width: 100%; margin: 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; }
+.ask-bar .question { max-width: none; max-height: 50vh; overflow: auto; }
+.ask-counter { float: right; font-weight: 400; color: var(--muted); }
+.ask-reply { align-self: flex-end; font-size: 12.5px; }
+.ask-line[data-status="open"] { color: var(--text); }

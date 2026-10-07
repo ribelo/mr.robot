@@ -6,6 +6,7 @@ import { go, useRoute, type Route } from './route.ts'
 import { Avatar } from './components/Avatar.tsx'
 import { ChatView } from './components/ChatView.tsx'
 import { Composer } from './components/Composer.tsx'
+import { AskBar } from './components/AskBar.tsx'
 import { Panel } from './components/Panel.tsx'
 import { RobotList } from './components/RobotList.tsx'
 import { Pages } from './pages.tsx'
@@ -96,6 +97,7 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
   const [conversation, setConversation] = useState<ConversationData>()
   const [panel, setPanel] = useState<RobotPanel>()
   const [failure, setFailure] = useState<string>()
+  const [replyingInstead, setReplyingInstead] = useState(false)
   const id = route.id
 
   const refresh = useCallback(async () => {
@@ -129,6 +131,8 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
     await refresh()
   }
 
+  // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
+  const asks = panel.canEdit ? conversation.items.flatMap((item) => (item.kind === 'question' && item.proposal.status === 'open' ? [item.proposal] : [])) : []
   const identity = robot?.identity ?? panel.summary.identity
   const header: ReactNode = (
     <header className="conversation-head">
@@ -164,14 +168,19 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
             </div>
           ) : null}
         </div>
+        {asks.length > 0 && !replyingInstead ? (
+          <AskBar asks={asks} onAnswer={(proposal, approve) => void answer(proposal, approve)} onReplyInstead={() => setReplyingInstead(true)} />
+        ) : (
         <Composer
           placeholder={`Message ${identity.name}`}
           onUpload={(file) => api.upload(id, file)}
           onSend={async (text, attachments) => {
             await api.send(id, { text, attachments })
+            setReplyingInstead(false)
             await refresh()
           }}
         />
+        )}
       </section>
       {route.panel ? (
         <Panel

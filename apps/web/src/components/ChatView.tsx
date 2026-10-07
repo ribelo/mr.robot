@@ -93,7 +93,8 @@ function Item({ item, meId, canAnswer, onAnswer }: { item: ChatItem; meId: strin
     case 'activity':
       return <ActivityLine tools={item.tools} />
     case 'question':
-      return <QuestionCard proposal={item.proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />
+      // The ask itself is answered where the owner types (rb-dat4); the stream keeps one line of it.
+      return <div className="chat-separator ask-line" data-status={item.proposal.status}>{`${askTitle(item.proposal)} · ${item.proposal.status === 'open' ? (canAnswer ? 'answer below' : 'waiting for the owner') : statusText(item.proposal.status)}`}</div>
     case 'working':
       return null
   }
@@ -103,22 +104,26 @@ function routineVerb(action: 'created' | 'updated' | 'deleted' | 'ran'): string 
   return action === 'created' ? 'Created routine' : action === 'updated' ? 'Updated routine' : action === 'deleted' ? 'Deleted routine' : ''
 }
 
-export function QuestionCard({ proposal, canAnswer, onAnswer }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
-  const title = proposal.kind === 'setup' ? 'Approve these Grants to finish setup'
+export function askTitle(proposal: ProposalView): string {
+  return proposal.kind === 'setup' ? 'Approve these Grants to finish setup'
     : proposal.kind === 'grants' ? 'Asks for more Grants'
       : proposal.kind === 'member-file' ? `Proposes an edit to ${proposal.file?.name ?? 'your file'}`
         : proposal.kind === 'skill' ? 'Proposes a skill for the library'
           : 'Needs you'
+}
+
+export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; counter?: string }) {
+  const title = askTitle(proposal)
   const grants = proposal.grants
   const lines = grants === null ? [] : [
     ...grants.tools.map((name) => ['Tool', name]),
     ...grants.skills.map((name) => ['Skill', name]),
     ...grants.recipients.map((name) => ['Recipient', name]),
-    ...grants.secrets.map((name) => ['Secret', name]),
+    ...grants.secrets.map((name) => ['Login', name]),
   ]
   return (
     <div className="question" data-status={proposal.status}>
-      <div className="question-title">{title}</div>
+      <div className="question-title">{title}{counter === undefined ? null : <span className="ask-counter">{counter}</span>}</div>
       <div className="question-purpose">{proposal.purpose}</div>
       {lines.length > 0 ? (
         <ul className="grant-list">{lines.map(([kind, name]) => <li key={`${kind}-${name}`}><span className="grant-kind">{kind}</span> {name}</li>)}</ul>
@@ -135,7 +140,7 @@ export function QuestionCard({ proposal, canAnswer, onAnswer }: { proposal: Prop
   )
 }
 
-function statusText(status: ProposalView['status']): string {
+export function statusText(status: ProposalView['status']): string {
   switch (status) {
     case 'open': return 'Waiting for the owner'
     case 'approved': return 'Approved'

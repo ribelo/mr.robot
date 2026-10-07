@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChatItem, ProposalView } from '@mr-robot/protocol'
 import { ChatView } from '../src/components/ChatView.tsx'
+import { AskBar } from '../src/components/AskBar.tsx'
 
 afterEach(cleanup)
 
@@ -32,16 +33,27 @@ describe('ChatView (robot-q4b2)', () => {
     expect(screen.getByText('Created routine')).toBeTruthy()
     expect(screen.getByText('Overnight outbound')).toBeTruthy()
     expect(screen.queryByText('Approve')).toBeNull()
-    expect(screen.getByText('Waiting for the owner')).toBeTruthy()
+    expect(screen.getByText('Approve these Grants to finish setup · waiting for the owner')).toBeTruthy()
   })
 
-  it('lets the owner answer a Grant proposal with its revision', () => {
+  it('keeps one line of an ask in the stream; the ask itself is answered in place of the composer (rb-dat4)', () => {
+    render(<ChatView items={items} meId="m-1" working={true} canAnswer={true} now={at} />)
+    expect(screen.getByText('Approve these Grants to finish setup · answer below')).toBeTruthy()
+    expect(screen.queryByText('Approve')).toBeNull()
+    expect(screen.getByLabelText('working')).toBeTruthy()
+  })
+
+  it('shows several asks one at a time with a count, answers with the revision, and can reply instead (rb-f5um, rb-r0oj)', () => {
     const onAnswer = vi.fn()
-    render(<ChatView items={items} meId="m-1" working={true} canAnswer={true} onAnswer={onAnswer} now={at} />)
+    const onReplyInstead = vi.fn()
+    const second = { ...proposal, id: 'p-2', purpose: 'Second ask' }
+    render(<AskBar asks={[proposal, second]} onAnswer={onAnswer} onReplyInstead={onReplyInstead} />)
+    expect(screen.getByText('1/2')).toBeTruthy()
     expect(screen.getByText('web')).toBeTruthy()
     fireEvent.click(screen.getByText('Approve'))
     expect(onAnswer).toHaveBeenCalledWith(proposal, true)
-    expect(screen.getByLabelText('working')).toBeTruthy()
+    fireEvent.click(screen.getByText('Reply instead'))
+    expect(onReplyInstead).toHaveBeenCalled()
   })
 
   it("shows another Member's message as theirs, not mine", () => {
