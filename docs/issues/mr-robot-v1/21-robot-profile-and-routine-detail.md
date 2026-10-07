@@ -6,7 +6,7 @@
 
 **Blocked by:** 06 Routines on Durable Object alarms; 11 Web Push and notification settings
 
-**Status:** in-progress
+**Status:** done
 
 - [x] Menu actions work and persist per Member (pin, unread, hidden)
 - [x] Edit profile saves and the list updates without reload
@@ -18,4 +18,4 @@ Verified 2026-10-07 on the live deployment: row menu (Pin, Mark as unread, Edit 
 
 Not built: reference 09's "Wake on screen notifications". A Robot's browser exists only during a Turn (it is closed and its state saved when the Turn ends), so no page can raise a notification between Turns. The sheet carries the per-Robot Notifications switch instead. "Move to new section" and "Replace with different bot" from reference 10 are not in the stories.
 
-Reopened 2026-10-07 by the story verification (verification.md): stories 91 (wake loop not run live end to end).
+Verified live 2026-10-07: the wake-on-notification loop end to end (91).

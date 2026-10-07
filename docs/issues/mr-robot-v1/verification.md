@@ -6,19 +6,17 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 89 works, 11 partial, 0 not done.
+Totals: 91 works, 9 partial, 0 not done.
 
 ## Partial or not done
 
 - 5 robot-d2uv, partial (not tried live): home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home)
 - 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
 - 43 robot-ueh0, partial (stub-only): browser.test.ts (stub browser); not tried on a real shop
-- 44 robot-b49q, partial (untested): Not tested against a real CAPTCHA
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
 - 84 robot-naul, partial: Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23)
-- 91 robot-lulc, partial (wake loop not run live end-to-end): Live: sheet. The wake loop: staging test (a real page left running, reattached, its notification read) and browser.test.ts; not run end-to-end live
 - 95 robot-cmz9, partial (no images): Live; images not shown (Robots store no image attachments)
 - 96 robot-gq88, partial (search not tried live): robot-trajectory.test.tsx (real session fixture); search not tried live on a long session
 
@@ -36,6 +34,15 @@ These were marked done but did not hold:
 - After a deploy a pending takeover lost its browser; messages during a takeover started Turns.
 - Compaction never completed at small budgets (checkpoint cap 400 tokens).
 - The spend-limit notice printed $0.0105 of $0.0001 as "0.01 of 0.00"; now shows the digits.
+
+## End-to-end check after the last deploy (2026-10-07 03:20–03:45)
+
+Done as the owner would, on the live app: created "Plant Keeper" from "New robot" (brief: water the plants); interview on Workers AI gpt-oss-120b; approved its Grants; switched to Claude Sonnet 5.5, which created the Sunday 10:00 schedule; switched back to Workers AI, which listed it; opened the routine detail (schedule, cron with time zone, next run, instructions) and the trajectory by clicking; rewound the last Turn from the Rewind sheet. Then deleted the Robot (archive kept). Bugs found and fixed during the run:
+- Workers AI refused every Turn after a tool call (assistant content null; it needs "").
+- gpt-oss-120b writes programs as "async()=>{...}", which only defined a function; such programs now run.
+- A new Robot started on the first Workers AI model even when the person had connected Claude; it now prefers a Provider they connected.
+
+Suites on that build: worker 124, web 11, infra 1, dependency lint, and the staging Browser Rendering test (13 checks) all pass.
 
 ## All stories
 
@@ -84,7 +91,7 @@ These were marked done but did not hold:
 | 41 | robot-doqx | Takeover request suspends the Robot and pushes "needs you" | Live: takeover request suspended Verifier; a message sent meanwhile now waits for the hand-back (fixed live: it used to start a Turn). "Needs you" push: push.test.ts; push itself proven live (71) | works |
 | 42 | robot-j4ll | Hand back resumes with URL and screenshot | Live: Hand back woke Verifier, which reported the new URL iana.org/help/example-domains | works |
 | 43 | robot-ueh0 | Pay/order clicks refused (English and Polish labels) | browser.test.ts (stub browser); not tried on a real shop | partial (stub-only) |
-| 44 | robot-b49q | CAPTCHA vendor detection with guidance | Not tested against a real CAPTCHA | partial (untested) |
+| 44 | robot-b49q | CAPTCHA vendor detection with guidance | Live: Verifier on DuckDuckGo's bot check named it a CAPTCHA and stopped; the staging test checks that a real site's own bot check is reported (DuckDuckGo, 2026-10-07) | works |
 | 45 | robot-5ewr | Code mode default, Worker Loader isolate | Live: every Verifier and Mr. Robot Turn ran as code programs on Claude | works |
 | 46 | robot-ax7s | Direct tool calls switch | Live: with code mode off Verifier called routine_list directly | works |
 | 47 | robot-8pqy | DSH tool-fs over R2, glob, grep, delete | Live: write, read, glob in Verifier's Workspace | works |
@@ -131,7 +138,7 @@ These were marked done but did not hold:
 | 88 | robot-3f4i | Admin refresh with fetched time | Live | works |
 | 89 | robot-mx6s | Never created on a model without a credential; refuse unusable model | settings-flow.test.ts (real DOs, faked OpenRouter list); live: the model list offers only connected Providers | works |
 | 90 | robot-mktj | Row menu: Pin, Mark as unread, Edit profile, Hide from sidebar | Live | works |
-| 91 | robot-lulc | Edit profile sheet incl. "Wake on screen notifications" | Live: sheet. The wake loop: staging test (a real page left running, reattached, its notification read) and browser.test.ts; not run end-to-end live | partial (wake loop not run live end-to-end) |
+| 91 | robot-lulc | Edit profile sheet incl. "Wake on screen notifications" | Live end to end: with the switch on, Verifier left a page open that showed a notification 90 s later; the minute check woke it with "Notification on screen: Order 1042: Out for delivery". Three bugs found and fixed on the way (a check before the notification lost it; pages opened after reattaching were not watched; tabs). Staging covers both cases | works |
 | 92 | robot-l3gr | Routine detail with cron + TZ, runs | Live | works |
 | 93 | robot-qhll | Pause/Resume/Delete routine | Live | works |
 | 94 | robot-3ioa | DSH trajectory ledger and strip | Live | works |
