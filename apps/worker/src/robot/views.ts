@@ -65,9 +65,10 @@ export const conversation = Effect.gen(function* () {
       return row === undefined ? undefined : proposalView(row)
     },
   })
-  // A proposal made inside a code-mode program has no direct tool result to project from (robot-vy9z).
+  // A proposal made inside a code-mode program has no direct tool result to project from (robot-vy9z);
+  // answered ones stay too, as the stream's record of the ask (rb-r0oj).
   const shown = new Set(items.flatMap((item) => (item.kind === 'question' ? [item.proposal.id] : [])))
-  for (const row of store.proposals('open')) {
+  for (const row of store.proposals().filter((proposal) => proposal.createdAt >= current.createdAt && proposal.status !== 'superseded')) {
     if (shown.has(row.id)) continue
     const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
     items.splice(position, 0, { kind: 'question', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
