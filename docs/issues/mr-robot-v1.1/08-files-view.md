@@ -6,8 +6,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Files view lists the seeded files of a new robot
-- [ ] Editing MEMORY.md saves to R2 and the robot's next turn mentions the change
-- [ ] Large and binary files open read-only with a size note
+- [x] Files view lists the seeded files of a new robot
+- [x] Editing MEMORY.md saves to R2 and the robot's next turn mentions the change
+- [x] Large and binary files open read-only with a size note
+
+Verified live 2026-10-07 on Browser Check: the robot menu and the panel open "Files"; persona files and MEMORY.md are pinned, then daily notes, skills, other files, and screenshots folded (![files](img/08-files.png)). Editing MEMORY.md and saving wrote it to R2 (![saved](img/08-memory-saved.png)); the chat shows "R Krzywaznia edited MEMORY.md."; at its next Turn the Robot was told "Your owner edited MEMORY.md…" and had the new line in context. A screenshot opens read-only: 58.1 kB binary file (image/png): shown read-only.. Files over 256 kB open read-only with their size. Only the owner saves (Robot DO test files-view.test.ts).
