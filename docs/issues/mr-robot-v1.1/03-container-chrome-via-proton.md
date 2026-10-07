@@ -6,9 +6,11 @@
 
 **Blocked by:** 02 Chrome in Cloudflare Containers backend
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] WireGuard configuration stored as a Home credential, never shown in logs
 - [ ] Pages report a Polish Proton address (an IP-echo page in the run)
 - [ ] Four-site results recorded
 - [ ] Home default backend set and the reason written in this ticket
+
+Built 2026-10-07: the Container Chrome image includes wireproxy; with WG_CONFIG set it starts a local SOCKS5 proxy and Chrome uses it. Admin → Proton VPN stores the WireGuard configuration sealed in the Home (write-only; checked to look like a WireGuard config); the "Container Chrome via VPN" backend becomes available once it is stored, and each Robot on it gets its own container (container-vpn:<robot>). Waiting for the owner's Proton WireGuard configuration (Polish server) to run the IP echo and the four sites.
