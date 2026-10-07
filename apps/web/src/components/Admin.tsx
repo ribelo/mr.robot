@@ -93,6 +93,8 @@ export function Admin() {
           </tr>
         ))}</tbody></table>
       )}
+      <h2>Home memory</h2>
+      <HomeMemory />
       <h2>Proxy</h2>
       <ProxyConfig configured={view.proxyConfigured === true} onSave={(url) => run(() => api.setProxy(url), url === null ? 'Removed.' : 'Saved.')} />
       <h2>Exa</h2>
@@ -286,6 +288,23 @@ function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url
         {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
         <button type="button" className="button button-primary" disabled={url.trim() === ''} onClick={() => void onSave(url).then(() => setUrl(''))}>Save</button>
       </div>
+    </div>
+  )
+}
+
+/** HOME.md (pl-yqno): household facts every Robot of the Home reads; the admin and Mr. Robot write it. */
+function HomeMemory() {
+  const [content, setContent] = useState<string>()
+  const [saved, setSaved] = useState(false)
+  useEffect(() => { void api.homeMemory().then((file) => setContent(file.content)) }, [])
+  if (content === undefined) return null
+  return (
+    <div className="form">
+      <div className="muted">Facts for every Robot in the Home: the electricity provider, the building, shared accounts. Each Robot is told when it changes.</div>
+      <label>HOME.md
+        <textarea rows={6} value={content} placeholder="# HOME.md" onChange={(event) => { setContent(event.target.value); setSaved(false) }} onBlur={() => void api.setHomeMemory(content).then(() => setSaved(true))} />
+        {saved ? <span className="muted">Saved.</span> : null}
+      </label>
     </div>
   )
 }

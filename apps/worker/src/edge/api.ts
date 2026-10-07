@@ -2,6 +2,7 @@
  * The HTTP API of the edge Worker. It holds no state: every call is routed to the
  * Durable Object that owns the data, after resolving the caller to a Member.
  */
+import { MEMBER_FILE_NAMES, type MemberFileName } from '../member/member.ts'
 import { probe } from '../browser/probe.ts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
@@ -70,8 +71,7 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('GET', '/api/me/files/:name', (c, { name }) => fileName(name).pipe(
-    Effect.flatMap((file) => call(() => c.env.MEMBER.getByName(c.member.id).file(file))),
-    Effect.map((content) => ({ name, content })),
+    Effect.flatMap((file) => call(() => c.env.MEMBER.getByName(c.member.id).file(file)).pipe(Effect.map((content) => ({ name: file, content })))),
   ))
   .on('PUT', '/api/me/files/:name', (c, { name }) => Effect.gen(function* () {
     const file = yield* fileName(name)
@@ -131,6 +131,13 @@ export const api = new Router<ApiContext>()
     const owner = yield* call(() => home(c.env).hostOwner(id))
     if (owner !== c.member.id && c.member.role !== 'admin') return yield* Effect.fail(forbidden('only the person who paired this host can unpair it'))
     yield* call(() => c.env.MEMBER.getByName(owner ?? c.member.id).unpairHost(id))
+    return { ok: true }
+  }))
+  .on('GET', '/api/home-memory', (c) => call(async () => ({ content: await home(c.env).homeMemory() })))
+  .on('PUT', '/api/admin/home-memory', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
+    yield* call(() => home(c.env).setHomeMemory(content, 'the Home admin', null))
     return { ok: true }
   }))
   .on('PUT', '/api/admin/proxy', (c) => Effect.gen(function* () {
@@ -394,8 +401,9 @@ function providerName(name: string, allowed: readonly ProviderId[]): Effect.Effe
   return allowed.includes(name as ProviderId) ? Effect.succeed(name as ProviderId) : Effect.fail(notFound('no such Provider here'))
 }
 
-function fileName(name: string): Effect.Effect<'USER.md' | 'PROACTIVE_PREFERENCES.md', ApiError> {
-  return name === 'USER.md' || name === 'PROACTIVE_PREFERENCES.md' ? Effect.succeed(name) : Effect.fail(notFound('no such file'))
+function fileName(name: string): Effect.Effect<MemberFileName, ApiError> {
+  const decoded = decodeURIComponent(name)
+  return (MEMBER_FILE_NAMES as readonly string[]).includes(decoded) ? Effect.succeed(decoded as MemberFileName) : Effect.fail(notFound('no such file'))
 }
 
 function conflictStale(): ApiError {

@@ -45,8 +45,10 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
     for (const file of ['SOUL.md', 'IDENTITY.md', 'AGENTS.md', 'TOOLS.md', 'MEMORY.md', 'USER.md', 'PROACTIVE_PREFERENCES.md']) {
       expect(listing).toContain(file)
     }
-    const prompt = (requests.get(id) ?? []).at(-1)!.messages.find((message) => message.role === 'system')
-    expect(JSON.stringify(prompt)).toContain('You\'re not a chatbot')
+    // Persona and memory are the context's first message, not the system prompt (pl-w3n0).
+    const messages = (requests.get(id) ?? []).at(-1)!.messages
+    expect(JSON.stringify(messages.find((message) => message.role === 'system'))).not.toContain('You\'re not a chatbot')
+    expect(JSON.stringify(messages.filter((message) => message.role === 'user'))).toContain('You\'re not a chatbot')
   })
 
   it('refuses edits to USER.md and turns them into a proposal the owner approves (robot-mj7v, robot-jpzp)', async () => {

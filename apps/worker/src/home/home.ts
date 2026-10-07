@@ -965,6 +965,23 @@ export class Home extends DurableObject<Env> {
   modelList(): Promise<ModelOption[]> { return this.run(modelList) }
   vpnConfig(): Promise<string | null> { return this.run(vpnConfig) }
   exaKey(): Promise<string | null> { return this.run(exaKey) }
+
+  /** HOME.md: shared household facts for every Robot of the Home (pl-yqno). */
+  async homeMemory(): Promise<string> {
+    return this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md'").toArray().map((row) => JSON.parse(row.v) as string)[0] ?? ''
+  }
+
+  async setHomeMemory(content: string, by: string, exceptRobot: string | null): Promise<void> {
+    this.ctx.storage.sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(content))
+    await this.memoryChanged(null, 'HOME.md', by, exceptRobot)
+  }
+
+  /** Tell the Robots that read a shared memory file that it changed: one Member's, or every Robot for HOME.md. */
+  async memoryChanged(memberId: string | null, path: string, by: string, exceptRobot: string | null): Promise<void> {
+    const robots = this.ctx.storage.sql.exec<{ id: string; owner_id: string }>('SELECT id, owner_id FROM robot').toArray()
+    await Promise.all(robots.filter((robot) => (memberId === null || robot.owner_id === memberId) && robot.id !== exceptRobot)
+      .map((robot) => this.env.ROBOT.getByName(robot.id).memoryChanged(path, by).catch(() => undefined)))
+  }
   proxyConfig(): Promise<string | null> { return this.run(proxyConfig) }
   setProxyConfig(url: string | null): Promise<void> { return this.run(setProxyConfig(url)) }
   hostChanged(entry: HostEntry | { id: string; removed: true }): Promise<void> { return this.run(hostChanged(entry)) }

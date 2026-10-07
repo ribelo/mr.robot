@@ -67,7 +67,7 @@ describe('configuring a Robot', () => {
     await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['web', 'secrets'], skills: [], recipients: [], secrets: ['bank'] } } })
     await testRobot(body.id).activateForTest()
     const preview = (await api<{ sections: Array<{ name: string; text: string }>; tools: string[] }>(ANNA, `/api/robots/${body.id}/prompt`)).body
-    expect(preview.sections.map((section) => section.name)).toEqual(['Platform', 'Persona and memory files'])
+    expect(preview.sections.map((section) => section.name)).toEqual(['Platform', 'Memory (first message of the context)'])
     expect(preview.sections[1]!.text).toContain('SOUL.md')
     expect(preview.tools).toContain('secret_get')
     expect(JSON.stringify(preview)).not.toContain('very-secret-pin-123')

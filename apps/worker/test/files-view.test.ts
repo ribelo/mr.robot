@@ -37,7 +37,7 @@ describe('the Files view (v1.1 ticket 08)', () => {
     await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'hi' } })
     await settle(body.id)
     const sent = JSON.stringify(requests.get(body.id)!.at(-1)!.messages)
-    expect(sent).toContain('Your owner edited MEMORY.md in your Workspace since your last Turn')
+    expect(sent).toContain('changed: MEMORY.md by your owner')
     expect(sent).toContain('pays invoices on the 10th')
   })
 

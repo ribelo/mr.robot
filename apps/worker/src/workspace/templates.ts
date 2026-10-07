@@ -16,7 +16,8 @@ export const ROBOT_FILES: Readonly<Record<string, string>> = {
 }
 
 /** Member files, seeded per Member; {{name}} is replaced with the Member name. */
-export const MEMBER_FILES: Readonly<Record<'USER.md' | 'PROACTIVE_PREFERENCES.md', string>> = {
+export const MEMBER_FILES: Readonly<Record<'USER.md' | 'PROACTIVE_PREFERENCES.md' | 'memory/world.md', string>> = {
+  'memory/world.md': "# world.md\n\n_Durable facts about your owner's world that every Robot of theirs may need: address, company and tax details, accounts, how invoices are issued, recurring bills._\n\n",
   'USER.md': "# USER.md\n\n_What you know about the person you're helping. Build this up over time, and don't assume what they haven't told you._\n\n- **Name:** {{name}}\n- **What to call them:**\n- **Timezone:**\n- **Notes:**\n\n## Context\n_What they care about, what they're working on, what to avoid. You're getting to know a person, not building a dossier._\n",
   'PROACTIVE_PREFERENCES.md': "# PROACTIVE_PREFERENCES.md\n\n_What you want to hear about without asking, what you never want brought up, and when. Your Robots read this whole file before composing a message, so plain words anywhere in it count._\n\n## Tell me about\n\n## Never tell me about\n\n## When\n\n_Messages may arrive from 09:00 to 21:30 local time. Timing preferences guide composition; delivery may wait for a quiet moment._\n\n## How\n\n_Format wishes: one brief line, a card stack, a full page when it needs one, a particular tone._\n",
 }

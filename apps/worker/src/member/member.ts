@@ -21,8 +21,8 @@ import type { OpencodeKey } from '../providers/opencode-go.ts'
 import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
 
-export type MemberFileName = 'USER.md' | 'PROACTIVE_PREFERENCES.md'
-export const MEMBER_FILE_NAMES: readonly MemberFileName[] = ['USER.md', 'PROACTIVE_PREFERENCES.md']
+export type MemberFileName = 'USER.md' | 'PROACTIVE_PREFERENCES.md' | 'memory/world.md'
+export const MEMBER_FILE_NAMES: readonly MemberFileName[] = ['USER.md', 'PROACTIVE_PREFERENCES.md', 'memory/world.md']
 
 export interface MemberProfile {
   readonly id: string
@@ -92,7 +92,7 @@ const file = (name: MemberFileName) => Effect.gen(function* () {
 })
 
 const files = Effect.gen(function* () {
-  return { 'USER.md': yield* file('USER.md'), 'PROACTIVE_PREFERENCES.md': yield* file('PROACTIVE_PREFERENCES.md') } as Record<MemberFileName, string>
+  return { 'USER.md': yield* file('USER.md'), 'PROACTIVE_PREFERENCES.md': yield* file('PROACTIVE_PREFERENCES.md'), 'memory/world.md': yield* file('memory/world.md') } as Record<MemberFileName, string>
 })
 
 const writeFile = (name: MemberFileName, content: string) => Effect.gen(function* () {
@@ -515,7 +515,12 @@ export class Member extends DurableObject<Env> {
   updateProfile(patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null }): Promise<MemberProfile> { return this.run(updateProfile(patch)) }
   file(name: MemberFileName): Promise<string> { return this.run(file(name)) }
   files(): Promise<Record<MemberFileName, string>> { return this.run(files) }
-  writeFile(name: MemberFileName, content: string): Promise<void> { return this.run(writeFile(name, content)) }
+  /** A shared memory file changed: every Robot of this Member hears who changed it (pl-9n7w). */
+  async writeFile(name: MemberFileName, content: string, by = 'your owner', exceptRobot?: string): Promise<void> {
+    await this.run(writeFile(name, content))
+    const memberId = (await this.run(profile)).id
+    await this.env.HOME.getByName(HOME_ID).memoryChanged(memberId, name, by, exceptRobot ?? null).catch((error: unknown) => console.warn('memory change not delivered', error))
+  }
   providers(): Promise<ProviderView[]> { return this.run(providers) }
   setApiKey(provider: ProviderId, key: string, shared: boolean): Promise<void> { return this.run(setApiKey(provider, key, shared)) }
   startOAuth(provider: 'openai' | 'anthropic'): Promise<Omit<FlowStart, 'flow'>> { return this.run(startOAuth(provider)) }

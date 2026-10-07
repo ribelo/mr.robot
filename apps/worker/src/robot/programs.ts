@@ -460,7 +460,9 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
     }
     case 'member-file': {
       if (proposal.file === null) return
-      yield* promise(() => platform.env.MEMBER.getByName(ownerId).writeFile(proposal.file!.name as MemberFileName, proposal.file!.content))
+      const file = proposal.file
+      if (file.name === 'HOME.md') yield* promise(() => platform.env.HOME.getByName(HOME_ID).setHomeMemory(file.content, 'your owner (approved)', null))
+      else yield* promise(() => platform.env.MEMBER.getByName(ownerId).writeFile(file.name as MemberFileName, file.content, 'your owner (approved)'))
       return
     }
   }

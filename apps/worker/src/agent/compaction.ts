@@ -24,10 +24,16 @@ export function compactionConfig(budget: number, modelWindow?: number): { headro
  * instruction rides as the last conversation message before DSH's summarization directive,
  * so it shapes what the checkpoint keeps without breaking the provider's prefix cache.
  */
-export function robotCompaction(instruction: string): typeof BasicCompactionEngine {
+export function robotCompaction(instruction: string, onCompacted?: () => void): typeof BasicCompactionEngine {
   // Headroom is set by compose() from the budget; the instruction is the only behaviour change.
   return class RobotCompaction extends BasicCompactionEngine {
-    protected override summarize(input: SummarizeInput, agent: Agent, signal?: AbortSignal): Promise<SummarizeResult> {
+    protected override async summarize(input: SummarizeInput, agent: Agent, signal?: AbortSignal): Promise<SummarizeResult> {
+      const result = await this.summarizeWithInstruction(input, agent, signal)
+      onCompacted?.()
+      return result
+    }
+
+    private summarizeWithInstruction(input: SummarizeInput, agent: Agent, signal?: AbortSignal): Promise<SummarizeResult> {
       if (instruction.trim().length === 0) return super.summarize(input, agent, signal)
       const guidance = {
         id: `compaction-guidance-${crypto.randomUUID()}`,

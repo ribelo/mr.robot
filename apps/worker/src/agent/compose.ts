@@ -35,6 +35,8 @@ export interface CompositionInput {
   /** The model's real context window (the budget may be smaller). */
   readonly modelWindow?: number
   readonly compactionInstruction: string
+  /** Called after a compaction replaced the context with a checkpoint. */
+  readonly onCompacted?: () => void
   /** Prompt sections, in order; text is read at every request so persona edits apply immediately. */
   readonly prompt: ReadonlyArray<{ readonly name: string; readonly text: () => string }>
   /** The capability plugins its grants allow (pl-rsoy); nothing else registers tools (robot-f9ln). */
@@ -69,7 +71,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
       await ctx.plugin(plugin as never, config as never)
     }
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
-    await ctx.plugin(robotCompaction(input.compactionInstruction), compactionConfig(input.contextBudget, input.modelWindow))
+    await ctx.plugin(robotCompaction(input.compactionInstruction, input.onCompacted), compactionConfig(input.contextBudget, input.modelWindow))
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
 

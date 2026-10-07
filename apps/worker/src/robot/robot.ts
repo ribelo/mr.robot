@@ -63,6 +63,8 @@ import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } fr
 import { PwaChannel } from '../channels/pwa.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
 import { mount, type Mount } from '../plugins/define.ts'
+import { Memory, type MemoryHost, type SharedFile } from '../plugins/memory.ts'
+import { renderBaseline, type MemoryChange, type MemoryFile } from '../agent/memory.ts'
 import { Browser } from '../plugins/browser.ts'
 import { Conversation as ConversationPlugin } from '../plugins/conversation.ts'
 import { Credentials } from '../plugins/credentials.ts'
@@ -237,7 +239,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.loadSecretMasks()
     const sections = [{ name: 'Platform', text: platformPrompt(config, owner.name) }]
     if (config.status === 'setup') sections.push({ name: 'Setup interview', text: setupPrompt(owner.name, this.store.get<string>('brief') ?? null) })
-    sections.push({ name: 'Persona and memory files', text: personaText(this.persona) })
+    sections.push({ name: 'Memory (first message of the context)', text: renderBaseline(await this.memoryFiles(), MEMORY_BYTES) })
     return {
       sections: sections.map((section) => ({ ...section, text: this.mask(section.text) })),
       tools: config.codeMode && config.status !== 'setup' ? ['run_code (code mode), calling:', ...this.toolNames()] : this.toolNames(),
@@ -333,12 +335,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
       this.store.beginTurn(wakeup.id, agent.session.id, startSeq, Date.now())
       this.store.set(`turn-start:${wakeup.id}`, startSeq)
-      // Files the owner edited since the last Turn: the Robot must not overwrite them from stale context (rb-xwks).
-      const edits = this.store.get<string[]>('owner-edits') ?? []
-      if (edits.length > 0) {
-        this.store.delete('owner-edits')
-        agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: `Your owner edited ${edits.join(', ')} in your Workspace since your last Turn. Read the current version before you rely on or change it.`, summary: '' }))
-      }
       agent.followup(wakeupMessage({
         sender: wakeup.sender,
         text: wakeup.text,
@@ -552,7 +548,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const brief = this.store.get<string>('brief') ?? null
     const prompt = [{ name: 'platform', text: () => platformPrompt(this.store.requireConfig(), owner.name) }]
     if (config.status === 'setup') prompt.push({ name: 'setup', text: () => setupPrompt(owner.name, brief) })
-    prompt.push({ name: 'workspace', text: () => personaText(this.persona) })
     const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
     const chosen = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)
     const contextWindow = chosen?.contextWindow
@@ -570,6 +565,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       contextBudget: config.contextBudget,
       ...(contextWindow === undefined ? {} : { modelWindow: contextWindow }),
       compactionInstruction: config.compactionInstruction,
+      // A compacted context lost the memory baseline; the next step brings it back fresh (pl-552r).
+      onCompacted: () => this.store.delete('memory-baseline'),
       prompt,
       mounts: this.mounts(config),
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
@@ -630,9 +627,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected mounts(config: RobotConfig): Mount[] {
     const mounts: Mount[] = [mount(Credentials, { source: this.credentials() })]
     if (config.status === 'setup') {
-      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) })]
+      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
-    mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }))
+    mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     const grants = this.store.effectiveGrants()
     const granted = new Set(grants.tools.filter(isToolGroup))
     if (granted.has('files')) mounts.push(mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }))
@@ -1489,8 +1486,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const current = await this.run(this.workspace.stat(path))
     if (current !== undefined && current.size > MAX_EDITABLE_BYTES) throw Object.assign(new Error('this file is too large to edit here'), { name: 'Invalid', status: 400 })
     await this.run(this.workspace.write(path, content, path.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8'))
-    const edits = this.store.get<string[]>('owner-edits') ?? []
-    this.store.set('owner-edits', [...new Set([...edits, path])])
+    await this.memoryChanged(path, 'your owner')
     const config = this.store.requireConfig()
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${this.owner().name} edited ${path}.`, Date.now())
     await this.changed()
@@ -1530,11 +1526,65 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { proposalId: proposal.id }
   }
 
+// ---------------------------------------------------------------- memory (v1.3 ticket 02)
+
+  /** Someone else changed a file this Robot reads; the note goes out with its next model step (pl-9n7w). */
+  async memoryChanged(path: string, by: string): Promise<void> {
+    const pending = this.store.get<MemoryChange[]>('memory-changes') ?? []
+    this.store.set('memory-changes', [...pending, { path, by }].slice(-50))
+  }
+
+  /** Every memory file in scope: the Home, the owner, and this Robot's own (pl-o3ck, pl-fkg7, pl-yqno). */
+  async memoryFiles(): Promise<MemoryFile[]> {
+    const config = this.store.requireConfig()
+    const own = [...PERSONA_FILES, 'memory/bank/experience.md', 'memory/bank/opinions.md', ...dailyNotePaths(Date.now(), config.timeZone)]
+    const [robotFiles, member, home] = await Promise.all([
+      this.run(Effect.forEach(own, (path) => this.workspace.readText(path).pipe(Effect.map((content) => ({ scope: 'robot' as const, path, content: content ?? '' }))), { concurrency: 8 })),
+      this.env.MEMBER.getByName(config.ownerId).files().catch(() => ({}) as Record<string, string>),
+      this.home().homeMemory().catch(() => ''),
+    ])
+    return [
+      { scope: 'home', path: 'HOME.md', content: home },
+      ...Object.entries(member).map(([path, content]): MemoryFile => ({ scope: 'member', path, content })),
+      ...robotFiles,
+    ]
+  }
+
+  memoryChanges(): MemoryChange[] {
+    return this.store.get<MemoryChange[]>('memory-changes') ?? []
+  }
+
+  needsBaseline(sessionId: string): boolean {
+    return this.store.get<string>('memory-baseline') !== sessionId
+  }
+
+  memoryDelivered(sessionId: string, baseline: boolean): void {
+    this.store.delete('memory-changes')
+    if (baseline) this.store.set('memory-baseline', sessionId)
+  }
+
+  /** Mr. Robot writes shared memory directly; every other Robot of the owner (or the Home) is told. */
+  private async writeShared(file: SharedFile, content: string): Promise<void> {
+    const config = this.store.requireConfig()
+    if (file === 'HOME.md') await this.home().setHomeMemory(content, config.identity.name, config.id)
+    else await this.env.MEMBER.getByName(config.ownerId).writeFile(file, content, config.identity.name, config.id)
+  }
+
+  private memoryHost(config: RobotConfig): MemoryHost {
+    return {
+      memoryFiles: () => this.memoryFiles(),
+      memoryChanges: () => this.memoryChanges(),
+      needsBaseline: (sessionId) => this.needsBaseline(sessionId),
+      memoryDelivered: (sessionId, baseline) => this.memoryDelivered(sessionId, baseline),
+      propose: (kind, purpose, payload) => this.propose(kind, purpose, payload),
+      ...(config.kind === 'mr-robot' ? { writeShared: (file: SharedFile, content: string) => this.writeShared(file, content) } : {}),
+    }
+  }
+
   /** The owner deleted a file (a local skill, an old note). */
   async deleteFile(path: string): Promise<void> {
     await this.run(this.workspace.remove(path))
-    const edits = this.store.get<string[]>('owner-edits') ?? []
-    this.store.set('owner-edits', [...new Set([...edits, `${path} (deleted)`])])
+    await this.memoryChanged(path, 'your owner (deleted)')
   }
 
   exaKey(): Promise<string | null> {
@@ -1755,6 +1805,9 @@ const WATCH_INTERVAL_MS = 60_000
 function runnable(config: RobotConfig): boolean {
   return config.status === 'active' || config.status === 'setup'
 }
+
+/** The memory baseline's byte budget (pl-jsdm). */
+const MEMORY_BYTES = 32_768
 
 /** Files above this size open read-only in the Files view. */
 const MAX_EDITABLE_BYTES = 256 * 1024

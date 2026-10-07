@@ -229,8 +229,9 @@ function MemberFiles() {
   return (
     <>
       <h2>What your Robots know about you</h2>
-      <div className="muted">Every Robot of yours reads these files and cannot change them; they propose edits for you to approve.</div>
+      <div className="muted">Every Robot of yours reads these files. Mr. Robot keeps them current; your other Robots propose edits for you to approve. A Robot is told when one changes.</div>
       <MemberFile name="USER.md" />
+      <MemberFile name="memory/world.md" />
       <MemberFile name="PROACTIVE_PREFERENCES.md" />
     </>
   )
