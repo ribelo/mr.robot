@@ -23,7 +23,8 @@ export function App() {
   const refreshRobots = useCallback(() => api.robots().then(setRobots).catch(() => undefined), [])
   // The desktop app's tray badge follows the list's unread robots (pl-mhyg).
   const unreadCount = robots.filter((robot) => robot.unread).length
-  useEffect(() => { void hostBridge()?.setUnread?.(unreadCount) }, [unreadCount])
+  // Re-sent on every list refresh: the app may have counted notifications on top of it meanwhile.
+  useEffect(() => { void hostBridge()?.setUnread?.(unreadCount) }, [robots, unreadCount])
   useEffect(() => {
     api.me().then(setMe, (cause: unknown) => setError(cause instanceof ApiError ? cause.message : 'cannot reach Mr. Robot'))
     void refreshRobots()
