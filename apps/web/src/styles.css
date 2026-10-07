@@ -272,3 +272,8 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .activity-now { align-self: flex-start; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
 .spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #ffffff30; border-top-color: var(--muted); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Screenshot thumbnails in trajectory records (robot-cmz9) */
+.dsh-record-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.dsh-record-image { max-width: 240px; max-height: 160px; border-radius: 6px; border: 1px solid var(--line); display: block; }
+.dsh-record-image.loading { width: 120px; height: 80px; background: #ffffff10; }

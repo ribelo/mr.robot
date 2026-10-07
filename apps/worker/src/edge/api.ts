@@ -252,6 +252,12 @@ export const api = new Router<ApiContext>()
     }))
     return new Response(`{"sessionId":${JSON.stringify(page.sessionId)},"hasMore":${page.hasMore},"events":${page.events}}`, { headers: { 'content-type': 'application/json' } })
   }))
+  .on('GET', '/api/robots/:id/attachments/:attachment', (c, { id, attachment }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const image = yield* call(() => robot(c, id).screenshotImage(decodeURIComponent(attachment)))
+    if (image === undefined) return yield* Effect.fail(notFound('no such image'))
+    return new Response(image.body, { headers: { 'content-type': image.mediaType, 'cache-control': 'private, max-age=86400' } })
+  }))
   .on('GET', '/api/robots/:id/panel', (c, { id }) => Effect.gen(function* () {
     const access = yield* reach(c, id)
     const entry = (yield* call(() => home(c.env).reachable(c.member.id))).find((summary) => summary.id === id)

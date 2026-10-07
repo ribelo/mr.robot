@@ -4,21 +4,27 @@
  */
 import { LlmAdapter, LlmError, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { finishReason } from './openai-chat.ts'
-import { httpFailure, replayBlocks, sse, StreamWriter, systemText, textOf } from './stream.ts'
+import { httpFailure, imagesOf, loadImages, replayBlocks, sse, StreamWriter, systemText, textWithoutImages, type ImageLoader, type LoadedImages } from './stream.ts'
 
 const URL_ = 'https://chatgpt.com/backend-api/codex/responses'
 
 type Item =
-  | { type: 'message'; role: 'user' | 'assistant'; content: Array<{ type: 'input_text' | 'output_text'; text: string }> }
+  | { type: 'message'; role: 'user' | 'assistant'; content: Array<{ type: 'input_text' | 'output_text'; text: string } | { type: 'input_image'; image_url: string }> }
   | { type: 'function_call'; call_id: string; name: string; arguments: string }
   | { type: 'function_call_output'; call_id: string; output: string }
   | { type: 'reasoning'; encrypted_content: string; summary: Array<{ type: 'summary_text'; text: string }> }
 
-function inputItems(options: GenerateOptions): Item[] {
+export function inputItems(options: GenerateOptions, images: LoadedImages = new Map()): Item[] {
   const items: Item[] = []
+  const pictures = (content: GenerateOptions['messages'][number]['content']) => imagesOf(content, images).map((part) => ({ type: 'input_image' as const, image_url: `data:${part.mediaType};base64,${part.base64}` }))
   for (const message of options.messages) {
-    if (message.role === 'user') items.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: textOf(message.content) }] })
-    else if (message.role === 'tool') items.push({ type: 'function_call_output', call_id: message.toolCallId, output: textOf(message.content) })
+    if (message.role === 'user') items.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: textWithoutImages(message.content, images) || '.' }, ...pictures(message.content)] })
+    else if (message.role === 'tool') {
+      // A function output is text only; its images follow as a user message.
+      items.push({ type: 'function_call_output', call_id: message.toolCallId, output: textWithoutImages(message.content, images) })
+      const attached = pictures(message.content)
+      if (attached.length > 0) items.push({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Image from the tool result above:' }, ...attached] })
+    }
     else if (message.role === 'assistant') {
       const sameProvider = (message as { source?: { provider?: string } }).source?.provider === options.provider
       const replay = sameProvider ? replayBlocks(message) : []
@@ -58,7 +64,7 @@ export function chatgptSubscription(credential: () => Promise<{ access: string; 
 }
 
 export class CodexAdapter extends LlmAdapter {
-  constructor(private readonly endpoint: ResponsesEndpoint, private readonly contextWindow: number) {
+  constructor(private readonly endpoint: ResponsesEndpoint, private readonly contextWindow: number, private readonly images?: ImageLoader) {
     super()
   }
 
@@ -67,6 +73,7 @@ export class CodexAdapter extends LlmAdapter {
       provider, id: model, name: model,
       context: { contextWindow: this.contextWindow },
       defaultMaxTokens: 32_000,
+      ...(this.images === undefined ? {} : { inputModalities: ['text', 'image'] }),
       reasoning: { efforts: ['low', 'medium', 'high'].map((id) => ({ id, name: id })) },
     } as never)
   }
@@ -81,7 +88,7 @@ export class CodexAdapter extends LlmAdapter {
         store: false,
         stream: true,
         instructions: systemText(options),
-        input: inputItems(options),
+        input: inputItems(options, await loadImages(options, this.images)),
         tools: (options.tools ?? []).map((tool) => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters, strict: false })),
         tool_choice: 'auto',
         parallel_tool_calls: true,

@@ -8,7 +8,7 @@ export interface BrowserHost {
   browserObserve(): Promise<Observation>
   browserAct(action: BrowserAction): Promise<Observation>
   browserWait(input: { text?: string; ms?: number }): Promise<Observation>
-  browserScreenshot(): Promise<{ path: string }>
+  browserScreenshot(): Promise<{ path: string; image: ScreenshotImage }>
 }
 
 /** Leash's primitives over Browser Rendering (robot-l9te): open, observe, act, screenshot, wait. */
@@ -50,12 +50,20 @@ export function browserTools(host: BrowserHost): ToolDefinition[] {
       parameters: { properties: { text: { type: 'string' }, ms: { type: 'integer' } } },
       execute: async (input) => renderObservation(await host.browserWait(input)),
     }),
-    tool<Record<string, never>>({
+    {
+      // The screenshot comes back as an image the model sees (robot-cmz9), and is saved as the screen.
       name: 'browser_screenshot',
-      description: 'Take a screenshot of the page; it is saved in your Workspace and shown to your owner as your screen.',
-      parameters: { properties: {} },
+      description: 'Take a screenshot of the page. You see the image in the result; it is also saved in your Workspace and shown to your owner as your screen. Use it to read what the text observation cannot (image puzzles, charts, layout).',
+      parameters: { type: 'object', additionalProperties: false, properties: {} },
+      output: {
+        schema: {},
+        render: (_args: unknown, value: { path: string; image: ScreenshotImage }) => [
+          { type: 'text', text: `Screenshot saved to ${value.path}.` },
+          { type: 'image', attachment: value.image },
+        ],
+      },
       execute: async () => host.browserScreenshot(),
-    }),
+    } as unknown as ToolDefinition,
   ]
 }
 
@@ -73,4 +81,14 @@ function toAction(args: { action: string; index?: number; text?: string; submit?
     case 'scroll': return { action: 'scroll', direction: args.direction ?? 'down' }
     default: throw new Error(`unknown action ${args.action}`)
   }
+}
+
+/** A screenshot as DSH's image attachment reference; the id resolves to the Workspace file. */
+export interface ScreenshotImage {
+  readonly attachmentId: string
+  readonly mediaType: 'image/png'
+  readonly bytes: number
+  readonly width: number
+  readonly height: number
+  readonly name: string
 }

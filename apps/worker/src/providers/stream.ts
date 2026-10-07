@@ -135,3 +135,29 @@ export class StreamWriter {
     yield { type: 'block-start', index: this.index, blockType: kind }
   }
 }
+
+/** Image bytes for an attachment reference (screenshots in the Robot's Workspace). */
+export type ImageLoader = (attachmentId: string) => Promise<{ mediaType: string; base64: string } | undefined>
+export type LoadedImages = ReadonlyMap<string, { mediaType: string; base64: string }>
+
+/** Load every image the request carries, once, before the provider body is built. */
+export async function loadImages(options: GenerateOptions, loader: ImageLoader | undefined): Promise<LoadedImages> {
+  const loaded = new Map<string, { mediaType: string; base64: string }>()
+  if (loader === undefined) return loaded
+  const ids = new Set(options.messages.flatMap((message) => message.content.flatMap((block) => (block.type === 'image' && block.offloaded !== true ? [String(block.attachment.attachmentId)] : []))))
+  await Promise.all([...ids].map(async (id) => {
+    const image = await loader(id).catch(() => undefined)
+    if (image !== undefined) loaded.set(id, image)
+  }))
+  return loaded
+}
+
+/** The images of a message, in order, that were loaded. */
+export function imagesOf(content: readonly ContentBlock[], images: LoadedImages): Array<{ mediaType: string; base64: string }> {
+  return content.flatMap((block) => (block.type === 'image' ? [images.get(String(block.attachment.attachmentId))].filter((image) => image !== undefined) : []))
+}
+
+/** Text of a message, with loaded images left out (they are sent as image parts). */
+export function textWithoutImages(content: readonly ContentBlock[], images: LoadedImages): string {
+  return content.flatMap((block) => (block.type === 'text' ? [block.text] : block.type === 'image' ? (images.has(String(block.attachment.attachmentId)) ? [] : ['[image not shown to this model]']) : block.type === 'file' ? ['[attachment not shown to this model]'] : [])).join('\n')
+}

@@ -1,4 +1,4 @@
-import { abortAllDurableObjects, env, reset, runDurableObjectAlarm } from 'cloudflare:test'
+import { abortAllDurableObjects, env, reset, runDurableObjectAlarm, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -115,6 +115,24 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
 
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { wakeOnScreenNotifications: false } })
     expect(runningSessions.size).toBe(0)
+  })
+
+  it('shows the model its screenshot as an image (robot-cmz9)', async () => {
+    const id = await shopper()
+    await say(id, 'look at it', [
+      { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/' } }] },
+      { calls: [{ name: 'browser_screenshot', args: {} }] },
+      { text: 'I see the page.' },
+    ])
+    const sent = JSON.stringify((requests.get(id) ?? []).at(-1)!.messages)
+    expect(sent).toMatch(/"type":"image","attachment":\{"attachmentId":"screen:[^"]+\.png","mediaType":"image\/png","bytes":33,"width":1280,"height":800/)
+    const attachmentId = /"attachmentId":"(screen:[^"]+)"/.exec(sent)![1]!
+    const image = await testRobot(id).screenshotImage(attachmentId)
+    expect(image?.mediaType).toBe('image/png')
+    expect(atob(image!.base64).length).toBe(33)
+    const response = await SELF.fetch(`https://robot.test/api/robots/${id}/attachments/${encodeURIComponent(attachmentId)}`, { headers: { 'x-dev-identity': ANNA } })
+    expect(response.headers.get('content-type')).toBe('image/png')
+    expect((await response.arrayBuffer()).byteLength).toBe(33)
   })
 
   it('updates the screen thumbnail after each screenshot (robot-ksvy)', async () => {

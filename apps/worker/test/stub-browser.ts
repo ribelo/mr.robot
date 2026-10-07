@@ -128,7 +128,13 @@ export class StubPage implements BrowserPage {
 
   async screenshot(): Promise<Uint8Array> {
     this.shots += 1
-    return new Uint8Array([137, 80, 78, 71, this.shots])
+    // A PNG signature and IHDR (1280×800), then the shot number.
+    const png = new Uint8Array(33)
+    png.set([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82])
+    new DataView(png.buffer).setUint32(16, 1280)
+    new DataView(png.buffer).setUint32(20, 800)
+    png[32] = this.shots
+    return png
   }
 
   url(): string {

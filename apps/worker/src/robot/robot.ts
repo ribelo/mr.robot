@@ -58,7 +58,7 @@ import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { webPlugin } from '../agent/web.ts'
 import { skillProposalTools, skillsPlugin } from '../agent/skills.ts'
-import { browserTools, type BrowserHost } from '../agent/tools/browser.ts'
+import { browserTools, type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
 import { takeoverTools, type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
@@ -602,6 +602,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       ...(contextWindow === undefined ? {} : { contextWindow }),
       ...(model === undefined ? {} : { model }),
       ...(wire === undefined ? {} : { wire }),
+      images: async (id) => {
+        const image = await this.screenshotImage(id)
+        return image === undefined ? undefined : { mediaType: image.mediaType, base64: image.base64 }
+      },
     })
   }
 
@@ -800,9 +804,25 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.observed(page)
   }
 
-  async browserScreenshot(): Promise<{ path: string }> {
+  async browserScreenshot(): Promise<{ path: string; image: ScreenshotImage }> {
     const page = await this.page()
-    return this.saveScreen(await page.screenshot())
+    const png = await page.screenshot()
+    const { path } = await this.saveScreen(png)
+    const name = path.slice('screens/'.length)
+    // PNG: width and height are the first two fields of the IHDR chunk.
+    const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
+    return { path, image: { attachmentId: `screen:${name}`, mediaType: 'image/png', bytes: png.byteLength, width: view.getUint32(16), height: view.getUint32(20), name } }
+  }
+
+  /** Image bytes for a screenshot attachment id, for the model and the trajectory inspector. */
+  async screenshotImage(attachmentId: string): Promise<{ mediaType: string; base64: string; body: ArrayBuffer } | undefined> {
+    if (!attachmentId.startsWith('screen:') || attachmentId.includes('/')) return undefined
+    const file = await this.run(this.workspace.read(`screens/${attachmentId.slice('screen:'.length)}`))
+    if (file === undefined) return undefined
+    const bytes = new Uint8Array(file.body)
+    let binary = ''
+    for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+    return { mediaType: file.contentType || 'image/png', base64: btoa(binary), body: file.body }
   }
 
   private async observed(page: BrowserPage): Promise<Observation> {

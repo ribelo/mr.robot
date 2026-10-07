@@ -9,6 +9,7 @@ import { AnthropicAdapter, claudeSubscription } from '../providers/anthropic.ts'
 import { chatgptSubscription, CodexAdapter } from '../providers/codex.ts'
 import { ChatCompletionsAdapter, WorkersAiAdapter } from '../providers/openai-chat.ts'
 import { opencodeGoAdapter, type OpencodePool } from '../providers/opencode-go.ts'
+import type { ImageLoader } from '../providers/stream.ts'
 
 export type ProviderId = 'deepseek' | 'openrouter' | 'workers-ai' | 'openai' | 'anthropic' | 'opencode-go'
 export const PROVIDER_IDS: readonly ProviderId[] = ['deepseek', 'openrouter', 'workers-ai', 'openai', 'anthropic', 'opencode-go']
@@ -35,6 +36,8 @@ export interface ProviderContext {
   /** The model the Robot runs on (OpenCode Go picks its wire format per model). */
   readonly model?: string
   readonly wire?: 'chat' | 'anthropic' | 'responses'
+  /** Screenshot bytes for image blocks (Claude and ChatGPT receive images). */
+  readonly images?: ImageLoader
 }
 
 export function providerAdapter(provider: string, context: ProviderContext): LlmAdapter {
@@ -53,12 +56,13 @@ export function providerAdapter(provider: string, context: ProviderContext): Llm
       if (context.ai === undefined) throw new LlmError('Workers AI is not bound in this deployment', 'MISSING_CREDENTIAL')
       return new WorkersAiAdapter(context.ai, window)
     case 'anthropic':
-      return new AnthropicAdapter(claudeSubscription(async () => (await oauth(context, 'anthropic')).access), window)
+      return new AnthropicAdapter(claudeSubscription(async () => (await oauth(context, 'anthropic')).access), window, context.images)
     case 'openai':
-      return new CodexAdapter(chatgptSubscription(() => oauth(context, 'openai')), window)
+      return new CodexAdapter(chatgptSubscription(() => oauth(context, 'openai')), window, context.images)
     case 'opencode-go': {
       const pool = context.credentials.opencodePool?.()
       if (pool === undefined || context.model === undefined) throw new LlmError('OpenCode Go is not available here', 'MISSING_CREDENTIAL')
+      // OpenCode Go's models differ in vision support; they get images as text (DSH projects them).
       return opencodeGoAdapter(context.model, pool, context.contextWindow, context.wire)
     }
     default:

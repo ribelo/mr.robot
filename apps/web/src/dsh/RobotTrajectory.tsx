@@ -19,6 +19,7 @@ import { en as trajectoryEn, type TrajectoryTranslate } from './trajectory/local
 import { registerTrajectoryAssistantDefinition } from './trajectory/trajectory-assistant-definition.ts'
 import { registerTrajectoryCompactionDefinitions } from './trajectory/trajectory-compaction-definition.ts'
 import type { TrajectorySnapshot } from './trajectory/trajectory-contract.ts'
+import type { MessageImageLoader, MessageImageSource } from './contract/slots.ts'
 import { registerTrajectoryMessageDefinitions } from './trajectory/trajectory-message-definitions.ts'
 import { registerTrajectoryRequestHeaderDefinition } from './trajectory/trajectory-request-header-definition.ts'
 import { EMPTY_TRAJECTORY_SNAPSHOT, registerTrajectoryConversationView } from './trajectory/trajectory-snapshot-builder.ts'
@@ -153,11 +154,42 @@ const translate: TrajectoryTranslate = (key, params) => {
 const duration = createTrajectoryDurationStore()
 const stringWrapping = createTrajectoryStringWrappingStore()
 
-/** Mr. Robot's Robots do not store image attachments yet; the view shows none. */
-const loadImage = Object.assign(async () => { throw new Error('images are not available') }, { peek: () => undefined })
+/** Screenshot images in records load from the Robot's Workspace (robot-cmz9), cached per page. */
+function imageLoader(robotId: string) {
+  const urls = new Map<string, string>()
+  return Object.assign(async (ref: { attachmentId: string }) => {
+    const known = urls.get(String(ref.attachmentId))
+    if (known !== undefined) return known
+    const response = await fetch(`/api/robots/${encodeURIComponent(robotId)}/attachments/${encodeURIComponent(String(ref.attachmentId))}`, { credentials: 'same-origin' })
+    if (!response.ok) throw new Error(`image answered ${response.status}`)
+    const url = URL.createObjectURL(await response.blob())
+    urls.set(String(ref.attachmentId), url)
+    return url
+  }, { peek: (ref: { attachmentId: string }) => urls.get(String(ref.attachmentId)) })
+}
+
+/** The record's images as thumbnails that open full size. */
+function RecordImages({ images, loadImage, align }: { images: readonly MessageImageSource[]; loadImage: MessageImageLoader; align: 'start' | 'end' }) {
+  return (
+    <div className="dsh-record-images" style={{ justifyContent: align === 'end' ? 'flex-end' : 'flex-start' }}>
+      {images.map((source, index) => <RecordImage key={index} source={source} loadImage={loadImage} />)}
+    </div>
+  )
+}
+
+function RecordImage({ source, loadImage }: { source: MessageImageSource; loadImage: MessageImageLoader }) {
+  const [url, setUrl] = useState<string | undefined>('preview' in source ? source.preview.url : loadImage.peek?.(source.attachment))
+  useEffect(() => {
+    if (url !== undefined || !('attachment' in source)) return
+    void loadImage(source.attachment).then(setUrl).catch(() => undefined)
+  }, [loadImage, source, url])
+  if (url === undefined) return <span className="dsh-record-image loading" />
+  return <a href={url} target="_blank" rel="noreferrer"><img className="dsh-record-image" src={url} alt={'attachment' in source ? (source.attachment.name ?? 'image') : 'image'} /></a>
+}
 
 export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liveVersion: number }) {
   const feed = useMemo(() => new TrajectoryFeed(robotId), [robotId])
+  const loadImage = useMemo(() => imageLoader(robotId) as unknown as MessageImageLoader, [robotId])
   const [error, setError] = useState<string>()
   useEffect(() => { feed.open().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause))) }, [feed])
   useEffect(() => { if (liveVersion > 0) void feed.refresh().catch(() => undefined) }, [feed, liveVersion])
@@ -176,7 +208,7 @@ export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liv
         useDuration={useDuration}
         viewRequest={null}
         completeViewRequest={() => undefined}
-        renderSlot={() => null}
+        renderSlot={(_key, owner) => <RecordImages images={owner.images} loadImage={owner.loadImage} align={owner.align} />}
         t={translate}
         jsonStringWrapping={{ getDefault: () => stringWrapping.getSnapshot(), setDefault: (value) => { stringWrapping.set(value) } }}
         loadOlder={feed.loadOlder}

@@ -5,7 +5,7 @@
  */
 import { LlmAdapter, LlmError, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { finishReason } from './openai-chat.ts'
-import { httpFailure, replayBlocks, sse, StreamWriter, systemText, textOf, type DshMessage } from './stream.ts'
+import { httpFailure, imagesOf, loadImages, replayBlocks, sse, StreamWriter, systemText, textWithoutImages, type DshMessage, type ImageLoader, type LoadedImages } from './stream.ts'
 
 const URL_ = 'https://api.anthropic.com/v1/messages?beta=true'
 const IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -15,9 +15,11 @@ type Block =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string; signature: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | { type: 'tool_result'; tool_use_id: string; content: string | Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>; is_error?: boolean }
 
-export function anthropicMessages(options: GenerateOptions, provider: string): Array<{ role: 'user' | 'assistant'; content: Block[] }> {
+export function anthropicMessages(options: GenerateOptions, provider: string, images: LoadedImages = new Map()): Array<{ role: 'user' | 'assistant'; content: Block[] }> {
+  const image = (part: { mediaType: string; base64: string }) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: part.mediaType, data: part.base64 } })
   const out: Array<{ role: 'user' | 'assistant'; content: Block[] }> = []
   const push = (role: 'user' | 'assistant', blocks: Block[]) => {
     if (blocks.length === 0) return
@@ -26,8 +28,15 @@ export function anthropicMessages(options: GenerateOptions, provider: string): A
     else out.push({ role, content: blocks })
   }
   for (const message of options.messages) {
-    if (message.role === 'user') push('user', [{ type: 'text', text: textOf(message.content) || '.' }])
-    else if (message.role === 'tool') push('user', [{ type: 'tool_result', tool_use_id: toolId(message.toolCallId), content: textOf(message.content), ...(message.isError === true ? { is_error: true } : {}) }])
+    if (message.role === 'user') {
+      const text = textWithoutImages(message.content, images)
+      const pictures = imagesOf(message.content, images).map(image)
+      push('user', [...pictures, ...(text === '' && pictures.length > 0 ? [] : [{ type: 'text' as const, text: text || '.' }])])
+    } else if (message.role === 'tool') {
+      const text = textWithoutImages(message.content, images)
+      const pictures = imagesOf(message.content, images).map(image)
+      push('user', [{ type: 'tool_result', tool_use_id: toolId(message.toolCallId), content: pictures.length === 0 ? text : [{ type: 'text', text: text || 'image' }, ...pictures], ...(message.isError === true ? { is_error: true } : {}) }])
+    }
     else if (message.role === 'assistant') push('assistant', assistantBlocks(message, provider))
   }
   return out
@@ -76,7 +85,7 @@ export function claudeSubscription(token: () => Promise<string>): AnthropicEndpo
 }
 
 export class AnthropicAdapter extends LlmAdapter {
-  constructor(private readonly endpoint: AnthropicEndpoint, private readonly contextWindow: number) {
+  constructor(private readonly endpoint: AnthropicEndpoint, private readonly contextWindow: number, private readonly images?: ImageLoader) {
     super()
   }
 
@@ -85,6 +94,7 @@ export class AnthropicAdapter extends LlmAdapter {
       provider, id: model, name: model,
       context: { contextWindow: this.contextWindow },
       defaultMaxTokens: 32_000,
+      ...(this.images === undefined ? {} : { inputModalities: ['text', 'image'] }),
       reasoning: { efforts: ['off', 'low', 'medium', 'high', 'max'].map((id) => ({ id, name: id })) },
     } as never)
   }
@@ -107,7 +117,7 @@ export class AnthropicAdapter extends LlmAdapter {
         max_tokens: maxTokens,
         stream: true,
         system: [...(this.endpoint.claudeCode ? [{ type: 'text', text: IDENTITY }] : []), ...(system === '' ? [] : [{ type: 'text', text: system }])],
-        messages: anthropicMessages(options, options.provider),
+        messages: anthropicMessages(options, options.provider, await loadImages(options, this.images)),
         ...(options.tools === undefined || options.tools.length === 0 ? {} : { tools: options.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) }),
         ...(budget === undefined ? {} : { thinking: { type: 'enabled', budget_tokens: budget } }),
       }),
