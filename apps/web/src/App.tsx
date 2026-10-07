@@ -74,6 +74,7 @@ export function App() {
         onProfile={() => go({ page: 'profile' })}
         onListPref={(id, change) => void api.listPref(id, change).then(refreshRobots)}
         onEditProfile={(id) => setSheet({ kind: 'profile', robotId: id })}
+        onAdvanced={(id) => go({ page: 'advanced', id })}
       />
       <main className="main">
         {route.page === 'robot'

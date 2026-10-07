@@ -83,7 +83,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </label>
 
       <h2>Tools</h2>
-      <div className="check-grid">
+      <div className="check-grid scroll-box">
         {catalog.toolGroups.map((group) => (
           <label key={group.name} className="check">
             <input type="checkbox" checked={draft.grants.tools.includes(group.name)} onChange={() => toggle('tools', group.name)} />
@@ -93,7 +93,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </div>
       <h2>Skills</h2>
       {catalog.skills.length === 0 ? <div className="muted">No skills in the library yet.</div> : (
-        <div className="check-grid">
+        <div className="check-grid scroll-box">
           {catalog.skills.map((skill) => (
             <label key={skill.name} className="check"><input type="checkbox" checked={draft.grants.skills.includes(skill.name)} onChange={() => toggle('skills', skill.name)} /><span>{skill.name}<small>{skill.description}</small></span></label>
           ))}
@@ -165,10 +165,6 @@ function PromptPreview({ id }: { id: string }) {
               <pre>{section.text}</pre>
             </details>
           ))}
-          <details className="prompt-section">
-            <summary>Tools <span className="muted">· {preview.tools.length}</span></summary>
-            <pre>{preview.tools.join('\n') || 'none'}</pre>
-          </details>
           <details className="prompt-section">
             <summary>Skills <span className="muted">· {preview.skills.length}</span></summary>
             <pre>{preview.skills.join('\n') || 'none granted'}</pre>

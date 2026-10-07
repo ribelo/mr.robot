@@ -295,3 +295,15 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .ask-counter { float: right; font-weight: 400; color: var(--muted); }
 .ask-reply { align-self: flex-end; font-size: 12.5px; }
 .ask-line[data-status="open"] { color: var(--text); }
+
+/* Settings navigation, model search, list heights (v1.1 ticket 07) */
+.scroll-box { max-height: 280px; overflow-y: auto; padding-right: 4px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+.model-combo { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.model-combo-current { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; background: #242424; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; color: inherit; }
+.model-combo-panel { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; background: #1e1e1e; border: 1px solid var(--line); border-radius: 12px; padding: 8px; box-shadow: 0 8px 30px #0008; }
+.model-combo-panel input { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.model-combo-list { max-height: 320px; overflow-y: auto; }
+.model-combo-group { font-size: 11.5px; color: var(--muted); padding: 8px 6px 4px; text-transform: none; }
+.model-option { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 7px 10px; border-radius: 8px; }
+.model-option:hover:not(:disabled), .model-option.selected { background: #ffffff12; }
+.model-option:disabled { color: var(--muted); }

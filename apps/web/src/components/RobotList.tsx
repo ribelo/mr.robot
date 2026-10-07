@@ -14,10 +14,11 @@ export interface RobotListProps {
   readonly onProfile: () => void
   readonly onListPref: (id: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }) => void
   readonly onEditProfile: (id: string) => void
+  readonly onAdvanced: (id: string) => void
 }
 
 /** The robot list (robot-q4b2, robot-mktj): pinned first, unread marked, a menu on every Robot. */
-export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreate, onAdmin, onProfile, onListPref, onEditProfile }: RobotListProps) {
+export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreate, onAdmin, onProfile, onListPref, onEditProfile, onAdvanced }: RobotListProps) {
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<string>()
   const [showHidden, setShowHidden] = useState(false)
@@ -43,6 +44,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
           onClose={() => setMenu(undefined)}
           onListPref={(change) => { setMenu(undefined); onListPref(robot.id, change) }}
           onEditProfile={() => { setMenu(undefined); onEditProfile(robot.id) }}
+          onAdvanced={() => { setMenu(undefined); onAdvanced(robot.id) }}
         />
       ) : null}
     </li>
@@ -77,11 +79,12 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
   )
 }
 
-function RowMenu({ robot, onClose, onListPref, onEditProfile }: {
+function RowMenu({ robot, onClose, onListPref, onEditProfile, onAdvanced }: {
   robot: RobotSummary
   onClose: () => void
   onListPref: (change: { pinned?: boolean; hidden?: boolean; unread?: boolean }) => void
   onEditProfile: () => void
+  onAdvanced: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -97,6 +100,7 @@ function RowMenu({ robot, onClose, onListPref, onEditProfile }: {
       <button type="button" role="menuitem" onClick={() => onListPref({ unread: !robot.unread })}>{robot.unread ? 'Mark as read' : 'Mark as unread'}</button>
       <hr />
       <button type="button" role="menuitem" onClick={onEditProfile}>Edit profile</button>
+      <button type="button" role="menuitem" onClick={onAdvanced}>Advanced settings</button>
       <hr />
       <button type="button" role="menuitem" onClick={() => onListPref({ hidden: robot.hidden !== true })}>{robot.hidden === true ? 'Show in sidebar' : 'Hide from sidebar'}</button>
     </div>
