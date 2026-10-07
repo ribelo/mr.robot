@@ -4,6 +4,7 @@
 let
   start = pkgs.writeShellScriptBin "start" ''
     set -eu
+    export PATH=${pkgs.coreutils}/bin:${pkgs.socat}/bin:${pkgs.wireproxy}/bin:${pkgs.chromium}/bin:$PATH
     mkdir -p /tmp/profile
     proxy=""
     # Container Chrome via VPN: the Home's Proton WireGuard config arrives as WG_CONFIG; wireproxy
@@ -20,7 +21,9 @@ let
     exec chromium \
       --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check \
       --disable-blink-features=AutomationControlled --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 \
-      --remote-allow-origins='*' --user-data-dir=/tmp/profile --window-size=1280,800 --lang=pl-PL $proxy about:blank
+      --remote-allow-origins='*' --user-data-dir=/tmp/profile --window-size=1280,800 --lang=pl-PL \
+      --user-agent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36' \
+      $proxy about:blank
   '';
 in
 pkgs.dockerTools.buildLayeredImage {
@@ -31,6 +34,6 @@ pkgs.dockerTools.buildLayeredImage {
   config = {
     Cmd = [ "/bin/start" ];
     ExposedPorts = { "9222/tcp" = { }; };
-    Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" "FONTCONFIG_FILE=${pkgs.fontconfig.out}/etc/fonts/fonts.conf" "HOME=/tmp" ];
+    Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" "FONTCONFIG_FILE=${pkgs.fontconfig.out}/etc/fonts/fonts.conf" "HOME=/tmp" "PATH=/bin" ];
   };
 }

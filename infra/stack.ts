@@ -12,7 +12,7 @@ import type { ChromeContainer, Home, Member, Robot } from '../apps/worker/src/in
 import { vapidPublicKey } from './vapid.ts'
 
 /** The pushed Chrome image (infra/chrome/push.sh prints it). */
-const CHROME_IMAGE_TAG = 'yihr03qchl7b'
+const CHROME_IMAGE_TAG = 'myr1wdvmb6d3'
 
 export const Files = Cloudflare.R2.Bucket('Files')
 
