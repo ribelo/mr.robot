@@ -43,6 +43,7 @@ try {
     ['a page left running is reattached and its notification read', report['watchReattached'] === true && String(JSON.stringify(report['watchNotifications'])).includes('Out for delivery')],
     ['a page opened after reattaching is watched too', String(JSON.stringify(report['watchAfterReattach'])).includes('Out for delivery')],
     ['a block page is recognised', report['blockPage'] === true],
+    ['a DataDome block (Allegro) is recognised', report['dataDome'] === true],
     ['a real bot check (DuckDuckGo) is recognised as a CAPTCHA', report['botCheck'] === 'bot check'],
     ['web search without a key returns real results', Number(report['searchCount']) >= 3 && /^https?:\/\/(?!www\.bing\.com)/.test(String(report['searchFirst']))],
   ]

@@ -103,7 +103,9 @@ export const OBSERVE_SCRIPT = `(() => {
         : /confirm (that )?(this search was made by|you are) a human|verify (that )?you are (a )?human|unusual traffic from your computer|not a robot|verifying you('|’)re not a bot|complete the security check/i.test(text) ? 'bot check' : null
   // A block page: short, and its title or opening says the visitor is blocked (Allegro, Cloudflare WAF, Akamai).
   const head = ((document.title || '') + '\\n' + text.slice(0, 600))
-  const blocked = text.length < 4000 && /you( have|'ve|’ve) been blocked|sorry, you have been blocked|access (to this page )?(has been )?denied|(your |this )?request (has been |was )?blocked|you don't have permission to access|403 forbidden/i.test(head)
+  // DataDome (Allegro and others) shows its block or puzzle inside an iframe from captcha-delivery.com.
+  const datadome = frames.some((src) => /captcha-delivery\\.com|datadome/i.test(src))
+  const blocked = datadome || text.length < 4000 && /you( have|'ve|’ve) been blocked|sorry, you have been blocked|access (to this page )?(has been )?denied|(your |this )?request (has been |was )?blocked|you don't have permission to access|403 forbidden/i.test(head)
   const scroller = document.scrollingElement || document.documentElement
   return {
     url: location.href,
