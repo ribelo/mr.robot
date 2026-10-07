@@ -91,6 +91,8 @@ export default {
       // Wake on screen notifications: leave a page running, reconnect, read what it showed.
       const watched = await driver.open(null)
       await watched.goto(`${url.origin}/notify`)
+      // A check before the page notifies must not lose later notifications (bug found live 2026-10-07).
+      report.watchEarly = await watched.takeNotifications()
       const sessionId = watched.sessionId()
       await watched.detach()
       await new Promise((resolve) => setTimeout(resolve, 4000))

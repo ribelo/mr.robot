@@ -206,7 +206,7 @@ class RenderingPage implements BrowserPage {
   }
 
   async takeNotifications(): Promise<Array<{ title: string; body: string; at: number }>> {
-    return (await this.page.evaluate('(() => { const all = window.__mrNotifications || []; window.__mrNotifications = []; return all })()').catch(() => [])) as Array<{ title: string; body: string; at: number }>
+    return (await this.page.evaluate('(window.__mrNotifications || []).splice(0)').catch(() => [])) as Array<{ title: string; body: string; at: number }>
   }
 
   /** Give the page a moment to react: a short network quiet period, bounded. */
