@@ -734,6 +734,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     if (config.wakeOnScreenNotifications !== true || config.status !== 'active') return this.stopWatching()
     let page = await this.browserDriver().attach(watch.sessionId)
+    console.log('screen watch', { robot: config.id, attached: page !== undefined })
     if (page === undefined) {
       page = await this.browserDriver().open(this.store.get<BrowserState>('browser-state') ?? null)
       if (watch.url.startsWith('http')) await page.goto(watch.url).catch(() => undefined)
@@ -741,6 +742,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     const notes = await page.takeNotifications()
     const url = page.url()
+    console.log('screen watch', { robot: config.id, notes: notes.length })
     await page.detach()
     for (const note of notes) {
       const line = [note.title, note.body].filter((part) => part.trim() !== '').join(': ')
