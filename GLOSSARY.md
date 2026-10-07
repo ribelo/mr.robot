@@ -31,3 +31,6 @@ Vocabulary for Mr. Robot. Specs, code and tests use these words and no synonyms.
 - **Global skill / Local skill** — a skill in the Home library (read-only for Robots except Mr. Robot) / a skill in one Robot's Workspace (the Robot edits it freely).
 - **Files view** — the per-Robot view of its Workspace with an editor.
 - **Composer** — the message input at the bottom of a Conversation.
+- **Host** — a computer running the Mr. Robot desktop app, paired to a Member, private or shared with the Home; offers robots files, a shell and a Host browser on grant.
+- **Host browser** — the browser backend served by a Host: Chrome installed there, driven over CDP through the app, behind the same seam as cloud backends.
+- **Host tools** — host_read, host_write, host_run on a granted Host.
