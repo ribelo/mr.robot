@@ -34,6 +34,7 @@ try {
     ['takeover typing reaches the page', report['takeoverTyped'] === 'Typed by a person'],
     ['takeover tap reaches the page', report['takeoverClicked'] === 'Signed in'],
     ['a page left running is reattached and its notification read', report['watchReattached'] === true && JSON.stringify(report['watchNotifications']).includes('Out for delivery')],
+    ['a real bot check (DuckDuckGo) is recognised as a CAPTCHA', report['botCheck'] === 'bot check'],
     ['web search without a key returns real results', Number(report['searchCount']) >= 3 && /^https?:\/\/(?!www\.bing\.com)/.test(String(report['searchFirst']))],
   ]
   for (const [name, ok] of checks) console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`)

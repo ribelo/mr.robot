@@ -79,6 +79,15 @@ export default {
       await page.close()
     }
     try {
+      // A real site's own bot check is recognised (robot-b49q).
+      const checked = await driver.open(null)
+      await checked.goto('https://html.duckduckgo.com/html/?q=mokotow')
+      report.botCheck = (await checked.observe()).challenge
+      await checked.close()
+    } catch (error) {
+      report.botCheckError = error instanceof Error ? error.message : String(error)
+    }
+    try {
       // Wake on screen notifications: leave a page running, reconnect, read what it showed.
       const watched = await driver.open(null)
       await watched.goto(`${url.origin}/notify`)

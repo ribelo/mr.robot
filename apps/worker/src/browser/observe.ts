@@ -94,7 +94,9 @@ export const OBSERVE_SCRIPT = `(() => {
   const frames = [...document.querySelectorAll('iframe')].map((frame) => frame.src || '')
   const challenge = frames.some((src) => src.includes('challenges.cloudflare.com')) ? 'turnstile'
     : frames.some((src) => /hcaptcha\\.com/.test(src)) ? 'hcaptcha'
-      : frames.some((src) => /recaptcha/.test(src)) ? 'recaptcha' : null
+      : frames.some((src) => /recaptcha/.test(src)) ? 'recaptcha'
+        // Sites' own bot checks (seen on DuckDuckGo, Google and Brave from Browser Rendering, 2026-10-07).
+        : /confirm (that )?(this search was made by|you are) a human|verify (that )?you are (a )?human|unusual traffic from your computer|not a robot|verifying you('|’)re not a bot|complete the security check/i.test(text) ? 'bot check' : null
   const scroller = document.scrollingElement || document.documentElement
   return {
     url: location.href,
