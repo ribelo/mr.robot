@@ -13,7 +13,10 @@ import { HOME_ID, type Env } from '../env.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { cronOf, describeSchedule } from './schedule.ts'
 import { displaySchedule, resumed } from '../agent/schedule.ts'
-import type { ProposalRow, RobotStore, RoutineRow, WakeupKind } from './store.ts'
+import type { ProposalRow, RobotConfig, RobotStore, RoutineRow, WakeupKind } from './store.ts'
+import { dueDelivery } from '../agent/schedule.ts'
+import { MR_ROBOT_TOOLS } from '../agent/catalog.ts'
+import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
@@ -66,6 +69,10 @@ export interface RobotPlatformShape {
   notifyMembers(kind: NotificationKind, body: string): Effect.Effect<number>
   /** Keep a fetched secret's value in memory to mask it (never stored). */
   rememberSecret(name: string, value: string): Effect.Effect<void>
+  /** The Durable Object's alarm. */
+  setAlarm(at: number | null): Effect.Effect<void>
+  /** Write the Muse persona files into a new Workspace (robot-om9f). */
+  seedWorkspace(): Effect.Effect<void>
   /** A Turn is running or about to run. */
   working(): Effect.Effect<boolean>
   /** Dispose the DSH agent so the next Turn composes over the current live session. */
@@ -560,4 +567,85 @@ export const undoRewind = (id: string) => Effect.gen(function* () {
   })
   yield* platform.changed()
   return { ...record, undone: true } as RewindView
+})
+
+// ------------------------------------------------------------------ creation and the alarm (robot-qo06, robot-7j1a, robot-v1gb)
+
+export const HEARTBEAT_MS = 30_000
+export const DEFAULT_CONTEXT_BUDGET = 128_000
+
+export interface RobotInit {
+  readonly id: string
+  readonly ownerId: string
+  readonly ownerName: string
+  readonly kind: 'mr-robot' | 'robot'
+  readonly identity: Identity
+  readonly sharing: Sharing
+  readonly status: RobotStatus
+  readonly model: ModelChoice
+  readonly timeZone: string
+  readonly spendLimitUsd: number | null
+  /** What the owner said the Robot is for ("New robot" form or Mr. Robot's brief). */
+  readonly brief?: string
+}
+
+/** A new Robot: its config, Workspace, registry row, and for setup the interview's first Turn (robot-btct). */
+export const create = (init: RobotInit) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const existing = store.config()
+  if (existing !== undefined) return existing
+  const config: RobotConfig = {
+    id: init.id, ownerId: init.ownerId, kind: init.kind, identity: init.identity, sharing: init.sharing, status: init.status,
+    blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: '',
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: init.spendLimitUsd, timeZone: init.timeZone,
+    liveSessionId: `s-${crypto.randomUUID()}`, revision: 1, createdAt: Date.now(),
+  }
+  store.transaction(() => {
+    store.saveConfig(config)
+    store.set('owner', { id: init.ownerId, name: init.ownerName })
+    if (init.brief !== undefined) store.set('brief', init.brief)
+    if (init.kind === 'mr-robot') store.setGrants({ tools: [...MR_ROBOT_TOOLS], skills: [], recipients: [], secrets: [] })
+  })
+  yield* platform.seedWorkspace()
+  yield* platform.changed()
+  if (init.status === 'setup') {
+    yield* wake({ kind: 'platform', sender: { kind: 'platform' }, text: 'Setup started. Greet your owner and begin the interview.', payload: { summary: 'Setup started' } })
+  }
+  return config
+})
+
+/**
+ * Due DSH schedule records become wake-ups with DSH's own framing; a recurring one contributes
+ * only its latest missed occurrence and advances to a future target, a one-shot ends (robot-v1gb).
+ */
+export const fireRoutines = (now: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  for (const routine of store.routines()) {
+    if (routine.paused || routine.nextRun === null || routine.nextRun > now) continue
+    const delivery = dueDelivery(routine.record, now)
+    store.transaction(() => {
+      const wakeupId = store.enqueue('routine', { kind: 'routine', routineId: routine.id, name: routine.record.title }, delivery.text, { routineId: routine.id, due: routine.nextRun }, now)
+      store.addRoutineRun(routine.id, wakeupId, now)
+      store.saveRoutine({ ...routine, lastRun: now, record: delivery.next ?? routine.record, nextRun: delivery.next === null ? null : Date.parse(delivery.next.scheduledAt) })
+    })
+  }
+})
+
+/** The next alarm: a heartbeat while work runs, the earliest Routine, outbox retry or screen check. */
+export const rearm = Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const config = store.config()
+  if (config === undefined || config.status === 'deleted') return yield* platform.setAlarm(null)
+  const runnable = config.status === 'active' || config.status === 'setup'
+  const outbox = store.sql.exec<{ at: number | null }>("SELECT MIN(next_attempt) AS at FROM outbox WHERE status = 'pending'").one().at
+  const watch = store.get<number>('watch-next')
+  const candidates = [
+    ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) ? [Date.now() + HEARTBEAT_MS] : []),
+    ...store.routines().flatMap((routine) => (routine.nextRun === null ? [] : [routine.nextRun])),
+    ...(outbox === null ? [] : [outbox]),
+    ...(watch === undefined ? [] : [watch]),
+  ]
+  yield* platform.setAlarm(candidates.length === 0 ? null : Math.min(...candidates))
 })

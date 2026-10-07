@@ -76,27 +76,16 @@ import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import * as Views from './views.ts'
+import * as Browse from './browsing.ts'
+import { Browsing } from './browsing.ts'
 import { proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
 export type { AnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
-const HEARTBEAT_MS = 30_000
-export const DEFAULT_CONTEXT_BUDGET = 128_000
+export { DEFAULT_CONTEXT_BUDGET } from './programs.ts'
 
-export interface RobotInit {
-  readonly id: string
-  readonly ownerId: string
-  readonly ownerName: string
-  readonly kind: 'mr-robot' | 'robot'
-  readonly identity: Identity
-  readonly sharing: Sharing
-  readonly status: 'setup' | 'active'
-  readonly model: ModelChoice
-  readonly timeZone: string
-  readonly spendLimitUsd: number | null
-  /** What the Robot was asked to become (setup only). */
-  readonly brief?: string
-}
+export type { RobotInit } from './programs.ts'
+import type { RobotInit } from './programs.ts'
 
 export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost {
   protected readonly store: RobotStore
@@ -138,6 +127,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
           return this.mask(text)
         }),
         stopWatching: () => Effect.promise(() => this.stopWatching()),
+        setAlarm: (at) => Effect.promise(() => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at))),
+        seedWorkspace: () => Effect.promise(() => this.seedWorkspace()),
         notifyMembers: (kind, body) => Effect.promise(() => this.notifyMembers(kind, body).catch(() => 0)),
         rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
         working: () => Effect.sync(() => this.store.activeTurn() !== undefined || this.pumping !== undefined),
@@ -160,47 +151,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- lifecycle (robot-qo06)
 
-  async create(init: RobotInit): Promise<RobotConfig> {
-    const existing = this.store.config()
-    if (existing !== undefined) return existing
-    const now = Date.now()
-    const config: RobotConfig = {
-      id: init.id,
-      ownerId: init.ownerId,
-      kind: init.kind,
-      identity: init.identity,
-      sharing: init.sharing,
-      status: init.status,
-      blockedReason: null,
-      model: init.model,
-      contextBudget: DEFAULT_CONTEXT_BUDGET,
-      codeMode: true,
-      compactionInstruction: '',
-      notifications: { enabled: true, members: [], channels: ['pwa'] },
-      spendLimitUsd: init.spendLimitUsd,
-      timeZone: init.timeZone,
-      liveSessionId: `s-${crypto.randomUUID()}`,
-      revision: 1,
-      createdAt: now,
-    }
-    this.store.transaction(() => {
-      this.store.saveConfig(config)
-      this.store.set('owner', { id: init.ownerId, name: init.ownerName })
-      if (init.brief !== undefined) this.store.set('brief', init.brief)
-      if (init.kind === 'mr-robot') this.store.setGrants({ tools: [...MR_ROBOT_TOOLS], skills: [], recipients: [], secrets: [] })
-    })
-    await this.seedWorkspace()
-    await this.report()
-    if (init.status === 'setup') {
-      await this.wake({
-        kind: 'platform',
-        sender: { kind: 'platform' },
-        text: 'Setup started. Greet your owner and begin the interview.',
-        payload: { summary: 'Setup started' },
-      })
-    }
-    return config
+  create(init: RobotInit): Promise<RobotConfig> {
+    return this.program(Programs.create(init))
   }
+
 
   pause(): Promise<void> {
     return this.program(Programs.pause)
@@ -268,7 +222,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   override async alarm(): Promise<void> {
     const config = this.store.config()
-    if (config !== undefined && config.status !== 'deleted') this.fireRoutines(Date.now())
+    if (config !== undefined && config.status !== 'deleted') await this.fireRoutines(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
     if (config !== undefined) await this.deliverOutbox()
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
@@ -283,17 +237,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Due DSH schedule records become wake-ups with DSH's own framing; a recurring one contributes
    * only its latest missed occurrence and advances to a future target, a one-shot ends (robot-v1gb).
    */
-  private fireRoutines(now: number): void {
-    for (const routine of this.store.routines()) {
-      if (routine.paused || routine.nextRun === null || routine.nextRun > now) continue
-      const delivery = dueDelivery(routine.record, now)
-      this.store.transaction(() => {
-        const wakeupId = this.store.enqueue('routine', { kind: 'routine', routineId: routine.id, name: routine.record.title }, delivery.text, { routineId: routine.id, due: routine.nextRun }, now)
-        this.store.addRoutineRun(routine.id, wakeupId, now)
-        this.store.saveRoutine({ ...routine, lastRun: now, record: delivery.next ?? routine.record, nextRun: delivery.next === null ? null : Date.parse(delivery.next.scheduledAt) })
-      })
-    }
+  private fireRoutines(now: number): Promise<void> {
+    return this.program(Programs.fireRoutines(now))
   }
+
 
   /** ctx.schedule over the routine table: DSH's records, stored here, fired by the alarm. */
   private schedule(): AlarmSchedule {
@@ -771,48 +718,39 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.rearm()
   }
 
-  async browserOpen(url: string): Promise<Observation> {
-    if (!/^https?:\/\//.test(url)) throw new Error('only http and https URLs')
-    const page = await this.page()
-    await page.goto(url)
-    return this.observed(page)
+  browserOpen(url: string): Promise<Observation> {
+    return this.browsing(Browse.open(url))
   }
 
-  async browserObserve(): Promise<Observation> {
-    return this.observed(await this.page())
+
+  browserObserve(): Promise<Observation> {
+    return this.browsing(Browse.observe)
   }
 
-  async browserAct(action: BrowserAction): Promise<Observation> {
-    const page = await this.page()
-    if (action.action === 'click' || (action.action === 'type' && action.submit === true)) {
-      // Payment stays with the owner (robot-ueh0): the final pay/order step is never clicked by a Robot.
-      const observation = await page.observe()
-      const target = observation.elements.find((element) => element.index === action.index)
-      // On a checkout page the last button is often just "Finish" or "Confirm" (saucedemo.com, many shops).
-      const checkout = CHECKOUT_PAGE.test(`${observation.url} ${observation.title}`) && CHECKOUT_FINAL.test(target?.label ?? '')
-      if (target !== undefined && (PAYMENT_STEP.test(target.label) || checkout)) {
-        throw new Error(`"${target.label}" looks like the payment or final order step. Stop here: tell your owner what is ready, or call browser_request_takeover so they pay themselves.`)
-      }
-    }
-    await page.act(action)
-    return this.observed(page)
+
+  browserAct(action: BrowserAction): Promise<Observation> {
+    return this.browsing(Browse.act(action))
   }
 
-  async browserWait(input: { text?: string; ms?: number }): Promise<Observation> {
-    const page = await this.page()
-    await page.waitFor(input)
-    return this.observed(page)
+
+  browserWait(input: { text?: string; ms?: number }): Promise<Observation> {
+    return this.browsing(Browse.wait(input))
   }
 
-  async browserScreenshot(): Promise<{ path: string; image: ScreenshotImage }> {
-    const page = await this.page()
-    const png = await page.screenshot()
-    const { path } = await this.saveScreen(png)
-    const name = path.slice('screens/'.length)
-    // PNG: width and height are the first two fields of the IHDR chunk.
-    const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
-    return { path, image: { attachmentId: `screen:${name}`, mediaType: 'image/png', bytes: png.byteLength, width: view.getUint32(16), height: view.getUint32(20), name } }
+
+  browserScreenshot(): Promise<{ path: string; image: ScreenshotImage }> {
+    return this.browsing(Browse.screenshot)
   }
+
+  /** Run a browser program with the Robot's page, masking and screen as its Browsing service. */
+  private browsing<A, E>(program: Effect.Effect<A, E, Browsing>): Promise<A> {
+    return this.program(Effect.provideService(program, Browsing, {
+      page: () => Effect.promise(() => this.page()),
+      observed: (page) => Effect.promise(() => this.observed(page)),
+      saveScreen: (png) => Effect.promise(() => this.saveScreen(png)),
+    }))
+  }
+
 
   /** Image bytes for a screenshot attachment id, for the model and the trajectory inspector. */
   async screenshotImage(attachmentId: string): Promise<{ mediaType: string; base64: string; body: ArrayBuffer } | undefined> {
@@ -1161,32 +1099,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- alarm
 
-  private async rearm(): Promise<void> {
-    const candidates: number[] = []
-    const config = this.store.config()
-    if (config === undefined || config.status === 'deleted') {
-      await this.ctx.storage.deleteAlarm()
-      return
-    }
-    if (this.store.activeTurn() !== undefined || (this.store.pendingWakeups() > 0 && runnable(config))) {
-      candidates.push(Date.now() + HEARTBEAT_MS)
-    }
-    candidates.push(...this.alarmCandidates())
-    if (candidates.length === 0) {
-      await this.ctx.storage.deleteAlarm()
-      return
-    }
-    await this.ctx.storage.setAlarm(Math.min(...candidates))
+  private rearm(): Promise<void> {
+    return this.program(Programs.rearm)
   }
 
-  /** Further alarm times: the earliest Routine and the next outbox retry. */
-  protected alarmCandidates(): number[] {
-    const config = this.store.config()
-    if (config === undefined || config.status === 'deleted') return []
-    const outbox = this.store.sql.exec<{ at: number | null }>("SELECT MIN(next_attempt) AS at FROM outbox WHERE status = 'pending'").one().at
-    const watch = this.store.get<number>('watch-next')
-    return [...this.store.routines().flatMap((routine) => routine.nextRun === null ? [] : [routine.nextRun]), ...(outbox === null ? [] : [outbox]), ...(watch === undefined ? [] : [watch])]
-  }
+
 
   // ---------------------------------------------------------------- Robot messages (robot-bsvs, robot-mv15, robot-ppzu, robot-bjq5)
 
@@ -1436,13 +1353,7 @@ const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Esc
 
 /** The tool running now: the latest call without a result (a code program's latest inner call wins). */
 
-/** Labels of the final payment or order step, in English and Polish. */
-const PAYMENT_STEP = /\b(pay( now)?|place (your )?order|buy now|complete (purchase|order)|confirm (and pay|payment|purchase)|submit order)\b|zapłać|płacę|kupuję|kupuj i płać|zamawiam|złóż zamówienie|potwierdzam (zakup|płatność)|przejdź do płatności/i
 
-/** A checkout or payment page, by address or title. */
-const CHECKOUT_PAGE = /checkout|payment|kasa|platnosc|płatność|zamowienie|zamówienie/i
-/** The closing button on such a page. */
-const CHECKOUT_FINAL = /^\s*(finish|confirm|complete|submit|zakończ|potwierdź|zatwierdź)\b/i
 
 interface WatchState {
   readonly sessionId: string
