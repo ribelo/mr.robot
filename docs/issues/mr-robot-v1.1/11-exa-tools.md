@@ -6,9 +6,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] With a key and the grant, a robot's search returns live Exa results
+- [x] With a key and the grant, a robot's search returns live Exa results
 - [x] Without the agent-runs grant those tools are absent
 - [x] Usage shows Exa calls and cost
 - [x] Without a key the grant explains that the admin must add one
@@ -23,4 +23,4 @@
 - Robot DO tests (exa.test.ts, Exa faked): search with the Home key returns results and records 1 call at $0.007; agent-run tools are absent without "exa-agent"; without a key the catalog note and the tool error say the admin must add one.
 - Against the real Exa API from this machine with the owner's desktop key (kept in memory, not stored): search returned the Cloudflare Containers pricing pages ($0.007), crawl returned example.com ($0.001), code context returned Puppeteer docs, the agent run list answered.
 - Live 2026-10-07 without a key: both groups carry the note "Needs the Home's Exa API key: the Home admin adds it under Admin → Exa."
-- Not yet: a live Robot search, which needs an Exa key stored in the Home (owner's step).
+- Live 2026-10-07 with the owner's desktop key stored in the Home (owner approved): Browser Check, granted "exa", answered "$0.000020 per additional vCPU-second… Source: https://developers.cloudflare.com/containers/pricing/" from web_search_exa; its usage shows 1 Exa call, $0.007.

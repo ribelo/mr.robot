@@ -14,7 +14,7 @@ Spec: ../mr-robot-v1.1.md. Work the frontier (all blockers done), browser ticket
 | 08 | [Files view for workspace and memory](08-files-view.md) | — | done |
 | 09 | [Global and local skills, editable](09-global-and-local-skills.md) | 08 | done |
 | 10 | [Mr. Robot rights and defaults](10-mr-robot-chief-rights.md) | 05, 09 | done |
-| 11 | [Exa tools with a Home key](11-exa-tools.md) | — | in-progress (needs an Exa key in the Home) |
+| 11 | [Exa tools with a Home key](11-exa-tools.md) | — | done |
 | 12 | [TOTP codes list beside logins](12-totp-codes.md) | 05 | postponed |
 | 13 | [Host tools from the owner's computer](13-host-tools-from-owners-computer.md) | 01 | postponed |
 | 14 | [Screen streaming for a Leash-driven host browser](14-host-browser-streaming.md) | 13 | postponed |
