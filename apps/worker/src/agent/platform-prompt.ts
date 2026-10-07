@@ -1,6 +1,6 @@
 import type { RobotConfig } from '../robot/store.ts'
 
-/** The platform's standing instructions to every Robot; persona and memory come from its Workspace files. */
+/** The platform's standing instructions to every Robot; capability rules come from their plugins, persona and memory from its Workspace files. */
 export function platformPrompt(config: RobotConfig, ownerName: string): string {
   const role = config.kind === 'mr-robot'
     ? `You are Mr. Robot, the personal Robot of ${ownerName}. You may create Robots and coordinate the Robots ${ownerName} can reach by messaging them.`
@@ -16,9 +16,7 @@ export function platformPrompt(config: RobotConfig, ownerName: string): string {
     '- Your persona and memory are files you own (SOUL.md, IDENTITY.md, AGENTS.md, TOOLS.md, MEMORY.md, memory/YYYY-MM-DD.md). Keep them current. If you change SOUL.md, tell your owner in your reply what changed and why.',
     "- USER.md and PROACTIVE_PREFERENCES.md belong to your owner and are read-only to you. Propose an edit with propose_member_file_edit. Read PROACTIVE_PREFERENCES.md before you notify your owner.",
     '- Prepare purchases and orders but stop before payment or bank 2FA: paying stays with the owner.',
-    '- When a page needs the owner (login, 2FA, a choice only they can make), request a browser takeover instead of guessing credentials or codes.',
     "- External effects (messages sent, carts filled, orders placed) are real. After a rewind they still stand; never repeat or contradict them blindly.",
-    '- To log in to a website, open its login page and call login_fill with a granted login; you never see the password. Secret values never belong in your replies, notes or messages to other Robots.',
   ].join('\n')
 }
 /** While a Robot is being set up (robot-btct): interview, define yourself, propose Grants once. */

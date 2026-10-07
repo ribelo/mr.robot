@@ -7,14 +7,12 @@
  * armed while it runs; if the DO dies mid-Turn, the alarm brings it back and the
  * interrupted Turn resumes from the last persisted event.
  */
-import { exaAgentTools, exaResearchTools } from '../agent/exa.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
 import { LlmError, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
   HostView,
   WorkspaceFileContent,
@@ -44,32 +42,42 @@ import type {
   Trajectory,
   TrajectoryEvent,
 } from '@mr-robot/protocol'
-import { MR_ROBOT_TOOLS, isToolGroup, type ToolGroup } from '../agent/catalog.ts'
+import { isToolGroup } from '../agent/catalog.ts'
 import { composeScoped, type Composition } from '../agent/compose.ts'
-import { browserUsePlugin, credentialsPlugin, filesPlugin } from '../agent/seams.ts'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
-import { AlarmSchedule, dueDelivery, schedulePlugin, SCHEDULE_TOOL_NAMES, type ScheduleTask } from '../agent/schedule.ts'
-import { notifyTools, type NotifyHost } from '../agent/tools/notify.ts'
-import { maskSecrets, secretTools, type SecretHost } from '../agent/tools/secrets.ts'
-import { messagingTools, replyTools, robotsTools, type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
+import { AlarmSchedule, dueDelivery, type ScheduleTask } from '../agent/schedule.ts'
+import { type NotifyHost } from '../agent/tools/notify.ts'
+import { maskSecrets, type SecretHost } from '../agent/tools/secrets.ts'
+import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage } from '../agent/sources.ts'
-import { conversationTools } from '../agent/tools/conversation.ts'
-import { fileTools, memberFileTools } from '../agent/tools/files.ts'
-import { grantProposalTools, setupTools } from '../agent/tools/proposals.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
-import { webPlugin } from '../agent/web.ts'
-import { skillFrontmatter, skillProposalTools, skillsPlugin } from '../agent/skills.ts'
-import { browserTools, type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
-import { takeoverTools, type TakeoverHost } from '../agent/tools/takeover.ts'
+import { skillFrontmatter } from '../agent/skills.ts'
+import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
+import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
-import { hostTools } from '../agent/tools/host.ts'
+import { mount, type Mount } from '../plugins/define.ts'
+import { Browser } from '../plugins/browser.ts'
+import { Conversation as ConversationPlugin } from '../plugins/conversation.ts'
+import { Credentials } from '../plugins/credentials.ts'
+import { Exa } from '../plugins/exa.ts'
+import { Files } from '../plugins/files.ts'
+import { GrantProposals } from '../plugins/grant-proposals.ts'
+import { Host } from '../plugins/host.ts'
+import { Logins } from '../plugins/logins.ts'
+import { Messaging } from '../plugins/messaging.ts'
+import { Notify } from '../plugins/notify.ts'
+import { Robots } from '../plugins/robots.ts'
+import { Routines } from '../plugins/routines.ts'
+import { Setup } from '../plugins/setup.ts'
+import { Skills } from '../plugins/skills.ts'
+import { Web } from '../plugins/web.ts'
 import { type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
@@ -563,8 +571,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       ...(contextWindow === undefined ? {} : { modelWindow: contextWindow }),
       compactionInstruction: config.compactionInstruction,
       prompt,
-      tools: this.tools(config),
-      plugins: this.plugins(config),
+      mounts: this.mounts(config),
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
     }))).catch(async (error: unknown) => {
       await Effect.runPromise(Scope.close(scope, Exit.void))
@@ -616,54 +623,43 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** Exactly the tools this Robot may call: the Conversation tools plus its granted groups. */
-  protected tools(config: RobotConfig): ToolDefinition[] {
-    const tools = [...conversationTools()]
-    if (config.status === 'setup') return [...tools, ...setupTools(this), ...fileTools(this)]
-    tools.push(...grantProposalTools(this), ...memberFileTools(this), ...replyTools(this))
-    for (const group of this.store.effectiveGrants().tools.filter(isToolGroup)) tools.push(...this.groupTools(group, config))
-    // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
-    const hostGrants = this.store.effectiveGrants().hosts ?? []
-    const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
-    tools.push(...hostTools(this, { files: names('files'), shell: names('shell') }))
-    return tools
-  }
-
-  /** Tools of one granted group. Groups whose tools come from a DSH plugin are mounted in plugins(). */
-  protected groupTools(group: ToolGroup, config: RobotConfig): ToolDefinition[] {
-    switch (group) {
-      case 'files': return fileTools(this)
-      // DSH's schedule tools, attached by schedulePlugin (see plugins()).
-      case 'routines': return []
-      case 'notify': return notifyTools(this)
-      case 'secrets': return secretTools(this, this.store.effectiveGrants().secrets)
-      case 'messaging': return messagingTools(this)
-      case 'skills': return skillProposalTools(this)
-      case 'browser': return [...browserTools(this), ...takeoverTools(this)]
-      case 'robots': return config.kind === 'mr-robot' ? robotsTools(this) : []
-      case 'exa': return exaResearchTools(this)
-      case 'exa-agent': return exaAgentTools(this)
-      default: return []
+  /**
+   * The capability plugins this Robot mounts (v1.3 ticket 01, pl-rsoy): always the conversation,
+   * then exactly its granted groups; while in setup only setup and files.
+   */
+  protected mounts(config: RobotConfig): Mount[] {
+    const mounts: Mount[] = [mount(Credentials, { source: this.credentials() })]
+    if (config.status === 'setup') {
+      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) })]
     }
-  }
-
-  /** Seam plugins for granted groups (DSH web, skills). */
-  protected plugins(config: RobotConfig): Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> {
-    const plugins: Array<(ctx: import('@deepseek-ai/cordis').Context) => Promise<void>> = [credentialsPlugin(this.credentials())]
-    // Setup may write its own persona files; afterwards only a files Grant gives the file tools.
-    if (config.status === 'setup' || this.store.mayUse('tool', 'files')) plugins.push(filesPlugin(this.workspace, (name) => this.memberFile(name)))
-    if (config.status !== 'setup' && this.store.mayUse('tool', 'browser')) plugins.push(browserUsePlugin())
-    if (config.status !== 'setup' && this.store.mayUse('tool', 'web')) plugins.push(webPlugin(this.credentials(), this.env.BROWSER))
-    if (config.status !== 'setup' && this.store.mayUse('tool', 'routines')) plugins.push(schedulePlugin(this.schedule()))
-    if (config.status !== 'setup' && this.store.mayUse('tool', 'skills')) {
-      plugins.push(skillsPlugin({
-        granted: () => this.home().loadableSkills(config.ownerId, this.store.effectiveGrants().skills),
-        content: async (name) => this.store.effectiveGrants().skills.includes(name) ? this.home().skillContent(config.ownerId, name) : null,
-        local: () => this.localSkills(),
-        localContent: (name) => this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null),
+    mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }))
+    const grants = this.store.effectiveGrants()
+    const granted = new Set(grants.tools.filter(isToolGroup))
+    if (granted.has('files')) mounts.push(mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }))
+    if (granted.has('notify')) mounts.push(mount(Notify, { host: this }))
+    if (granted.has('secrets')) mounts.push(mount(Logins, { host: this, granted: grants.secrets }))
+    if (granted.has('messaging')) mounts.push(mount(Messaging, { host: this }))
+    if (granted.has('browser')) mounts.push(mount(Browser, { host: this }))
+    if (granted.has('robots') && config.kind === 'mr-robot') mounts.push(mount(Robots, { host: this }))
+    if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }))
+    if (granted.has('web')) mounts.push(mount(Web, { credentials: this.credentials(), browser: this.env.BROWSER }))
+    if (granted.has('routines')) mounts.push(mount(Routines, { schedule: this.schedule() }))
+    if (granted.has('skills')) {
+      mounts.push(mount(Skills, {
+        host: this,
+        source: {
+          granted: () => this.home().loadableSkills(config.ownerId, this.store.effectiveGrants().skills),
+          content: async (name) => this.store.effectiveGrants().skills.includes(name) ? this.home().skillContent(config.ownerId, name) : null,
+          local: () => this.localSkills(),
+          localContent: (name) => this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null),
+        },
       }))
     }
-    return plugins
+    // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
+    const hostGrants = grants.hosts ?? []
+    const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
+    if (names('files').length > 0 || names('shell').length > 0) mounts.push(mount(Host, { host: this, files: names('files'), shell: names('shell') }))
+    return mounts
   }
 
   // ---------------------------------------------------------------- browser (robot-l9te, robot-t0vc, robot-0eew)
@@ -1676,8 +1672,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Names of the tools the current composition registers (what the model may call). */
   toolNames(): string[] {
     const config = this.store.requireConfig()
-    const routines = config.status !== 'setup' && this.store.mayUse('tool', 'routines') ? [...SCHEDULE_TOOL_NAMES] : []
-    return [...this.tools(config).map((tool) => tool.name), ...routines]
+    return this.mounts(config).flatMap(({ plugin, config: options }) => [...plugin.toolNames(options as never)])
   }
 
   /** One row of the admin fleet list, from the DO itself (robot-x26m). */

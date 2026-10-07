@@ -13,11 +13,12 @@ import SessionStore, { SessionId, SessionLogOffset, type SessionEvent } from '@d
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import ToolRuntime, { type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ThinkingEffort } from '@mr-robot/protocol'
 import { BudgetedAdapter } from './budget.ts'
 import { compactionConfig, robotCompaction } from './compaction.ts'
 import { SqliteSessionLog } from './session-log.ts'
+import type { Mount } from '../plugins/define.ts'
 
 export interface CompositionInput {
   readonly storage: DurableObjectStorage
@@ -36,10 +37,8 @@ export interface CompositionInput {
   readonly compactionInstruction: string
   /** Prompt sections, in order; text is read at every request so persona edits apply immediately. */
   readonly prompt: ReadonlyArray<{ readonly name: string; readonly text: () => string }>
-  /** Exactly the tools this Robot may call; nothing else is registered (robot-f9ln). */
-  readonly tools: readonly ToolDefinition[]
-  /** Extra seam plugins mounted for granted capabilities (web, skills, ...). */
-  readonly plugins?: ReadonlyArray<(ctx: Context) => Promise<void>>
+  /** The capability plugins its grants allow (pl-rsoy); nothing else registers tools (robot-f9ln). */
+  readonly mounts: readonly Mount[]
   /** Code mode (robot-5ewr): plugin that provides ctx.ptcRuntime, or undefined for direct tool calls. */
   readonly ptcRuntime?: (ctx: Context) => Promise<void>
 }
@@ -65,7 +64,10 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     await ctx.plugin(TokenMeter)
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
     await ctx.plugin(ToolRuntime, {})
-    for (const plugin of input.plugins ?? []) await plugin(ctx)
+    for (const { plugin, config } of input.mounts) {
+      await plugin.seams?.(ctx, config as never)
+      await ctx.plugin(plugin as never, config as never)
+    }
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
     await ctx.plugin(robotCompaction(input.compactionInstruction), compactionConfig(input.contextBudget, input.modelWindow))
     await ctx.plugin(AgentRegistry)
@@ -79,7 +81,6 @@ export async function compose(input: CompositionInput): Promise<Composition> {
       for (const [index, section] of input.prompt.entries()) {
         agentCtx.systemPrompt.section({ name: `robot:${section.name}`, order: index, text: () => section.text() })
       }
-      for (const tool of input.tools) agentCtx.tools.register(tool)
       if (input.ptcRuntime !== undefined) agentCtx.tools.presentAs('ptc')
     }
     const exists = (await ctx.sessionPersistence.stat(id)) !== undefined
