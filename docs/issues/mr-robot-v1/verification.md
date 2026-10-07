@@ -14,7 +14,7 @@ Totals: 95 works, 5 partial, 0 not done.
 - 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
 - 64 robot-lzu3, partial (ChatGPT sign-in not tried live): Live: Claude connected and running. ChatGPT: adapter checked against the real service with the owner's DSH login; the sign-in in the PWA not tried
 - 65 robot-7v9s, partial (DeepSeek not tried against the real service): Live: Workers AI (Turns on the deployment). Against the real services from this machine: OpenCode Go, and OpenRouter (2026-10-07, the adapter got a real tool call from openai/gpt-4o-mini). DeepSeek only against a faked API: no DeepSeek key exists here or in the Home
-- 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
+- 70 robot-ajrp, partial (not tried on a phone): Live in Chrome: the deployed manifest (standalone, start /, 192 and 512 px PNG icons) loads and the service worker is active, which is what Chrome requires to offer installing; not installed on a phone yet
 
 ## Broken until the review, fixed 2026-10-06/07
 
@@ -114,7 +114,7 @@ Suites on that build: worker 124, web 11, infra 1, dependency lint, and the stag
 | 67 | robot-6jqh | Token meter per Robot and Member | Live: Verifier's tokens grew from 330,767 to 345,032 input across a Turn; cost 0 on the subscription | works |
 | 68 | robot-8gag | Monthly limits | Live: Verifier on Workers AI with a $0.0001 limit blocked after one Turn with a notice | works |
 | 69 | robot-40nw | Block and notify at the limit | Live: blocked state, a message sent while blocked waited, and ran after the limit was raised | works |
-| 70 | robot-ajrp | Installable PWA | Manifest, service worker and icons served; not installed on a phone | partial (not tried on a phone) |
+| 70 | robot-ajrp | Installable PWA | Live in Chrome: the deployed manifest (standalone, start /, 192 and 512 px PNG icons) loads and the service worker is active, which is what Chrome requires to offer installing; not installed on a phone yet | partial (not tried on a phone) |
 | 71 | robot-9xoj | Web Push | Live: a real Chrome subscription (FCM) registered on the deployment received "Verifier: Done." when a Turn finished | works (Chrome desktop; not on a phone) |
 | 72 | robot-r2uz | Per-robot notifications switch | Live: with notifications off for Verifier a finished Turn sent no push | works |
 | 73 | robot-bden | Quiet hours; PROACTIVE_PREFERENCES.md in every prompt | Live: quiet hours until 02:00 held a push from 01:56 and delivered it at 02:00:00 | works |
