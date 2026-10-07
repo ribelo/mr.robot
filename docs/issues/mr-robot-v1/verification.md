@@ -6,11 +6,10 @@ Grading rule: **works** needs a live check on the deployment or a test on the re
 
 "Live" means exercised on the deployment as the owner: by clicking, or through the app's API from the signed-in tab with a test Robot "Verifier" on Claude Sonnet 5.5 (2026-10-07 00:50–01:10).
 
-Totals: 88 works, 11 partial, 1 not done.
+Totals: 88 works, 12 partial, 0 not done.
 
 ## Partial or not done
 
-- 84 robot-naul, not done: Effect runs the edge API, Workspace, vault, OAuth, push, catalogs and the composition scope; the Robot, Member and Home DO internals are plain async classes. Remaining work: ticket 23
 - 5 robot-d2uv, partial (not tried live): home.test.ts, admin.test.ts, takeover.test.ts (real DOs); not tried live (one-person Home)
 - 12 robot-bld3, partial (not tried live): lifecycle.test.ts (real DOs); not tried live (one-person Home)
 - 43 robot-ueh0, partial (stub-only): browser.test.ts (stub browser); not tried on a real shop
@@ -19,6 +18,7 @@ Totals: 88 works, 11 partial, 1 not done.
 - 65 robot-7v9s, partial (DeepSeek, OpenRouter not tried live): Live: Workers AI; OpenCode Go checked against the real service locally. DeepSeek and OpenRouter only with faked APIs (no keys in the Home)
 - 70 robot-ajrp, partial (not tried on a phone): Manifest, service worker and icons served; not installed on a phone
 - 83 robot-c8hq, partial (schedule seam not used): pnpm lint:deps; live Turns
+- 84 robot-naul, partial: Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23)
 - 91 robot-lulc, partial (wake loop not run live end-to-end): Live: sheet. The wake loop: staging test (a real page left running, reattached, its notification read) and browser.test.ts; not run end-to-end live
 - 95 robot-cmz9, partial (no images): Live; images not shown (Robots store no image attachments)
 - 96 robot-gq88, partial (search not tried live): robot-trajectory.test.tsx (real session fixture); search not tried live on a long session
@@ -125,7 +125,7 @@ These were marked done but did not hold:
 | 81 | robot-h3vr | Alchemy stack, one account | Live deploys | works |
 | 82 | robot-scwl | Workspace in R2 under robots/<id>/ | Live file tools | works |
 | 83 | robot-c8hq | DSH Cordis packages per Robot; schedule seam not used (ADR 0002) | pnpm lint:deps; live Turns | partial (schedule seam not used) |
-| 84 | robot-naul | Effect on the Cloudflare side | Effect runs the edge API, Workspace, vault, OAuth, push, catalogs and the composition scope; the Robot, Member and Home DO internals are plain async classes. Remaining work: ticket 23 | not done |
+| 84 | robot-naul | Effect programs over services in the Member and Home DOs and for the Robot's state (programs.ts); typed failures mapped at the edge | Worker suite (121) and live use after deploy; the Robot's browser, takeover, Channels, views and creation are still plain async (ticket 23) | partial |
 | 85 | robot-0eew | Browser Rendering binding | Live and staging | works |
 | 86 | robot-p9jm | Turns survive the client going away | robot-turn.test.ts (real DO, socket closed mid-Turn); live: tab hung during a Turn, the Turn finished server-side | works |
 | 87 | robot-d994 | Live model lists per connected Provider | Live: 13 Claude + 20 Workers AI models from the Providers | works |

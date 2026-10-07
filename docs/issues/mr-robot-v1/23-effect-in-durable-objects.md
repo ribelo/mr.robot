@@ -6,9 +6,15 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Robot DO: turn queue, routines/alarm, outbox, browser and limits as Effect services; the class only adapts RPC and alarm to them
-- [ ] Member and Home DOs the same
-- [ ] Failures are typed Effect errors, mapped to API errors at the edge
-- [ ] Worker test suite and the staging test pass unchanged
+- [x] Member and Home DOs the same
+- [x] Failures are typed Effect errors, mapped to API errors at the edge
+- [x] Worker test suite and the staging test pass unchanged
+
+Progress 2026-10-07:
+- Member and Home DOs: every RPC method is an Effect program over services (Sql, vaults, other DOs); the class only declares tables and adapts RPC (member/member.ts, home/home.ts, platform/durable.ts).
+- Robot DO: lifecycle, wake-ups, Routines, Robot messages and outbox, Mr. Robot's tools, settings, spend limits, proposals and answers, secrets, rewind and undo run as Effect programs (robot/programs.ts).
+- Typed failures (NotFound, Invalid, Conflict) cross RPC with name and status; the edge maps them to 404/400/409.
+- Still plain async in the Robot DO: creation and Workspace seeding, the read views (conversation, trajectory, panel, admin row), the browser, takeover and screencast sockets, Channels, and the alarm. The DSH agent loop stays a Cordis adapter by design.
