@@ -148,6 +148,20 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
     expect(await toolsOf(ANNA, id)).toEqual(expect.arrayContaining(['gmail_send', 'gmail_reply', 'gmail_forward']))
   })
 
+  it('a robot holding two kinds of connection gets both and still answers (regression: duplicate prompt section)', async () => {
+    fakeConnectors.set('google', fakeConnector('google'))
+    fakeConnectors.set('slack', fakeConnector('slack', 'fakeslack'))
+    const mail = await addConnection(annaId, 'Private', 'anna@private.test', 'token-private')
+    const team = await env.MEMBER.getByName(annaId).addConnection({ kind: 'slack', label: 'Acme', account: 'acme.slack.com', services: [], shared: false, meta: {}, secrets: { token: 'token-work' } })
+    const id = await robotOf(ANNA, { connections: [mail.id, team.id] })
+    expect(await toolsOf(ANNA, id)).toEqual(expect.arrayContaining(['google_accounts', 'slack_accounts']))
+    const results = await say(ANNA, id, [{ name: 'fake_whoami', args: {} }, { name: 'fakeslack_whoami', args: {} }])
+    expect(results[0]).toContain('[google · Private (anna@private.test)]')
+    expect(results[1]).toContain('[slack · Acme (acme.slack.com)]')
+    const conversation = (await api<{ items: Array<{ kind: string; text?: string }> }>(ANNA, `/api/robots/${id}/conversation`)).body
+    expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'Done.' })
+  })
+
   it('refused credentials show on the owner\'s row (cn-9s7r)', async () => {
     fakeConnectors.set('google', fakeConnector('google'))
     const revoked = await addConnection(annaId, 'Old', 'anna@old.test', 'revoked-token')

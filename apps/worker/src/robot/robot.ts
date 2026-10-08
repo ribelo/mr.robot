@@ -75,7 +75,7 @@ import { Exa } from '../plugins/exa.ts'
 import { Files } from '../plugins/files.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Host } from '../plugins/host.ts'
-import { ConnectorCapability } from '../plugins/connector.ts'
+import { connectorCapability } from '../plugins/connector.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
 import { CONNECTOR_SKILLS, CONNECTOR_SKILL_NAMES } from '../connectors/skills.ts'
@@ -737,7 +737,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     for (const [kind, plugin] of Object.entries(this.connectorPlugins()) as Array<[ConnectorKind, ConnectorPlugin]>) {
       if (this.pluginsOn[kind] === false) continue
       const accounts = this.grantedConnections(kind)
-      if (accounts.length > 0) mounts.push(mount(ConnectorCapability, { plugin, host: this.connectorHost(kind, accounts) }))
+      if (accounts.length > 0) mounts.push(mount(connectorCapability(kind), { plugin, host: this.connectorHost(kind, accounts) }))
     }
     return mounts
   }

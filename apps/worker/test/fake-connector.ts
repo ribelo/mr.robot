@@ -22,19 +22,19 @@ export const fakeService = (input: RequestInfo | URL, init?: RequestInit): Promi
   return Promise.resolve(Response.json({ who: token === 'token-private' ? 'anna@private.test' : token === 'token-work' ? 'anna@work.test' : 'ben@home.test', url: String(input) }))
 }
 
-export function fakeConnector(kind: ConnectorKind): ConnectorPlugin {
+export function fakeConnector(kind: ConnectorKind, prefix = 'fake'): ConnectorPlugin {
   return {
     kind,
     tools: (host) => connectorTools(host, [
       {
-        name: 'fake_whoami',
+        name: `${prefix}_whoami`,
         description: 'Ask the service who this account is.',
         parameters: { properties: {} },
         action: () => 'whoami',
         run: (_args: Record<string, never>, use: ConnectionUse) => Effect.map(request(host.fetch, { method: 'GET', url: 'https://fake.test/me', headers: { authorization: `Bearer ${use.secrets['token'] ?? use.secrets['accessToken']}` } }, Schema.Struct({ who: Schema.String })), (body) => `The service says: ${body.who} (token ${use.secrets['token']})`),
       },
       {
-        name: 'fake_send',
+        name: `${prefix}_send`,
         description: 'Send something.',
         write: true,
         parameters: { properties: { text: { type: 'string' } }, required: ['text'] },
