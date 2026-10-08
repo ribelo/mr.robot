@@ -8,7 +8,8 @@
  */
 import * as Schema from 'effect/Schema'
 
-export const GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json'
+/** A Worker opens an outgoing WebSocket with fetch and an https:// address (Upgrade header), not wss://. */
+export const GATEWAY_URL = 'https://gateway.discord.gg/?v=10&encoding=json'
 
 const Payload = Schema.Struct({
   op: Schema.Number,

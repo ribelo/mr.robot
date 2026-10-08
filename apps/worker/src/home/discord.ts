@@ -70,7 +70,11 @@ export class DiscordAtHome {
     try {
       const response = await this.fetch(GATEWAY_URL, { headers: { Upgrade: 'websocket' } })
       const socket = response.webSocket
-      if (socket === null || socket === undefined) return
+      if (socket === null || socket === undefined) {
+        console.warn('discord gateway refused the upgrade', response.status)
+        await this.setAlarm(Date.now() + 30_000)
+        return
+      }
       socket.accept()
       this.state = initialGateway
       this.socket = { socket, token: bot.token, ownerId: bot.ownerId }
