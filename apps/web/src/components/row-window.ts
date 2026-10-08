@@ -3,7 +3,7 @@
  * position, padding for the rest, scroll-to-index, follow the end while new rows arrive, and keep the
  * visible row in place when rows are added above it (older history loaded).
  */
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 
 export interface WindowRow {
   readonly key: string | number
@@ -139,4 +139,52 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
     scrollToIndex,
     scrollToEnd,
   }
+}
+
+/**
+ * Heights of rows whose size is known only once rendered (chat bubbles): measured as rows render and
+ * resize, an estimate until then. measure(key) is the ref callback for a row's wrapper.
+ */
+export function useMeasuredRows(keys: ReadonlyArray<string>, estimate: number): { readonly rows: ReadonlyArray<WindowRow>; readonly measure: (key: string) => (element: HTMLElement | null) => void } {
+  const heights = useRef(new Map<string, number>())
+  const [version, setVersion] = useState(0)
+  const observed = useRef(new Map<Element, string>())
+  const observer = useMemo(() => (typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver((entries) => {
+    let changed = false
+    for (const entry of entries) {
+      const key = observed.current.get(entry.target)
+      if (key === undefined) continue
+      const height = Math.round(entry.target.getBoundingClientRect().height)
+      if (height > 0 && heights.current.get(key) !== height) {
+        heights.current.set(key, height)
+        changed = true
+      }
+    }
+    if (changed) setVersion((value) => value + 1)
+  })), [])
+  useEffect(() => () => observer?.disconnect(), [observer])
+  const callbacks = useRef(new Map<string, (element: HTMLElement | null) => void>())
+  const measure = useCallback((key: string) => {
+    let callback = callbacks.current.get(key)
+    if (callback === undefined) {
+      let current: HTMLElement | null = null
+      callback = (element) => {
+        if (current !== null) { observer?.unobserve(current); observed.current.delete(current) }
+        current = element
+        if (element === null) return
+        observed.current.set(element, key)
+        observer?.observe(element)
+        const height = Math.round(element.getBoundingClientRect().height)
+        if (height > 0 && heights.current.get(key) !== height) {
+          heights.current.set(key, height)
+          setVersion((value) => value + 1)
+        }
+      }
+      callbacks.current.set(key, callback)
+    }
+    return callback
+  }, [observer])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- version marks new measurements in the ref
+  const rows = useMemo(() => keys.map((key) => ({ key, height: heights.current.get(key) ?? estimate })), [keys, estimate, version])
+  return { rows, measure }
 }

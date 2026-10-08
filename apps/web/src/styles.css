@@ -442,3 +442,7 @@ a.button { text-decoration: none; color: var(--text); }
   .conversation-search input { width: 120px; }
   table.grid td { white-space: normal; }
 }
+
+/* Long conversations render only the rows in view (fe-3ckb); each cell holds its row's margins and the gap. */
+.chat.chat-windowed { gap: 0; }
+.chat-cell { display: flow-root; }

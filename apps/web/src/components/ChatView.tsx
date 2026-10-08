@@ -1,4 +1,5 @@
-import { Fragment, type ReactNode , useState } from 'react'
+import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react'
+import { useMeasuredRows, useRowWindow } from './row-window.ts'
 import type { ChatItem, ProposalView, WorkDetails } from '@mr-robot/protocol'
 import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
@@ -22,12 +23,19 @@ export interface ChatViewProps {
   readonly robotId?: string
   /** The search match to scroll to and mark (pl-8594). */
   readonly highlight?: string
+  /** The scrolling element around the chat; long conversations render only the rows in view (fe-3ckb). */
+  readonly scrollRef?: RefObject<HTMLElement | null>
 }
+
+/** Conversations longer than this render through the row window. */
+const WINDOW_THRESHOLD = 80
+const ESTIMATED_ROW_PX = 64
+const ROW_GAP_PX = 8
 
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream, robotId, highlight }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream, robotId, highlight, scrollRef }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -66,7 +74,45 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
       ? <div key="working" className="bubble bubble-robot typing" aria-label="working"><span /><span /><span /></div>
       : <div key="working" className="activity-now" aria-label="working"><span className="spinner" /> Using {toolLabel(activity)}…</div>)
   }
-  return <div className="chat">{rows}</div>
+  return <ChatRows rows={rows} highlight={highlight} {...(scrollRef === undefined ? {} : { scrollRef })} />
+}
+
+/** The rows, all of them for a short conversation, the rows in view for a long one (fe-3ckb). */
+function ChatRows({ rows, highlight, scrollRef }: { rows: ReactNode[]; highlight: string | undefined; scrollRef?: RefObject<HTMLElement | null> }) {
+  const keys = useMemo(() => rows.map((row, index) => String((row as { key?: string | null }).key ?? index)), [rows])
+  const windowed = scrollRef !== undefined && rows.length > WINDOW_THRESHOLD
+  const measured = useMeasuredRows(windowed ? keys : [], ESTIMATED_ROW_PX)
+  const rowWindow = useRowWindow({
+    rows: measured.rows,
+    scrollElement: scrollRef ?? { current: null },
+    enabled: windowed,
+    overscan: 6,
+    margin: 0,
+    initialViewport: 900,
+    followThreshold: 120,
+  })
+  // A search match far up the conversation is brought into view, then outlined (pl-8594).
+  useEffect(() => {
+    if (highlight === undefined) return
+    const index = keys.indexOf(highlight)
+    if (index === -1) return
+    if (windowed) rowWindow.scrollToIndex(index, { align: 'center', behavior: 'auto' })
+    // The window renders the target after the scroll event; centre it exactly once it is in the page.
+    const timer = setTimeout(() => document.querySelector(`[data-item="${CSS.escape(highlight)}"]`)?.scrollIntoView({ block: 'center' }), 80)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- jump once per new match
+  }, [highlight])
+  if (!windowed) return <div className="chat">{rows}</div>
+  const { start, end } = rowWindow.range
+  return (
+    <div className="chat chat-windowed" style={{ paddingTop: rowWindow.paddingTop, paddingBottom: rowWindow.paddingBottom }}>
+      {rows.slice(start, end).map((row, offset) => {
+        const index = start + offset
+        const key = keys[index]!
+        return <div key={key} ref={measured.measure(key)} className="chat-cell" style={index === 0 ? undefined : { paddingTop: ROW_GAP_PX }}>{row}</div>
+      })}
+    </div>
+  )
 }
 
 function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; level: WorkDetails; robotId?: string }) {

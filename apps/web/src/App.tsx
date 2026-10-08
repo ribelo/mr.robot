@@ -1,6 +1,6 @@
 import { Empty as EmptyState, ErrorState } from './components/States.tsx'
 import { hostBridge } from './components/ThisComputer.tsx'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
 import * as Effect from 'effect/Effect'
 import { AsyncResult } from 'effect/reactivity'
@@ -136,9 +136,10 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
   const [replyingInstead, setReplyingInstead] = useState(false)
   const [search, setSearch] = useState<{ query: string; index: number }>()
   const [failure, setFailure] = useState<string>()
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const end = document.querySelector('.chat-scroll')
+    const end = scrollRef.current
     end?.scrollTo({ top: end.scrollHeight })
   }, [conversation.items.length, conversation.working, stream?.text.length])
 
@@ -156,7 +157,6 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
   const jump = (index: number) => {
     setSearch((value) => (value === undefined ? value : { ...value, index }))
     const target = matches[index]
-    if (target !== undefined) requestAnimationFrame(() => document.querySelector(`[data-item="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'center' }))
   }
   const header: ReactNode = (
     <header className="conversation-head">
@@ -196,9 +196,9 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
     <div className={route.panel ? 'conversation with-panel' : 'conversation'}>
       <section className="conversation-main">
         {header}
-        <div className="chat-scroll">
+        <div className="chat-scroll" ref={scrollRef}>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView items={conversation.items} meId={me.id} robotId={id} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
+          <ChatView items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>
