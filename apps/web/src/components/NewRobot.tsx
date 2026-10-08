@@ -1,31 +1,30 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAtomValue } from '@effect/atom-react'
+import * as Exit from 'effect/Exit'
+import { AsyncResult } from 'effect/reactivity'
 import type { ModelChoice, ProvidersView } from '@mr-robot/protocol'
-import { api, ApiError } from '../api.ts'
+import { keys, providersAtom, useCommand } from '../client/api-atoms.ts'
+import { exitFailure } from '../client/api-failure.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { go } from '../route.ts'
 
 /** Create a Robot: what it is for and the model it starts on; the Robot then interviews you. */
 export function NewRobot({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
-  const [providers, setProviders] = useState<ProvidersView>()
+  const providersResult = useAtomValue(providersAtom)
+  const providers: ProvidersView | undefined = AsyncResult.isSuccess(providersResult) ? providersResult.value : undefined
+  const command = useCommand()
   const [brief, setBrief] = useState('')
-  const [model, setModel] = useState<ModelChoice>()
+  const [chosen, setModel] = useState<ModelChoice>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    void api.providers().then((view) => {
-      setProviders(view)
-      const usable = view.models.some((option) => option.provider === view.defaultModel.provider && option.model === view.defaultModel.model)
-      const first = view.models[0]
-      setModel(usable || first === undefined ? view.defaultModel : { provider: first.provider, model: first.model, effort: 'off' })
-    })
-  }, [])
+  // Until the person picks one: the Home default when they can use it, else their first model.
+  const model = chosen ?? (providers === undefined ? undefined : startingModel(providers))
   const create = async () => {
     setBusy(true)
-    try {
-      const robot = await api.createRobot({ ...(brief.trim() === '' ? {} : { brief: brief.trim() }), ...(model === undefined ? {} : { model }) })
-      onCreated(robot.id)
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'could not create the Robot')
+    const exit = await command((api) => api.createRobot({ ...(brief.trim() === '' ? {} : { brief: brief.trim() }), ...(model === undefined ? {} : { model }) }), [keys.robots])
+    if (Exit.isSuccess(exit)) onCreated(exit.value.id)
+    else {
+      setError(exitFailure(exit))
       setBusy(false)
     }
   }
@@ -55,4 +54,10 @@ export function NewRobot({ onCancel, onCreated }: { onCancel: () => void; onCrea
       </div>
     </div>
   )
+}
+
+function startingModel(view: ProvidersView): ModelChoice {
+  const usable = view.models.some((option) => option.provider === view.defaultModel.provider && option.model === view.defaultModel.model)
+  const first = view.models[0]
+  return usable || first === undefined ? view.defaultModel : { provider: first.provider, model: first.model, effort: 'off' }
 }

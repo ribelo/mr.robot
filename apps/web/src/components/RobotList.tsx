@@ -3,7 +3,7 @@ import type { RobotSummary } from '@mr-robot/protocol'
 import { listTime } from '../time.ts'
 import { Avatar } from './Avatar.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
-import { api } from '../api.ts'
+import { keys, useCommand } from '../client/api-atoms.ts'
 
 export interface RobotListProps {
   readonly robots: readonly RobotSummary[]
@@ -29,6 +29,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<string>()
   const [danger, setDanger] = useState<{ robot: RobotSummary; action: 'delete' | 'clear' }>()
+  const command = useCommand()
   const [showHidden, setShowHidden] = useState(false)
   const matching = robots.filter((robot) => robot.identity.name.toLowerCase().includes(query.toLowerCase()))
   const visible = matching.filter((robot) => robot.hidden !== true).sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true))
@@ -68,7 +69,11 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
           goes="The robot, its conversation, files, memory and routines are deleted, and other robots stop being able to message it."
           action="Delete robot"
           onCancel={() => setDanger(undefined)}
-          onConfirm={async () => { await api.remove(danger.robot.id, danger.robot.identity.name); setDanger(undefined); onRemoved?.(danger.robot.id, true) }}
+          onConfirm={async () => {
+            const exit = await command((api) => api.remove(danger.robot.id, danger.robot.identity.name), [keys.robots, keys.robot(danger.robot.id)])
+            if (exit._tag === 'Success') { setDanger(undefined); onRemoved?.(danger.robot.id, true) }
+            return exit
+          }}
         />
       ) : (
         <ConfirmByName
@@ -79,7 +84,11 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
           action="Clear history"
           option={{ label: 'Also clear its memory', note: 'MEMORY.md, the memory bank and daily notes go back to empty.' }}
           onCancel={() => setDanger(undefined)}
-          onConfirm={async (memory) => { await api.clearHistory(danger.robot.id, danger.robot.identity.name, memory); setDanger(undefined); onRemoved?.(danger.robot.id, false) }}
+          onConfirm={async (memory) => {
+            const exit = await command((api) => api.clearHistory(danger.robot.id, danger.robot.identity.name, memory), [keys.robots, keys.robot(danger.robot.id), keys.files(danger.robot.id)])
+            if (exit._tag === 'Success') { setDanger(undefined); onRemoved?.(danger.robot.id, false) }
+            return exit
+          }}
         />
       )}
       <div className="sidebar-head">

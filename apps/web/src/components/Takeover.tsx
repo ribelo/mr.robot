@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react'
+import { useTakeover } from '../client/takeover-channel.ts'
 
 export interface TakeoverProps {
   readonly robotId: string
@@ -20,58 +21,23 @@ const modifiersOf = (event: KeyboardEvent) => (event.altKey ? 1 : 0) | (event.ct
  * (pl-485j), with a keyboard button for phones (pl-vwq6). Closing hands the browser back (pl-glfh).
  */
 export function Takeover({ robotId, robotName, requested, onClose }: TakeoverProps) {
-  const socket = useRef<WebSocket | undefined>(undefined)
+  const { state, send } = useTakeover(robotId)
+  const { frame, claimed, status, timing, logins } = state
   const image = useRef<HTMLImageElement>(null)
   const screen = useRef<HTMLDivElement>(null)
   const phoneInput = useRef<HTMLInputElement>(null)
-  const [frame, setFrame] = useState<{ src: string; width: number; height: number }>()
-  const [claimed, setClaimed] = useState(false)
-  const [message, setMessage] = useState<string>()
-  const [status, setStatus] = useState('Connecting…')
-  const [timing, setTiming] = useState<string>()
   const [focused, setFocused] = useState(false)
-  const [logins, setLogins] = useState<Array<{ name: string; username: string }> | null>(null)
+  // Hidden lists close locally until the server sends a new one.
+  const [loginsDismissed, setLoginsDismissed] = useState(false)
+  const message = state.message ?? undefined
+  // Taking over focuses the screen so typing goes to the page at once (pl-485j).
+  useEffect(() => { if (claimed) screen.current?.focus() }, [claimed])
+  useEffect(() => { setLoginsDismissed(false) }, [logins])
 
-  useEffect(() => {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${location.host}/api/robots/${encodeURIComponent(robotId)}/ws`)
-    socket.current = ws
-    ws.onopen = () => { setStatus('Opening the browser at its last page…'); ws.send(JSON.stringify({ type: 'live', on: true })) }
-    ws.onmessage = (event) => {
-      if (typeof event.data !== 'string' || event.data === 'pong') return
-      const data = JSON.parse(event.data) as { type: string; data?: string; text?: string; metadata?: { deviceWidth?: number; deviceHeight?: number }; message?: string; stages?: Record<string, number>; backend?: string }
-      if (data.type === 'frame' && data.data !== undefined) {
-        setFrame({ src: `data:image/jpeg;base64,${data.data}`, width: data.metadata?.deviceWidth ?? 1280, height: data.metadata?.deviceHeight ?? 800 })
-      } else if (data.type === 'status') {
-        setStatus(data.text ?? '')
-      } else if (data.type === 'timing' && data.stages !== undefined) {
-        setTiming(`Opened in ${((data.stages['firstFrame'] ?? 0) / 1000).toFixed(1)} s`)
-      } else if (data.type === 'claimed') {
-        setClaimed(true)
-        screen.current?.focus()
-      } else if (data.type === 'logins') {
-        setLogins((data as unknown as { entries: Array<{ name: string; username: string }> }).entries)
-      } else if (data.type === 'filled' && data.message !== undefined) {
-        setMessage(data.message)
-        setLogins(null)
-      } else if (data.type === 'claim-refused') {
-        setMessage('Someone else is using this browser right now.')
-      } else if (data.type === 'error' && data.message !== undefined) {
-        setMessage(data.message)
-      }
-    }
-    // Closing the window (or the tab) hands the browser back: the server sees the socket close.
-    return () => {
-      try { ws.send(JSON.stringify({ type: 'live', on: false })) } catch { /* not open */ }
-      ws.close()
-    }
-  }, [robotId])
-
-  const send = (input: Record<string, unknown>) => socket.current?.send(JSON.stringify(input))
 
   /** Map a tap on the scaled picture to page coordinates. */
   const point = (clientX: number, clientY: number) => {
-    if (frame === undefined || image.current === null) return undefined
+    if (frame === null || image.current === null) return undefined
     const box = image.current.getBoundingClientRect()
     return { x: ((clientX - box.left) / box.width) * frame.width, y: ((clientY - box.top) / box.height) * frame.height }
   }
@@ -103,7 +69,7 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
     <div className="takeover" role="dialog" aria-label={`${robotName}'s browser`}>
       <div className="takeover-bar">
         <span className="conversation-name">{robotName}’s browser</span>
-        {timing === undefined ? null : <span className="muted takeover-timing">{timing}</span>}
+        {timing === null ? null : <span className="muted takeover-timing">{timing}</span>}
         <span className="spacer" />
         {!claimed ? <button type="button" className="button button-primary" onClick={() => send({ type: 'claim' })}>Take over</button> : null}
         {claimed ? <button type="button" className="button button-primary" onClick={() => { send({ type: 'handback' }); onClose() }}>Hand back</button> : null}
@@ -124,7 +90,7 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
         onWheel={wheel}
         aria-label={claimed ? 'Browser screen: click it and type' : 'Browser screen'}
       >
-        {frame === undefined
+        {frame === null
           ? <div className="muted">{status || 'Opening the browser…'}</div>
           : <img ref={image} src={frame.src} alt="" onPointerUp={tap} draggable={false} />}
       </div>
@@ -139,12 +105,12 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
           <button type="button" className="button" aria-label="Logins for this page" onClick={() => send({ type: 'logins' })}>🔑</button>
         </div>
       ) : null}
-      {claimed && logins !== null ? (
+      {claimed && logins !== null && !loginsDismissed ? (
         <div className="takeover-logins">
           {logins.length === 0 ? <span className="muted">No login granted to this Robot matches this page.</span> : logins.map((login) => (
             <button key={login.name} type="button" className="button" onClick={() => send({ type: 'fill', name: login.name })}>{login.name}{login.username === '' ? '' : ` (${login.username})`}</button>
           ))}
-          <button type="button" className="link" onClick={() => setLogins(null)}>Close</button>
+          <button type="button" className="link" onClick={() => setLoginsDismissed(true)}>Close</button>
         </div>
       ) : null}
     </div>

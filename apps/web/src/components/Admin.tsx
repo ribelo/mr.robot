@@ -1,7 +1,10 @@
-import { Loading, ErrorState } from './States.tsx'
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useAtomRefresh } from '@effect/atom-react'
+import * as Exit from 'effect/Exit'
 import type { AdminView } from '@mr-robot/protocol'
-import { api, ApiError } from '../api.ts'
+import { adminAtom, homeMemoryAtom, keys, useCommand } from '../client/api-atoms.ts'
+import { exitFailure } from '../client/api-failure.ts'
+import { AtomView } from './AtomView.tsx'
 import { go } from '../route.ts'
 import { ConfirmButton } from './RobotSheets.tsx'
 
@@ -10,24 +13,23 @@ const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).to
 
 /** The Home admin's single place (robot-x26m, robot-1rap, robot-bvme, robot-d2uv). */
 export function Admin() {
-  const [view, setView] = useState<AdminView>()
-  const [message, setMessage] = useState<string>()
-  const refresh = useCallback(() => api.admin().then(setView, (cause: unknown) => setMessage(cause instanceof ApiError ? cause.message : 'failed')), [])
+  const refresh = useAtomRefresh(adminAtom)
+  // Robots change state by themselves; the view reads again every 15 seconds.
   useEffect(() => {
-    void refresh()
-    const timer = setInterval(() => void refresh(), 15_000)
+    const timer = setInterval(refresh, 15_000)
     return () => clearInterval(timer)
   }, [refresh])
-  const run = async (action: () => Promise<unknown>, done?: string) => {
-    try {
-      await action()
-      setMessage(done)
-    } catch (cause) {
-      setMessage(cause instanceof ApiError ? cause.message : 'failed')
-    }
-    await refresh()
+  return <AtomView atom={adminAtom} what="the Home" errorTitle="The admin view cannot be loaded">{(view) => <AdminPage view={view} />}</AtomView>
+}
+
+function AdminPage({ view }: { view: AdminView }) {
+  const command = useCommand()
+  const [message, setMessage] = useState<string>()
+  /** Run a change; done is the message on success, or a function of the result. */
+  const run = async <A,>(action: Parameters<typeof command<A>>[0], done?: string | ((value: A) => string)) => {
+    const exit = await command(action, [keys.admin, keys.robots, keys.hosts])
+    setMessage(Exit.isSuccess(exit) ? (typeof done === 'function' ? done(exit.value) : done) : exitFailure(exit))
   }
-  if (view === undefined) return message === undefined ? <Loading what="the Home" /> : <ErrorState title="The admin view cannot be loaded" message={message} />
   return (
     <div className="form">
       {message === undefined ? null : <div className="muted">{message}</div>}
@@ -74,15 +76,15 @@ export function Admin() {
               <td>{member.name}<div className="muted">{member.email}</div></td>
               <td>{member.role === 'admin' ? 'admin' : member.status}</td>
               <td>{usd(member.usage.costUsd)}<div className="muted">{tokens(member.usage.inputTokens + member.usage.outputTokens)} tokens</div></td>
-              <td>{member.role === 'admin' || member.status === 'removed' ? null : <ConfirmButton label="Remove" confirm="Remove and pause their Robots" onConfirm={() => void run(() => api.removeMember(member.id), 'Removed.')} />}</td>
+              <td>{member.role === 'admin' || member.status === 'removed' ? null : <ConfirmButton label="Remove" confirm="Remove and pause their Robots" onConfirm={() => void run((api) => api.removeMember(member.id), 'Removed.')} />}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <Invite onInvite={(email) => run(() => api.invite(email), `Invited ${email}. They join on first sign-in.`)} />
+      <Invite onInvite={(email) => run((api) => api.invite(email), `Invited ${email}. They join on first sign-in.`)} />
 
       <h2>Home settings</h2>
-      <HomeSettings view={view} onSave={(patch) => run(() => api.updateHomeSettings(patch), 'Saved.')} />
+      <HomeSettings view={view} onSave={(patch) => run((api) => api.updateHomeSettings(patch), 'Saved.')} />
       <h2>Hosts</h2>
       {(view.hosts ?? []).length === 0 ? <div className="muted">No computers paired in this Home.</div> : (
         <table className="grid"><tbody>{(view.hosts ?? []).map((host) => (
@@ -95,13 +97,13 @@ export function Admin() {
         ))}</tbody></table>
       )}
       <h2>Home memory</h2>
-      <HomeMemory />
+      <AtomView atom={homeMemoryAtom}>{(file) => <HomeMemory initial={file.content} />}</AtomView>
       <h2>Proxy</h2>
-      <ProxyConfig configured={view.proxyConfigured === true} onSave={(url) => run(() => api.setProxy(url), url === null ? 'Removed.' : 'Saved.')} />
+      <ProxyConfig configured={view.proxyConfigured === true} onSave={(url) => run((api) => api.setProxy(url), url === null ? 'Removed.' : 'Saved.')} />
       <h2>Exa</h2>
-      <ExaKey configured={view.exaConfigured === true} onSave={(key) => run(() => api.setExaKey(key), key === null ? 'Removed.' : 'Saved.')} />
+      <ExaKey configured={view.exaConfigured === true} onSave={(key) => run((api) => api.setExaKey(key), key === null ? 'Removed.' : 'Saved.')} />
       <h2>Proton VPN</h2>
-      <VpnConfig configured={view.vpnConfigured === true} onSave={(config) => run(() => api.setVpnConfig(config), config === null ? 'Removed.' : 'Saved.')} />
+      <VpnConfig configured={view.vpnConfigured === true} onSave={(config) => run((api) => api.setVpnConfig(config), config === null ? 'Removed.' : 'Saved.')} />
 
       <h2>Model lists</h2>
       <div className="muted">Each Provider's own list of models, fetched with a connected key or subscription and refreshed daily. Robots choose from these.</div>
@@ -114,7 +116,7 @@ export function Admin() {
           </tr>
         ))}
       </tbody></table>
-      <div className="question-actions"><button type="button" className="button" onClick={() => void run(async () => { const result = await api.refreshModels(); setMessage(result.map((entry) => `${entry.provider}: ${entry.error ?? `${entry.count} models`}`).join(' · ')) })}>Refresh models</button></div>
+      <div className="question-actions"><button type="button" className="button" onClick={() => void run((api) => api.refreshModels, (result) => result.map((entry) => `${entry.provider}: ${entry.error ?? `${entry.count} models`}`).join(' · '))}>Refresh models</button></div>
 
       <h2>Providers</h2>
       {view.providers.length === 0 ? <div className="muted">No Provider connected yet. Connect one on your profile page.</div> : (
@@ -122,10 +124,10 @@ export function Admin() {
       )}
 
       <h2>Skill library</h2>
-      <SkillLibrary view={view} onChanged={() => run(async () => undefined, 'Saved.')} />
+      <SkillLibrary view={view} onMessage={setMessage} />
       <details className="prompt-section">
         <summary>Sync from a Git repository (optional)</summary>
-        <SkillRepository view={view} onSave={(input) => run(() => api.setSkillRepository(input), 'Saved.')} onSync={() => run(async () => { const result = await api.syncSkills(); setMessage(`Synced ${result.synced.length} skills.`) })} />
+        <SkillRepository view={view} onSave={(input) => run((api) => api.setSkillRepository(input), 'Saved.')} onSync={() => run((api) => api.syncSkills, (result) => `Synced ${result.synced.length} skills.`)} />
         <div className="muted">Imported skills stay editable; a skill you edit here is kept as it is by later syncs.</div>
       </details>
     </div>
@@ -215,19 +217,22 @@ function VpnConfig({ configured, onSave }: { configured: boolean; onSave: (confi
 }
 
 /** The Home library (rb-5ku3): every global skill opens in an editor; create and delete. */
-function SkillLibrary({ view, onChanged }: { view: AdminView; onChanged: () => Promise<void> }) {
+function SkillLibrary({ view, onMessage }: { view: AdminView; onMessage: (message: string | undefined) => void }) {
+  const command = useCommand()
   const [editing, setEditing] = useState<{ name: string; description: string; content: string; isNew: boolean } | null>(null)
   const [error, setError] = useState<string>()
-  const open = async (name: string, description: string) => setEditing({ name, description, content: (await api.skill(name)).content, isNew: false })
+  const open = async (name: string, description: string) => {
+    const exit = await command((api) => api.skill(name), [])
+    if (Exit.isSuccess(exit)) setEditing({ name, description, content: exit.value.content, isNew: false })
+    else setError(exitFailure(exit))
+  }
   const save = async () => {
     if (editing === null) return
-    try {
-      await api.saveSkill(editing.name, editing.description, editing.content)
+    const failure = exitFailure(await command((api) => api.saveSkill(editing.name, editing.description, editing.content), [keys.admin]))
+    setError(failure)
+    if (failure === undefined) {
       setEditing(null)
-      setError(undefined)
-      await onChanged()
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'could not save')
+      onMessage('Saved.')
     }
   }
   return (
@@ -240,7 +245,7 @@ function SkillLibrary({ view, onChanged }: { view: AdminView; onChanged: () => P
             <td className="muted">{skill.source === 'git' ? (skill.edited === true ? 'from Git, edited' : 'from Git') : skill.source === 'robot' ? `from a Robot (${skill.visibility})` : 'written here'}</td>
             <td><span className="form inline">
               <button type="button" className="link" onClick={() => void open(skill.name, skill.description)}>Edit</button>
-              <button type="button" className="link" onClick={() => { if (confirm(`Delete the skill ${skill.name}?`)) void api.deleteSkill(skill.name).then(onChanged) }}>Delete</button>
+              <button type="button" className="link" onClick={() => { if (confirm(`Delete the skill ${skill.name}?`)) void command((api) => api.deleteSkill(skill.name), [keys.admin]).then((exit) => onMessage(exitFailure(exit) ?? 'Deleted.')) }}>Delete</button>
             </span></td>
           </tr>
         ))}</tbody></table>
@@ -294,17 +299,16 @@ function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url
 }
 
 /** HOME.md (pl-yqno): household facts every Robot of the Home reads; the admin and Mr. Robot write it. */
-function HomeMemory() {
-  const [content, setContent] = useState<string>()
-  const [saved, setSaved] = useState(false)
-  useEffect(() => { void api.homeMemory().then((file) => setContent(file.content)) }, [])
-  if (content === undefined) return null
+function HomeMemory({ initial }: { initial: string }) {
+  const command = useCommand()
+  const [content, setContent] = useState(initial)
+  const [saved, setSaved] = useState<string>()
   return (
     <div className="form">
       <div className="muted">Facts for every Robot in the Home: the electricity provider, the building, shared accounts. Each Robot is told when it changes.</div>
       <label>HOME.md
-        <textarea rows={6} value={content} placeholder="# HOME.md" onChange={(event) => { setContent(event.target.value); setSaved(false) }} onBlur={() => void api.setHomeMemory(content).then(() => setSaved(true))} />
-        {saved ? <span className="muted">Saved.</span> : null}
+        <textarea rows={6} value={content} placeholder="# HOME.md" onChange={(event) => { setContent(event.target.value); setSaved(undefined) }} onBlur={() => void command((api) => api.setHomeMemory(content), [keys.homeMemory]).then((exit) => setSaved(exitFailure(exit) ?? 'Saved.'))} />
+        {saved === undefined ? null : <span className="muted">{saved}</span>}
       </label>
     </div>
   )

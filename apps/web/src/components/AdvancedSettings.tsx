@@ -3,7 +3,11 @@ import { ConfirmByName } from './ConfirmByName.tsx'
 import { useState, useEffect } from 'react'
 import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort, BrowserBackend } from '@mr-robot/protocol'
 import { ModelSelect } from './ModelSelect.tsx'
-import { api } from '../api.ts'
+import type * as Exit from 'effect/Exit'
+import { promptAtom } from '../client/api-atoms.ts'
+import type { ApiFailure } from '../client/api-failure.ts'
+import { renderResult } from './AtomView.tsx'
+import { useAtomValue } from '@effect/atom-react'
 
 export interface AdvancedSettingsProps {
   readonly panel: RobotPanel
@@ -11,8 +15,8 @@ export interface AdvancedSettingsProps {
   readonly onSave: (patch: SettingsPatch) => Promise<void>
   readonly onPause: () => void
   readonly onResume: () => void
-  readonly onDelete: (confirm: string) => Promise<unknown>
-  readonly onClear: (confirm: string, memory: boolean) => Promise<unknown>
+  readonly onDelete: (confirm: string) => Promise<Exit.Exit<void, ApiFailure>>
+  readonly onClear: (confirm: string, memory: boolean) => Promise<Exit.Exit<void, ApiFailure>>
 }
 
 const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max']
@@ -170,7 +174,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           goes="The conversation and its history are deleted; the robot starts a fresh conversation."
           stays="Its settings, grants, routines and files stay."
           option={{ label: 'Also clear its memory', note: 'MEMORY.md, the memory bank and daily notes go back to empty.' }}
-          onCancel={() => setDanger(undefined)} onConfirm={async (memory) => { await onClear(name, memory); setDanger(undefined) }} />
+          onCancel={() => setDanger(undefined)} onConfirm={async (memory) => { const exit = await onClear(name, memory); if (exit._tag === 'Success') setDanger(undefined); return exit }} />
       ) : null}
     </div>
   )
@@ -178,13 +182,12 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
 
 /** What the model receives at the start of the next Turn (saved settings, not the draft). */
 function PromptPreview({ id }: { id: string }) {
-  const [preview, setPreview] = useState<Awaited<ReturnType<typeof api.prompt>>>()
-  useEffect(() => { void api.prompt(id).then(setPreview) }, [id])
+  const result = useAtomValue(promptAtom(id))
   return (
     <>
       <h2>Prompt</h2>
       <div className="muted">What the model is given at the start of each Turn, as saved. Secret values are masked.</div>
-      {preview === undefined ? <Loading what="the prompt" /> : (
+      {renderResult(result, { what: 'the prompt' }, (preview) => (
         <>
           {preview.sections.map((section) => (
             <details key={section.name} className="prompt-section">
@@ -197,7 +200,7 @@ function PromptPreview({ id }: { id: string }) {
             <pre>{preview.skills.join('\n') || 'none granted'}</pre>
           </details>
         </>
-      )}
+      ))}
     </>
   )
 }

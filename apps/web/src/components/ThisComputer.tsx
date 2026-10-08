@@ -1,6 +1,8 @@
 import { Loading, Empty, ErrorState } from './States.tsx'
 import { useEffect, useState } from 'react'
-import { api, ApiError } from '../api.ts'
+import { hostActionsAtom, keys, useCommand } from '../client/api-atoms.ts'
+import { exitFailure } from '../client/api-failure.ts'
+import { AtomView } from './AtomView.tsx'
 
 /** The desktop app's bridge (apps/host preload); absent in a browser. */
 interface HostState {
@@ -36,6 +38,7 @@ const LINES: Record<HostState['state'], string> = {
 /** "This computer" (hs-p0jr): the desktop app's host settings, inside the Mr. Robot interface. */
 export function ThisComputer() {
   const bridge = hostBridge()
+  const command = useCommand()
   const [state, setState] = useState<HostState>()
   const [name, setName] = useState('')
   const [server, setServer] = useState('')
@@ -52,13 +55,16 @@ export function ThisComputer() {
     const started = await bridge.pair()
     if (started.error !== undefined) return setMessage(started.error)
     // Signed in already (hs-upeq): this page approves the app's code itself.
-    if (started.code !== undefined) {
-      await api.approvePairing(started.code).catch((error: unknown) => setMessage(error instanceof ApiError ? error.message : 'could not pair'))
+    const code = started.code
+    if (code !== undefined) {
+      const failure = exitFailure(await command((api) => api.approvePairing(code), [keys.hosts]))
+      if (failure !== undefined) setMessage(failure)
     }
   }
   const unpair = async () => {
     if (!confirm(`Unpair ${state.name}? Robots stop using it until you pair it again.`)) return
-    if (state.hostId !== null) await api.unpairHost(state.hostId).catch(() => undefined)
+    const hostId = state.hostId
+    if (hostId !== null) await command((api) => api.unpairHost(hostId), [keys.hosts])
     await bridge.unpair()
   }
   return (
@@ -89,27 +95,26 @@ export function ThisComputer() {
 
 /** What robots did on this computer (pl-vcy7): newest first, with the exit status of each command. */
 function HostLog({ hostId }: { hostId: string }) {
-  const [actions, setActions] = useState<Awaited<ReturnType<typeof api.hostActions>>>()
-  const [failed, setFailed] = useState(false)
-  useEffect(() => { void api.hostActions(hostId).then(setActions).catch(() => setFailed(true)) }, [hostId])
   return (
     <>
       <h2>What robots did here</h2>
-      {failed ? <ErrorState title="The log cannot be loaded" /> : actions === undefined ? <Loading what="the log" /> : actions.length === 0 ? <Empty title="Nothing yet" hint="No robot has used this computer yet." /> : (
-        <table className="grid host-log">
-          <thead><tr><th>When</th><th>Robot</th><th>Action</th><th>Result</th></tr></thead>
-          <tbody>
-            {actions.map((entry, index) => (
-              <tr key={index}>
-                <td>{new Date(entry.at).toLocaleString()}</td>
-                <td>{entry.robotName}</td>
-                <td className="wrap"><code>{entry.action}</code> {entry.detail}</td>
-                <td className={entry.outcome === 'done' && (entry.exitCode ?? 0) === 0 ? 'muted' : 'host-log-failed wrap'}>{entry.outcome === 'done' ? (entry.exitCode === null ? 'done' : `exit ${entry.exitCode}`) : entry.outcome}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <AtomView atom={hostActionsAtom(hostId)} what="the log" errorTitle="The log cannot be loaded">
+        {(actions) => actions.length === 0 ? <Empty title="Nothing yet" hint="No robot has used this computer yet." /> : (
+          <table className="grid host-log">
+            <thead><tr><th>When</th><th>Robot</th><th>Action</th><th>Result</th></tr></thead>
+            <tbody>
+              {actions.map((entry, index) => (
+                <tr key={index}>
+                  <td>{new Date(entry.at).toLocaleString()}</td>
+                  <td>{entry.robotName}</td>
+                  <td className="wrap"><code>{entry.action}</code> {entry.detail}</td>
+                  <td className={entry.outcome === 'done' && (entry.exitCode ?? 0) === 0 ? 'muted' : 'host-log-failed wrap'}>{entry.outcome === 'done' ? (entry.exitCode === null ? 'done' : `exit ${entry.exitCode}`) : entry.outcome}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </AtomView>
     </>
   )
 }

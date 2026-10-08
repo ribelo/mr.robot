@@ -1,42 +1,37 @@
-import { Loading } from './States.tsx'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useAtomValue } from '@effect/atom-react'
 import type { Identity, RobotPanel, RoutineView } from '@mr-robot/protocol'
-import { api, ApiError } from '../api.ts'
+import { keys, panelAtom, useCommand } from '../client/api-atoms.ts'
+import { exitFailure } from '../client/api-failure.ts'
+import { renderResult } from './AtomView.tsx'
 import { Avatar } from './Avatar.tsx'
 import { ClockIcon } from './ChatView.tsx'
 
 const COLORS = ['#5ec4b6', '#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
 /** Edit profile (robot-lulc, reference 09): avatar, name, title, description, notifications, Routines. */
-export function EditProfileSheet({ robotId, onClose, onChanged, onOpenRoutine }: {
+export function EditProfileSheet({ robotId, onClose, onOpenRoutine }: {
   robotId: string
   onClose: () => void
-  onChanged: () => void
   onOpenRoutine: (routine: RoutineView) => void
 }) {
-  const [panel, setPanel] = useState<RobotPanel>()
-  const [identity, setIdentity] = useState<Identity>()
-  const [notify, setNotify] = useState(true)
-  const [watch, setWatch] = useState(false)
+  const result = useAtomValue(panelAtom(robotId))
+  return <>{renderResult(result, {}, (panel) => <ProfileForm robotId={robotId} panel={panel} onClose={onClose} onOpenRoutine={onOpenRoutine} />)}</>
+}
+
+function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: string; panel: RobotPanel; onClose: () => void; onOpenRoutine: (routine: RoutineView) => void }) {
+  const command = useCommand()
+  const [identity, setIdentity] = useState<Identity>(panel.settings.identity)
+  const [notify, setNotify] = useState(panel.settings.notifications.enabled)
+  const [watch, setWatch] = useState(panel.settings.wakeOnScreenNotifications)
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
-  useEffect(() => {
-    void api.panel(robotId).then((loaded) => {
-      setPanel(loaded)
-      setIdentity(loaded.settings.identity)
-      setNotify(loaded.settings.notifications.enabled)
-      setWatch(loaded.settings.wakeOnScreenNotifications)
-    })
-  }, [robotId])
-  if (panel === undefined || identity === undefined) return <Sheet onClose={onClose}><Loading /></Sheet>
   const save = async () => {
     setSaving(true)
-    try {
-      await api.updateSettings(robotId, { identity, notifications: { ...panel.settings.notifications, enabled: notify }, wakeOnScreenNotifications: watch })
-      onChanged()
-      onClose()
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'could not save')
+    const failure = exitFailure(await command((api) => api.updateSettings(robotId, { identity, notifications: { ...panel.settings.notifications, enabled: notify }, wakeOnScreenNotifications: watch }), [keys.robot(robotId), keys.robots]))
+    if (failure === undefined) onClose()
+    else {
+      setError(failure)
       setSaving(false)
     }
   }
@@ -97,30 +92,31 @@ export function RoutineList({ routines, onOpen }: { routines: readonly RoutineVi
 }
 
 /** Routine detail (robot-l3gr, robot-qhll, reference 08). */
-export function RoutineSheet({ robotId, routineId, canEdit, onClose, onBack, onChanged }: {
+export function RoutineSheet({ robotId, routineId, canEdit, onClose, onBack }: {
   robotId: string
   routineId: string
   canEdit: boolean
   onClose: () => void
   onBack?: () => void
-  onChanged: () => void
 }) {
-  const [routine, setRoutine] = useState<RoutineView | null>()
+  const result = useAtomValue(panelAtom(robotId))
+  const command = useCommand()
   const [error, setError] = useState<string>()
-  const load = useCallback(() => api.panel(robotId).then((panel) => setRoutine(panel.routines.find((entry) => entry.id === routineId) ?? null)), [robotId, routineId])
-  useEffect(() => { void load() }, [load])
-  if (routine === undefined) return <Sheet onClose={onClose}><Loading what="the routine" /></Sheet>
-  if (routine === null) return <Sheet onClose={onClose}><div className="muted">This Routine no longer exists.</div></Sheet>
-  const act = async (action: () => Promise<unknown>, closeAfter = false) => {
-    try {
-      await action()
-      onChanged()
-      if (closeAfter) (onBack ?? onClose)()
-      else await load()
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'failed')
+  return <>{renderResult(result, { what: 'the routine' }, (panel) => {
+    const routine = panel.routines.find((entry) => entry.id === routineId)
+    if (routine === undefined) return <Sheet onClose={onClose}><div className="muted">This Routine no longer exists.</div></Sheet>
+    const act = async (run: Parameters<typeof command>[0], closeAfter = false) => {
+      const failure = exitFailure(await command(run, [keys.robot(robotId), keys.admin]))
+      setError(failure)
+      if (failure === undefined && closeAfter) (onBack ?? onClose)()
     }
-  }
+    return <RoutineDetail routine={routine} canEdit={canEdit} onClose={onClose} {...(onBack === undefined ? {} : { onBack })} error={error}
+      onDelete={() => void act((api) => api.deleteRoutine(robotId, routine.id), true)}
+      onTogglePause={() => void act((api) => api.pauseRoutine(robotId, routine.id, !routine.paused))} />
+  })}</>
+}
+
+function RoutineDetail({ routine, canEdit, onClose, onBack, error, onDelete, onTogglePause }: { routine: RoutineView; canEdit: boolean; onClose: () => void; onBack?: () => void; error: string | undefined; onDelete: () => void; onTogglePause: () => void }) {
   return (
     <Sheet
       title={routine.name}
@@ -128,9 +124,9 @@ export function RoutineSheet({ robotId, routineId, canEdit, onClose, onBack, onC
       {...(onBack === undefined ? {} : { onBack })}
       footer={canEdit ? (
         <>
-          <ConfirmButton label="Delete" confirm="Delete for good" onConfirm={() => void act(() => api.deleteRoutine(robotId, routine.id), true)} />
+          <ConfirmButton label="Delete" confirm="Delete for good" onConfirm={onDelete} />
           <span className="spacer" />
-          <button type="button" className="button" onClick={() => void act(() => api.pauseRoutine(robotId, routine.id, !routine.paused))}>{routine.paused ? 'Resume' : 'Pause'}</button>
+          <button type="button" className="button" onClick={onTogglePause}>{routine.paused ? 'Resume' : 'Pause'}</button>
         </>
       ) : null}
     >

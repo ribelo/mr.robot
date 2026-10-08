@@ -1,9 +1,14 @@
-import { Loading, Empty as EmptyState, ErrorState } from './components/States.tsx'
+import { Empty as EmptyState, ErrorState } from './components/States.tsx'
 import { hostBridge } from './components/ThisComputer.tsx'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
+import * as Effect from 'effect/Effect'
+import { AsyncResult } from 'effect/reactivity'
 import type { Conversation as ConversationData, Me, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
-import { api, ApiError } from './api.ts'
-import { useLive } from './live.ts'
+import { conversationAtom, keys, meAtom, panelAtom, robotsAtom, useCommand } from './client/api-atoms.ts'
+import { exitFailure } from './client/api-failure.ts'
+import { robotFeedAtom } from './client/robot-feed.ts'
+import { renderResult } from './components/AtomView.tsx'
 import { go, useRoute, type Route } from './route.ts'
 import { Avatar } from './components/Avatar.tsx'
 import { ChatView } from './components/ChatView.tsx'
@@ -16,46 +21,43 @@ import { NewRobot } from './components/NewRobot.tsx'
 import { EditProfileSheet, RoutineSheet } from './components/RobotSheets.tsx'
 
 export function App() {
-  const route = useRoute()
-  const [me, setMe] = useState<Me>()
-  const [robots, setRobots] = useState<RobotSummary[]>([])
-  const [error, setError] = useState<string>()
+  const meResult = useAtomValue(meAtom)
+  return <>{renderResult(meResult, { errorTitle: 'Mr. Robot cannot be reached' }, (me) => <SignedIn me={me} />)}</>
+}
 
-  const refreshRobots = useCallback(() => api.robots().then(setRobots).catch(() => undefined), [])
+function SignedIn({ me }: { me: Me }) {
+  const route = useRoute()
+  const robotsResult = useAtomValue(robotsAtom)
+  const refreshRobots = useAtomRefresh(robotsAtom)
+  const robots: readonly RobotSummary[] = AsyncResult.getOrElse(robotsResult, () => [])
+  const command = useCommand()
   // The desktop app's tray badge follows the list's unread robots (pl-mhyg).
   const unreadCount = robots.filter((robot) => robot.unread).length
   // Re-sent on every list refresh: the app may have counted notifications on top of it meanwhile.
   useEffect(() => { void hostBridge()?.setUnread?.(unreadCount) }, [robots, unreadCount])
+  // Robots this person does not have open change too; the list reads again every half minute.
   useEffect(() => {
-    api.me().then(setMe, (cause: unknown) => setError(cause instanceof ApiError ? cause.message : 'cannot reach Mr. Robot'))
-    void refreshRobots()
-    const timer = setInterval(() => void refreshRobots(), 30_000)
+    const timer = setInterval(refreshRobots, 30_000)
     return () => clearInterval(timer)
   }, [refreshRobots])
 
   const [creating, setCreating] = useState(false)
   const [sheet, setSheet] = useState<Sheet>()
-  const [sheetVersion, setSheetVersion] = useState(0)
-
-  if (error !== undefined) return <div className="fatal">{error}</div>
-  if (me === undefined) return <div className="fatal"><Loading /></div>
 
   const selected = 'id' in route ? route.id : undefined
   const create = () => setCreating(true)
-  const created = async (id: string) => {
+  const created = (id: string) => {
     setCreating(false)
-    await refreshRobots()
     go({ page: 'robot', id, panel: false })
   }
 
   return (
     <div className={`app page-${route.page}`}>
-      {creating ? <NewRobot onCancel={() => setCreating(false)} onCreated={(id) => void created(id)} /> : null}
+      {creating ? <NewRobot onCancel={() => setCreating(false)} onCreated={created} /> : null}
       {sheet?.kind === 'profile' ? (
         <EditProfileSheet
           robotId={sheet.robotId}
           onClose={() => setSheet(undefined)}
-          onChanged={() => { void refreshRobots(); setSheetVersion((version) => version + 1) }}
           onOpenRoutine={(routine) => setSheet({ kind: 'routine', robotId: sheet.robotId, routineId: routine.id, fromProfile: true })}
         />
       ) : null}
@@ -66,7 +68,6 @@ export function App() {
           canEdit={robots.find((entry) => entry.id === sheet.robotId)?.ownerId === me.id}
           onClose={() => setSheet(undefined)}
           {...(sheet.fromProfile ? { onBack: () => setSheet({ kind: 'profile', robotId: sheet.robotId }) } : {})}
-          onChanged={() => { void refreshRobots(); setSheetVersion((version) => version + 1) }}
         />
       ) : null}
       <RobotList
@@ -78,19 +79,19 @@ export function App() {
         onCreate={() => void create()}
         onAdmin={() => go({ page: 'admin' })}
         onProfile={() => go({ page: 'profile' })}
-        onListPref={(id, change) => void api.listPref(id, change).then(refreshRobots)}
+        onListPref={(id, change) => void command((api) => api.listPref(id, change), [keys.robots])}
         onEditProfile={(id) => setSheet({ kind: 'profile', robotId: id })}
         onAdvanced={(id) => go({ page: 'advanced', id })}
         onFiles={(id) => go({ page: 'files', id, path: null })}
         meId={me.id}
-        onRemoved={(id, deleted) => { void refreshRobots(); setSheetVersion((version) => version + 1); if (deleted && selected === id) go({ page: 'home' }) }}
+        onRemoved={(id, deleted) => { if (deleted && selected === id) go({ page: 'home' }) }}
       />
       <main className="main">
         {route.page === 'robot'
-          ? <RobotView key={`${route.id}-${sheetVersion}`} route={route} me={me} robot={robots.find((robot) => robot.id === route.id)} onChanged={refreshRobots} onSheet={setSheet} />
+          ? <RobotView key={route.id} route={route} me={me} robot={robots.find((robot) => robot.id === route.id)} onSheet={setSheet} />
           : route.page === 'home'
             ? <Empty />
-            : <Pages route={route} me={me} robots={robots} onChanged={refreshRobots} />}
+            : <Pages route={route} me={me} robots={robots} />}
       </main>
     </div>
   )
@@ -103,53 +104,43 @@ function Empty() {
 /** The sheet open over the app: a Robot's profile or one of its Routines. */
 type Sheet = { kind: 'profile'; robotId: string } | { kind: 'routine'; robotId: string; routineId: string; fromProfile: boolean }
 
-function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Route, { page: 'robot' }>; me: Me; robot: RobotSummary | undefined; onChanged: () => void; onSheet: (sheet: Sheet) => void }) {
-  const [conversation, setConversation] = useState<ConversationData>()
-  const [panel, setPanel] = useState<RobotPanel>()
-  const [failure, setFailure] = useState<string>()
-  const [replyingInstead, setReplyingInstead] = useState(false)
-  const [stream, setStream] = useState<{ text: string; thinking: string }>()
-  const [search, setSearch] = useState<{ query: string; index: number }>()
+function RobotView({ route, me, robot, onSheet }: { route: Extract<Route, { page: 'robot' }>; me: Me; robot: RobotSummary | undefined; onSheet: (sheet: Sheet) => void }) {
   const id = route.id
   const details = me.workDetails !== 'compact'
+  const conversationResult = useAtomValue(conversationAtom(details ? `${id}|details` : id))
+  const panelResult = useAtomValue(panelAtom(id))
+  const refreshConversation = useAtomRefresh(conversationAtom(details ? `${id}|details` : id))
+  const refreshPanel = useAtomRefresh(panelAtom(id))
+  // Subscribing keeps the Robot's live feed open while its conversation is on screen (fe-xp06).
+  const feed = AsyncResult.getOrElse(useAtomValue(robotFeedAtom(id)), () => ({ stream: null, changes: 0 }))
+  const both = AsyncResult.all([conversationResult, panelResult])
+  return <>{renderResult(both, { what: 'the conversation', errorTitle: 'This robot cannot be opened', retry: () => { refreshConversation(); refreshPanel() } }, ([conversation, panel]) => (
+    <RobotConversation route={route} me={me} robot={robot} conversation={conversation} panel={panel} stream={feed.stream} onSheet={onSheet} />
+  ))}</>
+}
 
-  const refresh = useCallback(async () => {
-    try {
-      const [nextConversation, nextPanel] = await Promise.all([api.conversation(id, details), api.panel(id)])
-      setConversation(nextConversation)
-      setPanel(nextPanel)
-      setFailure(undefined)
-    } catch (cause) {
-      setFailure(cause instanceof ApiError ? cause.message : 'cannot load this robot')
-    }
-  }, [id, details])
-
-  useEffect(() => { void refresh() }, [refresh])
-  useLive(id, (_working, message) => {
-    // Streaming text updates the live bubble only; the stored message arrives with the next change.
-    if (message.type === 'stream') {
-      setStream(message.done === true ? undefined : { text: message.text ?? '', thinking: message.thinking ?? '' })
-      return
-    }
-    void refresh()
-    onChanged()
-  })
+function RobotConversation({ route, me, robot, conversation, panel, stream, onSheet }: {
+  route: Extract<Route, { page: 'robot' }>
+  me: Me
+  robot: RobotSummary | undefined
+  conversation: ConversationData
+  panel: RobotPanel
+  stream: { readonly text: string; readonly thinking: string } | null
+  onSheet: (sheet: Sheet) => void
+}) {
+  const id = route.id
+  const command = useCommand()
+  const [replyingInstead, setReplyingInstead] = useState(false)
+  const [search, setSearch] = useState<{ query: string; index: number }>()
+  const [failure, setFailure] = useState<string>()
 
   useEffect(() => {
     const end = document.querySelector('.chat-scroll')
     end?.scrollTo({ top: end.scrollHeight })
-  }, [conversation?.items.length, conversation?.working, stream?.text.length])
-
-  if (failure !== undefined) return <div className="empty-main"><ErrorState title="This robot cannot be opened" message={failure} onRetry={() => void refresh()} back={{ label: 'All robots', onClick: () => go({ page: 'home' }) }} /></div>
-  if (conversation === undefined || panel === undefined) return <div className="empty-main"><Loading what="the conversation" /></div>
+  }, [conversation.items.length, conversation.working, stream?.text.length])
 
   const answer = async (proposal: ProposalView, approve: boolean) => {
-    try {
-      await api.answer(id, proposal, approve)
-    } catch (cause) {
-      alert(cause instanceof ApiError ? cause.message : 'could not answer')
-    }
-    await refresh()
+    setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve), [keys.robot(id), keys.robots])))
   }
 
   // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
@@ -203,10 +194,11 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
       <section className="conversation-main">
         {header}
         <div className="chat-scroll">
-          <ChatView items={conversation.items} meId={me.id} robotId={id} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === undefined ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
+          {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
+          <ChatView items={conversation.items} meId={me.id} robotId={id} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
-              <button type="button" className="button" onClick={() => void api.retry(id).then(refresh)}>Try again</button>
+              <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>
               <button type="button" className="link" onClick={() => go({ page: 'advanced', id })}>Change the model</button>
             </div>
           ) : null}
@@ -216,11 +208,14 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
         ) : (
         <Composer
           placeholder={`Message ${identity.name}`}
-          onUpload={(file) => api.upload(id, file)}
+          onUpload={async (file) => {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            return command((api) => api.upload(id, { name: file.name, type: file.type, bytes }), [keys.files(id)])
+          }}
           onSend={async (text, attachments) => {
-            await api.send(id, { text, attachments })
+            const sent = await command((api) => api.send(id, { text, attachments }), [keys.robot(id), keys.robots])
             setReplyingInstead(false)
-            await refresh()
+            return sent
           }}
         />
         )}

@@ -1,10 +1,12 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { Attachment } from '@mr-robot/protocol'
+import * as Exit from 'effect/Exit'
+import { exitFailure, type ApiFailure } from '../client/api-failure.ts'
 
 export interface ComposerProps {
   readonly placeholder: string
-  readonly onSend: (text: string, attachments: Attachment[]) => Promise<void>
-  readonly onUpload: (file: File) => Promise<Attachment>
+  readonly onSend: (text: string, attachments: Attachment[]) => Promise<Exit.Exit<void, ApiFailure>>
+  readonly onUpload: (file: File) => Promise<Exit.Exit<Attachment, ApiFailure>>
 }
 
 /** Text and files for a Robot (robot-jlzk). Enter sends on a keyboard; the button sends on a phone. */
@@ -12,18 +14,19 @@ export function Composer({ placeholder, onSend, onUpload }: ComposerProps) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<Attachment[]>([])
   const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string>()
   const input = useRef<HTMLInputElement>(null)
 
   const send = async () => {
     if (busy || (text.trim() === '' && files.length === 0)) return
     setBusy(true)
-    try {
-      await onSend(text.trim(), files)
+    const sent = await onSend(text.trim(), files)
+    setFailure(exitFailure(sent))
+    if (Exit.isSuccess(sent)) {
       setText('')
       setFiles([])
-    } finally {
-      setBusy(false)
     }
+    setBusy(false)
   }
 
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -36,16 +39,16 @@ export function Composer({ placeholder, onSend, onUpload }: ComposerProps) {
   const upload = async (list: FileList | null) => {
     if (list === null) return
     setBusy(true)
-    try {
-      const uploaded = await Promise.all([...list].map(onUpload))
-      setFiles((current) => [...current, ...uploaded])
-    } finally {
-      setBusy(false)
-    }
+    const results = await Promise.all([...list].map(onUpload))
+    const uploaded = results.flatMap((result) => (Exit.isSuccess(result) ? [result.value] : []))
+    setFiles((current) => [...current, ...uploaded])
+    setFailure(results.map(exitFailure).find((message) => message !== undefined))
+    setBusy(false)
   }
 
   return (
     <div className="composer">
+      {failure === undefined ? null : <div className="composer-failure">{failure}</div>}
       {files.length > 0 ? (
         <div className="composer-files">
           {files.map((file) => (

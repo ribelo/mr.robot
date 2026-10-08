@@ -1,3 +1,4 @@
+import { RegistryProvider } from '@effect/atom-react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RobotPanel } from '@mr-robot/protocol'
@@ -57,9 +58,15 @@ describe('Panel (robot-z3ud)', () => {
 describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
   const serve = () => {
     const calls: Array<{ path: string; method: string; body: unknown }> = []
-    vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
-      calls.push({ path, method: init?.method ?? 'GET', body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) })
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(input, 'http://localhost').pathname
+      const raw = init?.body
+      const text = raw === undefined || raw === null ? undefined : ArrayBuffer.isView(raw) ? new TextDecoder().decode(raw) : String(raw)
+      calls.push({ path, method: init?.method ?? 'GET', body: text === undefined ? undefined : JSON.parse(text) })
       if (path.endsWith('/panel')) return Response.json(panel)
+      // The server answers a settings change with the saved settings, a routine change with the routine.
+      if (path.endsWith('/settings')) return Response.json(panel.settings)
+      if (path.endsWith('/pause')) return Response.json(panel.routines[0])
       return Response.json({ ok: true })
     }))
     return calls
@@ -67,7 +74,7 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
 
   it('the routine detail shows schedule, cron, status, instructions and runs, and pauses', async () => {
     const calls = serve()
-    render(<RoutineSheet robotId="r-1" routineId="rt-1" canEdit onClose={vi.fn()} onChanged={vi.fn()} />)
+    render(<RegistryProvider><RoutineSheet robotId="r-1" routineId="rt-1" canEdit onClose={vi.fn()} /></RegistryProvider>)
     expect(await screen.findByText('Work the queue')).toBeTruthy()
     expect(screen.getByText('CRON_TZ=Europe/Warsaw 0 2 * * 0')).toBeTruthy()
     expect(screen.getByText('Queue worked: 12 leads.')).toBeTruthy()
@@ -79,13 +86,13 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
 
   it('edit profile saves name and notifications together', async () => {
     const calls = serve()
-    const changed = vi.fn()
-    render(<EditProfileSheet robotId="r-1" onClose={vi.fn()} onChanged={changed} onOpenRoutine={vi.fn()} />)
+    const closed = vi.fn()
+    render(<RegistryProvider><EditProfileSheet robotId="r-1" onClose={closed} onOpenRoutine={vi.fn()} /></RegistryProvider>)
     fireEvent.change(await screen.findByDisplayValue('Sales Outbound'), { target: { value: 'Outbound' } })
     fireEvent.click(screen.getByRole('switch', { name: 'Notifications' }))
     fireEvent.click(screen.getByRole('switch', { name: 'Wake on screen notifications' }))
     fireEvent.click(screen.getByText('Save'))
-    await vi.waitFor(() => expect(changed).toHaveBeenCalled())
+    await vi.waitFor(() => expect(closed).toHaveBeenCalled())
     expect(calls.find((call) => call.method === 'PATCH')!.body).toMatchObject({ identity: { name: 'Outbound' }, notifications: { enabled: false }, wakeOnScreenNotifications: true })
     vi.unstubAllGlobals()
   })

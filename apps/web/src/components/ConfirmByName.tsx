@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ApiError } from '../api.ts'
+import type * as Exit from 'effect/Exit'
+import { exitFailure, type ApiFailure } from '../client/api-failure.ts'
 
 /**
  * A destructive action confirmed by typing a name exactly (pl-kehf). There is no undo, so the
@@ -12,7 +13,8 @@ export function ConfirmByName({ title, name, goes, stays, action, option, onConf
   stays?: string
   action: string
   option?: { label: string; note: string }
-  onConfirm: (option: boolean) => Promise<unknown>
+  /** Resolves with the command's Exit; a failure is shown in the dialog. */
+  onConfirm: (option: boolean) => Promise<Exit.Exit<unknown, ApiFailure>>
   onCancel: () => void
 }) {
   const [typed, setTyped] = useState('')
@@ -23,10 +25,9 @@ export function ConfirmByName({ title, name, goes, stays, action, option, onConf
   const confirm = async () => {
     setBusy(true)
     setError(undefined)
-    try {
-      await onConfirm(checked)
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'it did not work; try again')
+    const failure = exitFailure(await onConfirm(checked))
+    if (failure !== undefined) {
+      setError(failure)
       setBusy(false)
     }
   }

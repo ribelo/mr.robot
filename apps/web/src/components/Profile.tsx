@@ -2,9 +2,13 @@ import { ConfirmByName } from './ConfirmByName.tsx'
 import { hostBridge } from './ThisComputer.tsx'
 import { WORK_DETAILS } from './WorkDetails.tsx'
 import { Hosts } from './Hosts.tsx'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { Me, ProvidersView, LoginView } from '@mr-robot/protocol'
-import { api, ApiError } from '../api.ts'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useAtomValue } from '@effect/atom-react'
+import * as Exit from 'effect/Exit'
+import type { Me, OpencodeKeysView, ProvidersView } from '@mr-robot/protocol'
+import { keys, memberFileAtom, opencodeKeysAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
+import { exitFailure } from '../client/api-failure.ts'
+import { AtomView } from './AtomView.tsx'
 
 const PROVIDERS = [
   { id: 'deepseek', name: 'DeepSeek', note: 'DeepSeek models with your API key.', kind: 'api-key' },
@@ -14,11 +18,11 @@ const PROVIDERS = [
 ] as const
 
 /** A Member's own settings: profile, quiet hours, Provider credentials, Member files. */
-export function Profile({ me, onChanged }: { me: Me; onChanged: () => void }) {
+export function Profile({ me }: { me: Me }) {
   return (
     <div className="form">
-      <Preferences me={me} onChanged={onChanged} />
-      <WorkDetailsSetting me={me} onChanged={onChanged} />
+      <Preferences me={me} />
+      <WorkDetailsSetting me={me} />
       <ResetEverything me={me} />
       <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
       <Providers />
@@ -29,15 +33,15 @@ export function Profile({ me, onChanged }: { me: Me; onChanged: () => void }) {
   )
 }
 
-function Preferences({ me, onChanged }: { me: Me; onChanged: () => void }) {
+function Preferences({ me }: { me: Me }) {
+  const command = useCommand()
   const [name, setName] = useState(me.name)
   const [timeZone, setTimeZone] = useState(me.timeZone)
   const [quiet, setQuiet] = useState(me.quietHours ?? { start: '', end: '' })
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState<string>()
   const save = async () => {
-    await api.updateMe({ name, timeZone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null })
-    setSaved(true)
-    onChanged()
+    const exit = await command((api) => api.updateMe({ name, timeZone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null }), [keys.me, keys.robots, keys.admin])
+    setSaved(exitFailure(exit) ?? 'Saved.')
   }
   return (
     <>
@@ -48,30 +52,26 @@ function Preferences({ me, onChanged }: { me: Me; onChanged: () => void }) {
         <label>Quiet from<input type="time" value={quiet.start} onChange={(event) => setQuiet({ ...quiet, start: event.target.value })} /></label>
         <label>until<input type="time" value={quiet.end} onChange={(event) => setQuiet({ ...quiet, end: event.target.value })} /></label>
       </div>
-      <div className="question-actions">{saved ? <span className="muted">Saved.</span> : null}<button type="button" className="button button-primary" onClick={() => void save()}>Save</button></div>
+      <div className="question-actions">{saved === undefined ? null : <span className="muted">{saved}</span>}<button type="button" className="button button-primary" onClick={() => void save()}>Save</button></div>
     </>
   )
 }
 
 function Providers() {
-  const [view, setView] = useState<ProvidersView>()
+  return <AtomView atom={providersAtom} what="Providers">{(view) => <ProviderList view={view} />}</AtomView>
+}
+
+function ProviderList({ view }: { view: ProvidersView }) {
+  const command = useCommand()
   const [message, setMessage] = useState<string>()
-  const refresh = useCallback(() => api.providers().then(setView), [])
-  useEffect(() => { void refresh() }, [refresh])
-  const run = async (action: () => Promise<unknown>, done?: string) => {
-    try {
-      await action()
-      setMessage(done)
-    } catch (cause) {
-      setMessage(cause instanceof ApiError ? cause.message : 'failed')
-    }
-    await refresh()
+  const run = async (action: Parameters<typeof command>[0], done?: string) => {
+    const failure = exitFailure(await command(action, [keys.providers]))
+    setMessage(failure ?? done)
   }
-  if (view === undefined) return <div className="muted">Loading Providers…</div>
   const sharedBy = (id: string) => view.shared.filter((entry) => entry.provider === id).map((entry) => entry.ownerName)
   const shareToggle = (id: string) => {
     const mine = view.mine.find((entry) => entry.provider === id)
-    return mine === undefined ? null : <label className="check"><input type="checkbox" checked={mine.shared} onChange={(event) => void run(() => api.shareProvider(id, event.target.checked))} /> shared with the Home</label>
+    return mine === undefined ? null : <label className="check"><input type="checkbox" checked={mine.shared} onChange={(event) => { const shared = event.target.checked; void run((api) => api.shareProvider(id, shared)) }} /> shared with the Home</label>
   }
   return (
     <>
@@ -84,19 +84,19 @@ function Providers() {
           return (
             <ProviderRow key={provider.id} name={provider.name} note={provider.note} sharedBy={sharedBy(provider.id)}>
               {mine === undefined
-                ? <Connect provider={provider} onDone={(text) => void run(async () => undefined, text)} />
+                ? <Connect provider={provider} onDone={(text) => setMessage(text)} />
                 : (
                   <span className="form inline">
                     <span className="connected">Connected</span>
                     {shareToggle(provider.id)}
-                    <button type="button" className="link" onClick={() => void run(() => api.removeProvider(provider.id), 'Removed.')}>Remove</button>
+                    <button type="button" className="link" onClick={() => void run((api) => api.removeProvider(provider.id), 'Removed.')}>Remove</button>
                   </span>
                 )}
             </ProviderRow>
           )
         })}
         <ProviderRow name="OpenCode Go" note="Every model of the plan. With several keys, the next one takes over when a key runs out." sharedBy={sharedBy('opencode-go')}>
-          <OpencodeKeys share={shareToggle('opencode-go')} onChanged={refresh} />
+          <AtomView atom={opencodeKeysAtom}>{(keyPool) => <OpencodeKeys view={keyPool} share={shareToggle('opencode-go')} />}</AtomView>
         </ProviderRow>
         <ProviderRow name="Workers AI" note="Models on Cloudflare, billed to this Cloudflare account." sharedBy={[]}>
           <span className="muted">Included</span>
@@ -119,31 +119,24 @@ function ProviderRow({ name, note, sharedBy, children }: { name: string; note: s
 }
 
 /** OpenCode Go keys (ticket 19): a pool, so it is managed here rather than through Connect. */
-function OpencodeKeys({ share, onChanged }: { share: ReactNode; onChanged: () => Promise<unknown> }) {
-  const [view, setView] = useState<Awaited<ReturnType<typeof api.opencodeKeys>>>()
+function OpencodeKeys({ view, share }: { view: OpencodeKeysView; share: ReactNode }) {
+  const command = useCommand()
   const [adding, setAdding] = useState(false)
   const [key, setKey] = useState('')
   const [error, setError] = useState<string>()
-  useEffect(() => { void api.opencodeKeys().then(setView) }, [])
-  const change = async (action: () => Promise<Awaited<ReturnType<typeof api.opencodeKeys>>>) => {
-    try {
-      setView(await action())
-      setError(undefined)
-      await onChanged()
-      return true
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'failed')
-      return false
-    }
+  const change = async (action: Parameters<typeof command>[0]) => {
+    const failure = exitFailure(await command(action, [keys.providers]))
+    setError(failure)
+    return failure === undefined
   }
-  const keys = view?.keys ?? []
+  const poolKeys = view.keys
   const form = (
     <span className="form inline">
       <input type="password" value={key} placeholder="OpenCode API key (sk-…)" onChange={(event) => setKey(event.target.value)} />
-      <button type="button" className="button" disabled={key.trim() === ''} onClick={() => void change(() => api.addOpencodeKey(key)).then((ok) => { if (ok) { setKey(''); setAdding(false) } })}>Add</button>
+      <button type="button" className="button" disabled={key.trim() === ''} onClick={() => void change((api) => api.addOpencodeKey(key)).then((ok) => { if (ok) { setKey(''); setAdding(false) } })}>Add</button>
     </span>
   )
-  if (keys.length === 0) {
+  if (poolKeys.length === 0) {
     return (
       <span className="form">
         {adding ? form : <button type="button" className="button" onClick={() => setAdding(true)}>Connect</button>}
@@ -154,11 +147,11 @@ function OpencodeKeys({ share, onChanged }: { share: ReactNode; onChanged: () =>
   return (
     <span className="form">
       <span className="form inline"><span className="connected">Connected</span>{share}</span>
-      {keys.map((entry) => (
+      {poolKeys.map((entry) => (
         <span key={entry.id} className="form inline key-row">
           <span className="mono">{entry.masked}</span>
-          {entry.id === view?.activeId ? <span className="muted">in use</span> : <button type="button" className="link" onClick={() => void change(() => api.activateOpencodeKey(entry.id))}>Use this one</button>}
-          <button type="button" className="link" onClick={() => void change(() => api.removeOpencodeKey(entry.id))}>Remove</button>
+          {entry.id === view.activeId ? <span className="muted">in use</span> : <button type="button" className="link" onClick={() => void change((api) => api.activateOpencodeKey(entry.id))}>Use this one</button>}
+          <button type="button" className="link" onClick={() => void change((api) => api.removeOpencodeKey(entry.id))}>Remove</button>
         </span>
       ))}
       {adding ? form : <button type="button" className="link" onClick={() => setAdding(true)}>+ Add another key</button>}
@@ -168,6 +161,7 @@ function OpencodeKeys({ share, onChanged }: { share: ReactNode; onChanged: () =>
 }
 
 function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; onDone: (message: string) => void }) {
+  const command = useCommand()
   const [open, setOpen] = useState(false)
   const [key, setKey] = useState('')
   const [shared, setShared] = useState(false)
@@ -177,19 +171,22 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
 
   useEffect(() => {
     if (provider.id !== 'openai' || flow === undefined) return
+    // The device sign-in finishes on OpenAI's page; this page asks every few seconds whether it has.
     const timer = setInterval(() => {
-      api.finishOAuth('openai', shared).then((result) => {
-        if (result.connected) {
-          clearInterval(timer)
-          onDone('ChatGPT subscription connected.')
+      void command((api) => api.finishOAuth('openai', shared), [keys.providers]).then((exit) => {
+        if (Exit.isSuccess(exit)) {
+          if (exit.value.connected) {
+            clearInterval(timer)
+            onDone('ChatGPT subscription connected.')
+          }
+          return
         }
-      }, (cause: unknown) => {
         clearInterval(timer)
-        setError(cause instanceof ApiError ? cause.message : 'sign-in failed')
+        setError(exitFailure(exit))
       })
     }, 5000)
     return () => clearInterval(timer)
-  }, [flow, provider.id, shared, onDone])
+  }, [flow, provider.id, shared, onDone, command])
 
   if (!open) return <button type="button" className="button" onClick={() => setOpen(true)}>Connect</button>
   const sharedBox = <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /> share with the Home</label>
@@ -199,7 +196,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
         <input type="password" value={key} placeholder="API key" onChange={(event) => setKey(event.target.value)} />
         {sharedBox}
         {error === undefined ? null : <span className="muted">{error}</span>}
-        <button type="button" className="button button-primary" onClick={() => void api.setApiKey(provider.id, key, shared).then(() => onDone('Saved.'), (cause: unknown) => setError(cause instanceof ApiError ? cause.message : 'failed'))}>Save</button>
+        <button type="button" className="button button-primary" onClick={() => void command((api) => api.setApiKey(provider.id, key, shared), [keys.providers]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) onDone('Saved.'); else setError(failure) })}>Save</button>
       </span>
     )
   }
@@ -207,7 +204,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
     return (
       <span className="form">
         {sharedBox}
-        <button type="button" className="button button-primary" onClick={() => void api.startOAuth(provider.id).then(setFlow, (cause: unknown) => setError(cause instanceof ApiError ? cause.message : 'failed'))}>Sign in</button>
+        <button type="button" className="button button-primary" onClick={() => void command((api) => api.startOAuth(provider.id), []).then((exit) => { if (Exit.isSuccess(exit)) setFlow(exit.value); else setError(exitFailure(exit)) })}>Sign in</button>
         {error === undefined ? null : <span className="muted">{error}</span>}
       </span>
     )
@@ -225,7 +222,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
       <span><a href={flow.url} target="_blank" rel="noreferrer">Sign in to Claude</a>. You will land on a page that does not load: copy its whole address and paste it here.</span>
       <input value={pasted} placeholder="http://localhost:53692/callback?code=…" onChange={(event) => setPasted(event.target.value)} />
       {error === undefined ? null : <span className="muted">{error}</span>}
-      <button type="button" className="button button-primary" onClick={() => void api.finishOAuth('anthropic', shared, pasted).then(() => onDone('Claude subscription connected.'), (cause: unknown) => setError(cause instanceof ApiError ? cause.message : 'failed'))}>Finish</button>
+      <button type="button" className="button button-primary" onClick={() => void command((api) => api.finishOAuth('anthropic', shared, pasted), [keys.providers]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) onDone('Claude subscription connected.'); else setError(failure) })}>Finish</button>
     </span>
   )
 }
@@ -243,14 +240,17 @@ function MemberFiles() {
 }
 
 function MemberFile({ name }: { name: string }) {
-  const [content, setContent] = useState<string>()
-  const [saved, setSaved] = useState(false)
-  useEffect(() => { void api.memberFile(name).then((file) => setContent(file.content)) }, [name])
-  if (content === undefined) return null
+  return <AtomView atom={memberFileAtom(name)}>{(file) => <MemberFileEditor name={name} initial={file.content} />}</AtomView>
+}
+
+function MemberFileEditor({ name, initial }: { name: string; initial: string }) {
+  const command = useCommand()
+  const [content, setContent] = useState(initial)
+  const [saved, setSaved] = useState<string>()
   return (
     <label>{name}
-      <textarea rows={8} value={content} placeholder={PLACEHOLDERS[name]} onChange={(event) => { setContent(event.target.value); setSaved(false) }} onBlur={() => void api.writeMemberFile(name, content).then(() => setSaved(true))} />
-      {saved ? <span className="muted">Saved.</span> : null}
+      <textarea rows={8} value={content} placeholder={PLACEHOLDERS[name]} onChange={(event) => { setContent(event.target.value); setSaved(undefined) }} onBlur={() => void command((api) => api.writeMemberFile(name, content), [keys.memberFiles]).then((exit) => setSaved(exitFailure(exit) ?? 'Saved.'))} />
+      {saved === undefined ? null : <span className="muted">{saved}</span>}
     </label>
   )
 }
@@ -262,6 +262,11 @@ function DeviceNotifications({ vapidPublicKey }: { vapidPublicKey: string }) {
       <div className="toggle-card"><div><div>Notifications on this computer</div><div className="muted">The Mr. Robot app shows them as system notifications while this computer is paired. Quiet hours hold them until morning.</div></div></div>
     )
   }
+  return <WebPushSwitch vapidPublicKey={vapidPublicKey} />
+}
+
+function WebPushSwitch({ vapidPublicKey }: { vapidPublicKey: string }) {
+  const command = useCommand()
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
   const [subscription, setSubscription] = useState<PushSubscription | null>(null)
   const [error, setError] = useState<string>()
@@ -275,7 +280,8 @@ function DeviceNotifications({ vapidPublicKey }: { vapidPublicKey: string }) {
       if ((await Notification.requestPermission()) !== 'granted') throw new Error('notifications are blocked for this site')
       const registration = await navigator.serviceWorker.ready
       const created = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64urlToBytes(vapidPublicKey) })
-      await api.subscribePush(created.toJSON(), navigator.userAgent.slice(0, 80))
+      const failure = exitFailure(await command((api) => api.subscribePush(created.toJSON(), navigator.userAgent.slice(0, 80)), []))
+      if (failure !== undefined) throw new Error(failure)
       setSubscription(created)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'cannot enable notifications')
@@ -283,7 +289,7 @@ function DeviceNotifications({ vapidPublicKey }: { vapidPublicKey: string }) {
   }
   const disable = async () => {
     if (subscription === null) return
-    await api.unsubscribePush(subscription.endpoint)
+    await command((api) => api.unsubscribePush(subscription.endpoint), [])
     await subscription.unsubscribe()
     setSubscription(null)
   }
@@ -311,26 +317,19 @@ function base64urlToBytes(text: string): Uint8Array<ArrayBuffer> {
 /** The vault (robot-vplt): values go in, never come back out to the browser. */
 /** Logins (v1.1 ticket 05, rb-4dxe): entries with username, password, websites and notes; granted per Robot. */
 function Secrets() {
-  const [list, setList] = useState<LoginView[]>()
+  const listResult = useAtomValue(secretsAtom)
+  const list = listResult._tag === 'Success' ? listResult.value : undefined
+  const command = useCommand()
   const [editing, setEditing] = useState<LoginDraft | null>(null)
   const [revealed, setRevealed] = useState<Record<string, string>>({})
   const [error, setError] = useState<string>()
-  const refresh = useCallback(() => api.secrets().then(setList), [])
-  useEffect(() => { void refresh() }, [refresh])
-  const run = async (action: () => Promise<unknown>) => {
-    try {
-      await action()
-      setError(undefined)
-      return true
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'failed')
-      return false
-    } finally {
-      await refresh()
-    }
+  const run = async (action: Parameters<typeof command>[0]) => {
+    const failure = exitFailure(await command(action, [keys.secrets]))
+    setError(failure)
+    return failure === undefined
   }
   const save = async (draft: LoginDraft) => {
-    const ok = await run(() => api.putLogin(draft.name, {
+    const ok = await run((api) => api.putLogin(draft.name, {
       username: draft.username,
       ...(draft.password === '' ? {} : { password: draft.password }),
       websites: draft.websites.split(/[\n,]/).map((site) => site.trim()).filter((site) => site !== ''),
@@ -356,10 +355,10 @@ function Secrets() {
             {login.mine ? (
               <span className="form inline">
                 <button type="button" className="link" onClick={() => revealed[login.name] === undefined
-                  ? void api.revealLogin(login.name).then(({ password }) => setRevealed({ ...revealed, [login.name]: password }))
+                  ? void command((api) => api.revealLogin(login.name), []).then((exit) => { if (Exit.isSuccess(exit)) setRevealed({ ...revealed, [login.name]: exit.value.password }); else setError(exitFailure(exit)) })
                   : setRevealed(Object.fromEntries(Object.entries(revealed).filter(([name]) => name !== login.name)))}>{revealed[login.name] === undefined ? 'Reveal' : 'Hide'}</button>
                 <button type="button" className="link" onClick={() => setEditing({ name: login.name, username: login.username, password: '', websites: login.websites.join('\n'), notes: login.notes, allowRead: login.allowRead, shared: login.scope === 'home', existing: true })}>Edit</button>
-                <button type="button" className="link" onClick={() => void run(() => api.deleteSecret(login.name))}>Delete</button>
+                <button type="button" className="link" onClick={() => void run((api) => api.deleteSecret(login.name))}>Delete</button>
               </span>
             ) : null}
           </div>
@@ -403,7 +402,8 @@ function LoginForm({ draft, onChange, onSave, onCancel }: { draft: LoginDraft; o
 }
 
 /** Work details (pl-6eir): how much of a Robot's work the chat shows; per person. */
-function WorkDetailsSetting({ me, onChanged }: { me: Me; onChanged: () => void }) {
+function WorkDetailsSetting({ me }: { me: Me }) {
+  const command = useCommand()
   const [value, setValue] = useState(me.workDetails ?? 'compact')
   return (
     <>
@@ -412,7 +412,7 @@ function WorkDetailsSetting({ me, onChanged }: { me: Me; onChanged: () => void }
       <div className="segmented" role="radiogroup" aria-label="Work details">
         {WORK_DETAILS.map((option) => (
           <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? 'segment active' : 'segment'}
-            onClick={() => { setValue(option.id); void api.updateMe({ workDetails: option.id }).then(onChanged) }}>{option.label}</button>
+            onClick={() => { setValue(option.id); void command((api) => api.updateMe({ workDetails: option.id }), [keys.me]) }}>{option.label}</button>
         ))}
       </div>
       <div className="muted">{WORK_DETAILS.find((option) => option.id === value)?.note}</div>
@@ -422,6 +422,7 @@ function WorkDetailsSetting({ me, onChanged }: { me: Me; onChanged: () => void }
 
 /** Reset everything (pl-062x): as if signing in for the first time, without entering credentials again. */
 function ResetEverything({ me }: { me: Me }) {
+  const command = useCommand()
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -436,7 +437,11 @@ function ResetEverything({ me }: { me: Me }) {
           stays="Logins, providers, computers, members and the skill library stay."
           action="Reset everything"
           onCancel={() => setOpen(false)}
-          onConfirm={async () => { await api.resetEverything(me.name); location.hash = '#/'; location.reload() }}
+          onConfirm={async () => {
+            const exit = await command((api) => api.resetEverything(me.name), [])
+            if (Exit.isSuccess(exit)) { location.hash = '#/'; location.reload() }
+            return exit
+          }}
         />
       ) : null}
     </>
