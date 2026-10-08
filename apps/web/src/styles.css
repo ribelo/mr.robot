@@ -424,13 +424,13 @@ a.button { text-decoration: none; color: var(--text); }
 .host-log-failed { color: #ff9a9d; }
 
 /* ---------------------------------------------------------------- States and polish (v1.3 ticket 08) */
-.state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 40px 20px; color: var(--muted); min-height: 160px; }
-.empty-main .state, .fatal .state { min-height: 0; }
-.state-title { color: var(--text); font-size: 15px; font-weight: 600; }
-.state-hint { font-size: 13.5px; max-width: 420px; line-height: 1.5; }
-.state-action { display: flex; gap: 10px; margin-top: 6px; }
-.state-error .state-title { color: #ffb4b4; }
-.state .spinner { width: 18px; height: 18px; }
+.page-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 40px 20px; color: var(--muted); min-height: 160px; }
+.empty-main .page-state, .fatal .page-state { min-height: 0; }
+.page-state-title { color: var(--text); font-size: 15px; font-weight: 600; }
+.page-state-hint { font-size: 13.5px; max-width: 420px; line-height: 1.5; }
+.page-state-action { display: flex; gap: 10px; margin-top: 6px; }
+.page-state-error .page-state-title { color: #ffb4b4; }
+.page-state .spinner { width: 18px; height: 18px; }
 /* Rows that span their container include their padding (the phone sidebar overflowed sideways). */
 .robot-row, .search, .file-row, .composer-row, .page, .modal { box-sizing: border-box; }
 .sidebar { overflow-x: hidden; }
