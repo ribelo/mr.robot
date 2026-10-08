@@ -72,8 +72,9 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
   const offsets = rowOffsets(enabled ? rows : [])
   const totalHeight = offsets[offsets.length - 1] ?? 0
 
-  // Track the scroll position and the pane's height.
-  useLayoutEffect(() => {
+  // Track the scroll position and the pane's height. A passive effect: the scrolling element may be
+  // a parent whose ref React sets only after this component's layout effects ran.
+  useEffect(() => {
     const pane = scrollElement.current
     if (pane === null || !enabled) return
     const read = () => setViewport({ top: pane.scrollTop - margin, height: pane.clientHeight || initialViewport })
