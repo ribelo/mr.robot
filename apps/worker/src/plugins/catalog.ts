@@ -29,6 +29,8 @@ export interface PluginEntry {
   readonly toolGroups: readonly ToolGroup[]
   /** The Home's settings for the plugin (admin only); secret fields carry role "secret". */
   readonly homeConfig?: z<unknown>
+  /** Setup steps in Markdown for the plugin page; origin is this Mr. Robot's address (callback URLs). */
+  readonly guide?: (origin: string) => string
   /** What the admin still has to set up, given the saved values and which secrets are stored. */
   readonly setupNeeded?: (values: Readonly<Record<string, unknown>>, secretsSet: ReadonlySet<string>) => string | null
   readonly connector?: ConnectorSpec
@@ -61,6 +63,20 @@ export const PLUGINS: readonly PluginEntry[] = [
       clientSecret: z.string().role('secret').required().description('OAuth client secret'),
     }) as never,
     setupNeeded: (values, secrets) => (typeof values['clientId'] === 'string' && values['clientId'] !== '' && secrets.has('clientSecret') ? null : 'The Home admin sets up the Google OAuth client once.'),
+    guide: (origin) => [
+      'Do this once for the whole Home. It takes a few screens in Google Cloud; nothing is installed.',
+      '',
+      '1. Open [console.cloud.google.com](https://console.cloud.google.com/projectcreate) and create a project named **Mr Robot**.',
+      '2. Enable the APIs (use the project you just created): [Gmail](https://console.cloud.google.com/apis/library/gmail.googleapis.com), [Calendar](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com), [Drive](https://console.cloud.google.com/apis/library/drive.googleapis.com), [Docs](https://console.cloud.google.com/apis/library/docs.googleapis.com), [Sheets](https://console.cloud.google.com/apis/library/sheets.googleapis.com) and [People](https://console.cloud.google.com/apis/library/people.googleapis.com) — press **Enable** on each.',
+      '3. Open [Google Auth Platform → Branding](https://console.cloud.google.com/auth/branding): app name **Mr. Robot**, your e-mail as support and developer contact. Under **Audience** choose **External**, then press **Publish app** so it is *In production* (in Testing mode Google expires the sign-in every 7 days). Google shows an "unverified app" warning at sign-in; that is expected for a private app: press **Advanced → Go to Mr. Robot**.',
+      '4. Open [Clients](https://console.cloud.google.com/auth/clients) → **Create client** → type **Web application**, name **Mr. Robot**. Under **Authorized redirect URIs** add exactly:',
+      '',
+      `    ${origin}/api/connections/google/oauth/callback`,
+      '',
+      '5. Press **Create**, copy the **Client ID** and **Client secret** into the fields below and press **Save**.',
+      '',
+      'Then each person connects their own Google accounts under their name → Connections → Google, choosing which services each account grants.',
+    ].join('\n'),
     connector: {
       kind: 'google',
       connect: {

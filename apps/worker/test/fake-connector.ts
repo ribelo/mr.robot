@@ -10,10 +10,14 @@ import { connectorTools, request, type ConnectionUse, type ConnectorPlugin } fro
 /** Fakes the test Robot mounts in place of the real connectors, by kind. */
 export const fakeConnectors = new Map<ConnectorKind, ConnectorPlugin>()
 
+/** Bearer tokens the fake service received, in order. */
+export const fakeServiceTokens: string[] = []
+
 /** Recorded responses of the fake service, keyed by bearer token. */
 export const fakeService = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const auth = new Headers(init?.headers).get('authorization') ?? ''
   const token = auth.replace(/^Bearer /, '')
+  fakeServiceTokens.push(token)
   if (token === 'revoked-token') return Promise.resolve(Response.json({ error: 'invalid_token' }, { status: 401 }))
   return Promise.resolve(Response.json({ who: token === 'token-private' ? 'anna@private.test' : token === 'token-work' ? 'anna@work.test' : 'ben@home.test', url: String(input) }))
 }
@@ -27,7 +31,7 @@ export function fakeConnector(kind: ConnectorKind): ConnectorPlugin {
         description: 'Ask the service who this account is.',
         parameters: { properties: {} },
         action: () => 'whoami',
-        run: (_args: Record<string, never>, use: ConnectionUse) => Effect.map(request(host.fetch, { method: 'GET', url: 'https://fake.test/me', headers: { authorization: `Bearer ${use.secrets['token']}` } }, Schema.Struct({ who: Schema.String })), (body) => `The service says: ${body.who} (token ${use.secrets['token']})`),
+        run: (_args: Record<string, never>, use: ConnectionUse) => Effect.map(request(host.fetch, { method: 'GET', url: 'https://fake.test/me', headers: { authorization: `Bearer ${use.secrets['token'] ?? use.secrets['accessToken']}` } }, Schema.Struct({ who: Schema.String })), (body) => `The service says: ${body.who} (token ${use.secrets['token']})`),
       },
       {
         name: 'fake_send',

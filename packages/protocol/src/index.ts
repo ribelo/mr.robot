@@ -633,6 +633,8 @@ export const PluginView = Schema.Struct({
   secretsSet: Schema.Array(Schema.String),
   /** A sentence when the admin still has to set the plugin up (Google OAuth client, Discord bot). */
   setupNeeded: Schema.NullOr(Schema.String),
+  /** Step-by-step setup in Markdown, shown on the plugin page (cn-fpyt, cn-csae). */
+  guide: Schema.NullOr(Schema.String),
   /** Connectors only: how a person connects an account. */
   connector: Schema.NullOr(Schema.Struct({ kind: ConnectorKind, connect: ConnectMethod })),
 })

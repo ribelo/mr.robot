@@ -1080,11 +1080,11 @@ export class Home extends DurableObject<Env> {
     return this.ctx.storage.sql.exec<{ role: string }>('SELECT role FROM member WHERE id = ?', id).toArray()[0]?.role === 'admin'
   }
 
-  plugins(memberId: string): PluginView[] { return this.pluginsOf.list(this.isAdmin(memberId)) }
+  plugins(memberId: string, origin: string): PluginView[] { return this.pluginsOf.list(this.isAdmin(memberId), origin) }
   pluginsEnabled(): Record<string, boolean> { return this.pluginsOf.enabled() }
   setPluginEnabled(name: string, enabled: boolean): void { this.pluginsOf.setEnabled(name, enabled) }
-  async setPluginConfig(name: string, input: Record<string, unknown>): Promise<PluginView> {
-    const view = await this.pluginsOf.setConfig(name, input)
+  async setPluginConfig(name: string, input: Record<string, unknown>, origin: string): Promise<PluginView> {
+    const view = await this.pluginsOf.setConfig(name, input, origin)
     // The Exa key also lives where the admin view and the catalog look (rb-x8i3).
     if (name === 'exa') {
       const key = (await this.pluginsOf.settings('exa')).secrets['apiKey']

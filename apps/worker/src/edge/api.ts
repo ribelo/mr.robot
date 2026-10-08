@@ -129,7 +129,7 @@ export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ Hosts (v1.2)
   .on('GET', '/api/hosts', (c) => call(() => home(c.env).hostsFor(c.member.id)))
   // ---------------------------------------------------------------- plugins and connections (v1.5)
-  .on('GET', '/api/plugins', (c) => call(() => home(c.env).plugins(c.member.id)))
+  .on('GET', '/api/plugins', (c) => call(() => home(c.env).plugins(c.member.id, new URL(c.request.url).origin)))
   .on('PUT', '/api/admin/plugins/:name', (c, { name }) => Effect.gen(function* () {
     yield* admin(c)
     const body = yield* decodeBody(c.request, PluginSwitch)
@@ -141,9 +141,33 @@ export const api = new Router<ApiContext>()
     yield* admin(c)
     const body = yield* decodeBody(c.request, PluginSettingsInput)
     if (pluginByName(name) === undefined) return yield* Effect.fail(notFound('no such plugin'))
-    return yield* Effect.tryPromise({ try: () => home(c.env).setPluginConfig(name, body.values), catch: (error) => badRequest(error instanceof Error ? error.message.replace(/^PluginConfigInvalid: /, '') : 'the settings are not valid') })
+    return yield* Effect.tryPromise({ try: () => home(c.env).setPluginConfig(name, body.values, new URL(c.request.url).origin), catch: (error) => badRequest(error instanceof Error ? error.message.replace(/^PluginConfigInvalid: /, '') : 'the settings are not valid') })
   }))
   .on('GET', '/api/connections', (c) => call(() => home(c.env).connectionsFor(c.member.id)))
+  // Google consent (v1.5 ticket 02): the browser navigates here, so both answer with a redirect.
+  .on('GET', '/api/connections/google/oauth/start', (c) => Effect.promise(async () => {
+    const url = new URL(c.request.url)
+    const services = (url.searchParams.get('services') ?? '').split(',').filter(Boolean)
+    try {
+      const consent = await c.env.MEMBER.getByName(c.member.id).startGoogleConsent(url.origin, services, url.searchParams.get('shared') === '1', url.searchParams.get('reconnect'))
+      return Response.redirect(consent, 302)
+    } catch (error) {
+      return Response.redirect(`${url.origin}/#/me?connection-error=${encodeURIComponent(error instanceof Error ? error.message : 'could not start the sign-in')}`, 302)
+    }
+  }))
+  .on('GET', '/api/connections/google/oauth/callback', (c) => Effect.promise(async () => {
+    const url = new URL(c.request.url)
+    const back = (query: string) => Response.redirect(`${url.origin}/#/me?${query}`, 302)
+    const code = url.searchParams.get('code')
+    const state = url.searchParams.get('state')
+    if (code === null || state === null) return back(`connection-error=${encodeURIComponent(url.searchParams.get('error') === 'access_denied' ? 'you declined on Google\'s screen; nothing was connected' : 'Google sent no sign-in code')}`)
+    try {
+      const connection = await c.env.MEMBER.getByName(c.member.id).finishGoogleConsent(url.origin, code, state)
+      return back(`connected=${encodeURIComponent(connection.account)}`)
+    } catch (error) {
+      return back(`connection-error=${encodeURIComponent(error instanceof Error ? error.message : 'the sign-in did not complete')}`)
+    }
+  }))
   .on('POST', '/api/connections/:kind', (c, { kind }) => Effect.gen(function* () {
     const body = yield* decodeBody(c.request, ConnectionPaste)
     const plugin = PLUGINS.find((entry) => entry.connector?.kind === kind)

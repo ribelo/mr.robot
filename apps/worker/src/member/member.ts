@@ -4,6 +4,7 @@
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
 import { HostHub, type HostEntry, type HostAction } from './hosts.ts'
+import { GoogleConsents } from './google-consent.ts'
 import { ConnectionStore, type ConnectionChange, type ConnectionMeta, type NewConnection, type OwnConnection } from './connections.ts'
 import { metaOf, parseEntry, type LoginMeta } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -593,13 +594,35 @@ export class Member extends DurableObject<Env> {
     return this.connectionStore
   }
 
+  private googleConsents: GoogleConsents | undefined
+  private get google(): GoogleConsents {
+    this.googleConsents ??= new GoogleConsents(this.ctx.storage.sql, this.connectionsOf, async () => {
+      const settings = await this.env.HOME.getByName(HOME_ID).pluginSettings('google')
+      const clientId = settings.values['clientId']
+      const clientSecret = settings.secrets['clientSecret']
+      return typeof clientId === 'string' && clientId !== '' && clientSecret !== undefined ? { clientId, clientSecret } : null
+    }, this.connectorFetch())
+    return this.googleConsents
+  }
+
+  /** fetch for connector sign-ins and token refresh; tests substitute recorded responses. */
+  protected connectorFetch(): typeof globalThis.fetch {
+    return (input, init) => fetch(input, init)
+  }
+
+  startGoogleConsent(origin: string, services: string[], shared: boolean, reconnect: string | null): Promise<string> { return this.google.start(origin, services, shared, reconnect) }
+  finishGoogleConsent(origin: string, code: string, state: string): Promise<OwnConnection> { return this.google.finish(origin, code, state) }
+
   connections(): OwnConnection[] { return this.connectionsOf.list() }
   connection(id: string): OwnConnection | undefined { return this.connectionsOf.get(id) }
   addConnection(input: NewConnection): Promise<OwnConnection> { return this.connectionsOf.add(input) }
   updateConnection(id: string, change: ConnectionChange): Promise<OwnConnection | undefined> { return this.connectionsOf.update(id, change) }
   removeConnection(id: string): Promise<boolean> { return this.connectionsOf.remove(id) }
   /** Secrets and state of a connection for one call; the caller (the Home, for a granted Robot) never keeps them. */
-  useConnection(id: string): Promise<{ connection: OwnConnection; secrets: Record<string, string>; meta: ConnectionMeta } | undefined> { return this.connectionsOf.use(id) }
+  async useConnection(id: string): Promise<{ connection: OwnConnection; secrets: Record<string, string>; meta: ConnectionMeta } | undefined> {
+    const use = await this.connectionsOf.use(id)
+    return use !== undefined && use.connection.kind === 'google' ? this.google.fresh(use) : use
+  }
 
   // ---------------------------------------------------------------- Hosts (v1.2)
 

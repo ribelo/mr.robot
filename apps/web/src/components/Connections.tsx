@@ -16,9 +16,15 @@ import { SchemaFields } from './Plugins.tsx'
 export function Connections() {
   const plugins = useAtomValue(pluginsAtom)
   const connections = useAtomValue(connectionsAtom)
+  // A Google consent comes back to #/me?connected=… or ?connection-error=… (v1.5 ticket 02).
+  const outcome = new URLSearchParams(location.hash.split('?')[1] ?? '')
+  const connected = outcome.get('connected')
+  const failed = outcome.get('connection-error')
   return (
     <>
       <h2>Connections</h2>
+      {connected === null ? null : <div className="note note-ok">Connected {connected}.</div>}
+      {failed === null ? null : <div className="note">{failed.charAt(0).toUpperCase() + failed.slice(1)}.</div>}
       <div className="muted">Accounts your Robots can act on. Each Robot gets only the connections you grant it in its settings. <button type="button" className="link" onClick={() => go({ page: 'plugins' })}>All plugins</button></div>
       {renderResult(AsyncResult.all([plugins, connections]), { what: 'your connections' }, ([pluginList, connectionList]) => (
         <div className="providers">
@@ -74,6 +80,7 @@ function ConnectorPanel({ plugin, connections }: { plugin: PluginView; connectio
                 <b>{connection.label}</b> <span className="muted">{connection.account}{connection.mine ? '' : ` · ${connection.ownerName}'s, shared`}</span>
                 {connection.services.length > 0 ? <div className="muted">{connection.services.join(', ')}</div> : null}
                 {connection.status === 'connected' ? null : <div className="host-log-failed">{connection.status === 'needs-reconsent' ? 'Needs consent again' : 'Paste again'}{connection.statusNote === null ? '' : `: ${connection.statusNote}`}</div>}
+                {connection.mine && connection.status === 'needs-reconsent' && connector.connect.method === 'oauth' ? <a className="button" href={`/api/connections/${connector.kind}/oauth/start?reconnect=${encodeURIComponent(connection.id)}`}>Reconnect</a> : null}
               </div>
               {connection.mine ? (
                 <div className="connection-actions">

@@ -12,6 +12,7 @@ import { exitFailure } from '../client/api-failure.ts'
 import { go } from '../route.ts'
 import { AtomView, renderResult } from './AtomView.tsx'
 import { Empty } from './States.tsx'
+import { Markdown } from './Markdown.tsx'
 
 function Brand({ path, color }: { path: string; color: string }) {
   return <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d={path} fill={color} /></svg>
@@ -116,6 +117,7 @@ function PluginSettings({ plugin, isAdmin }: { plugin: PluginView; isAdmin: bool
         <div className="muted">{plugin.description}</div>
       </div>
       {plugin.setupNeeded === null ? null : <div className="note">{plugin.setupNeeded}</div>}
+      {plugin.guide === null ? null : <div className="plugin-guide"><h3>Setup</h3><Markdown text={plugin.guide} /></div>}
       {!isAdmin ? <div className="muted">Only the Home admin changes this plugin's settings.</div> : plugin.fields.length === 0 ? <div className="muted">This plugin has no settings.</div> : (
         <div className="form">
           <h3>Settings</h3>

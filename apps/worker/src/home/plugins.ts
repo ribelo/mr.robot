@@ -36,7 +36,7 @@ export class HomePlugins {
     return new Set(this.sql.exec<{ field: string }>('SELECT field FROM plugin_secret WHERE name = ?', name).toArray().map((row) => row.field))
   }
 
-  view(plugin: PluginEntry, isAdmin: boolean): PluginView {
+  view(plugin: PluginEntry, isAdmin: boolean, origin: string): PluginView {
     const values = this.values(plugin.name)
     const secretsSet = this.secretsSet(plugin.name)
     const connect = plugin.connector?.connect
@@ -48,6 +48,7 @@ export class HomePlugins {
       values: isAdmin ? values : {},
       secretsSet: isAdmin ? [...secretsSet] : [],
       setupNeeded: plugin.setupNeeded?.(values, secretsSet) ?? null,
+      guide: isAdmin ? plugin.guide?.(origin) ?? null : null,
       connector: plugin.connector === undefined || connect === undefined ? null : {
         kind: plugin.connector.kind,
         connect: connect.method === 'oauth'
@@ -57,8 +58,8 @@ export class HomePlugins {
     }
   }
 
-  list(isAdmin: boolean): PluginView[] {
-    return PLUGINS.map((plugin) => this.view(plugin, isAdmin))
+  list(isAdmin: boolean, origin: string): PluginView[] {
+    return PLUGINS.map((plugin) => this.view(plugin, isAdmin, origin))
   }
 
   setEnabled(name: string, enabled: boolean): void {
@@ -67,7 +68,7 @@ export class HomePlugins {
   }
 
   /** Save the detail page's form: plain values in the configuration, secrets sealed apart. */
-  async setConfig(name: string, input: Readonly<Record<string, unknown>>): Promise<PluginView> {
+  async setConfig(name: string, input: Readonly<Record<string, unknown>>, origin: string): Promise<PluginView> {
     const plugin = pluginByName(name)
     if (plugin === undefined) throw new PluginNotFound(name)
     if (plugin.homeConfig === undefined) throw new PluginConfigInvalid({ plugin: name, message: 'this plugin has no settings' })
@@ -78,7 +79,7 @@ export class HomePlugins {
       const sealed = await Effect.runPromise(this.vault.seal(value))
       this.sql.exec('INSERT INTO plugin_secret (name, field, sealed) VALUES (?, ?, ?) ON CONFLICT (name, field) DO UPDATE SET sealed = excluded.sealed', name, field, sealed)
     }
-    return this.view(plugin, true)
+    return this.view(plugin, true, origin)
   }
 
   /** A plugin's setting for the platform's own use (an OAuth client); secrets opened now, never sent to a browser. */

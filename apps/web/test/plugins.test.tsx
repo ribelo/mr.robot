@@ -11,7 +11,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const newcomer: PluginView = {
   name: 'notion', title: 'Notion', description: 'Pages and databases.', icon: 'notion', group: 'connector', enabled: true,
   fields: [{ key: 'workspace', label: 'Workspace name', description: 'As shown in Notion.', kind: 'text', options: [], required: true }, { key: 'apiKey', label: 'Integration secret', description: null, kind: 'secret', options: [], required: true }],
-  values: { workspace: 'Home' }, secretsSet: ['apiKey'], setupNeeded: null,
+  values: { workspace: 'Home' }, secretsSet: ['apiKey'], setupNeeded: null, guide: null,
   connector: { kind: 'slack', connect: { method: 'paste', fields: [{ key: 'token', label: 'Token', description: null, kind: 'secret', options: [], required: true }], instructions: 'Paste the token from Notion.' } },
 }
 const files: PluginView = { ...newcomer, name: 'files', title: 'Files', description: 'Workspace files.', icon: 'folder', group: 'capability', fields: [], values: {}, secretsSet: [], connector: null }

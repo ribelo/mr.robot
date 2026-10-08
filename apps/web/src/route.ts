@@ -15,7 +15,8 @@ export type Route =
   | { readonly page: 'plugin'; readonly name: string }
 
 export function parse(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
+  // A query after the path (#/me?connected=…) is for the page, not the route.
+  const parts = hash.replace(/^#\/?/, '').split('?')[0]!.split('/').filter(Boolean)
   if (parts[0] === 'r' && parts[1] !== undefined) {
     const id = decodeURIComponent(parts[1])
     if (parts[2] === 'trajectory') return { page: 'trajectory', id }

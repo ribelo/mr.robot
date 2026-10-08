@@ -19,6 +19,15 @@ export { default, Home } from '../src/index.ts'
 
 /** The production Member with a clock hook for OAuth expiry. */
 export class Member extends ProductionMember {
+  protected override connectorFetch(): typeof globalThis.fetch {
+    return connectorFixtures.fetch
+  }
+
+  /** Every connection's access token is past its expiry. */
+  async expireConnectionsForTest(): Promise<void> {
+    this.ctx.storage.sql.exec("UPDATE connection SET meta = json_set(meta, '$.expiresAt', 0)")
+  }
+
   async expireCredentialsForTest(): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE credential SET expires = 0')
   }
