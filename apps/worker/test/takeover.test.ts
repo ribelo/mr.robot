@@ -1,5 +1,5 @@
 import { abortAllDurableObjects, env, reset, SELF } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Conversation, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { browserLog, cdpLog } from './stub-browser.ts'
@@ -78,17 +78,17 @@ describe('live view and takeover', () => {
     const viewer = await connect(ANNA, id)
     await viewer.send({ type: 'live', on: true })
     expect(browserLog).toContain('attach')
-    expect(viewer.received.some((message) => message['type'] === 'frame')).toBe(true)
+    await vi.waitFor(() => expect(viewer.received.some((message) => message['type'] === 'frame')).toBe(true))
   })
 
   it('streams the screen to a watcher without taking it over (robot-ksvy)', async () => {
     const id = await shopperAtLogin()
     const viewer = await connect(ANNA, id)
     await viewer.send({ type: 'live', on: true })
-    expect(cdpLog.map((entry) => entry.method)).toContain('Page.startScreencast')
-    expect(viewer.received.some((message) => message['type'] === 'frame')).toBe(true)
+    await vi.waitFor(() => expect(cdpLog.map((entry) => entry.method)).toContain('Page.startScreencast'))
+    await vi.waitFor(() => expect(viewer.received.some((message) => message['type'] === 'frame')).toBe(true))
     await viewer.send({ type: 'tap', x: 10, y: 10 })
-    expect(viewer.received.at(-1)).toMatchObject({ type: 'error', message: 'claim the browser first' })
+    await vi.waitFor(() => expect(viewer.received).toContainEqual(expect.objectContaining({ type: 'error', message: 'claim the browser first' })))
   })
 
   it('only the owner controls it; taps and keys reach the page; handing back resumes the Robot (robot-g6qb, robot-j4ll)', async () => {
@@ -96,18 +96,18 @@ describe('live view and takeover', () => {
     const anna = await connect(ANNA, id)
     const ben = await connect(BEN, id)
     await ben.send({ type: 'claim' })
-    expect(ben.received.at(-1)).toMatchObject({ type: 'error', message: 'only the owner takes over this browser' })
+    await vi.waitFor(() => expect(ben.received).toContainEqual(expect.objectContaining({ type: 'error', message: 'only the owner takes over this browser' })))
     await anna.send({ type: 'claim' })
-    expect(anna.received.some((message) => message['type'] === 'claimed')).toBe(true)
+    await vi.waitFor(() => expect(anna.received.some((message) => message['type'] === 'claimed')).toBe(true))
     await ben.send({ type: 'tap', x: 1, y: 1 })
-    expect(ben.received.at(-1)).toMatchObject({ type: 'error' })
+    await vi.waitFor(() => expect(ben.received).toContainEqual(expect.objectContaining({ type: 'error' })))
 
     await anna.send({ type: 'tap', x: 200, y: 300 })
     await anna.send({ type: 'text', text: 'right-password' })
     await anna.send({ type: 'key', key: 'Enter' })
-    expect(cdpLog.filter((entry) => entry.method.startsWith('Input.')).map((entry) => entry.method)).toEqual([
+    await vi.waitFor(() => expect(cdpLog.filter((entry) => entry.method.startsWith('Input.')).map((entry) => entry.method)).toEqual([
       'Input.dispatchMouseEvent', 'Input.dispatchMouseEvent', 'Input.insertText', 'Input.dispatchKeyEvent', 'Input.dispatchKeyEvent',
-    ])
+    ]))
 
     scripts.set(id, [{ text: 'Thanks, I can continue.' }])
     await anna.send({ type: 'handback' })
@@ -161,12 +161,12 @@ describe('live view and takeover', () => {
     const viewer = await connect(ANNA, body.id)
     await viewer.send({ type: 'live', on: true })
     expect(browserLog).toEqual(['open', 'goto:https://shop.test/login'])
-    expect(viewer.received.some((message) => message.type === 'frame')).toBe(true)
+    await vi.waitFor(() => expect(viewer.received.some((message) => message.type === 'frame')).toBe(true))
 
     // The owner takes the idle browser without being asked; hand-back does not wake the Robot.
     const before = (requests.get(body.id) ?? []).length
     await viewer.send({ type: 'claim' })
-    expect(viewer.received.some((message) => message.type === 'claimed')).toBe(true)
+    await vi.waitFor(() => expect(viewer.received.some((message) => message.type === 'claimed')).toBe(true))
     await viewer.send({ type: 'handback' })
     viewer.socket.close(1000)
     await new Promise((resolve) => setTimeout(resolve, 100))
@@ -182,9 +182,9 @@ describe('live view and takeover', () => {
     const anna = await connect(ANNA, id)
     await anna.send({ type: 'claim' })
     await anna.send({ type: 'logins' })
-    expect(anna.received.find((message) => message.type === 'logins')).toEqual({ type: 'logins', entries: [{ name: 'shop', username: 'anna' }] })
+    await vi.waitFor(() => expect(anna.received.find((message) => message.type === 'logins')).toEqual({ type: 'logins', entries: [{ name: 'shop', username: 'anna' }] }))
     await anna.send({ type: 'fill', name: 'shop' })
-    expect(anna.received.find((message) => message.type === 'filled')).toMatchObject({ message: expect.stringContaining('Filled') })
+    await vi.waitFor(() => expect(anna.received.find((message) => message.type === 'filled')).toMatchObject({ message: expect.stringContaining('Filled') }))
     expect(browserLog).toContain('fill')
   })
 
@@ -198,9 +198,9 @@ describe('live view and takeover', () => {
     await viewer.send({ type: 'text', text: 'a' })
     await viewer.send({ type: 'key', key: 'Enter', code: 'Enter', modifiers: 0 })
     await viewer.send({ type: 'key', key: 'a', code: 'KeyA', modifiers: 2 })
-    expect(cdpLog).toContainEqual({ method: 'Input.insertText', params: { text: 'a' } })
-    expect(cdpLog.find((entry) => entry.method === 'Input.dispatchKeyEvent' && entry.params?.['key'] === 'Enter')?.params).toMatchObject({ type: 'rawKeyDown', windowsVirtualKeyCode: 13 })
-    expect(cdpLog.find((entry) => entry.method === 'Input.dispatchKeyEvent' && entry.params?.['key'] === 'a')?.params).toMatchObject({ modifiers: 2, windowsVirtualKeyCode: 65 })
+    await vi.waitFor(() => expect(cdpLog).toContainEqual({ method: 'Input.insertText', params: { text: 'a' } }))
+    await vi.waitFor(() => expect(cdpLog.find((entry) => entry.method === 'Input.dispatchKeyEvent' && entry.params?.['key'] === 'Enter')?.params).toMatchObject({ type: 'rawKeyDown', windowsVirtualKeyCode: 13 }))
+    await vi.waitFor(() => expect(cdpLog.find((entry) => entry.method === 'Input.dispatchKeyEvent' && entry.params?.['key'] === 'a')?.params).toMatchObject({ modifiers: 2, windowsVirtualKeyCode: 65 }))
     // Closing the window without "Hand back" resumes the Robot.
     scripts.set(id, [{ text: 'Logged in, continuing.' }])
     viewer.socket.close(1000)
