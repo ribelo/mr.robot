@@ -102,7 +102,7 @@ export const PLUGINS: readonly PluginEntry[] = [
           token: z.string().role('secret').required().description('Token (xoxc-…)'),
           cookie: z.string().role('secret').required().description('Cookie d (xoxd-…)'),
         }) as never,
-        instructions: 'Open the workspace in Chrome and sign in. Press F12 and open the Console. Type: JSON.parse(localStorage.localConfig_v2).teams — copy the token that starts with xoxc- for the workspace. Then open Application → Cookies → https://app.slack.com and copy the value of the cookie named d (it starts with xoxd-). Paste both here. Signing out of Slack in that browser ends the session; paste again then.',
+        instructions: 'Open the workspace in the browser and sign in. Press F12 → Console and run: JSON.parse(localStorage.getItem("localConfig_v2")).teams — copy the token starting with xoxc- . Then open Application → Cookies → https://app.slack.com and copy the cookie named d (it starts with xoxd-). Paste both here. If you sign out of Slack in that browser, paste them again.',
       },
     },
   },

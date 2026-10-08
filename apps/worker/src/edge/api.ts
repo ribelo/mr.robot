@@ -36,8 +36,6 @@ import type { AnswerResult } from '../robot/robot.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
 import { PLUGINS, pluginByName } from '../plugins/catalog.ts'
 import { parseForm } from '../connectors/schema-form.ts'
-import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
-import { describeConnectorFailure } from '../connectors/connector.ts'
 
 export interface ApiContext {
   readonly request: Request
@@ -175,12 +173,9 @@ export const api = new Router<ApiContext>()
     if (plugin === undefined || connect === undefined || connect.method !== 'paste') return yield* Effect.fail(notFound('this connector does not connect by pasting'))
     const parsed = parseForm(plugin.name, connect.schema, body.values, new Set())
     if (!parsed.ok) return yield* Effect.fail(badRequest(parsed.error.message))
-    const implementation = CONNECTOR_PLUGINS[plugin.connector!.kind]
-    if (implementation?.verifyPasted === undefined) return yield* Effect.fail(badRequest(`${plugin.title} is not available yet`))
-    const verified = yield* implementation.verifyPasted(parsed.secrets, (input, init) => fetch(input, init)).pipe(Effect.mapError((failure) => badRequest(`${plugin.title} refused these values: ${describeConnectorFailure(failure)}`)))
-    return yield* call(() => c.env.MEMBER.getByName(c.member.id).addConnection({
-      kind: plugin.connector!.kind, label: body.label?.trim() || verified.label, account: verified.account, services: [], shared: body.shared, meta: verified.meta, secrets: parsed.secrets,
-    }))
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).connectPasted({
+      kind: plugin.connector!.kind, label: body.label ?? null, shared: body.shared, services: [], secrets: parsed.secrets,
+    })).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
   }))
   .on('PATCH', '/api/connections/:id', (c, { id }) => Effect.gen(function* () {
     const body = yield* decodeBody(c.request, ConnectionPatch)

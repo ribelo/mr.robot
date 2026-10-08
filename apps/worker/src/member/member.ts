@@ -5,6 +5,8 @@
  */
 import { HostHub, type HostEntry, type HostAction } from './hosts.ts'
 import { GoogleConsents } from './google-consent.ts'
+import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
+import { describeConnectorFailure } from '../connectors/connector.ts'
 import { ConnectionStore, type ConnectionChange, type ConnectionMeta, type NewConnection, type OwnConnection } from './connections.ts'
 import { metaOf, parseEntry, type LoginMeta } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -12,7 +14,7 @@ import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
-import type { NotificationKind, ProviderView, QuietHours, WorkDetails } from '@mr-robot/protocol'
+import type { ConnectorKind, NotificationKind, ProviderView, QuietHours, WorkDetails } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -608,6 +610,26 @@ export class Member extends DurableObject<Env> {
   /** fetch for connector sign-ins and token refresh; tests substitute recorded responses. */
   protected connectorFetch(): typeof globalThis.fetch {
     return (input, init) => fetch(input, init)
+  }
+
+  /**
+   * A connection from pasted values (Slack session, Discord bot token): the connector checks them with
+   * the service first (cn-3cnb), so a wrong paste fails here instead of at the first call.
+   */
+  async connectPasted(input: { kind: ConnectorKind; label: string | null; shared: boolean; services: readonly string[]; secrets: Readonly<Record<string, string>> }): Promise<OwnConnection> {
+    const connector = CONNECTOR_PLUGINS[input.kind]
+    if (connector?.verifyPasted === undefined) throw new Error(`${input.kind} is not available yet`)
+    const outcome = await Effect.runPromise(Effect.result(connector.verifyPasted(input.secrets, this.connectorFetch())))
+    if (outcome._tag === 'Failure') throw new Error(outcome.failure._tag === 'ConnectorUnauthorized' ? `the pasted values were refused: ${outcome.failure.message}` : describeConnectorFailure(outcome.failure))
+    return this.connectionsOf.add({
+      kind: input.kind,
+      label: input.label === null || input.label.trim() === '' ? outcome.success.label : input.label.trim(),
+      account: outcome.success.account,
+      services: input.services,
+      shared: input.shared,
+      meta: outcome.success.meta,
+      secrets: input.secrets,
+    })
   }
 
   startGoogleConsent(origin: string, services: string[], shared: boolean, reconnect: string | null): Promise<string> { return this.google.start(origin, services, shared, reconnect) }
