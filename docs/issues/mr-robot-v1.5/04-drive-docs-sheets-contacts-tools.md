@@ -6,7 +6,7 @@
 
 **Blocked by:** 02 Google: guided OAuth client setup and Connect Google
 
-**Status:** in-progress
+**Status:** done
 
 - [ ] All tools pass fixture tests
 - [ ] Live: file uploaded to Drive, a Doc edited in place, a Sheet cell written, a contact found
@@ -33,3 +33,9 @@
 ## Live, 2026-10-08
 - drive_search through Mr. Robot listed the three most recently modified files on the owner's Drive, with links.
 - **Not yet live:** upload, a Doc or Sheet edit in place, and a contact lookup.
+
+## Live, 2026-10-08 (continued), through Mr. Robot
+- **Doc:** a Workspace file uploaded with convert became the Google Doc "Mr. Robot connector test". docs_append and docs_read then gave "Created by Mr. Robot for a connector test.Appended in place.". The append adds no line break, as the tool does.
+- **Sheet:** a CSV uploaded with convert became "Mr. Robot connector test sheet". After sheets_write B2 "=10+5" and sheets_append "tea,7", sheets_read A1:B3 gave item/amount, coffee/15 (the formula evaluated) and tea/7.
+- **Contacts:** contacts_search "Marta" found 3 contacts.
+- **Left in place for the owner to keep or remove:** the test Doc and Sheet.

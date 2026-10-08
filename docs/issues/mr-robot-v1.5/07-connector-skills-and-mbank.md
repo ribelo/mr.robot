@@ -29,3 +29,8 @@
   - A robot granted only the mbank skill does not get it; a robot granted the Google connection gets google-workspace and mbank-notifications but not slack-workspace.
   - An admin edit survives the next seeding.
 - **Open, needs the owner:** mBank e-mail notifications switched on and a connected Gmail, then a live report of the latest transactions.
+
+## Live, 2026-10-08
+- On the deployed app, the library has google-workspace, mbank-notifications, slack-workspace and discord-bot, added when Google was first connected.
+- Mr. Robot's prompt (he holds the Google connection) offers google-workspace and mbank-notifications.
+- **Postponed by the owner:** whether mBank notifications are on, and so the live mBank report.

@@ -6,7 +6,7 @@
 
 **Blocked by:** 01 Connector core, Plugins page, per-plugin settings rows
 
-**Status:** in-progress
+**Status:** done
 
 - [ ] Live: the owner completes the client setup and connects one account from the page
 - [ ] Second account connects with different services
@@ -44,3 +44,10 @@
 - **Connect Google** with Gmail, Calendar, Drive and Contacts: Google's unverified-app warning → Advanced → continue, per-scope consent → back on the profile page with "Connected r.krzywaznia@gmail.com". The connection lists gmail, calendar, drive, contacts.
 - **Found live:** the Gmail read scope (gmail.modify) also allows sending at Google's level. Sending is held back by the robot's write grant, not by the consent.
 - **Fixed live:** the Connect Google link button rendered blank (text colour the same as its background), and the account showed twice in the trajectory header when the label is the address.
+
+## Live, 2026-10-08 (continued)
+- **Refresh without the owner:** about an hour after connecting, after the first access token had expired, Mr. Robot read the Gmail labels (21 labels) and the connection stayed "connected". The token was refreshed by itself.
+- **Re-consent:**
+  - The owner's grant to Mr. Robot was removed in Google Account → Connected apps → Mr. Robot → "Usuń wszystko". Only the grant is removed; Google confirms no data is deleted.
+  - The next read set the row to **Needs consent again**, with Google's message and **Reconnect**.
+  - Reconnect (Google's warning → continue → consent) came back to "Connected r.krzywaznia@gmail.com" on the same connection (one row, same id, no note). A read then worked again.

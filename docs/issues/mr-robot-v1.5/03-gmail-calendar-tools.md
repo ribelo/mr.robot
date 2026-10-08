@@ -6,7 +6,7 @@
 
 **Blocked by:** 02 Google: guided OAuth client setup and Connect Google
 
-**Status:** in-progress
+**Status:** done
 
 - [ ] All tools pass fixture tests
 - [ ] Live: inbox triage summary and an event created on the owner's calendar
@@ -35,3 +35,10 @@
   - calendar_events gave no events for the next 7 days.
 - The trajectory shows "[google · r.krzywaznia@gmail.com] search …" and "[google · …] events …".
 - **Not yet live:** creating an event and the triage actions (archive, label, draft).
+
+## Live, 2026-10-08 (continued), through Mr. Robot on r.krzywaznia@gmail.com
+- **Calendar:** created the event "Mr. Robot connector test" (2026-10-09 12:00–12:15 Europe/Warsaw, no attendees), then updated it with location "test".
+- **Gmail:**
+  - On the thread "Your project gemini-425318 has been shut down": a new label "Mr Robot test", archive and mark read. gmail_thread then showed no INBOX and no UNREAD.
+  - The thread was then put back (INBOX added, label removed, unread again). A search confirms it is back in the inbox.
+- **Left in place for the owner to keep or remove:** the test event and the empty label "Mr Robot test". Nothing outside git is deleted without his word.
