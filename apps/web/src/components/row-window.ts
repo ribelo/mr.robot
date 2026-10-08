@@ -70,6 +70,8 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
 }): RowWindow {
   const [viewport, setViewport] = useState({ top: 0, height: initialViewport })
   const offsets = rowOffsets(enabled ? rows : [])
+  /** At the end as of the last scroll; rows growing under it fire no scroll, so it stays true until the person scrolls away. */
+  const following = useRef(true)
   const totalHeight = offsets[offsets.length - 1] ?? 0
 
   // Track the scroll position and the pane's height. A passive effect: the scrolling element may be
@@ -77,13 +79,16 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
   useEffect(() => {
     const pane = scrollElement.current
     if (pane === null || !enabled) return
-    const read = () => setViewport({ top: pane.scrollTop - margin, height: pane.clientHeight || initialViewport })
+    const read = () => {
+      following.current = pane.scrollHeight - pane.clientHeight - pane.scrollTop <= followThreshold
+      setViewport({ top: pane.scrollTop - margin, height: pane.clientHeight || initialViewport })
+    }
     read()
     pane.addEventListener('scroll', read, { passive: true })
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(read)
     observer?.observe(pane)
     return () => { pane.removeEventListener('scroll', read); observer?.disconnect() }
-  }, [scrollElement, enabled, margin, initialViewport])
+  }, [scrollElement, enabled, margin, initialViewport, followThreshold])
 
   // Before rows change: remember the first visible row by key and whether the view sat at the end.
   const anchor = useRef<{ key: string | number; offset: number; atEnd: boolean } | null>(null)
@@ -96,7 +101,7 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
       const top = pane.scrollTop - margin
       const index = rowAt(beforeOffsets, Math.max(0, top))
       const row = before[index]
-      const atEnd = pane.scrollHeight - pane.clientHeight - pane.scrollTop <= followThreshold
+      const atEnd = following.current
       if (row !== undefined) anchor.current = { key: row.key, offset: top - beforeOffsets[index]!, atEnd }
     }
     previousRows.current = rows
@@ -130,6 +135,7 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
   const scrollToEnd = useCallback(() => {
     const pane = scrollElement.current
     if (pane !== null) pane.scrollTop = pane.scrollHeight
+    following.current = true
   }, [scrollElement])
 
   return {
