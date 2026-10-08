@@ -29,3 +29,7 @@
 
 - **google-files.test.ts:** every tool against recorded Drive, Docs, Sheets and People responses: queries, multipart and media uploads, export formats, the cache warm-up, and in-place writes. Totals: worker 245 tests.
 - **Open, needs the owner's account:** a live upload, a Doc edited in place, a Sheet cell written, a contact found.
+
+## Live, 2026-10-08
+- drive_search through Mr. Robot listed the three most recently modified files on the owner's Drive, with links.
+- **Not yet live:** upload, a Doc or Sheet edit in place, and a contact lookup.

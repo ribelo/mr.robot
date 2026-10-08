@@ -28,3 +28,10 @@
 - **google-tools.test.ts:** every tool against recorded Gmail and Calendar responses, checking the request it makes (URL, query, body, MIME text) and how it reads the answer. A 401 is reported and marks the connection.
 - **connectors.test.ts:** a Robot holding a Google connection without the write grant has gmail_search, gmail_draft and calendar_create but no send, reply or forward. With the write grant they appear.
 - **Open, needs the owner's account:** a live inbox triage and an event created on his calendar.
+
+## Live, 2026-10-08
+- **Read-only check through Mr. Robot on r.krzywaznia@gmail.com:**
+  - gmail_search gave the five newest unread e-mails, including Google's notices for the three projects shut down that morning.
+  - calendar_events gave no events for the next 7 days.
+- The trajectory shows "[google · r.krzywaznia@gmail.com] search …" and "[google · …] events …".
+- **Not yet live:** creating an event and the triage actions (archive, label, draft).

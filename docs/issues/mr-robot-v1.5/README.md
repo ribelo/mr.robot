@@ -5,9 +5,9 @@ Spec: ../mr-robot-v1.5.md. 01 first; then 02 → 03, 04; 05 and 06 in parallel; 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
 | 01 | [Connector core, Plugins page, per-plugin settings rows](01-connector-core-plugins-page-settings.md) | — | done |
-| 02 | [Google: guided OAuth client setup and Connect Google](02-google-connect.md) | 01 | in-progress (live connect needs the owner's Google Cloud client) |
-| 03 | [Gmail and Calendar tools](03-gmail-calendar-tools.md) | 02 | in-progress (live triage and event need a connected Google account) |
-| 04 | [Drive, Docs, Sheets and Contacts tools](04-drive-docs-sheets-contacts-tools.md) | 02 | in-progress (live upload, edit and lookup need a connected Google account) |
+| 02 | [Google: guided OAuth client setup and Connect Google](02-google-connect.md) | 01 | in-progress (connected live; refresh after expiry and Reconnect not yet seen live) |
+| 03 | [Gmail and Calendar tools](03-gmail-calendar-tools.md) | 02 | in-progress (live reads done; a live event and triage actions not yet) |
+| 04 | [Drive, Docs, Sheets and Contacts tools](04-drive-docs-sheets-contacts-tools.md) | 02 | in-progress (live Drive search done; upload and in-place edits not yet) |
 | 05 | [Discord bot plugin and channel](05-discord-bot-and-channel.md) | 01 | in-progress (live bot and channel need the owner's Discord bot) |
 | 06 | [Slack plugin with pasted session](06-slack-plugin.md) | 01 | in-progress (live unread list needs the owner's Slack paste) |
 | 07 | [SKILL.md per connector and the mBank notifications skill](07-connector-skills-and-mbank.md) | 03, 05, 06 | in-progress (live mBank report needs Gmail and the notifications on) |

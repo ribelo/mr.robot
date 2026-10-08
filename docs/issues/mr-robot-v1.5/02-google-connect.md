@@ -35,3 +35,12 @@
   - A revoked refresh shows "needs-reconsent" and Reconnect repairs the same connection id.
 - **Live (2026-10-08):** the Plugins → Google page with the guide and the real callback URL on the deployed app (![](img/02-google-guide.webp)).
 - **Open, needs the owner:** the client setup in his Google Cloud, a first and a second account connected, a refresh after expiry, a revoke and reconnect. All four are in the batched questions.
+
+## Live, 2026-10-08 (with the owner, through Leash)
+- **Google Cloud project "Mr Robot" (mr-robot-511013):**
+  - The six APIs are enabled, and the Auth Platform is set up: External, *In production*, home and privacy links on this deployment, authorized domain r-krzywaznia-2c4.workers.dev.
+  - A Web client "Mr. Robot" has this deployment's callback URL. Its ID and secret are saved on Plugins → Google, and the page no longer says it needs setup.
+  - Publishing needed the home and privacy links and the authorized domain on Branding. Without them, Google keeps **Publish app** disabled. The guide does not say this yet.
+- **Connect Google** with Gmail, Calendar, Drive and Contacts: Google's unverified-app warning → Advanced → continue, per-scope consent → back on the profile page with "Connected r.krzywaznia@gmail.com". The connection lists gmail, calendar, drive, contacts.
+- **Found live:** the Gmail read scope (gmail.modify) also allows sending at Google's level. Sending is held back by the robot's write grant, not by the consent.
+- **Fixed live:** the Connect Google link button rendered blank (text colour the same as its background), and the account showed twice in the trajectory header when the label is the address.
