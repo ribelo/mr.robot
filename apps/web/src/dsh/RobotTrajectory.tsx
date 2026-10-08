@@ -83,6 +83,8 @@ class EventWindow {
   firstSeq: number | undefined
   lastSeq: number | undefined
   sessionId: string | undefined
+  /** Every event loaded, oldest first: an older page rebuilds the window from all of them. */
+  events: SessionEventsPage['events'] = []
 
   constructor() {
     const definitions = trajectoryDefinitions()
@@ -129,6 +131,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
     window.sessionId = page.sessionId
     window.firstSeq = page.events[0]?.seq
     window.lastSeq = page.events.at(-1)?.seq
+    window.events = page.events
     window.assembler.replaceWindow(entries(page.events), page.hasMore)
     window.assembler.activateTarget('trajectory')
     write({ snapshot: window.snapshot(), paging: { openState: 'open', loadingOlder: false, hasMore: page.hasMore }, failure: null })
@@ -141,6 +144,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
     const page = yield* api.events(load.robotId, { after: window.lastSeq, limit: 2000 })
     // A different session (after a rewind) replaces the whole window.
     if (page.sessionId !== window.sessionId) return yield* open
+    window.events = [...window.events, ...page.events]
     for (const entry of entries(page.events)) window.assembler.append(entry)
     window.lastSeq = page.events.at(-1)?.seq ?? window.lastSeq
     if (page.events.length > 0) write({ ...read(), snapshot: window.snapshot() })
@@ -153,7 +157,10 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
     Effect.ensuring(Effect.sync(() => { const now = read(); write({ ...now, paging: { ...now.paging, loadingOlder: false } }) })),
   )
   const before = read().snapshot
-  window.assembler.prepend(entries(page.events), page.hasMore)
+  // DSH's assembler refuses some prepends (a system message that moves its target); rebuilding the window takes any page.
+  window.events = [...page.events, ...window.events]
+  window.assembler.replaceWindow(entries(window.events), page.hasMore)
+  window.assembler.activateTarget('trajectory')
   window.firstSeq = page.events[0]?.seq ?? window.firstSeq
   const snapshot = window.snapshot()
   const now = read()
