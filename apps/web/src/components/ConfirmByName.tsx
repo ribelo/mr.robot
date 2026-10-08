@@ -40,7 +40,7 @@ export function ConfirmByName({ title, name, goes, stays, action, option, onConf
         {option === undefined ? null : (
           <label className="check"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>{option.label}<small>{option.note}</small></span></label>
         )}
-        <label>Type <b>{name}</b> to confirm
+        <label><span>Type <b>{name}</b> to confirm</span>
           <input autoFocus value={typed} onChange={(event) => setTyped(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && matches && !busy) void confirm() }} />
         </label>
         {error === undefined ? null : <div className="error">{error}</div>}
