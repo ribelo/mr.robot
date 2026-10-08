@@ -9,6 +9,7 @@
 **Status:** ready-for-agent
 
 - [ ] Plugins page and settings rows render from plugin schemas; adding a plugin adds its row without UI code
+- [ ] Each plugin opens a detail page (icon, name, description, schema-derived form, Save) as in docs/reference/13
 - [ ] Robot DO test: an ungranted connection is invisible to the robot; a Home-shared one is usable by another Member's robot once granted
 - [ ] Secret fields never appear in configuration, logs or trajectory
 - [ ] Account parameter routing verified with two fake connections
