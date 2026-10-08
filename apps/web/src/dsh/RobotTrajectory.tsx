@@ -121,6 +121,9 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   const api = yield* MrRobotApi
   const state = trajectoryStateAtom(load.robotId)
   const window = windowOf(load.robotId)
+  // Read through the registry: a subscribed read would restart this command each time it updates the state.
+  const read = () => get.registry.read()
+  const write = (next: TrajectoryState) => get.registry.set(state, next)
   const open = Effect.gen(function* () {
     const page = yield* api.events(load.robotId, { limit: PAGE })
     window.sessionId = page.sessionId
@@ -128,7 +131,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
     window.lastSeq = page.events.at(-1)?.seq
     window.assembler.replaceWindow(entries(page.events), page.hasMore)
     window.assembler.activateTarget('trajectory')
-    get.set(state, { snapshot: window.snapshot(), paging: { openState: 'open', loadingOlder: false, hasMore: page.hasMore }, failure: null })
+    write({ snapshot: window.snapshot(), paging: { openState: 'open', loadingOlder: false, hasMore: page.hasMore }, failure: null })
     return false
   })
   if (load.kind === 'open' || window.lastSeq === undefined) return yield* open
@@ -138,25 +141,25 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
     if (page.sessionId !== window.sessionId) return yield* open
     for (const entry of entries(page.events)) window.assembler.append(entry)
     window.lastSeq = page.events.at(-1)?.seq ?? window.lastSeq
-    if (page.events.length > 0) get.set(state, { ...get(state), snapshot: window.snapshot() })
+    if (page.events.length > 0) write({ ...read(), snapshot: window.snapshot() })
     return false
   }
-  const current = get(state)
+  const current = read()
   if (window.firstSeq === undefined || !current.paging.hasMore) return false
-  get.set(state, { ...current, paging: { ...current.paging, loadingOlder: true } })
+  write({ ...current, paging: { ...current.paging, loadingOlder: true } })
   const page = yield* api.events(load.robotId, { before: window.firstSeq, limit: PAGE }).pipe(
-    Effect.ensuring(Effect.sync(() => { const now = get(state); get.set(state, { ...now, paging: { ...now.paging, loadingOlder: false } }) })),
+    Effect.ensuring(Effect.sync(() => { const now = read(); write({ ...now, paging: { ...now.paging, loadingOlder: false } }) })),
   )
-  const before = get(state).snapshot
+  const before = read().snapshot
   window.assembler.prepend(entries(page.events), page.hasMore)
   window.firstSeq = page.events[0]?.seq ?? window.firstSeq
   const snapshot = window.snapshot()
-  const now = get(state)
-  get.set(state, { ...now, snapshot, paging: { ...now.paging, hasMore: page.hasMore } })
+  const now = read()
+  write({ ...now, snapshot, paging: { ...now.paging, hasMore: page.hasMore } })
   return snapshot !== before
 }).pipe(Effect.tapError((failure) => Effect.sync(() => {
-  const now = get(trajectoryStateAtom(load.robotId))
-  get.set(trajectoryStateAtom(load.robotId), { ...now, failure: describeFailure(failure) })
+  const target = trajectoryStateAtom(load.robotId)
+  get.registry.set(target, { ...get.registry.get(target), failure: describeFailure(failure) })
 }))), { concurrent: true })
 
 function interpolate(text: string, params?: Record<string, unknown>): string {
