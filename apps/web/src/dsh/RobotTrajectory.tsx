@@ -4,7 +4,7 @@
  * Conversation assembler is DSH's ui-conversation engine (./conversation). This file replaces
  * only DSH's shell: it loads events from the Mr. Robot API and hands the assembled snapshot to the view.
  */
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -134,7 +134,9 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
     write({ snapshot: window.snapshot(), paging: { openState: 'open', loadingOlder: false, hasMore: page.hasMore }, failure: null })
     return false
   })
-  if (load.kind === 'open' || window.lastSeq === undefined) return yield* open
+  if (load.kind === 'open') return yield* open
+  // Nothing loaded yet: the open in flight brings the latest events.
+  if (window.lastSeq === undefined) return false
   if (load.kind === 'refresh') {
     const page = yield* api.events(load.robotId, { after: window.lastSeq, limit: 2000 })
     // A different session (after a rewind) replaces the whole window.
@@ -213,8 +215,9 @@ export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liv
   const loadImage = useMemo(() => imageLoader(robotId) as unknown as MessageImageLoader, [robotId])
   const wantsActual = useSyncExternalStore(duration.subscribe, duration.getSnapshot)
   useEffect(() => { void load({ robotId, kind: 'open' }) }, [load, robotId])
-  // Every change the Robot announces brings the events written since (fe-xp06).
-  useEffect(() => { if (liveVersion > 0) void load({ robotId, kind: 'refresh' }) }, [load, robotId, liveVersion])
+  // Every change the Robot announces after the page opened brings the events written since (fe-xp06).
+  const openedAt = useRef(liveVersion)
+  useEffect(() => { if (liveVersion !== openedAt.current) void load({ robotId, kind: 'refresh' }) }, [load, robotId, liveVersion])
   const loadOlder = useCallback(async () => {
     const exit = await load({ robotId, kind: 'older' })
     return Exit.isSuccess(exit) && exit.value

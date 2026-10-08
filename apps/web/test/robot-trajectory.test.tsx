@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { RegistryProvider } from '@effect/atom-react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import events from './fixtures/session-events.json'
@@ -43,6 +43,18 @@ describe('the trajectory page over Robot events (robot-3ioa, robot-s54i, fe-r2kx
     rerender(<RegistryProvider><RobotTrajectory robotId="r-fixture-2" liveVersion={1} /></RegistryProvider>)
     await vi.waitFor(() => expect(calls.some((search) => search.includes('after='))).toBe(true))
     await vi.waitFor(() => expect(rows().length).toBeGreaterThan(before))
+  })
+
+  it('pages back through older events when asked (robot-gq88)', async () => {
+    const split = all.findIndex((event) => event.seq >= 30)
+    const calls = serveEvents((query) => (query.get('before') === null ? { hasMore: true, events: all.slice(split) } : { hasMore: false, events: all.slice(0, split) }))
+    // Opened while the Robot's feed has already counted changes (as from its conversation).
+    render(<RegistryProvider><RobotTrajectory robotId="r-fixture-4" liveVersion={7} /></RegistryProvider>)
+    const button = await screen.findByText('Load earlier history')
+    const before = document.body.textContent ?? ''
+    fireEvent.click(button)
+    await vi.waitFor(() => expect(calls.some((search) => search.includes('before='))).toBe(true))
+    await vi.waitFor(() => expect((document.body.textContent ?? '').length).toBeGreaterThan(before.length))
   })
 
   it('shows a failure as the error state with Try again', async () => {
