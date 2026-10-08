@@ -57,6 +57,17 @@ async function sha256(text: string): Promise<string> {
 
 type Client = Effect.Success<ReturnType<typeof makeHostClient>['client']>
 
+export interface HostAction {
+  readonly robotId: string
+  readonly robotName: string
+  readonly action: string
+  readonly detail: string
+  /** "done", or the error. */
+  readonly outcome: string
+  readonly exitCode: number | null
+  readonly at: number
+}
+
 export class HostHub {
   private readonly clients = new Map<string, { client: Client; deliver: (data: string) => Effect.Effect<void>; scope: Scope.Closeable }>()
   /** Robots using each host's browser now: session → robot name. */
@@ -253,13 +264,42 @@ export class HostHub {
     const row = this.row(id)
     if (row === undefined) throw new HostRefused('no such host')
     const robot = await this.env.ROBOT.getByName(robotId).hostAccess(id, grant)
+    this.robotNames.set(robotId, robot.name)
     const reaches = robot.ownerId === this.ownerId() || row.sharing === 'home'
     if (!reaches || !(robot.granted || robot.mrRobot)) throw new HostRefused(`${robot.name} has no ${grant} grant on the host "${row.name}". Ask your owner with propose_grants.`)
     if (row.online !== 1) throw new HostOffline(`the host "${row.name}" is offline (last seen ${row.last_seen === null ? 'never' : new Date(row.last_seen).toISOString().slice(0, 16).replace('T', ' ')} UTC)`)
     return row
   }
 
-  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client) => Effect.Effect<A, unknown>, timeoutMs = 120_000): Promise<A> {
+  /** Which robot did what on a host, when, and how it ended (pl-vcy7). */
+  private record(entry: { hostId: string; robotId: string; action: string; detail: string; outcome: string; exitCode: number | null }): void {
+    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS host_action (id INTEGER PRIMARY KEY AUTOINCREMENT, host_id TEXT NOT NULL, robot_id TEXT NOT NULL, robot_name TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, outcome TEXT NOT NULL, exit_code INTEGER, at INTEGER NOT NULL)')
+    this.ctx.storage.sql.exec('INSERT INTO host_action (host_id, robot_id, robot_name, action, detail, outcome, exit_code, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      entry.hostId, entry.robotId, this.robotNames.get(entry.robotId) ?? entry.robotId, entry.action, entry.detail.slice(0, 500), entry.outcome.slice(0, 300), entry.exitCode, Date.now())
+    this.ctx.storage.sql.exec('DELETE FROM host_action WHERE host_id = ? AND id NOT IN (SELECT id FROM host_action WHERE host_id = ? ORDER BY id DESC LIMIT 500)', entry.hostId, entry.hostId)
+  }
+
+  private readonly robotNames = new Map<string, string>()
+
+  /** The latest actions on one host, newest first. */
+  actions(id: string, limit = 100): HostAction[] {
+    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS host_action (id INTEGER PRIMARY KEY AUTOINCREMENT, host_id TEXT NOT NULL, robot_id TEXT NOT NULL, robot_name TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, outcome TEXT NOT NULL, exit_code INTEGER, at INTEGER NOT NULL)')
+    return this.ctx.storage.sql.exec<{ robot_id: string; robot_name: string; action: string; detail: string; outcome: string; exit_code: number | null; at: number }>('SELECT * FROM host_action WHERE host_id = ? ORDER BY id DESC LIMIT ?', id, limit).toArray()
+      .map((row) => ({ robotId: row.robot_id, robotName: row.robot_name, action: row.action, detail: row.detail, outcome: row.outcome, exitCode: row.exit_code, at: row.at }))
+  }
+
+  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string; exitCode?: (value: A) => number | null }): Promise<A> {
+    try {
+      const value = await this.runUnlogged(id, robotId, grant, call, timeoutMs)
+      if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: log.exitCode?.(value) ?? null })
+      return value
+    } catch (error) {
+      if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: error instanceof Error ? error.message : String(error), exitCode: null })
+      throw error
+    }
+  }
+
+  private async runUnlogged<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client) => Effect.Effect<A, unknown>, timeoutMs: number): Promise<A> {
     await this.authorize(id, robotId, grant)
     const client = await this.client(id)
     const exit = await Effect.runPromiseExit(call(client).pipe(Effect.timeout(timeoutMs)))

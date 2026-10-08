@@ -73,6 +73,7 @@ export function ThisComputer() {
           ? <button type="button" className="button button-primary" disabled={state.state === 'pairing'} onClick={() => void pair()}>Pair this computer</button>
           : <button type="button" className="button" onClick={() => void unpair()}>Unpair</button>}
       </div>
+      {state.hostId === null ? null : <HostLog hostId={state.hostId} />}
       <h2>Server</h2>
       <label>Mr. Robot server address
         <input value={server} onChange={(event) => setServer(event.target.value)} />
@@ -82,5 +83,32 @@ export function ThisComputer() {
         <button type="button" className="button" disabled={server.trim() === '' || server === state.server} onClick={() => { if (confirm(`Move this app to ${server}?`)) void bridge.save({ server }).then((result) => { if (result.error !== undefined) setMessage(result.error) }) }}>Change server</button>
       </div>
     </div>
+  )
+}
+
+/** What robots did on this computer (pl-vcy7): newest first, with the exit status of each command. */
+function HostLog({ hostId }: { hostId: string }) {
+  const [actions, setActions] = useState<Awaited<ReturnType<typeof api.hostActions>>>()
+  const [failed, setFailed] = useState(false)
+  useEffect(() => { void api.hostActions(hostId).then(setActions).catch(() => setFailed(true)) }, [hostId])
+  return (
+    <>
+      <h2>What robots did here</h2>
+      {failed ? <div className="muted">The log could not be loaded.</div> : actions === undefined ? <div className="muted">Loading…</div> : actions.length === 0 ? <div className="muted">No robot has used this computer yet.</div> : (
+        <table className="grid host-log">
+          <thead><tr><th>When</th><th>Robot</th><th>Action</th><th>Result</th></tr></thead>
+          <tbody>
+            {actions.map((entry, index) => (
+              <tr key={index}>
+                <td>{new Date(entry.at).toLocaleString()}</td>
+                <td>{entry.robotName}</td>
+                <td className="wrap"><code>{entry.action}</code> {entry.detail}</td>
+                <td className={entry.outcome === 'done' && (entry.exitCode ?? 0) === 0 ? 'muted' : 'host-log-failed wrap'}>{entry.outcome === 'done' ? (entry.exitCode === null ? 'done' : `exit ${entry.exitCode}`) : entry.outcome}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   )
 }

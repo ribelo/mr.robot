@@ -80,7 +80,8 @@ function FileEditor({ robotId, path, canEdit, onBack }: { robotId: string; path:
         <strong>{path}</strong>
         {file === undefined ? null : <span className="muted">{size(file.size)}</span>}
       </div>
-      {file === undefined ? <div className="muted">{status ?? 'Loading…'}</div> : file.text === null ? <div className="muted">{file.note}</div> : (
+      {file === undefined ? null : <div className="file-actions"><a className="button" href={api.rawUrl(robotId, path, true)} download>Download</a>{previewable(path) ? <a className="button" href={api.rawUrl(robotId, path)} target="_blank" rel="noreferrer">Open</a> : null}</div>}
+      {file === undefined ? <div className="muted">{status ?? 'Loading…'}</div> : previewable(path) ? <FilePreview robotId={robotId} path={path} /> : file.text === null ? <div className="muted">{file.note}</div> : (
         <>
           <textarea aria-label={`Edit ${path}`} className="file-text" value={text} readOnly={!editable} spellCheck={false} onChange={(event) => { setText(event.target.value); setStatus(undefined) }} />
           {editable ? (
@@ -98,4 +99,18 @@ function FileEditor({ robotId, path, canEdit, onBack }: { robotId: string; path:
 
 function size(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} kB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+const IMAGE = /\.(png|jpe?g|gif|webp)$/i
+
+/** Files shown in the page instead of as text: images and PDFs (pl-ojbr). */
+function previewable(path: string): boolean {
+  return IMAGE.test(path) || /\.pdf$/i.test(path)
+}
+
+function FilePreview({ robotId, path }: { robotId: string; path: string }) {
+  const url = api.rawUrl(robotId, path)
+  return IMAGE.test(path)
+    ? <img className="file-preview-image" src={url} alt={path} />
+    : <iframe className="file-preview-pdf" src={url} title={path} />
 }

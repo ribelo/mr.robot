@@ -1,4 +1,4 @@
-import { reset } from 'cloudflare:test'
+import { reset, env, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { WorkspaceFileContent, WorkspaceFileView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -50,5 +50,19 @@ describe('the Files view (v1.1 ticket 08)', () => {
     const opened = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${body.id}/file?path=${encodeURIComponent(shot.path)}`)).body
     expect(opened).toMatchObject({ text: null, readOnly: true })
     expect(opened.note).toContain('binary file')
+  })
+
+  it('serves a file for preview and download with its type (pl-ojbr)', async () => {
+    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+    await settle(body.id)
+    await env.FILES.put(`robots/${body.id}/out/report.pdf`, '%PDF-1.4 test')
+    const inline = await SELF.fetch(`https://mr-robot.test/api/robots/${body.id}/raw?path=out/report.pdf`, { headers: { 'x-dev-identity': ANNA } })
+    expect(inline.headers.get('content-type')).toBe('application/pdf')
+    expect(inline.headers.get('content-disposition')).toContain('inline')
+    expect(await inline.text()).toBe('%PDF-1.4 test')
+    const download = await SELF.fetch(`https://mr-robot.test/api/robots/${body.id}/raw?path=out/report.pdf&download=1`, { headers: { 'x-dev-identity': ANNA } })
+    expect(download.headers.get('content-disposition')).toContain('attachment')
+    const page = await SELF.fetch(`https://mr-robot.test/api/robots/${body.id}/raw?path=MEMORY.md`, { headers: { 'x-dev-identity': ANNA } })
+    expect(page.headers.get('content-security-policy')).toContain('sandbox')
   })
 })

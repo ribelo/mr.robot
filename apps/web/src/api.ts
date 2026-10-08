@@ -110,6 +110,8 @@ export const api = {
   approvePairing: (code: string) => request<{ hostId: string; name: string }>(`/api/hosts/pair/${encodeURIComponent(code)}`, { body: {} }),
   setHostSharing: (id: string, sharing: 'private' | 'home') => request(`/api/hosts/${encodeURIComponent(id)}`, { method: 'PATCH', body: { sharing } }),
   unpairHost: (id: string) => request(`/api/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  hostActions: (id: string) => request<Array<{ robotId: string; robotName: string; action: string; detail: string; outcome: string; exitCode: number | null; at: number }>>(`/api/hosts/${encodeURIComponent(id)}/actions`),
+  rawUrl: (robotId: string, path: string, download = false) => `/api/robots/${encodeURIComponent(robotId)}/raw?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`,
   homeMemory: () => request<{ content: string }>('/api/home-memory'),
   setHomeMemory: (content: string) => request('/api/admin/home-memory', { method: 'PUT', body: { content } }),
   setProxy: (url: string | null) => request<{ ok: boolean; configured: boolean }>('/api/admin/proxy', { method: 'PUT', body: { url } }),

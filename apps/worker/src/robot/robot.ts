@@ -1599,6 +1599,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** One file for the editor; binary and large files are read-only (rb-q5eb). */
+  /** A Workspace file as bytes, for preview and download (pl-ojbr). */
+  async fileRaw(path: string): Promise<{ body: ArrayBuffer; mediaType: string } | undefined> {
+    const file = await this.run(this.workspace.read(path))
+    if (file === undefined) return undefined
+    return { body: file.body as ArrayBuffer, mediaType: mediaTypeOf(path) }
+  }
+
   async fileContent(path: string): Promise<WorkspaceFileContent> {
     const file = await this.run(this.workspace.read(path))
     if (file === undefined) throw Object.assign(new Error(`no file "${path}"`), { name: 'NotFound', status: 404 })
@@ -1955,4 +1962,15 @@ function formatBytes(bytes: number): string {
 function optionalString(payload: Record<string, unknown>, key: string): Record<string, string> {
   const value = payload[key]
   return typeof value === 'string' ? { [key]: value } : {}
+}
+
+const MEDIA_TYPES: Record<string, string> = {
+  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+  txt: 'text/plain; charset=utf-8', md: 'text/markdown; charset=utf-8', csv: 'text/csv; charset=utf-8', json: 'application/json', html: 'text/plain; charset=utf-8',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', zip: 'application/zip',
+}
+
+/** The content type a file is served with; HTML and SVG-like scripts are never rendered as pages. */
+function mediaTypeOf(path: string): string {
+  return MEDIA_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
 }

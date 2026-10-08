@@ -183,4 +183,13 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(frames.some((entry) => entry.d.body === 'Done.' && entry.d.url === `/#/r/${encodeURIComponent(id)}`)).toBe(true)
   })
+
+  it('logs each host action with the robot, the command and its exit status (pl-vcy7)', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(ANNA, [`${desk.hostId}:shell`])
+    await say(ANNA, id, [{ calls: [{ name: 'host_run', args: { host: 'Desk', command: 'uname -a' } }] }, { text: 'Ran it.' }])
+    const actions = (await api<Array<{ robotName: string; action: string; detail: string; outcome: string; exitCode: number | null }>>(ANNA, `/api/hosts/${desk.hostId}/actions`)).body
+    expect(actions[0]).toMatchObject({ robotName: 'New robot', action: 'run', detail: 'uname -a', outcome: 'done', exitCode: 0 })
+    expect((await api(BEN, `/api/hosts/${desk.hostId}/actions`)).status).toBe(404)
+  })
 })

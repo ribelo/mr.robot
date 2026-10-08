@@ -108,6 +108,7 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
   const [failure, setFailure] = useState<string>()
   const [replyingInstead, setReplyingInstead] = useState(false)
   const [stream, setStream] = useState<{ text: string; thinking: string }>()
+  const [search, setSearch] = useState<{ query: string; index: number }>()
   const id = route.id
   const details = me.workDetails !== 'compact'
 
@@ -153,6 +154,15 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
   // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
   const asks = panel.canEdit ? conversation.items.flatMap((item) => (item.kind === 'question' && item.proposal.status === 'open' ? [item.proposal] : [])) : []
   const identity = robot?.identity ?? panel.summary.identity
+  // Search within the conversation (pl-8594): every item's text, newest match first.
+  const needle = search?.query.trim().toLowerCase() ?? ''
+  const matches = needle === '' ? [] : conversation.items.filter((item) => searchText(item).toLowerCase().includes(needle)).map((item) => item.id).reverse()
+  const current = matches.length === 0 || search === undefined ? undefined : matches[Math.min(search.index, matches.length - 1)]
+  const jump = (index: number) => {
+    setSearch((value) => (value === undefined ? value : { ...value, index }))
+    const target = matches[index]
+    if (target !== undefined) requestAnimationFrame(() => document.querySelector(`[data-item="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'center' }))
+  }
   const header: ReactNode = (
     <header className="conversation-head">
       <button type="button" className="icon-button back" aria-label="Back" onClick={() => go({ page: 'home' })}>‹</button>
@@ -162,6 +172,19 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
       {panel.summary.status === 'paused' ? <span className="pill">paused</span> : null}
       {panel.summary.status === 'blocked' ? <span className="pill pill-warn">blocked</span> : null}
       <span className="spacer" />
+      {search === undefined
+        ? <button type="button" className="icon-button" aria-label="Search this conversation" onClick={() => setSearch({ query: '', index: 0 })}><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg></button>
+        : (
+          <span className="conversation-search">
+            <input autoFocus aria-label="Search this conversation" placeholder="Search this conversation" value={search.query}
+              onChange={(event) => setSearch({ query: event.target.value, index: 0 })}
+              onKeyDown={(event) => { if (event.key === 'Enter') jump(matches.length === 0 ? 0 : (search.index + (event.shiftKey ? matches.length - 1 : 1)) % matches.length); if (event.key === 'Escape') setSearch(undefined) }} />
+            <span className="muted">{needle === '' ? '' : matches.length === 0 ? 'none' : `${Math.min(search.index, matches.length - 1) + 1} of ${matches.length}`}</span>
+            <button type="button" className="icon-button small" aria-label="Previous match" disabled={matches.length === 0} onClick={() => jump((search.index + 1) % matches.length)}>↑</button>
+            <button type="button" className="icon-button small" aria-label="Next match" disabled={matches.length === 0} onClick={() => jump((search.index + matches.length - 1) % matches.length)}>↓</button>
+            <button type="button" className="icon-button small" aria-label="Close search" onClick={() => setSearch(undefined)}>×</button>
+          </span>
+        )}
       {panel.canEdit ? <button type="button" className="head-button" onClick={() => go({ page: 'advanced', id })}>Settings</button> : null}
       <button
         type="button"
@@ -179,7 +202,7 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
       <section className="conversation-main">
         {header}
         <div className="chat-scroll">
-          <ChatView items={conversation.items} meId={me.id} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === undefined ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
+          <ChatView items={conversation.items} meId={me.id} robotId={id} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === undefined ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void api.retry(id).then(refresh)}>Try again</button>
@@ -215,4 +238,15 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
       ) : null}
     </div>
   )
+}
+
+/** The words of a chat item a search can find. */
+function searchText(item: ConversationData['items'][number]): string {
+  switch (item.kind) {
+    case 'message': return item.text + ' ' + item.attachments.map((file) => file.name).join(' ')
+    case 'reply': case 'notice': case 'thinking': return item.text
+    case 'routine': return item.name
+    case 'question': return item.proposal.purpose
+    default: return ''
+  }
 }

@@ -18,12 +18,16 @@ export interface ChatViewProps {
   readonly workDetails?: WorkDetails
   /** The reply and thinking streaming in now (pl-jzr7). */
   readonly stream?: { readonly text: string; readonly thinking: string }
+  /** For attachment links. */
+  readonly robotId?: string
+  /** The search match to scroll to and mark (pl-8594). */
+  readonly highlight?: string
 }
 
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream, robotId, highlight }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -51,7 +55,7 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
         </div>,
       )
     }
-    rows.push(<Item key={item.id} item={item} meId={meId} canAnswer={canAnswer} level={workDetails} {...(onAnswer === undefined ? {} : { onAnswer })} />)
+    rows.push(<div key={item.id} data-item={item.id} className={highlight === item.id ? 'chat-item search-hit' : 'chat-item'}><Item item={item} meId={meId} canAnswer={canAnswer} level={workDetails} {...(robotId === undefined ? {} : { robotId })} {...(onAnswer === undefined ? {} : { onAnswer })} /></div>)
   }
   const showThinking = workDetails === 'detailed' || workDetails === 'verbose'
   if (working && stream !== undefined && showThinking && stream.thinking !== '') rows.push(<ThinkingRow key="live-thinking" text={stream.thinking} level={workDetails} running={stream.text === ''} />)
@@ -65,7 +69,7 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
   return <div className="chat">{rows}</div>
 }
 
-function Item({ item, meId, canAnswer, onAnswer, level }: { item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; level: WorkDetails }) {
+function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; level: WorkDetails; robotId?: string }) {
   switch (item.kind) {
     case 'message': {
       const own = item.sender.kind === 'member' && item.sender.memberId === meId
@@ -82,7 +86,9 @@ function Item({ item, meId, canAnswer, onAnswer, level }: { item: ChatItem; meId
             {label === null ? null : <>{label} </>}
             <RichText text={item.text} />
             {item.attachments.length > 0 ? (
-              <div className="attachments">{item.attachments.map((file) => <span key={file.path} className="attachment">📎 {file.name}</span>)}</div>
+              <div className="attachments">{item.attachments.map((file) => robotId === undefined
+                ? <span key={file.path} className="attachment">📎 {file.name}</span>
+                : <span key={file.path} className="attachment"><a href={`/api/robots/${encodeURIComponent(robotId)}/raw?path=${encodeURIComponent(file.path)}`} target="_blank" rel="noreferrer">📎 {file.name}</a> <a className="attachment-download" href={`/api/robots/${encodeURIComponent(robotId)}/raw?path=${encodeURIComponent(file.path)}&download=1`} download aria-label={`Download ${file.name}`}>↓</a></span>)}</div>
             ) : null}
           </div>
           {item.reaction === null ? null : <span className="reaction" aria-label={`reacted ${item.reaction}`}>{item.reaction}</span>}

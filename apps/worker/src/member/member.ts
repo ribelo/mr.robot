@@ -3,7 +3,7 @@
  * PROACTIVE_PREFERENCES.md, mounted read-only into each of their Robots), and the
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
-import { HostHub, type HostEntry } from './hosts.ts'
+import { HostHub, type HostEntry, type HostAction } from './hosts.ts'
 import { metaOf, parseEntry, type LoginMeta } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Context from 'effect/Context'
@@ -595,11 +595,12 @@ export class Member extends DurableObject<Env> {
   setHostSharing(id: string, sharing: 'private' | 'home'): Promise<void> { return this.hosts.setSharing(id, sharing) }
   unpairHost(id: string): Promise<void> { return this.hosts.unpair(id) }
 
-  hostRead(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client) => client.Read({ path })) }
-  hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }) { return this.hosts.run(id, robotId, 'files', (client) => client.Write(input)) }
+  hostRead(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client) => client.Read({ path }), undefined, { action: 'read', detail: path }) }
+  hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }) { return this.hosts.run(id, robotId, 'files', (client) => client.Write(input), undefined, { action: 'write', detail: input.path }) }
   hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number }) {
-    return this.hosts.run(id, robotId, 'shell', (client) => client.Run(input), Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000)
+    return this.hosts.run(id, robotId, 'shell', (client) => client.Run(input), Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000, { action: 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})`, exitCode: (result) => result.exitCode })
   }
+  hostActions(id: string): HostAction[] { return this.hosts.actions(id) }
   hostBrowserOpen(id: string, robotId: string, robotName: string): Promise<string> { return this.hosts.openBrowser(id, robotId, robotName) }
   hostBrowserClose(id: string, robotId: string, session: string): Promise<void> { return this.hosts.closeBrowser(id, robotId, session) }
 

@@ -140,6 +140,12 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).setHomeMemory(content, 'the Home admin', null))
     return { ok: true }
   }))
+  // The host action log (pl-vcy7): only the host's owner sees it.
+  .on('GET', '/api/hosts/:id/actions', (c, { id }) => call(async () => {
+    const member = c.env.MEMBER.getByName(c.member.id)
+    if (!(await member.hostList()).some((host) => host.id === id)) throw Object.assign(new Error('no such computer of yours'), { status: 404 })
+    return member.hostActions(id)
+  }))
   .on('PUT', '/api/admin/proxy', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { url } = yield* decodeBody(c.request, Schema.Struct({ url: Schema.NullOr(Schema.String) }))
@@ -304,6 +310,26 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/robots/:id/files', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
     return yield* call(() => robot(c, id).files())
+  }))
+  .on('GET', '/api/robots/:id/raw', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const url = new URL(c.request.url)
+    const path = normalizePath(url.searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    const file = yield* call(() => robot(c, id).fileRaw(path))
+    if (file === undefined) return yield* Effect.fail(notFound(`no file "${path}"`))
+    const name = path.split('/').pop() ?? 'file'
+    const download = url.searchParams.get('download') === '1'
+    return new Response(file.body, {
+      headers: {
+        'content-type': file.mediaType,
+        'content-disposition': `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(name)}`,
+        // A robot-written file is never a script on our origin; PDFs and images need the viewer, the rest is sandboxed.
+        ...(file.mediaType === 'application/pdf' || file.mediaType.startsWith('image/') && file.mediaType !== 'image/svg+xml' ? {} : { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" }),
+        'x-content-type-options': 'nosniff',
+        'cache-control': 'private, no-store',
+      },
+    })
   }))
   .on('GET', '/api/robots/:id/file', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
