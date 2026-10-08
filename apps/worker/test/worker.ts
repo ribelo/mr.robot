@@ -4,6 +4,8 @@ import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { StubLlm } from './stub-llm.ts'
 import { StubDriver } from './stub-browser.ts'
 import { FakeChannel } from './fake-channel.ts'
+import { fakeConnectors, fakeService } from './fake-connector.ts'
+import { connectorFixtures } from './connector-fixtures.ts'
 import type { ChannelAdapter, InboundEvent } from '../src/channels/channel.ts'
 import type { BrowserDriver } from '../src/browser/driver.ts'
 import type { BrowserBackend } from '@mr-robot/protocol'
@@ -45,6 +47,15 @@ export class Member extends ProductionMember {
 
 /** The production Robot with the scripted stub model on the "stub" Provider. */
 export class Robot extends ProductionRobot {
+  /** Fake connectors set by a test replace the real ones; their HTTP is the recorded fake service. */
+  protected override connectorPlugins() {
+    return fakeConnectors.size === 0 ? super.connectorPlugins() : Object.fromEntries(fakeConnectors)
+  }
+
+  protected override connectorFetch(): typeof globalThis.fetch {
+    return fakeConnectors.size === 0 ? connectorFixtures.fetch : fakeService
+  }
+
   protected override adapter(provider: string, contextWindow?: number, model?: string, wire?: 'chat' | 'anthropic' | 'responses'): LlmAdapter {
     return provider === 'stub' ? new StubLlm(this.store.requireConfig().id) : super.adapter(provider, contextWindow, model, wire)
   }

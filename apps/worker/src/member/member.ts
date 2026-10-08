@@ -4,6 +4,7 @@
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
 import { HostHub, type HostEntry, type HostAction } from './hosts.ts'
+import { ConnectionStore, type ConnectionChange, type ConnectionMeta, type NewConnection, type OwnConnection } from './connections.ts'
 import { metaOf, parseEntry, type LoginMeta } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Context from 'effect/Context'
@@ -580,6 +581,25 @@ export class Member extends DurableObject<Env> {
       if (alarm === null || alarm > next) await this.ctx.storage.setAlarm(next)
     }
   }
+
+  // ---------------------------------------------------------------- Connections (v1.5)
+
+  private connectionStore: ConnectionStore | undefined
+  private get connectionsOf(): ConnectionStore {
+    this.connectionStore ??= new ConnectionStore(this.ctx.storage.sql, makeVault(this.env.DATA_KEY, 'connections'), async (connection, shared) => {
+      const memberId = (await this.profile()).id
+      await this.env.HOME.getByName(HOME_ID).connectionShared(memberId, connection, shared)
+    })
+    return this.connectionStore
+  }
+
+  connections(): OwnConnection[] { return this.connectionsOf.list() }
+  connection(id: string): OwnConnection | undefined { return this.connectionsOf.get(id) }
+  addConnection(input: NewConnection): Promise<OwnConnection> { return this.connectionsOf.add(input) }
+  updateConnection(id: string, change: ConnectionChange): Promise<OwnConnection | undefined> { return this.connectionsOf.update(id, change) }
+  removeConnection(id: string): Promise<boolean> { return this.connectionsOf.remove(id) }
+  /** Secrets and state of a connection for one call; the caller (the Home, for a granted Robot) never keeps them. */
+  useConnection(id: string): Promise<{ connection: OwnConnection; secrets: Record<string, string>; meta: ConnectionMeta } | undefined> { return this.connectionsOf.use(id) }
 
   // ---------------------------------------------------------------- Hosts (v1.2)
 

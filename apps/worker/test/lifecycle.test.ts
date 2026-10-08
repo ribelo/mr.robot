@@ -73,7 +73,7 @@ describe('creating a Robot', () => {
     const robot = (await robots(ANNA)).find((entry) => entry.id === id)
     expect(robot).toMatchObject({ status: 'active', identity: { name: 'Flat Watcher' } })
     const settings = await env.ROBOT.getByName(id).settings()
-    expect(settings.grants).toEqual({ tools: ['routines', 'web'], skills: [], recipients: [], secrets: [], hosts: [] })
+    expect(settings.grants).toEqual({ tools: ['routines', 'web'], skills: [], recipients: [], secrets: [], hosts: [], connections: [] })
 
     const again = await api(ANNA, `/api/robots/${id}/proposals/${proposal.id}`, { body: { revision: proposal.revision, approve: true } })
     expect(again.status).toBe(409)

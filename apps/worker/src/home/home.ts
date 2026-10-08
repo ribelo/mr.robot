@@ -3,7 +3,7 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { HostView, LoginView } from '@mr-robot/protocol'
+import type { ConnectionView, HostView, LoginView, PluginView } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -31,6 +31,10 @@ import * as Layer from 'effect/Layer'
 import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { backendOptions } from '../browser/backends.ts'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
+import { connectionView, HomePlugins } from './plugins.ts'
+import { disabledToolGroups } from '../plugins/catalog.ts'
+import type { PlainValue } from '../connectors/schema-form.ts'
+import type { ConnectionChange, ConnectionMeta, OwnConnection } from '../member/connections.ts'
 import { liveModels, type ListingAccess } from '../providers/live-catalog.ts'
 import { fetchMetadata, type MetadataIndex } from '../providers/model-metadata.ts'
 import { PROVIDER_IDS } from '../agent/providers.ts'
@@ -990,7 +994,14 @@ export class Home extends DurableObject<Env> {
   createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> { return this.run(createRobot(ownerId, brief, model)) }
   syncMrRobots(): Promise<void> { return this.run(syncMrRobots) }
   adminView(adminId: string): Promise<AdminView> { return this.run(adminView(adminId)) }
-  catalog(memberId: string, robotId: string): Promise<SettingsCatalog> { return this.run(catalog(memberId, robotId)) }
+  /** What a Member can grant: tool groups of plugins that are on, and their usable connections (v1.5). */
+  async catalog(memberId: string, robotId: string): Promise<SettingsCatalog> {
+    const base = await this.run(catalog(memberId, robotId))
+    const off = disabledToolGroups(this.pluginsOf.enabled())
+    const enabled = this.pluginsOf.enabled()
+    const connections = (await this.connectionsFor(memberId)).filter((connection) => enabled[connection.kind] !== false)
+    return { ...base, toolGroups: base.toolGroups.filter((group) => !off.has(group.name)), connections }
+  }
   skills(memberId: string): Promise<SkillView[]> { return this.run(skills(memberId)) }
   loadableSkills(memberId: string, names: readonly string[]): Promise<SkillView[]> { return this.run(loadableSkills(memberId, names)) }
   skillRepository(): Promise<SkillRepository | null> { return this.run(skillRepository) }
@@ -1015,7 +1026,8 @@ export class Home extends DurableObject<Env> {
   unavailableModels(memberId: string): Promise<ModelOption[]> { return this.run(unavailableModels(memberId)) }
   modelList(): Promise<ModelOption[]> { return this.run(modelList) }
   vpnConfig(): Promise<string | null> { return this.run(vpnConfig) }
-  exaKey(): Promise<string | null> { return this.run(exaKey) }
+  /** The Exa plugin's key (its detail page), or the key saved before plugins had settings. */
+  async exaKey(): Promise<string | null> { return (await this.pluginsOf.settings('exa')).secrets['apiKey'] ?? await this.run(exaKey) }
 
   /** HOME.md: shared household facts for every Robot of the Home (pl-yqno). */
   async homeMemory(): Promise<string> {
@@ -1042,12 +1054,75 @@ export class Home extends DurableObject<Env> {
   pairingView(code: string): Promise<{ name: string; platform: string; approved: boolean }> { return this.run(pairingView(code)) }
   approvePairing(code: string, memberId: string): Promise<{ hostId: string; name: string }> { return this.run(approvePairing(code, memberId)) }
   pollPairing(code: string): Promise<{ status: 'expired' | 'pending' } | { status: 'paired'; hostId: string; token: string }> { return this.run(pollPairing(code)) }
-  setExaKey(key: string | null): Promise<void> { return this.run(setExaKey(key)) }
+  async setExaKey(key: string | null): Promise<void> {
+    await this.run(setExaKey(key))
+    await this.pluginsOf.setSecret('exa', 'apiKey', key === null || key.trim() === '' ? null : key.trim())
+  }
   setVpnConfig(config: string | null): Promise<void> { return this.run(setVpnConfig(config)) }
   credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }
   providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> { return this.run(providerCredential(memberId, provider)) }
   opencodePoolOwner(memberId: string): Promise<{ ownerId: string; forHome: boolean } | null> { return this.run(opencodePoolOwner(memberId)) }
   providersView(memberId: string): Promise<ProvidersView> { return this.run(providersView(memberId)) }
+
+  // ---------------------------------------------------------------- Plugins and connections (v1.5)
+
+  private pluginsStore: HomePlugins | undefined
+  private get pluginsOf(): HomePlugins {
+    this.pluginsStore ??= new HomePlugins(this.ctx.storage.sql, makeVault(this.env.DATA_KEY, 'plugins'))
+    return this.pluginsStore
+  }
+
+  private memberName(id: string): string {
+    return this.ctx.storage.sql.exec<{ name: string }>('SELECT name FROM member WHERE id = ?', id).toArray()[0]?.name ?? 'someone'
+  }
+
+  private isAdmin(id: string): boolean {
+    return this.ctx.storage.sql.exec<{ role: string }>('SELECT role FROM member WHERE id = ?', id).toArray()[0]?.role === 'admin'
+  }
+
+  plugins(memberId: string): PluginView[] { return this.pluginsOf.list(this.isAdmin(memberId)) }
+  pluginsEnabled(): Record<string, boolean> { return this.pluginsOf.enabled() }
+  setPluginEnabled(name: string, enabled: boolean): void { this.pluginsOf.setEnabled(name, enabled) }
+  async setPluginConfig(name: string, input: Record<string, unknown>): Promise<PluginView> {
+    const view = await this.pluginsOf.setConfig(name, input)
+    // The Exa key also lives where the admin view and the catalog look (rb-x8i3).
+    if (name === 'exa') {
+      const key = (await this.pluginsOf.settings('exa')).secrets['apiKey']
+      if (key !== undefined) await this.run(setExaKey(key))
+    }
+    return view
+  }
+  /** A plugin's settings with secrets, for the platform only (Google's OAuth client). */
+  pluginSettings(name: string): Promise<{ values: Record<string, PlainValue>; secrets: Record<string, string> }> { return this.pluginsOf.settings(name) }
+
+  connectionShared(ownerId: string, connection: OwnConnection, shared: boolean): void { this.pluginsOf.connectionShared(ownerId, connection, shared) }
+
+  /** A Member's own connections and the ones others share with the Home (cn-qs78). */
+  async connectionsFor(memberId: string): Promise<ConnectionView[]> {
+    const own = (await this.env.MEMBER.getByName(memberId).connections()).map((connection) => connectionView(connection, memberId, this.memberName(memberId), memberId))
+    const shared = this.pluginsOf.sharedBy(memberId).map(({ ownerId, connection }) => connectionView(connection, ownerId, this.memberName(ownerId), memberId))
+    return [...own, ...shared]
+  }
+
+  /** Who owns a connection the Member may use: the Member, or another Member who shared it; null otherwise. */
+  private async usableOwner(memberId: string, id: string): Promise<string | null> {
+    if ((await this.env.MEMBER.getByName(memberId).connection(id)) !== undefined) return memberId
+    return this.pluginsOf.sharedOwner(id)
+  }
+
+  /** Secrets and state of a connection for one call by one of the Member's Robots; never cached. */
+  async useConnection(memberId: string, id: string): Promise<{ connection: ConnectionView; secrets: Record<string, string>; meta: ConnectionMeta } | null> {
+    const owner = await this.usableOwner(memberId, id)
+    if (owner === null) return null
+    const use = await this.env.MEMBER.getByName(owner).useConnection(id)
+    return use === undefined ? null : { ...use, connection: connectionView(use.connection, owner, this.memberName(owner), memberId) }
+  }
+
+  /** A connector call found the credentials refused, or refreshed them: the owner's row changes. */
+  async updateUsedConnection(memberId: string, id: string, change: ConnectionChange): Promise<void> {
+    const owner = await this.usableOwner(memberId, id)
+    if (owner !== null) await this.env.MEMBER.getByName(owner).updateConnection(id, change)
+  }
 }
 
 export function currentMonth(at = Date.now()): string {

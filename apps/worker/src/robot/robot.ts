@@ -74,6 +74,11 @@ import { Exa } from '../plugins/exa.ts'
 import { Files } from '../plugins/files.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Host } from '../plugins/host.ts'
+import { ConnectorCapability } from '../plugins/connector.ts'
+import { disabledToolGroups } from '../plugins/catalog.ts'
+import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
+import type { ConnectorHost, ConnectorPlugin, GrantedConnection } from '../connectors/connector.ts'
+import type { ConnectionView, ConnectorKind } from '@mr-robot/protocol'
 import { Logins } from '../plugins/logins.ts'
 import { Messaging } from '../plugins/messaging.ts'
 import { Notify } from '../plugins/notify.ts'
@@ -119,6 +124,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private handingBack = false
   /** The hosts this Robot's owner reaches, refreshed each Turn (names for tools and labels). */
   private knownHosts: HostView[] = []
+  /** The owner's usable connections and the Home's plugin switches, refreshed with the reach (v1.5). */
+  private knownConnections: ConnectionView[] = []
+  private pluginsOn: Record<string, boolean> = {}
   /** The kind of the wake-up the running Turn serves. */
   private currentWakeup: string | undefined
   /** The browser was opened for a viewer (live view or takeover), not by a Turn (rb-keaw). */
@@ -686,7 +694,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     const grants = this.store.effectiveGrants()
-    const granted = new Set(grants.tools.filter(isToolGroup))
+    // Plugins the Home switched off are not mounted for anyone (cn-dbm9).
+    const off = disabledToolGroups(this.pluginsOn)
+    const granted = new Set(grants.tools.filter(isToolGroup).filter((group) => !off.has(group)))
     if (granted.has('files')) mounts.push(mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }))
     if (granted.has('notify')) mounts.push(mount(Notify, { host: this }))
     if (granted.has('secrets')) mounts.push(mount(Logins, { host: this, granted: grants.secrets }))
@@ -711,7 +721,60 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const hostGrants = grants.hosts ?? []
     const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
     if (names('files').length > 0 || names('shell').length > 0) mounts.push(mount(Host, { host: this, files: names('files'), shell: names('shell') }))
+    for (const [kind, plugin] of Object.entries(this.connectorPlugins()) as Array<[ConnectorKind, ConnectorPlugin]>) {
+      if (this.pluginsOn[kind] === false) continue
+      const accounts = this.grantedConnections(kind)
+      if (accounts.length > 0) mounts.push(mount(ConnectorCapability, { plugin, host: this.connectorHost(kind, accounts) }))
+    }
     return mounts
+  }
+
+  // ---------------------------------------------------------------- connectors (v1.5)
+
+  /** The connector implementations; tests substitute fakes. */
+  protected connectorPlugins(): Partial<Record<ConnectorKind, ConnectorPlugin>> {
+    return CONNECTOR_PLUGINS
+  }
+
+  /** fetch for connector HTTP; tests substitute recorded responses. */
+  protected connectorFetch(): typeof globalThis.fetch {
+    return (input, init) => fetch(input, init)
+  }
+
+  /** Connections of a kind this Robot holds a grant for, with the write grant marked (cn-xezx). */
+  private grantedConnections(kind: ConnectorKind): GrantedConnection[] {
+    const grants = this.store.effectiveGrants().connections ?? []
+    return this.knownConnections
+      .filter((connection) => connection.kind === kind && grants.includes(connection.id))
+      .map((connection) => ({ id: connection.id, kind, label: connection.label, account: connection.account, services: connection.services, write: grants.includes(`${connection.id}:write`), isDefault: connection.isDefault }))
+  }
+
+  private connectorHost(kind: ConnectorKind, accounts: GrantedConnection[]): ConnectorHost {
+    const ownerId = this.store.requireConfig().ownerId
+    return {
+      kind,
+      accounts,
+      fetch: this.connectorFetch(),
+      use: async (connectionId) => {
+        // Checked again at each call: a grant withdrawn mid-Turn stops working at once.
+        if (!(this.store.effectiveGrants().connections ?? []).includes(connectionId)) throw new Error('this connection is no longer granted')
+        const use = await this.home().useConnection(ownerId, connectionId)
+        if (use === null) throw new Error('this connection no longer exists or is no longer shared')
+        // Secrets of the call are masked out of everything this Turn writes (cn-a1i0).
+        for (const [field, value] of Object.entries(use.secrets)) this.remember(`${use.connection.label}:${field}`, value)
+        return { secrets: use.secrets, meta: use.meta }
+      },
+      markStatus: (connectionId, status, note) => this.home().updateUsedConnection(ownerId, connectionId, { status, statusNote: note }),
+      saveFile: async (path, bytes) => {
+        await this.run(this.workspace.write(path, bytes))
+        return path
+      },
+      readFile: async (path) => {
+        const file = await this.run(this.workspace.read(path))
+        if (file === undefined) throw new Error(`no file ${path} in the Workspace`)
+        return new Uint8Array(file.body)
+      },
+    }
   }
 
   // ---------------------------------------------------------------- browser (robot-l9te, robot-t0vc, robot-0eew)
@@ -1057,10 +1120,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async refreshReach(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
-    this.knownHosts = await this.home().hostsFor(config.ownerId)
+    ;[this.knownHosts, this.knownConnections, this.pluginsOn] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled()])
     if (config.kind !== 'mr-robot') return
     const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), this.home().skills(config.ownerId)])
-    this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name), hosts: this.knownHosts.map((host) => host.id) })
+    this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name), hosts: this.knownHosts.map((host) => host.id), connections: this.knownConnections.map((connection) => connection.id) })
   }
 
   private async refreshPersona(): Promise<void> {

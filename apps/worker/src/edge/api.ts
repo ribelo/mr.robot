@@ -8,6 +8,10 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import {
   LoginInput,
+  ConnectionPaste,
+  ConnectionPatch,
+  PluginSettingsInput,
+  PluginSwitch,
   BrowserBackend,
   MemberPreferences,
   ApiKeyInput,
@@ -30,6 +34,10 @@ import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import type { AnswerResult } from '../robot/robot.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
+import { PLUGINS, pluginByName } from '../plugins/catalog.ts'
+import { parseForm } from '../connectors/schema-form.ts'
+import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
+import { describeConnectorFailure } from '../connectors/connector.ts'
 
 export interface ApiContext {
   readonly request: Request
@@ -120,6 +128,49 @@ export const api = new Router<ApiContext>()
   }))
   // ------------------------------------------------------------ Hosts (v1.2)
   .on('GET', '/api/hosts', (c) => call(() => home(c.env).hostsFor(c.member.id)))
+  // ---------------------------------------------------------------- plugins and connections (v1.5)
+  .on('GET', '/api/plugins', (c) => call(() => home(c.env).plugins(c.member.id)))
+  .on('PUT', '/api/admin/plugins/:name', (c, { name }) => Effect.gen(function* () {
+    yield* admin(c)
+    const body = yield* decodeBody(c.request, PluginSwitch)
+    if (pluginByName(name) === undefined) return yield* Effect.fail(notFound('no such plugin'))
+    yield* call(() => home(c.env).setPluginEnabled(name, body.enabled))
+    return { ok: true }
+  }))
+  .on('PUT', '/api/admin/plugins/:name/settings', (c, { name }) => Effect.gen(function* () {
+    yield* admin(c)
+    const body = yield* decodeBody(c.request, PluginSettingsInput)
+    if (pluginByName(name) === undefined) return yield* Effect.fail(notFound('no such plugin'))
+    return yield* Effect.tryPromise({ try: () => home(c.env).setPluginConfig(name, body.values), catch: (error) => badRequest(error instanceof Error ? error.message.replace(/^PluginConfigInvalid: /, '') : 'the settings are not valid') })
+  }))
+  .on('GET', '/api/connections', (c) => call(() => home(c.env).connectionsFor(c.member.id)))
+  .on('POST', '/api/connections/:kind', (c, { kind }) => Effect.gen(function* () {
+    const body = yield* decodeBody(c.request, ConnectionPaste)
+    const plugin = PLUGINS.find((entry) => entry.connector?.kind === kind)
+    const connect = plugin?.connector?.connect
+    if (plugin === undefined || connect === undefined || connect.method !== 'paste') return yield* Effect.fail(notFound('this connector does not connect by pasting'))
+    const parsed = parseForm(plugin.name, connect.schema, body.values, new Set())
+    if (!parsed.ok) return yield* Effect.fail(badRequest(parsed.error.message))
+    const implementation = CONNECTOR_PLUGINS[plugin.connector!.kind]
+    if (implementation?.verifyPasted === undefined) return yield* Effect.fail(badRequest(`${plugin.title} is not available yet`))
+    const verified = yield* implementation.verifyPasted(parsed.secrets, (input, init) => fetch(input, init)).pipe(Effect.mapError((failure) => badRequest(`${plugin.title} refused these values: ${describeConnectorFailure(failure)}`)))
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).addConnection({
+      kind: plugin.connector!.kind, label: body.label?.trim() || verified.label, account: verified.account, services: [], shared: body.shared, meta: verified.meta, secrets: parsed.secrets,
+    }))
+  }))
+  .on('PATCH', '/api/connections/:id', (c, { id }) => Effect.gen(function* () {
+    const body = yield* decodeBody(c.request, ConnectionPatch)
+    const updated = yield* call(() => c.env.MEMBER.getByName(c.member.id).updateConnection(id, {
+      ...(body.label === undefined || body.label.trim() === '' ? {} : { label: body.label.trim() }),
+      ...(body.shared === undefined ? {} : { shared: body.shared }),
+      ...(body.isDefault === true ? { isDefault: true } : {}),
+    }))
+    return updated === undefined ? yield* Effect.fail(notFound('no such connection of yours')) : updated
+  }))
+  .on('DELETE', '/api/connections/:id', (c, { id }) => Effect.gen(function* () {
+    const removed = yield* call(() => c.env.MEMBER.getByName(c.member.id).removeConnection(id))
+    return removed ? { ok: true } : yield* Effect.fail(notFound('no such connection of yours'))
+  }))
   .on('GET', '/api/hosts/pair/:code', (c, { code }) => call(() => home(c.env).pairingView(code)))
   .on('POST', '/api/hosts/pair/:code', (c, { code }) => call(() => home(c.env).approvePairing(code, c.member.id)))
   .on('PATCH', '/api/hosts/:id', (c, { id }) => Effect.gen(function* () {

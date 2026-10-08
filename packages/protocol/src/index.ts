@@ -73,7 +73,7 @@ export const Identity = Schema.Struct({
 })
 export type Identity = typeof Identity.Type
 
-export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret', 'host'])
+export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret', 'host', 'connection'])
 export type GrantKind = typeof GrantKind.Type
 
 export const GrantSet = Schema.Struct({
@@ -83,6 +83,8 @@ export const GrantSet = Schema.Struct({
   secrets: Schema.Array(Schema.String),
   /** Host grants (v1.2, hs-5ktw): "<hostId>:browser", "<hostId>:files", "<hostId>:shell". */
   hosts: Schema.optional(Schema.Array(Schema.String)),
+  /** Connection grants (v1.5, cn-xezx): "<connectionId>" reads; "<connectionId>:write" also sends (Gmail send, Slack post). */
+  connections: Schema.optional(Schema.Array(Schema.String)),
 })
 export type GrantSet = typeof GrantSet.Type
 export const emptyGrants: GrantSet = { tools: [], skills: [], recipients: [], secrets: [] }
@@ -594,6 +596,77 @@ export type ConfiguredResult = typeof ConfiguredResult.Type
 export const ModelListRefresh = Schema.Array(Schema.Struct({ provider: Schema.String, count: Schema.Number, error: Schema.NullOr(Schema.String) }))
 export type ModelListRefresh = typeof ModelListRefresh.Type
 
+// ---------------------------------------------------------------- Plugins and connections (v1.5)
+
+/** One field of a plugin's form, described from its Schemastery schema (cn-s1pd); secret fields never carry a value. */
+export const PluginField = Schema.Struct({
+  key: Schema.String,
+  label: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  kind: Schema.Literals(['text', 'secret', 'number', 'boolean', 'choice', 'choices']),
+  options: Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })),
+  required: Schema.Boolean,
+})
+export type PluginField = typeof PluginField.Type
+
+export const ConnectorKind = Schema.Literals(['google', 'slack', 'discord'])
+export type ConnectorKind = typeof ConnectorKind.Type
+
+/** How a person adds a connection of a connector: an OAuth consent, or pasted values. */
+export const ConnectMethod = Schema.Union([
+  Schema.Struct({ method: Schema.Literal('oauth'), services: Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })) }),
+  Schema.Struct({ method: Schema.Literal('paste'), fields: Schema.Array(PluginField), instructions: Schema.String }),
+])
+export type ConnectMethod = typeof ConnectMethod.Type
+
+/** A plugin as the Plugins page, its detail page and the settings rows show it (cn-dbm9, cn-s1pd). */
+export const PluginView = Schema.Struct({
+  name: Schema.String,
+  title: Schema.String,
+  description: Schema.String,
+  icon: Schema.String,
+  group: Schema.Literals(['capability', 'connector']),
+  enabled: Schema.Boolean,
+  /** The Home's settings for the plugin: its form and the values saved (secret fields only say whether one is stored). */
+  fields: Schema.Array(PluginField),
+  values: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean, Schema.Array(Schema.String)])),
+  secretsSet: Schema.Array(Schema.String),
+  /** A sentence when the admin still has to set the plugin up (Google OAuth client, Discord bot). */
+  setupNeeded: Schema.NullOr(Schema.String),
+  /** Connectors only: how a person connects an account. */
+  connector: Schema.NullOr(Schema.Struct({ kind: ConnectorKind, connect: ConnectMethod })),
+})
+export type PluginView = typeof PluginView.Type
+
+export const ConnectionStatus = Schema.Literals(['connected', 'needs-reconsent', 'rejected'])
+export type ConnectionStatus = typeof ConnectionStatus.Type
+
+/** A connected account (cn-qs78, cn-bsge); secrets stay in its owner's vault and are never sent. */
+export const ConnectionView = Schema.Struct({
+  id: Schema.String,
+  kind: ConnectorKind,
+  label: Schema.String,
+  /** The account it acts as: an e-mail address, a workspace, a bot name. */
+  account: Schema.String,
+  ownerId: Schema.String,
+  ownerName: Schema.String,
+  shared: Schema.Boolean,
+  mine: Schema.Boolean,
+  isDefault: Schema.Boolean,
+  /** Google: the services granted at consent (gmail, gmail-send, calendar, drive, contacts). */
+  services: Schema.Array(Schema.String),
+  status: ConnectionStatus,
+  statusNote: Schema.NullOr(Schema.String),
+  createdAt: Schema.Number,
+})
+export type ConnectionView = typeof ConnectionView.Type
+
+export const PluginSwitch = Schema.Struct({ enabled: Schema.Boolean })
+export const PluginSettingsInput = Schema.Struct({ values: Schema.Record(Schema.String, Schema.Unknown) })
+/** A connection by pasted values (Slack session, Discord bot token); the values are secrets. */
+export const ConnectionPaste = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.Boolean, values: Schema.Record(Schema.String, Schema.String) })
+export const ConnectionPatch = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.optional(Schema.Boolean), isDefault: Schema.optional(Schema.Boolean) })
+
 // ---------------------------------------------------------------- What a Robot's settings can choose from
 
 export const SettingsCatalog = Schema.Struct({
@@ -609,6 +682,8 @@ export const SettingsCatalog = Schema.Struct({
   defaultBrowserBackend: Schema.optional(BrowserBackend),
   /** Hosts the owner reaches, for per-host grants (hs-5ktw). */
   hosts: Schema.optional(Schema.Array(HostView)),
+  /** Connections the owner can grant: their own and the Home's shared ones (cn-xezx). */
+  connections: Schema.optional(Schema.Array(ConnectionView)),
 })
 export type SettingsCatalog = typeof SettingsCatalog.Type
 

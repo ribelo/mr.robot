@@ -1,0 +1,114 @@
+/**
+ * Every plugin the Plugins page lists (cn-dbm9): the capability plugins a Robot is granted by tool
+ * group, and the connectors. A plugin may carry a Home settings schema (its detail page form) and,
+ * for connectors, how a person connects an account. Adding an entry adds its row and page; the
+ * web app has no per-plugin code.
+ */
+import z from '@deepseek-ai/schemastery'
+import type { ConnectMethod, ConnectorKind } from '@mr-robot/protocol'
+import { TOOL_GROUPS, type ToolGroup } from '../agent/catalog.ts'
+
+export interface ConnectorSpec {
+  readonly kind: ConnectorKind
+  readonly connect: ConnectSpec
+}
+
+/** Connect by OAuth consent with a service choice, or by pasting values described by a schema. */
+export type ConnectSpec =
+  | { readonly method: 'oauth'; readonly services: Extract<ConnectMethod, { method: 'oauth' }>['services'] }
+  | { readonly method: 'paste'; readonly schema: z<unknown>; readonly instructions: string }
+
+export interface PluginEntry {
+  readonly name: string
+  readonly title: string
+  readonly description: string
+  /** An icon name the web app draws (DSH icon set). */
+  readonly icon: string
+  readonly group: 'capability' | 'connector'
+  /** Tool groups this plugin provides; a disabled plugin's groups are neither mounted nor grantable. */
+  readonly toolGroups: readonly ToolGroup[]
+  /** The Home's settings for the plugin (admin only); secret fields carry role "secret". */
+  readonly homeConfig?: z<unknown>
+  /** What the admin still has to set up, given the saved values and which secrets are stored. */
+  readonly setupNeeded?: (values: Readonly<Record<string, unknown>>, secretsSet: ReadonlySet<string>) => string | null
+  readonly connector?: ConnectorSpec
+}
+
+const capability = (name: ToolGroup, title: string, icon: string, extra: Partial<PluginEntry> = {}): PluginEntry => ({
+  name, title, description: TOOL_GROUPS[name], icon, group: 'capability', toolGroups: [name], ...extra,
+})
+
+export const PLUGINS: readonly PluginEntry[] = [
+  capability('files', 'Files', 'folder'),
+  capability('web', 'Web', 'globe'),
+  capability('browser', 'Browser', 'browser'),
+  capability('routines', 'Routines', 'alarm'),
+  capability('messaging', 'Messaging', 'send'),
+  capability('secrets', 'Logins', 'key'),
+  capability('skills', 'Skills', 'sparkle'),
+  capability('notify', 'Notifications', 'bell'),
+  capability('exa', 'Exa research', 'search', {
+    toolGroups: ['exa', 'exa-agent'],
+    description: 'Web search, page crawling, code context and long agent runs through Exa, paid per call from the Home\'s key.',
+    homeConfig: z.object({ apiKey: z.string().role('secret').description('Exa API key').comment('From dashboard.exa.ai → API keys. Calls are billed to this key.') }) as never,
+    setupNeeded: (_values, secrets) => (secrets.has('apiKey') ? null : 'Add the Home\'s Exa API key.'),
+  }),
+  {
+    name: 'google', title: 'Google', icon: 'google', group: 'connector', toolGroups: [],
+    description: 'Gmail, Calendar, Drive with Docs and Sheets, and Contacts for the Google accounts people connect.',
+    homeConfig: z.object({
+      clientId: z.string().description('OAuth client ID').comment('From Google Cloud → APIs & Services → Credentials, the web client created for Mr. Robot.'),
+      clientSecret: z.string().role('secret').description('OAuth client secret'),
+    }) as never,
+    setupNeeded: (values, secrets) => (typeof values['clientId'] === 'string' && values['clientId'] !== '' && secrets.has('clientSecret') ? null : 'The Home admin sets up the Google OAuth client once.'),
+    connector: {
+      kind: 'google',
+      connect: {
+        method: 'oauth',
+        services: [
+          { value: 'gmail', label: 'Gmail (read, label, draft)' },
+          { value: 'gmail-send', label: 'Gmail sending' },
+          { value: 'calendar', label: 'Calendar' },
+          { value: 'drive', label: 'Drive, Docs and Sheets' },
+          { value: 'contacts', label: 'Contacts' },
+        ],
+      },
+    },
+  },
+  {
+    name: 'slack', title: 'Slack', icon: 'slack', group: 'connector', toolGroups: [],
+    description: 'Read a Slack workspace (channels, unread, threads, search, people) and, with a write grant, post and mark read.',
+    connector: {
+      kind: 'slack',
+      connect: {
+        method: 'paste',
+        schema: z.object({
+          token: z.string().role('secret').required().description('Token (xoxc-…)'),
+          cookie: z.string().role('secret').required().description('Cookie d (xoxd-…)'),
+        }) as never,
+        instructions: 'Open the workspace in Chrome and sign in. Press F12 and open the Console. Type: JSON.parse(localStorage.localConfig_v2).teams — copy the token that starts with xoxc- for the workspace. Then open Application → Cookies → https://app.slack.com and copy the value of the cookie named d (it starts with xoxd-). Paste both here. Signing out of Slack in that browser ends the session; paste again then.',
+      },
+    },
+  },
+  {
+    name: 'discord', title: 'Discord', icon: 'discord', group: 'connector', toolGroups: [],
+    description: 'A Discord bot on your server: Robots read and post in channels and DMs, and talk to you through their own channel.',
+    connector: {
+      kind: 'discord',
+      connect: {
+        method: 'paste',
+        schema: z.object({
+          token: z.string().role('secret').required().description('Bot token'),
+        }) as never,
+        instructions: 'Set up the bot once: open discord.com/developers/applications → New Application, name it Mr. Robot. In Bot, press Reset Token and copy it, and switch on Message Content Intent. Paste the token here; the row then shows the link that invites the bot to your server.',
+      },
+    },
+  },
+]
+
+export const pluginByName = (name: string): PluginEntry | undefined => PLUGINS.find((plugin) => plugin.name === name)
+
+/** Tool groups of the plugins the Home switched off. */
+export function disabledToolGroups(enabled: Readonly<Record<string, boolean>>): Set<string> {
+  return new Set(PLUGINS.filter((plugin) => enabled[plugin.name] === false).flatMap((plugin) => plugin.toolGroups))
+}
