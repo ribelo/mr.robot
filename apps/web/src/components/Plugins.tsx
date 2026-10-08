@@ -3,7 +3,7 @@ import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/reactivity'
 import type { PluginField, PluginView } from '@mr-robot/protocol'
 import {
-  IconAlarmClockOutlineRegular, IconCodeOutlineRegular, IconEditOutlineRegular, IconFolderOpenOutlineRegular, IconGlobeOutlineRegular,
+  IconAlarmClockOutlineRegular, IconEditOutlineRegular, IconFolderOpenOutlineRegular, IconGlobeOutlineRegular,
   IconLinkOutlineRegular, IconSearchOutlineRegular, IconSendOutlineRegular, IconSparkleRegular, IconThinkOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { siDiscord, siGoogle } from 'simple-icons'
@@ -22,18 +22,18 @@ export function PluginIcon({ icon }: { icon: string }): ReactNode {
   const glyph = (() => {
     switch (icon) {
       case 'folder': return <IconFolderOpenOutlineRegular />
-      case 'globe': return <IconGlobeOutlineRegular />
-      case 'browser': return <IconCodeOutlineRegular />
+      case 'globe': return <IconLinkOutlineRegular />
+      case 'browser': return <IconGlobeOutlineRegular />
       case 'alarm': return <IconAlarmClockOutlineRegular />
       case 'send': return <IconSendOutlineRegular />
-      case 'key': return <IconLinkOutlineRegular />
+      case 'key': return <IconEditOutlineRegular />
       case 'sparkle': return <IconSparkleRegular />
       case 'bell': return <IconThinkOutlineRegular />
       case 'search': return <IconSearchOutlineRegular />
       case 'google': return <Brand path={siGoogle.path} color={`#${siGoogle.hex}`} />
       case 'discord': return <Brand path={siDiscord.path} color={`#${siDiscord.hex}`} />
       case 'slack': return <span className="plugin-glyph">#</span>
-      default: return <IconEditOutlineRegular />
+      default: return <IconSparkleRegular />
     }
   })()
   return <span className="plugin-icon">{glyph}</span>

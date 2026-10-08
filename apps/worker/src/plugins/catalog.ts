@@ -57,8 +57,8 @@ export const PLUGINS: readonly PluginEntry[] = [
     name: 'google', title: 'Google', icon: 'google', group: 'connector', toolGroups: [],
     description: 'Gmail, Calendar, Drive with Docs and Sheets, and Contacts for the Google accounts people connect.',
     homeConfig: z.object({
-      clientId: z.string().description('OAuth client ID').comment('From Google Cloud → APIs & Services → Credentials, the web client created for Mr. Robot.'),
-      clientSecret: z.string().role('secret').description('OAuth client secret'),
+      clientId: z.string().required().description('OAuth client ID').comment('From Google Cloud → APIs & Services → Credentials, the web client created for Mr. Robot.'),
+      clientSecret: z.string().role('secret').required().description('OAuth client secret'),
     }) as never,
     setupNeeded: (values, secrets) => (typeof values['clientId'] === 'string' && values['clientId'] !== '' && secrets.has('clientSecret') ? null : 'The Home admin sets up the Google OAuth client once.'),
     connector: {

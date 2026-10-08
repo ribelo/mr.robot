@@ -469,10 +469,11 @@ a.button { text-decoration: none; color: var(--text); }
 .note { border: 1px solid #5a4a25; background: #2c2617; color: #e8d3a0; border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
 .connector-row { flex-direction: column; align-items: stretch; }
 .provider-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; }
-.provider-action .status-dot { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; color: var(--muted); }
-.status-dot::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #666; }
-.status-ok::before { background: #8fc27a; }
-.status-warn::before { background: #e8a33c; }
+.connect-status { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; color: var(--muted); white-space: nowrap; font-size: 13.5px; }
+.connect-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #666; }
+.connect-status-ok::before { background: #8fc27a; }
+.connect-status-warn::before { background: #e8a33c; }
+.connector-row .provider-action { align-items: center; flex: none; }
 .connector-panel { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .connection-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .connection { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }

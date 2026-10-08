@@ -50,7 +50,7 @@ function ConnectorRow({ plugin, connections }: { plugin: PluginView; connections
           <div className="muted">{plugin.description}</div>
         </div>
         <div className="provider-action">
-          <span className={`status-dot status-${status.tone}`}>{status.text}</span>
+          <span className={`connect-status connect-status-${status.tone}`}>{status.text}</span>
           <button type="button" className="button" onClick={() => setOpen(!open)}>{connections.length === 0 ? 'Connect' : 'Manage'}</button>
         </div>
       </div>
@@ -112,7 +112,7 @@ function PasteConnect({ plugin, fields, instructions }: { plugin: PluginView; fi
     <div className="form connect-form">
       <div className="muted">{instructions}</div>
       <SchemaFields fields={fields} values={values} secretsSet={[]} onChange={setValues} />
-      <label>Name <span className="muted">(optional)</span><input value={label} placeholder="Shown to your Robots, e.g. Work" onChange={(event) => setLabel(event.target.value)} /></label>
+      <label><span>Name <span className="muted">(optional)</span></span><input value={label} placeholder="Shown to your Robots, e.g. Work" onChange={(event) => setLabel(event.target.value)} /></label>
       <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Home</span></label>
       <div className="question-actions">{message === undefined ? null : <span className="muted">{message}</span>}<button type="button" className="button button-primary" disabled={busy} onClick={() => void connect()}>Connect</button></div>
     </div>
