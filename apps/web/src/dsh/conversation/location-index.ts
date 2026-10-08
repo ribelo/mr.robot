@@ -1,7 +1,7 @@
 import type {
   AssistantLiveChunkEvent, SessionEventLike, SessionEventLikeEntry,
 } from '@deepseek-ai/dsh-api-session-controller/client'
-import { notifySubscribers } from '@deepseek-ai/dsh-client-store'
+import { atomSource, type AtomSource } from '../../client/atom-source.ts'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import type {
   ConversationLocation, ConversationLocationData,
@@ -22,28 +22,22 @@ export interface ConversationLocationDataChange {
 }
 
 class MutableLocationDataSource implements ConversationLocationDataSource<unknown> {
-  private readonly listeners = new Set<() => void>()
-  private published: unknown
+  /** Published through an atom (fe-r2kx): subscribers hear only a changed value. */
+  private readonly source: AtomSource<unknown>
 
   constructor(
     private readonly store: MutableLocationDataStore,
     private readonly key: string,
   ) {
-    this.published = store.get(key)
+    this.source = atomSource(store.get(key))
   }
 
   readonly getSnapshot = (): unknown => this.store.get(this.key)
 
-  readonly subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener)
-    return () => { this.listeners.delete(listener) }
-  }
+  readonly subscribe = (listener: () => void): (() => void) => this.source.subscribe(listener)
 
   publish(): void {
-    const next = this.getSnapshot()
-    if (this.published === next) return
-    this.published = next
-    notifySubscribers(this.listeners, `[ui-conversation] Location data ${this.key}`)
+    this.source.set(this.getSnapshot())
   }
 }
 

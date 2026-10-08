@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { useVirtualizer } from '@tanstack/react-virtual'
+import { useRowWindow } from '../../components/row-window.ts'
 import {
   CodeBlock,
   FileTypeIcon,
@@ -2170,27 +2170,18 @@ export function TrajectoryTable({
   const virtualizationEnabled = hasOlderRecords
     || records.length > VIRTUALIZATION_THRESHOLD
   const virtualScrollMargin = hasOlderRecords ? HISTORY_LOAD_ROW_HEIGHT_PX : 0
-  const estimateVirtualRowSize = useCallback(
-    (index: number) => virtualRowStructure[index]?.height ?? 30,
+  const windowRows = useMemo(
+    () => virtualRowStructure.map((row, index) => ({ key: row.key ?? index, height: row.height ?? 30 })),
     [virtualRowStructure],
   )
-  const getVirtualRowKey = useCallback(
-    (index: number) => virtualRowStructure[index]?.key ?? index,
-    [virtualRowStructure],
-  )
-  const getTableScrollElement = useCallback(() => tablePaneRef.current, [])
-  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
-    count: virtualizationEnabled ? virtualRowStructure.length : 0,
+  const rowVirtualizer = useRowWindow({
+    rows: windowRows,
+    scrollElement: tablePaneRef,
     enabled: virtualizationEnabled,
-    estimateSize: estimateVirtualRowSize,
-    getItemKey: getVirtualRowKey,
-    getScrollElement: getTableScrollElement,
-    initialRect: { width: 0, height: VIRTUAL_INITIAL_VIEWPORT_HEIGHT_PX },
-    anchorTo: 'end',
     overscan: VIRTUAL_OVERSCAN_ROWS,
-    scrollMargin: virtualScrollMargin,
-    scrollEndThreshold: BOTTOM_FOLLOW_THRESHOLD_PX,
-    followOnAppend: 'auto',
+    margin: virtualScrollMargin,
+    initialViewport: VIRTUAL_INITIAL_VIEWPORT_HEIGHT_PX,
+    followThreshold: BOTTOM_FOLLOW_THRESHOLD_PX,
   })
   const virtualIndexByRecordId = useMemo(() => {
     const indexes = new Map<string, number>()
@@ -2203,19 +2194,14 @@ export function TrajectoryTable({
     }
     return indexes
   }, [projectedVirtualRows])
-  const virtualItems = virtualizationEnabled ? rowVirtualizer.getVirtualItems() : []
-  const virtualTop = Math.max(0, (virtualItems[0]?.start ?? 0) - virtualScrollMargin)
-  const virtualBottom = virtualItems.length === 0
-    ? 0
-    : Math.max(
-      0,
-      rowVirtualizer.getTotalSize()
-        + virtualScrollMargin
-        - (virtualItems.at(-1)?.end ?? 0),
-    )
+  const virtualIndexes = virtualizationEnabled
+    ? Array.from({ length: rowVirtualizer.range.end - rowVirtualizer.range.start }, (_, offset) => rowVirtualizer.range.start + offset)
+    : []
+  const virtualTop = rowVirtualizer.paddingTop
+  const virtualBottom = virtualIndexes.length === 0 ? 0 : rowVirtualizer.paddingBottom
   const renderedRecords = virtualizationEnabled
-    ? virtualItems.flatMap((item) => {
-      const row = projectedVirtualRows[item.index]
+    ? virtualIndexes.flatMap((index) => {
+      const row = projectedVirtualRows[index]
       if (row === undefined) return []
       return row.entries.map((entry, entryIndex) => ({
         record: currentRecord(entry.record),
@@ -2563,7 +2549,7 @@ export function TrajectoryTable({
       if (historyLoading) return
       tableScrollInitialized.current = true
       followsTableTail.current = true
-      if (virtualizationEnabled) rowVirtualizer.scrollToEnd({ behavior: 'auto' })
+      if (virtualizationEnabled) rowVirtualizer.scrollToEnd()
       else pane.scrollTop = pane.scrollHeight
       setTableScrollReady(true)
       return

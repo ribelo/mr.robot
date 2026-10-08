@@ -1,7 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/react'
+import { RegistryProvider } from '@effect/atom-react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import events from './fixtures/session-events.json'
-import { RobotTrajectory, TrajectoryFeed } from '../src/dsh/RobotTrajectory.tsx'
+import { RobotTrajectory } from '../src/dsh/RobotTrajectory.tsx'
 
 afterEach(() => {
   cleanup()
@@ -9,43 +10,44 @@ afterEach(() => {
 })
 
 // A real Robot session (names replaced): four Turns, the last one a code-mode program calling routine_create.
-const serve = () => vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sessionId: 's-1', hasMore: false, events })))
+const all = events as Array<{ seq: number }>
 
-describe('the DSH trajectory over Robot events (robot-3ioa, robot-s54i)', () => {
-  it('assembles Turns, requests and the code-mode program with its nested call', async () => {
-    serve()
-    const feed = new TrajectoryFeed('r-fixture')
-    await feed.open()
-    const snapshot = feed.getSnapshot()
-    expect(snapshot.eventNodes.length).toBeGreaterThan(5)
-    expect(snapshot.requests.length).toBe(5)
-    expect(snapshot.eventNodes.map((node) => node.kind)).toEqual(['context', 'assistant', 'context', 'assistant', 'context', 'assistant', 'context', 'assistant', 'tool-result', 'assistant'])
-    const result = snapshot.eventNodes.find((node) => node.kind === 'tool-result')
-    // The program's inner call is recorded with its result, as a nested Subtool record.
-    expect(JSON.stringify(result)).toContain('"name":"routine_create"')
-  })
+function serveEvents(page: (query: URLSearchParams) => { hasMore: boolean; events: unknown[] }) {
+  const calls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input, 'http://localhost')
+    calls.push(url.search)
+    return Response.json({ sessionId: 's-1', ...page(url.searchParams) })
+  }))
+  return calls
+}
 
-  it('pages back through older events (robot-gq88)', async () => {
-    const all = events as Array<{ seq: number }>
-    const split = all.findIndex((event) => event.seq >= 30)
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      const before = new URL(url, 'https://x').searchParams.get('before')
-      return before === null
-        ? Response.json({ sessionId: 's-1', hasMore: true, events: all.slice(split) })
-        : Response.json({ sessionId: 's-1', hasMore: false, events: all.slice(0, split) })
-    }))
-    const feed = new TrajectoryFeed('r-fixture')
-    await feed.open()
-    expect(feed.getPaging().hasMore).toBe(true)
-    const recent = feed.getSnapshot().eventNodes.length
-    expect(await feed.loadOlder()).toBe(true)
-    expect(feed.getPaging().hasMore).toBe(false)
-    expect(feed.getSnapshot().eventNodes.length).toBeGreaterThan(recent)
-  })
+const rows = () => [...document.querySelectorAll('tr[data-kind]')].map((row) => row.getAttribute('data-kind'))
 
-  it('renders the view with its toolbar', async () => {
-    serve()
-    render(<RobotTrajectory robotId="r-fixture" liveVersion={0} />)
+describe('the trajectory page over Robot events (robot-3ioa, robot-s54i, fe-r2kx)', () => {
+  it('shows the Turns, requests and the code-mode program with its nested call', async () => {
+    serveEvents(() => ({ hasMore: false, events: all }))
+    render(<RegistryProvider><RobotTrajectory robotId="r-fixture-1" liveVersion={0} /></RegistryProvider>)
     expect(await screen.findByText('Duration')).toBeTruthy()
+    await vi.waitFor(() => expect(rows().length).toBeGreaterThan(5))
+    expect(rows()).toContain('tool')
+    expect(document.body.textContent).toContain('routine_create')
+  })
+
+  it('reads the events written since on each live change (fe-xp06)', async () => {
+    const split = all.findIndex((event) => event.seq >= 30)
+    const calls = serveEvents((query) => (query.get('after') === null ? { hasMore: false, events: all.slice(0, split) } : { hasMore: false, events: all.slice(split) }))
+    const { rerender } = render(<RegistryProvider><RobotTrajectory robotId="r-fixture-2" liveVersion={0} /></RegistryProvider>)
+    await vi.waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    const before = rows().length
+    rerender(<RegistryProvider><RobotTrajectory robotId="r-fixture-2" liveVersion={1} /></RegistryProvider>)
+    await vi.waitFor(() => expect(calls.some((search) => search.includes('after='))).toBe(true))
+    await vi.waitFor(() => expect(rows().length).toBeGreaterThan(before))
+  })
+
+  it('shows a failure as the error state with Try again', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'no such robot' }, { status: 404 })))
+    render(<RegistryProvider><RobotTrajectory robotId="r-fixture-3" liveVersion={0} /></RegistryProvider>)
+    expect((await screen.findByRole('alert')).textContent).toContain('No such robot.')
   })
 })

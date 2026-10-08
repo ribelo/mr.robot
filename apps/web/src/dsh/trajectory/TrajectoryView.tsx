@@ -7,7 +7,7 @@ import type {
 } from '../contract/index.ts'
 import type { SnapshotSelectorHook } from '../slots.ts'
 import type { TrajectoryTranslate } from './locales.ts'
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { AtomSource } from '../../client/atom-source.ts'
 import type { JsonTreeProps } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   TrajectoryTable,
@@ -97,7 +97,7 @@ export interface TrajectoryViewInjected {
   /** Shared wrapping preference read by expansion handlers. */
   jsonStringWrapping?: Omit<NonNullable<JsonTreeProps['stringWrapping']>, 'label'>
   hooks: {
-    duration: SnapshotStore<boolean>
+    duration: AtomSource<boolean>
   }
   loadOlder: () => Promise<boolean>
   loadImage: MessageImageLoader

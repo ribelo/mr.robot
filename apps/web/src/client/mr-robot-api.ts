@@ -12,7 +12,7 @@ import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, OpencodeKeysView, PromptPreview, ProposalView,
-  ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
+  ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WorkspaceFileContent, WorkspaceFileView,
   type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
@@ -59,6 +59,9 @@ const make = Effect.gen(function* () {
     createRobot: (input: { readonly brief?: string; readonly model?: ModelChoice }) => request(CreatedRobot, 'POST', '/api/robots', input),
     conversation: (id: string, details: boolean) => get(Conversation, `/api/robots/${enc(id)}/conversation${details ? '?details=1' : ''}`),
     trajectory: (id: string) => get(Trajectory, `/api/robots/${enc(id)}/trajectory`),
+    /** A page of raw session events: the latest (no cursor), newer than after, or older than before. */
+    events: (id: string, page: { readonly before?: number; readonly after?: number; readonly limit: number }) =>
+      get(SessionEventsPage, `/api/robots/${enc(id)}/events?limit=${page.limit}${page.before === undefined ? '' : `&before=${page.before}`}${page.after === undefined ? '' : `&after=${page.after}`}`),
     panel: (id: string) => get(RobotPanel, `/api/robots/${enc(id)}/panel`),
     catalog: (id: string) => get(SettingsCatalog, `/api/robots/${enc(id)}/catalog`),
     prompt: (id: string) => get(PromptPreview, `/api/robots/${enc(id)}/prompt`),

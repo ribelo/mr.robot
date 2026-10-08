@@ -5,6 +5,15 @@
  * only DSH's shell: it loads events from the Mr. Robot API and hands the assembled snapshot to the view.
  */
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import { Atom } from 'effect/reactivity'
+import type { SessionEventsPage } from '@mr-robot/protocol'
+import { apiRuntime } from '../client/api-atoms.ts'
+import { describeFailure } from '../client/api-failure.ts'
+import { MrRobotApi } from '../client/mr-robot-api.ts'
+import { ErrorState } from '../components/States.tsx'
 import type { SessionEventLikeEntry } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import { ConversationNodeAssembler } from './conversation/assembler.ts'
@@ -59,88 +68,96 @@ interface Paging {
   readonly hasMore: boolean
 }
 
-/** One Robot's event window, assembled the way DSH's session controller feeds ui-conversation. */
-export class TrajectoryFeed {
-  private readonly assembler: ConversationNodeAssembler
-  private readonly listeners = new Set<() => void>()
-  private snapshot: TrajectorySnapshot = EMPTY_TRAJECTORY_SNAPSHOT
-  paging: Paging = { openState: 'loading', loadingOlder: false, hasMore: false }
-  private firstSeq: number | undefined
-  private lastSeq: number | undefined
-  private sessionId: string | undefined
+/** What the trajectory page shows for one Robot (fe-r2kx). */
+interface TrajectoryState {
+  readonly snapshot: TrajectorySnapshot
+  readonly paging: Paging
+  readonly failure: string | null
+}
 
-  constructor(private readonly robotId: string) {
+const INITIAL: TrajectoryState = { snapshot: EMPTY_TRAJECTORY_SNAPSHOT, paging: { openState: 'loading', loadingOlder: false, hasMore: false }, failure: null }
+
+/** The event window of one Robot: DSH's assembler fed page by page, as DSH's session controller feeds ui-conversation. */
+class EventWindow {
+  readonly assembler: ConversationNodeAssembler
+  firstSeq: number | undefined
+  lastSeq: number | undefined
+  sessionId: string | undefined
+
+  constructor() {
     const definitions = trajectoryDefinitions()
     this.assembler = new ConversationNodeAssembler(definitions.events, definitions.views)
   }
 
-  subscribe = (listener: () => void) => {
-    this.listeners.add(listener)
-    return () => { this.listeners.delete(listener) }
-  }
-
-  getSnapshot = () => this.snapshot
-  getPaging = () => this.paging
-
-  private async fetch(query: string): Promise<{ sessionId: string; hasMore: boolean; events: SessionEvent[] }> {
-    const response = await fetch(`/api/robots/${encodeURIComponent(this.robotId)}/events?${query}`, { credentials: 'same-origin' })
-    if (!response.ok) throw new Error(`events answered ${response.status}`)
-    return response.json() as Promise<{ sessionId: string; hasMore: boolean; events: SessionEvent[] }>
-  }
-
-  private entries(events: readonly SessionEvent[]): SessionEventLikeEntry[] {
-    return events.map((event) => ({ type: 'event', event }))
-  }
-
-  private publish(): void {
+  snapshot(): TrajectorySnapshot {
     this.assembler.flush()
-    this.snapshot = (this.assembler.snapshot('trajectory') as TrajectorySnapshot | undefined) ?? EMPTY_TRAJECTORY_SNAPSHOT
-    for (const listener of this.listeners) listener()
-  }
-
-  private setPaging(change: Partial<Paging>): void {
-    this.paging = { ...this.paging, ...change }
-    for (const listener of this.listeners) listener()
-  }
-
-  /** The latest page; a different session (after a rewind) replaces the whole window. */
-  async open(): Promise<void> {
-    const page = await this.fetch(`limit=${PAGE}`)
-    this.sessionId = page.sessionId
-    this.firstSeq = page.events[0]?.seq
-    this.lastSeq = page.events.at(-1)?.seq
-    this.assembler.replaceWindow(this.entries(page.events), page.hasMore)
-    this.assembler.activateTarget('trajectory')
-    this.paging = { openState: 'open', loadingOlder: false, hasMore: page.hasMore }
-    this.publish()
-  }
-
-  /** New events since the last one seen (live updates). */
-  async refresh(): Promise<void> {
-    if (this.lastSeq === undefined) return this.open()
-    const page = await this.fetch(`after=${this.lastSeq}&limit=2000`)
-    if (page.sessionId !== this.sessionId) return this.open()
-    for (const entry of this.entries(page.events)) this.assembler.append(entry)
-    this.lastSeq = page.events.at(-1)?.seq ?? this.lastSeq
-    if (page.events.length > 0) this.publish()
-  }
-
-  loadOlder = async (): Promise<boolean> => {
-    if (this.firstSeq === undefined || !this.paging.hasMore) return false
-    this.setPaging({ loadingOlder: true })
-    try {
-      const page = await this.fetch(`before=${this.firstSeq}&limit=${PAGE}`)
-      const before = this.snapshot
-      this.assembler.prepend(this.entries(page.events), page.hasMore)
-      this.firstSeq = page.events[0]?.seq ?? this.firstSeq
-      this.paging = { ...this.paging, hasMore: page.hasMore }
-      this.publish()
-      return this.snapshot !== before
-    } finally {
-      this.setPaging({ loadingOlder: false })
-    }
+    // SAFETY: the 'trajectory' target is registered by registerTrajectoryConversationView, whose builder returns a TrajectorySnapshot.
+    return (this.assembler.snapshot('trajectory') as TrajectorySnapshot | undefined) ?? EMPTY_TRAJECTORY_SNAPSHOT
   }
 }
+
+/** DSH session events as the assembler takes them; the server sends exactly what the DSH session stored. */
+function entries(events: SessionEventsPage['events']): SessionEventLikeEntry[] {
+  // SAFETY: each event was written by the worker's DSH session log of the same DSH version; seq and type are checked by the Schema.
+  return events.map((event) => ({ type: 'event', event: event as unknown as SessionEvent }))
+}
+
+/** One state atom per Robot; the windows they read live as long as the page. */
+const windows = new Map<string, EventWindow>()
+const windowOf = (robotId: string): EventWindow => {
+  let window = windows.get(robotId)
+  if (window === undefined) {
+    window = new EventWindow()
+    windows.set(robotId, window)
+  }
+  return window
+}
+const trajectoryStateAtom = Atom.family((_robotId: string) => Atom.make(INITIAL).pipe(Atom.keepAlive))
+
+type Load = { readonly robotId: string; readonly kind: 'open' | 'refresh' | 'older' }
+
+/** Open the latest page, append newer events (live), or prepend an older page; resolves whether older rows were added. */
+const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* () {
+  const api = yield* MrRobotApi
+  const state = trajectoryStateAtom(load.robotId)
+  const window = windowOf(load.robotId)
+  const open = Effect.gen(function* () {
+    const page = yield* api.events(load.robotId, { limit: PAGE })
+    window.sessionId = page.sessionId
+    window.firstSeq = page.events[0]?.seq
+    window.lastSeq = page.events.at(-1)?.seq
+    window.assembler.replaceWindow(entries(page.events), page.hasMore)
+    window.assembler.activateTarget('trajectory')
+    get.set(state, { snapshot: window.snapshot(), paging: { openState: 'open', loadingOlder: false, hasMore: page.hasMore }, failure: null })
+    return false
+  })
+  if (load.kind === 'open' || window.lastSeq === undefined) return yield* open
+  if (load.kind === 'refresh') {
+    const page = yield* api.events(load.robotId, { after: window.lastSeq, limit: 2000 })
+    // A different session (after a rewind) replaces the whole window.
+    if (page.sessionId !== window.sessionId) return yield* open
+    for (const entry of entries(page.events)) window.assembler.append(entry)
+    window.lastSeq = page.events.at(-1)?.seq ?? window.lastSeq
+    if (page.events.length > 0) get.set(state, { ...get(state), snapshot: window.snapshot() })
+    return false
+  }
+  const current = get(state)
+  if (window.firstSeq === undefined || !current.paging.hasMore) return false
+  get.set(state, { ...current, paging: { ...current.paging, loadingOlder: true } })
+  const page = yield* api.events(load.robotId, { before: window.firstSeq, limit: PAGE }).pipe(
+    Effect.ensuring(Effect.sync(() => { const now = get(state); get.set(state, { ...now, paging: { ...now.paging, loadingOlder: false } }) })),
+  )
+  const before = get(state).snapshot
+  window.assembler.prepend(entries(page.events), page.hasMore)
+  window.firstSeq = page.events[0]?.seq ?? window.firstSeq
+  const snapshot = window.snapshot()
+  const now = get(state)
+  get.set(state, { ...now, snapshot, paging: { ...now.paging, hasMore: page.hasMore } })
+  return snapshot !== before
+}).pipe(Effect.tapError((failure) => Effect.sync(() => {
+  const now = get(trajectoryStateAtom(load.robotId))
+  get.set(trajectoryStateAtom(load.robotId), { ...now, failure: describeFailure(failure) })
+}))), { concurrent: true })
 
 function interpolate(text: string, params?: Record<string, unknown>): string {
   return params === undefined ? text : text.replace(/\{(\w+)\}/g, (match, key: string) => (key in params ? String(params[key]) : match))
@@ -188,18 +205,23 @@ function RecordImage({ source, loadImage }: { source: MessageImageSource; loadIm
 }
 
 export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liveVersion: number }) {
-  const feed = useMemo(() => new TrajectoryFeed(robotId), [robotId])
+  const state = useAtomValue(trajectoryStateAtom(robotId))
+  const load = useAtomSet(loadEventsAtom, { mode: 'promiseExit' })
   const loadImage = useMemo(() => imageLoader(robotId) as unknown as MessageImageLoader, [robotId])
-  const [error, setError] = useState<string>()
-  useEffect(() => { feed.open().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause))) }, [feed])
-  useEffect(() => { if (liveVersion > 0) void feed.refresh().catch(() => undefined) }, [feed, liveVersion])
-  const snapshot = useSyncExternalStore(feed.subscribe, feed.getSnapshot)
-  const paging = useSyncExternalStore(feed.subscribe, feed.getPaging)
   const wantsActual = useSyncExternalStore(duration.subscribe, duration.getSnapshot)
+  useEffect(() => { void load({ robotId, kind: 'open' }) }, [load, robotId])
+  // Every change the Robot announces brings the events written since (fe-xp06).
+  useEffect(() => { if (liveVersion > 0) void load({ robotId, kind: 'refresh' }) }, [load, robotId, liveVersion])
+  const loadOlder = useCallback(async () => {
+    const exit = await load({ robotId, kind: 'older' })
+    return Exit.isSuccess(exit) && exit.value
+  }, [load, robotId])
+  const snapshot = state.snapshot
+  const paging = state.paging
   const useTrajectory = useCallback(<S,>(select: (value: TrajectorySnapshot) => S) => select(snapshot), [snapshot])
   const useSession = useCallback(<S,>(select: (value: Paging) => S) => select(paging), [paging])
   const useDuration = useCallback(<S,>(select: (value: boolean) => S) => select(wantsActual), [wantsActual])
-  if (error !== undefined) return <div className="muted">Could not load the trajectory: {error}</div>
+  if (state.failure !== null && paging.openState === 'loading') return <ErrorState title="The trajectory cannot be loaded" message={state.failure} onRetry={() => void load({ robotId, kind: 'open' })} />
   return (
     <div className="dsh-trajectory">
       <TrajectoryView
@@ -211,7 +233,7 @@ export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liv
         renderSlot={(_key, owner) => <RecordImages images={owner.images} loadImage={owner.loadImage} align={owner.align} />}
         t={translate}
         jsonStringWrapping={{ getDefault: () => stringWrapping.getSnapshot(), setDefault: (value) => { stringWrapping.set(value) } }}
-        loadOlder={feed.loadOlder}
+        loadOlder={loadOlder}
         loadImage={loadImage}
         setActualDuration={(value) => { duration.set(value) }}
       />

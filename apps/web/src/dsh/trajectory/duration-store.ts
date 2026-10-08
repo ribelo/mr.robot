@@ -1,13 +1,9 @@
-import {
-  createSnapshotStore, type SnapshotStore,
-} from '@deepseek-ai/dsh-client-store'
+import { persistedPreference, type AtomSource } from '../../client/atom-source.ts'
 
 /**
- * Create the browser-wide trajectory duration preference source.
- * @returns a persisted source shared by every session view in one plugin lifecycle.
+ * The browser-wide trajectory duration preference: elapsed or actual time (fe-r2kx).
+ * @returns a persisted source shared by every trajectory view in the page.
  */
-export function createTrajectoryDurationStore(): SnapshotStore<boolean> {
-  return createSnapshotStore(false, {
-    persist: { name: 'dsh.trajectory.duration' },
-  })
+export function createTrajectoryDurationStore(): AtomSource<boolean> {
+  return persistedPreference('dsh.trajectory.duration', false)
 }

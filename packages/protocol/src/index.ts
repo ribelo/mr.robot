@@ -406,6 +406,17 @@ export const Trajectory = Schema.Struct({
 })
 export type Trajectory = typeof Trajectory.Type
 
+/**
+ * One page of a Robot's raw session events for the trajectory (ticket 22): DSH session events as
+ * stored, oldest first. Only the fields the PWA relies on are checked; the rest passes through to DSH's assembler.
+ */
+export const SessionEventsPage = Schema.Struct({
+  sessionId: Schema.String,
+  hasMore: Schema.Boolean,
+  events: Schema.Array(Schema.StructWithRest(Schema.Struct({ seq: Schema.Number, type: Schema.String }), [Schema.Record(Schema.String, Schema.Unknown)])),
+})
+export type SessionEventsPage = typeof SessionEventsPage.Type
+
 /** What the model is given at the start of a Turn (robot-vqtw). */
 export const PromptPreview = Schema.Struct({
   sections: Schema.Array(Schema.Struct({ name: Schema.String, text: Schema.String })),

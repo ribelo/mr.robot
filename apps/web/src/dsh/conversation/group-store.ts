@@ -1,5 +1,5 @@
 /** Keyed group publication and incremental validation of rendering positions. */
-import { createSnapshotStore, type ObservableSnapshot, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { atomSource, type AtomSource, type ObservableSnapshot } from '../../client/atom-source.ts'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { ConversationViewNode } from '../contract/conversation.ts'
 import type {
@@ -10,7 +10,7 @@ type Parts = Set<string | undefined>
 
 interface GroupSource<Data> {
   readonly observable: ObservableSnapshot<GroupSnapshot<Data> | undefined>
-  readonly publication: SnapshotStore<GroupSnapshot<Data> | undefined>
+  readonly publication: AtomSource<GroupSnapshot<Data> | undefined>
 }
 
 interface GroupChanges<Data> {
@@ -55,7 +55,7 @@ export class ConversationGroupStore<Data> implements ConversationGroupedView<Dat
   groupSource(key: GroupKey): ObservableSnapshot<GroupSnapshot<Data> | undefined> {
     let source = this.sources.get(key)
     if (source === undefined) {
-      const publication = createSnapshotStore(this.groups.get(key))
+      const publication = atomSource(this.groups.get(key))
       source = {
         publication,
         observable: {
