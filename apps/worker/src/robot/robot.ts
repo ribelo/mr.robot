@@ -78,6 +78,7 @@ import { Host } from '../plugins/host.ts'
 import { ConnectorCapability } from '../plugins/connector.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
+import { CONNECTOR_SKILLS, CONNECTOR_SKILL_NAMES } from '../connectors/skills.ts'
 import type { ConnectorHost, ConnectorPlugin, GrantedConnection } from '../connectors/connector.ts'
 import type { ConnectionView, ConnectorKind } from '@mr-robot/protocol'
 import { Logins } from '../plugins/logins.ts'
@@ -715,12 +716,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }))
     if (granted.has('web')) mounts.push(mount(Web, { credentials: this.credentials(), browser: this.env.BROWSER }))
     if (granted.has('routines')) mounts.push(mount(Routines, { schedule: this.schedule() }))
-    if (granted.has('skills')) {
+    // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
+    const connectorSkills = this.connectorSkillNames()
+    const skillNames = () => [...this.store.effectiveGrants().skills.filter((name) => !CONNECTOR_SKILL_NAMES.has(name)), ...this.connectorSkillNames()]
+    if (granted.has('skills') || connectorSkills.length > 0) {
       mounts.push(mount(Skills, {
         host: this,
         source: {
-          granted: () => this.home().loadableSkills(config.ownerId, this.store.effectiveGrants().skills),
-          content: async (name) => this.store.effectiveGrants().skills.includes(name) ? this.home().skillContent(config.ownerId, name) : null,
+          granted: () => this.home().loadableSkills(config.ownerId, skillNames()),
+          content: async (name) => skillNames().includes(name) ? this.home().skillContent(config.ownerId, name) : null,
           local: () => this.localSkills(),
           localContent: (name) => this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null),
         },
@@ -739,6 +743,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   // ---------------------------------------------------------------- connectors (v1.5)
+
+  /** Skills of the connector kinds this Robot holds a granted connection for (and whose plugin is on). */
+  private connectorSkillNames(): string[] {
+    const kinds = new Set(Object.keys(this.connectorPlugins()).filter((kind) => this.pluginsOn[kind] !== false && this.grantedConnections(kind as ConnectorKind).length > 0) as ConnectorKind[])
+    return [...kinds].flatMap((kind) => CONNECTOR_SKILLS[kind].map((entry) => entry.name))
+  }
 
   /** The connector implementations; tests substitute fakes. */
   protected connectorPlugins(): Partial<Record<ConnectorKind, ConnectorPlugin>> {

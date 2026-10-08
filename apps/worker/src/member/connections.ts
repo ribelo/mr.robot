@@ -46,6 +46,8 @@ export class ConnectionStore {
     private readonly vault: VaultShape,
     /** A shared connection changed or stopped being shared: the Home's index follows. */
     private readonly publish: (connection: OwnConnection, shared: boolean) => Promise<void>,
+    /** A connection was added: the connector's skills go into the library. */
+    private readonly added: () => Promise<void> = async () => undefined,
   ) {
     sql.exec(`CREATE TABLE IF NOT EXISTS connection (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, account TEXT NOT NULL, shared INTEGER NOT NULL,
@@ -87,6 +89,7 @@ export class ConnectionStore {
     await this.sealSecrets(id, input.secrets)
     const view = this.get(id)!
     if (view.shared) await this.publish(view, true)
+    await this.added()
     return view
   }
 

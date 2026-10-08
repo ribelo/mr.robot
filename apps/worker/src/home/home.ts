@@ -33,6 +33,7 @@ import { backendOptions } from '../browser/backends.ts'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
+import { CONNECTOR_SKILLS } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
 import type { GatewayMessage } from '../connectors/discord-gateway.ts'
 import type { PlainValue } from '../connectors/schema-form.ts'
@@ -1083,6 +1084,17 @@ export class Home extends DurableObject<Env> {
   }
 
   plugins(memberId: string, origin: string): PluginView[] { return this.pluginsOf.list(this.isAdmin(memberId), origin) }
+
+  /**
+   * The connector skills in the library (cn-go3s): added when missing, so the admin sees and may edit
+   * them; an existing skill of the same name (edited or not) is left as it is.
+   */
+  async seedConnectorSkills(): Promise<void> {
+    for (const entry of Object.values(CONNECTOR_SKILLS).flat()) {
+      const known = this.ctx.storage.sql.exec<{ name: string }>('SELECT name FROM skill WHERE name = ?', entry.name).toArray().length > 0
+      if (!known) await this.saveSkill(entry.name, entry.description, entry.content, null)
+    }
+  }
   pluginsEnabled(): Record<string, boolean> { return this.pluginsOf.enabled() }
   setPluginEnabled(name: string, enabled: boolean): void { this.pluginsOf.setEnabled(name, enabled) }
   async setPluginConfig(name: string, input: Record<string, unknown>, origin: string): Promise<PluginView> {

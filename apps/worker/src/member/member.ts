@@ -592,7 +592,7 @@ export class Member extends DurableObject<Env> {
     this.connectionStore ??= new ConnectionStore(this.ctx.storage.sql, makeVault(this.env.DATA_KEY, 'connections'), async (connection, shared) => {
       const memberId = (await this.profile()).id
       await this.env.HOME.getByName(HOME_ID).connectionShared(memberId, connection, shared)
-    })
+    }, async () => { await this.env.HOME.getByName(HOME_ID).seedConnectorSkills().catch((error: unknown) => console.warn('connector skills not seeded', error)) })
     return this.connectionStore
   }
 
