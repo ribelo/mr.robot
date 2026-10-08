@@ -114,9 +114,12 @@ function RobotView({ route, me, robot, onSheet }: { route: Extract<Route, { page
   // Subscribing keeps the Robot's live feed open while its conversation is on screen (fe-xp06).
   const feed = AsyncResult.getOrElse(useAtomValue(robotFeedAtom(id)), () => ({ stream: null, changes: 0 }))
   const both = AsyncResult.all([conversationResult, panelResult])
-  return <>{renderResult(both, { what: 'the conversation', errorTitle: 'This robot cannot be opened', retry: () => { refreshConversation(); refreshPanel() }, back: { label: 'All robots', onClick: () => go({ page: 'home' }) } }, ([conversation, panel]) => (
+  // Loading and errors fill the main area centred, as before; the conversation lays itself out.
+  if (!AsyncResult.isSuccess(both)) return <div className="empty-main">{renderResult(both, { what: 'the conversation', errorTitle: 'This robot cannot be opened', retry: () => { refreshConversation(); refreshPanel() }, back: { label: 'All robots', onClick: () => go({ page: 'home' }) } }, ([conversation, panel]) => (
     <RobotConversation route={route} me={me} robot={robot} conversation={conversation} panel={panel} stream={feed.stream} onSheet={onSheet} />
-  ))}</>
+  ))}</div>
+  const [conversation, panel] = both.value
+  return <RobotConversation route={route} me={me} robot={robot} conversation={conversation} panel={panel} stream={feed.stream} onSheet={onSheet} />
 }
 
 function RobotConversation({ route, me, robot, conversation, panel, stream, onSheet }: {
