@@ -55,6 +55,8 @@ describe('the trajectory page over Robot events (robot-3ioa, robot-s54i, fe-r2kx
     fireEvent.click(button)
     await vi.waitFor(() => expect(calls.some((search) => search.includes('before='))).toBe(true))
     await vi.waitFor(() => expect((document.body.textContent ?? '').length).toBeGreaterThan(before.length))
+    // The latest page is opened once, not again after the older page arrives.
+    expect(calls.filter((search) => !search.includes('before=') && !search.includes('after=')).length).toBe(1)
   })
 
   it('shows a failure as the error state with Try again', async () => {

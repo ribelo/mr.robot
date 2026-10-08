@@ -214,14 +214,17 @@ export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liv
   const load = useAtomSet(loadEventsAtom, { mode: 'promiseExit' })
   const loadImage = useMemo(() => imageLoader(robotId) as unknown as MessageImageLoader, [robotId])
   const wantsActual = useSyncExternalStore(duration.subscribe, duration.getSnapshot)
-  useEffect(() => { void load({ robotId, kind: 'open' }) }, [load, robotId])
+  // The setter's identity is not stable across renders; effects read the latest one through a ref.
+  const loadRef = useRef(load)
+  loadRef.current = load
+  useEffect(() => { void loadRef.current({ robotId, kind: 'open' }) }, [robotId])
   // Every change the Robot announces after the page opened brings the events written since (fe-xp06).
   const openedAt = useRef(liveVersion)
-  useEffect(() => { if (liveVersion !== openedAt.current) void load({ robotId, kind: 'refresh' }) }, [load, robotId, liveVersion])
+  useEffect(() => { if (liveVersion !== openedAt.current) void loadRef.current({ robotId, kind: 'refresh' }) }, [robotId, liveVersion])
   const loadOlder = useCallback(async () => {
-    const exit = await load({ robotId, kind: 'older' })
+    const exit = await loadRef.current({ robotId, kind: 'older' })
     return Exit.isSuccess(exit) && exit.value
-  }, [load, robotId])
+  }, [robotId])
   const snapshot = state.snapshot
   const paging = state.paging
   const useTrajectory = useCallback(<S,>(select: (value: TrajectorySnapshot) => S) => select(snapshot), [snapshot])
