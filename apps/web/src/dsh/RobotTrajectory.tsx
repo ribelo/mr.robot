@@ -122,7 +122,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   const state = trajectoryStateAtom(load.robotId)
   const window = windowOf(load.robotId)
   // Read through the registry: a subscribed read would restart this command each time it updates the state.
-  const read = () => get.registry.read()
+  const read = () => get.registry.get(state)
   const write = (next: TrajectoryState) => get.registry.set(state, next)
   const open = Effect.gen(function* () {
     const page = yield* api.events(load.robotId, { limit: PAGE })
