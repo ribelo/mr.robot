@@ -34,3 +34,19 @@
   - End to end through the Robot DO: a channel message wakes the robot, its reply posts to the channel, a duplicate wakes it once, notify_owner posts there, and a DM reaches Mr. Robot with the answer in the DM.
 - **Live (2026-10-08):** the Discord plugin page with the guide (![](img/05-discord-guide.webp)).
 - **Open, needs the owner's bot:** the bot joins his server, a message both ways, a notification, and the gateway coming back after a restart. The socket shell itself (outbound WebSocket from the Durable Object) has not run against Discord yet.
+
+## Live, 2026-10-08 (with the owner, through Leash)
+- **Setup:** the Discord application "Mr. Robot" (id 1557840219720519830) was created; the owner solved Discord's hCaptcha and its password check.
+  - Message Content Intent is on.
+  - **Decision:** Public Bot stays on. Discord refuses a private bot while the Installation tab has a default install link. A public bot can only be added by someone who has its link; it reads nothing unless it is in a server.
+- **Connect:** the token went from the page straight into Connections → Discord and was checked by Discord. The row offers "Invite the bot to a server".
+- **Server:** the owner had no server, so a private server "Mr. Robot" was created on his account. The bot was invited with exactly the six permissions; Mr. Robot (the robot) got #general (1557842506908041279).
+- **Fixed live:**
+  - The gateway never started: a Worker opens an outgoing WebSocket with fetch on an https:// address, not wss://. After the fix the bot shows Online.
+  - A Turn failed for a robot holding two connector kinds: both mounted the same capability, so the prompt section "mr-robot:connector" was registered twice. Now there is one capability per kind. Regression test in connectors.test.ts.
+- **Verified live:**
+  - The gateway logs in.
+  - After a deploy restarted the Durable Objects, the bot came back Online by itself, through the alarm.
+  - Messages in #general arrive in Mr. Robot's conversation as Discord messages from "rk".
+  - A post from Mr. Robot to #general works: his failure notice for check two appeared in the channel.
+- **Not yet seen live:** an ordinary reply in #general. From check three on, every Turn failed with Anthropic 429 rate_limit_error ("would exceed your account's rate limit"), on the owner's Anthropic account. That is outside Mr. Robot.
