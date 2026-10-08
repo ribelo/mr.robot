@@ -20,7 +20,7 @@ export function Hosts() {
     <>
       <h2>Hosts</h2>
       {hostBridge() === undefined ? null : <div><button type="button" className="button" onClick={() => go({ page: 'this-computer' })}>This computer…</button></div>}
-      <div className="muted">Computers running the Mr. Robot app. Install it, enter this server's address ({location.origin}), and approve the computer when the browser opens.</div>
+      <div className="muted">Computers running the Mr. Robot desktop app. Install it, enter this server's address, sign in there and pair from its This computer page.</div>
       {hosts === undefined ? null : hosts.length === 0 ? <div className="muted">No computers paired yet.</div> : (
         <table className="grid"><tbody>{hosts.map((host) => (
           <tr key={host.id}>

@@ -11,4 +11,4 @@ Spec: ../mr-robot-v1.3.md. 01 first (the refactor every later plugin rides on); 
 | 05 | [Native notifications in the app and unread badges](05-native-notifications-unread.md) | — | done |
 | 06 | [Delete robot, clear history, reset everything](06-delete-clear-reset.md) | — | done |
 | 07 | [Search, file preview and download, host action log](07-search-files-host-log.md) | — | done |
-| 08 | [Empty, loading and error states; polish pass over every page](08-states-and-polish.md) | 03, 05, 06, 07 | ready-for-agent |
+| 08 | [Empty, loading and error states; polish pass over every page](08-states-and-polish.md) | 03, 05, 06, 07 | done |

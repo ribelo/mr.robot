@@ -249,7 +249,7 @@ function MemberFile({ name }: { name: string }) {
   if (content === undefined) return null
   return (
     <label>{name}
-      <textarea rows={8} value={content} onChange={(event) => { setContent(event.target.value); setSaved(false) }} onBlur={() => void api.writeMemberFile(name, content).then(() => setSaved(true))} />
+      <textarea rows={8} value={content} placeholder={PLACEHOLDERS[name]} onChange={(event) => { setContent(event.target.value); setSaved(false) }} onBlur={() => void api.writeMemberFile(name, content).then(() => setSaved(true))} />
       {saved ? <span className="muted">Saved.</span> : null}
     </label>
   )
@@ -441,4 +441,8 @@ function ResetEverything({ me }: { me: Me }) {
       ) : null}
     </>
   )
+}
+
+const PLACEHOLDERS: Record<string, string> = {
+  'memory/world.md': 'Facts every Robot of yours may need: your address, company and tax details, accounts, how invoices are issued, recurring bills.',
 }
