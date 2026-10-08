@@ -59,7 +59,7 @@ export const PLUGINS: readonly PluginEntry[] = [
     name: 'google', title: 'Google', icon: 'google', group: 'connector', toolGroups: [],
     description: 'Gmail, Calendar, Drive with Docs and Sheets, and Contacts for the Google accounts people connect.',
     homeConfig: z.object({
-      clientId: z.string().required().description('OAuth client ID').comment('From Google Cloud → APIs & Services → Credentials, the web client created for Mr. Robot.'),
+      clientId: z.string().required().description('OAuth client ID').comment('From Google Auth Platform → Clients: the web client created for Mr. Robot.'),
       clientSecret: z.string().role('secret').required().description('OAuth client secret'),
     }) as never,
     setupNeeded: (values, secrets) => (typeof values['clientId'] === 'string' && values['clientId'] !== '' && secrets.has('clientSecret') ? null : 'The Home admin sets up the Google OAuth client once.'),
@@ -71,7 +71,7 @@ export const PLUGINS: readonly PluginEntry[] = [
       '3. Open [Google Auth Platform](https://console.cloud.google.com/auth/overview) and press **Get started**: app name **Mr. Robot**, your e-mail as support and contact address, audience **External**. Then open [Audience](https://console.cloud.google.com/auth/audience) and press **Publish app** so the status is *In production*: in *Testing* Google ends every sign-in after 7 days. At sign-in Google warns that the app is unverified; for a private app that is expected: press **Advanced → Go to Mr. Robot (unsafe)**.',
       '4. Open [Clients](https://console.cloud.google.com/auth/clients) → **Create client** → type **Web application**, name **Mr. Robot**. Under **Authorized redirect URIs** add exactly:',
       '',
-      `    ${origin}/api/connections/google/oauth/callback`,
+      `   \`${origin}/api/connections/google/oauth/callback\``,
       '',
       '5. Press **Create**, copy the **Client ID** and **Client secret** into the fields below and press **Save**.',
       '',
