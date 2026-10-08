@@ -1,3 +1,4 @@
+import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { useState, useEffect } from 'react'
 import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort, BrowserBackend } from '@mr-robot/protocol'
@@ -183,7 +184,7 @@ function PromptPreview({ id }: { id: string }) {
     <>
       <h2>Prompt</h2>
       <div className="muted">What the model is given at the start of each Turn, as saved. Secret values are masked.</div>
-      {preview === undefined ? <div className="muted">Loading…</div> : (
+      {preview === undefined ? <Loading what="the prompt" /> : (
         <>
           {preview.sections.map((section) => (
             <details key={section.name} className="prompt-section">

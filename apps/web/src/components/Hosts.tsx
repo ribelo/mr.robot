@@ -1,3 +1,4 @@
+import { Loading, Empty, ErrorState } from './States.tsx'
 import { hostBridge } from './ThisComputer.tsx'
 import { go } from '../route.ts'
 import { useEffect, useState } from 'react'
@@ -44,8 +45,8 @@ export function PairHost({ code }: { code: string }) {
   const [pending, setPending] = useState<{ name: string; platform: string; approved: boolean }>()
   const [result, setResult] = useState<string>()
   useEffect(() => { void api.pairing(code).then(setPending).catch((error: unknown) => setResult(error instanceof ApiError ? error.message : 'unknown pairing code')) }, [code])
-  if (result !== undefined) return <div className="form"><p>{result}</p></div>
-  if (pending === undefined) return <div className="muted">Loading…</div>
+  if (result !== undefined) return result.startsWith('Paired ') ? <div className="form"><Empty title="Paired" hint={result} /></div> : <div className="form"><ErrorState title="This computer cannot be paired" message={result} /></div>
+  if (pending === undefined) return <Loading what="the pairing" />
   return (
     <div className="form">
       <p>Pair the computer <b>{pending.name}</b> ({pending.platform}) with your Mr. Robot? Robots you grant it can then use its files, a shell as you, and its Chrome while the app runs.</p>

@@ -1,3 +1,4 @@
+import { Loading, Empty as EmptyState, ErrorState } from './components/States.tsx'
 import { hostBridge } from './components/ThisComputer.tsx'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { Conversation as ConversationData, Me, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
@@ -37,7 +38,7 @@ export function App() {
   const [sheetVersion, setSheetVersion] = useState(0)
 
   if (error !== undefined) return <div className="fatal">{error}</div>
-  if (me === undefined) return <div className="fatal">Loading…</div>
+  if (me === undefined) return <div className="fatal"><Loading /></div>
 
   const selected = 'id' in route ? route.id : undefined
   const create = () => setCreating(true)
@@ -96,7 +97,7 @@ export function App() {
 }
 
 function Empty() {
-  return <div className="empty-main">Pick a robot, or tap + to make a new one.</div>
+  return <div className="empty-main"><EmptyState title="Pick a robot" hint="Choose one on the left, or tap + to make a new one." /></div>
 }
 
 /** The sheet open over the app: a Robot's profile or one of its Routines. */
@@ -139,8 +140,8 @@ function RobotView({ route, me, robot, onChanged, onSheet }: { route: Extract<Ro
     end?.scrollTo({ top: end.scrollHeight })
   }, [conversation?.items.length, conversation?.working, stream?.text.length])
 
-  if (failure !== undefined) return <div className="empty-main">{failure}</div>
-  if (conversation === undefined || panel === undefined) return <div className="empty-main">Loading…</div>
+  if (failure !== undefined) return <div className="empty-main"><ErrorState title="This robot cannot be opened" message={failure} onRetry={() => void refresh()} back={{ label: 'All robots', onClick: () => go({ page: 'home' }) }} /></div>
+  if (conversation === undefined || panel === undefined) return <div className="empty-main"><Loading what="the conversation" /></div>
 
   const answer = async (proposal: ProposalView, approve: boolean) => {
     try {

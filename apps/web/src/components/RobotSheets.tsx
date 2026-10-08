@@ -1,3 +1,4 @@
+import { Loading } from './States.tsx'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { Identity, RobotPanel, RoutineView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
@@ -27,7 +28,7 @@ export function EditProfileSheet({ robotId, onClose, onChanged, onOpenRoutine }:
       setWatch(loaded.settings.wakeOnScreenNotifications)
     })
   }, [robotId])
-  if (panel === undefined || identity === undefined) return <Sheet onClose={onClose}><div className="muted">Loading…</div></Sheet>
+  if (panel === undefined || identity === undefined) return <Sheet onClose={onClose}><Loading /></Sheet>
   const save = async () => {
     setSaving(true)
     try {
@@ -108,7 +109,7 @@ export function RoutineSheet({ robotId, routineId, canEdit, onClose, onBack, onC
   const [error, setError] = useState<string>()
   const load = useCallback(() => api.panel(robotId).then((panel) => setRoutine(panel.routines.find((entry) => entry.id === routineId) ?? null)), [robotId, routineId])
   useEffect(() => { void load() }, [load])
-  if (routine === undefined) return <Sheet onClose={onClose}><div className="muted">Loading…</div></Sheet>
+  if (routine === undefined) return <Sheet onClose={onClose}><Loading what="the routine" /></Sheet>
   if (routine === null) return <Sheet onClose={onClose}><div className="muted">This Routine no longer exists.</div></Sheet>
   const act = async (action: () => Promise<unknown>, closeAfter = false) => {
     try {

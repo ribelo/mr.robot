@@ -1,3 +1,4 @@
+import { Loading, Empty, ErrorState } from './States.tsx'
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api.ts'
 
@@ -45,7 +46,7 @@ export function ThisComputer() {
     bridge.onChange(setState)
   }, [bridge])
   if (bridge === undefined) return <div className="muted">This page belongs to the Mr. Robot desktop app. Install it on a computer to let your robots use that computer.</div>
-  if (state === undefined) return <div className="muted">Loading…</div>
+  if (state === undefined) return <Loading />
   const pair = async () => {
     setMessage(undefined)
     const started = await bridge.pair()
@@ -94,7 +95,7 @@ function HostLog({ hostId }: { hostId: string }) {
   return (
     <>
       <h2>What robots did here</h2>
-      {failed ? <div className="muted">The log could not be loaded.</div> : actions === undefined ? <div className="muted">Loading…</div> : actions.length === 0 ? <div className="muted">No robot has used this computer yet.</div> : (
+      {failed ? <ErrorState title="The log cannot be loaded" /> : actions === undefined ? <Loading what="the log" /> : actions.length === 0 ? <Empty title="Nothing yet" hint="No robot has used this computer yet." /> : (
         <table className="grid host-log">
           <thead><tr><th>When</th><th>Robot</th><th>Action</th><th>Result</th></tr></thead>
           <tbody>

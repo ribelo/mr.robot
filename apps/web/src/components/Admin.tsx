@@ -1,3 +1,4 @@
+import { Loading, ErrorState } from './States.tsx'
 import { useCallback, useEffect, useState } from 'react'
 import type { AdminView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
@@ -26,7 +27,7 @@ export function Admin() {
     }
     await refresh()
   }
-  if (view === undefined) return <div className="muted">{message ?? 'Loading…'}</div>
+  if (view === undefined) return message === undefined ? <Loading what="the Home" /> : <ErrorState title="The admin view cannot be loaded" message={message} />
   return (
     <div className="form">
       {message === undefined ? null : <div className="muted">{message}</div>}

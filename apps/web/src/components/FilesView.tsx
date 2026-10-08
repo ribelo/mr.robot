@@ -1,3 +1,4 @@
+import { Loading, ErrorState } from './States.tsx'
 import { useCallback, useEffect, useState } from 'react'
 import type { WorkspaceFileContent, WorkspaceFileView } from '@mr-robot/protocol'
 import { api, ApiError } from '../api.ts'
@@ -21,7 +22,7 @@ export function FilesView({ robotId, path, canEdit, onOpen }: { robotId: string;
   useEffect(() => { void refresh() }, [refresh])
   if (path !== null) return <FileEditor robotId={robotId} path={path} canEdit={canEdit} onBack={() => { onOpen(null); void refresh() }} />
   if (error !== undefined) return <div className="muted">{error}</div>
-  if (files === undefined) return <div className="muted">Loading…</div>
+  if (files === undefined) return <Loading what="the files" />
   const newSkill = async () => {
     const name = prompt('Name of the new local skill (lowercase-with-dashes)')?.trim()
     if (name === undefined || name === '') return
@@ -81,7 +82,7 @@ function FileEditor({ robotId, path, canEdit, onBack }: { robotId: string; path:
         {file === undefined ? null : <span className="muted">{size(file.size)}</span>}
       </div>
       {file === undefined ? null : <div className="file-actions"><a className="button" href={api.rawUrl(robotId, path, true)} download>Download</a>{previewable(path) ? <a className="button" href={api.rawUrl(robotId, path)} target="_blank" rel="noreferrer">Open</a> : null}</div>}
-      {file === undefined ? <div className="muted">{status ?? 'Loading…'}</div> : previewable(path) ? <FilePreview robotId={robotId} path={path} /> : file.text === null ? <div className="muted">{file.note}</div> : (
+      {file === undefined ? (status === undefined ? <Loading what="the file" /> : <ErrorState title="This file cannot be opened" message={status} back={{ label: 'All files', onClick: onBack }} />) : previewable(path) ? <FilePreview robotId={robotId} path={path} /> : file.text === null ? <div className="muted">{file.note}</div> : (
         <>
           <textarea aria-label={`Edit ${path}`} className="file-text" value={text} readOnly={!editable} spellCheck={false} onChange={(event) => { setText(event.target.value); setStatus(undefined) }} />
           {editable ? (

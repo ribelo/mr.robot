@@ -91,7 +91,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" />
       </label>
       <ul className="robot-list">
-        {visible.length === 0 && hidden.length === 0 ? <li className="empty">No robots yet.</li> : null}
+        {visible.length === 0 && hidden.length === 0 ? <li className="empty">{query === '' ? 'No robots yet.' : `No robot matches “${query}”.`}</li> : null}
         {visible.map(row)}
         {hidden.length === 0 ? null : (
           <li className="hidden-group">

@@ -1,3 +1,4 @@
+import { Loading, Empty } from './components/States.tsx'
 import { ThisComputer } from './components/ThisComputer.tsx'
 import { PairHost } from './components/Hosts.tsx'
 import { FilesView } from './components/FilesView.tsx'
@@ -46,7 +47,7 @@ export function Pages({ route, me, robots, onChanged }: { route: Route; me: Me; 
         <Profile me={me} onChanged={onChanged} />
       </div>
     )
-    default: return <div className="empty-main">{route.page}</div>
+    default: return <div className="empty-main"><Empty title="Nothing here" hint="This address does not lead to a page." /></div>
   }
 }
 
@@ -108,7 +109,7 @@ function RewindSheet({ id, onClose, onDone }: { id: string; onClose: () => void;
         <div className="sheet-head"><span /><span className="sheet-title">Rewind the Conversation</span><button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button></div>
         <div className="sheet-body">
           <div className="muted">The Robot forgets everything from that Turn on. The current log stays in the archive and you can undo. What it did outside (messages sent, orders placed) still stands.</div>
-          {trajectory === undefined ? <div className="muted">Loading…</div> : null}
+          {trajectory === undefined ? <Loading what="the trajectory" /> : null}
           {(trajectory?.rewinds ?? []).filter((rewind) => !rewind.undone).map((rewind) => (
             <div key={rewind.id} className="detail-block">
               Rewound to event {rewind.atSeq} on {new Date(rewind.at).toLocaleString()}. <button type="button" className="link" onClick={() => void act(() => api.undoRewind(id, rewind.id))}>Undo</button>
@@ -154,7 +155,7 @@ function AdvancedPage({ id, onChanged }: { id: string; onChanged: () => void }) 
     <div className="page">
       <PageHead title={`${state?.panel.summary.identity.name ?? 'Robot'} · Advanced settings`} back={{ page: 'robot', id, panel: true }} />
       {message === undefined ? null : <div className="muted">{message}</div>}
-      {state === undefined ? <div className="muted">Loading…</div> : (
+      {state === undefined ? <Loading what="the settings" /> : (
         <AdvancedSettings
           key={JSON.stringify(state.panel.settings)}
           panel={state.panel}
@@ -172,7 +173,7 @@ function AdvancedPage({ id, onChanged }: { id: string; onChanged: () => void }) 
 function TakeoverPage({ id, robot }: { id: string; robot: RobotSummary | undefined }) {
   const [panel, setPanel] = useState<RobotPanel>()
   useEffect(() => { void api.panel(id).then(setPanel) }, [id])
-  if (panel === undefined) return <div className="empty-main">Loading…</div>
+  if (panel === undefined) return <div className="empty-main"><Loading what="the browser" /></div>
   return (
     <Takeover
       robotId={id}
