@@ -1,3 +1,4 @@
+import { go } from '../route.ts'
 import { useEffect, useRef, useState } from 'react'
 import type { RobotSummary } from '@mr-robot/protocol'
 import { listTime } from '../time.ts'
@@ -113,6 +114,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
         <button type="button" className="me" onClick={onProfile}>
           <span className="initials">{initials(meName)}</span> {meName}
         </button>
+        <button type="button" className="link" onClick={() => go({ page: 'plugins' })}>Plugins</button>
         {isAdmin ? <button type="button" className="link" onClick={onAdmin}>Admin</button> : null}
       </div>
     </nav>

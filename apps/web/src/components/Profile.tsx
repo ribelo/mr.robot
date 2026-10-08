@@ -2,6 +2,7 @@ import { ConfirmByName } from './ConfirmByName.tsx'
 import { hostBridge } from './ThisComputer.tsx'
 import { WORK_DETAILS } from './WorkDetails.tsx'
 import { Hosts } from './Hosts.tsx'
+import { Connections } from './Connections.tsx'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
@@ -26,6 +27,7 @@ export function Profile({ me }: { me: Me }) {
       <ResetEverything me={me} />
       <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
       <Providers />
+      <Connections />
       <Secrets />
       <Hosts />
       <MemberFiles />

@@ -25,6 +25,8 @@ export const keys = {
   hosts: 'hosts',
   memberFiles: 'member-files',
   homeMemory: 'home-memory',
+  plugins: 'plugins',
+  connections: 'connections',
 } as const
 
 type Read<A> = (api: MrRobotApi['Service']) => Effect.Effect<A, ApiFailure>
@@ -65,6 +67,8 @@ export const secretsAtom = query((api) => api.secrets, [keys.secrets])
 export const hostsAtom = query((api) => api.hosts, [keys.hosts])
 export const hostActionsAtom = Atom.family((hostId: string) => query((api) => api.hostActions(hostId), [keys.hosts]))
 export const pairingAtom = Atom.family((code: string) => query((api) => api.pairing(code), [keys.hosts]))
+export const pluginsAtom = query((api) => api.plugins, [keys.plugins])
+export const connectionsAtom = query((api) => api.connections, [keys.connections])
 export const skillAtom = Atom.family((name: string) => query((api) => api.skill(name), [keys.admin]))
 
 /** A change to make through the API, and the keys whose atoms must read again after it succeeds. */

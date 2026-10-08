@@ -10,7 +10,7 @@ import * as FetchHttpClient from 'effect/http/FetchHttpClient'
 import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
-  AdminView, Attachment, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
+  AdminView, Attachment, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, OpencodeKeysView, PromptPreview, ProposalView,
   ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WorkspaceFileContent, WorkspaceFileView,
@@ -130,6 +130,14 @@ const make = Effect.gen(function* () {
     setHostSharing: (id: string, sharing: 'private' | 'home') => send('PATCH', `/api/hosts/${enc(id)}`, { sharing }),
     unpairHost: (id: string) => send('DELETE', `/api/hosts/${enc(id)}`),
     hostActions: (id: string) => get(Schema.Array(HostAction), `/api/hosts/${enc(id)}/actions`),
+
+    plugins: get(Schema.Array(PluginView), '/api/plugins'),
+    setPluginEnabled: (name: string, enabled: boolean) => send('PUT', `/api/admin/plugins/${enc(name)}`, { enabled }),
+    savePluginSettings: (name: string, values: Record<string, unknown>) => request(PluginView, 'PUT', `/api/admin/plugins/${enc(name)}/settings`, { values }),
+    connections: get(Schema.Array(ConnectionView), '/api/connections'),
+    pasteConnection: (kind: string, input: { readonly label?: string; readonly shared: boolean; readonly values: Record<string, string> }) => request(ConnectionView, 'POST', `/api/connections/${enc(kind)}`, input),
+    updateConnection: (id: string, change: { readonly label?: string; readonly shared?: boolean; readonly isDefault?: boolean }) => request(ConnectionView, 'PATCH', `/api/connections/${enc(id)}`, change),
+    removeConnection: (id: string) => send('DELETE', `/api/connections/${enc(id)}`),
   }
 })
 

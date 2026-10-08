@@ -11,6 +11,8 @@ export type Route =
   | { readonly page: 'profile' }
   | { readonly page: 'pair'; readonly code: string }
   | { readonly page: 'this-computer' }
+  | { readonly page: 'plugins' }
+  | { readonly page: 'plugin'; readonly name: string }
 
 export function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
@@ -25,6 +27,7 @@ export function parse(hash: string): Route {
   if (parts[0] === 'admin') return { page: 'admin' }
   if (parts[0] === 'me') return { page: 'profile' }
   if (parts[0] === 'this-computer') return { page: 'this-computer' }
+  if (parts[0] === 'plugins') return parts[1] === undefined ? { page: 'plugins' } : { page: 'plugin', name: decodeURIComponent(parts[1]) }
   if (parts[0] === 'pair' && parts[1] !== undefined) return { page: 'pair', code: decodeURIComponent(parts[1]) }
   return { page: 'home' }
 }
@@ -41,6 +44,8 @@ export function href(route: Route): string {
     case 'profile': return '#/me'
     case 'this-computer': return '#/this-computer'
     case 'pair': return `#/pair/${encodeURIComponent(route.code)}`
+    case 'plugins': return '#/plugins'
+    case 'plugin': return `#/plugins/${encodeURIComponent(route.name)}`
   }
 }
 

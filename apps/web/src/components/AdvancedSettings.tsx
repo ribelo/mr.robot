@@ -115,6 +115,27 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           ))}
         </div>
       )}
+      <h2>Connections</h2>
+      {mrRobot ? <div className="muted">Mr. Robot can use every connection you can.</div> : (catalog.connections ?? []).length === 0 ? <div className="muted">No connections yet: connect accounts under your name → Connections.</div> : (
+        <div className="check-grid">
+          {(catalog.connections ?? []).flatMap((connection) => {
+            const canWrite = connection.kind === 'slack' || (connection.kind === 'google' && connection.services.includes('gmail-send'))
+            const read = (
+              <label key={connection.id} className="check">
+                <input type="checkbox" checked={(draft.grants.connections ?? []).includes(connection.id)} onChange={() => toggle('connections', connection.id)} />
+                <span>{connection.label}<small>{connection.kind} · {connection.account}{connection.mine ? '' : ` · ${connection.ownerName}'s`}{connection.status === 'connected' ? '' : ' · needs attention'}</small></span>
+              </label>
+            )
+            if (!canWrite) return [read]
+            return [read, (
+              <label key={`${connection.id}:write`} className="check">
+                <input type="checkbox" checked={(draft.grants.connections ?? []).includes(`${connection.id}:write`)} onChange={() => toggle('connections', `${connection.id}:write`)} />
+                <span>{connection.label}: {connection.kind === 'google' ? 'send e-mail' : 'post and mark read'}<small>A separate grant: without it the Robot only reads</small></span>
+              </label>
+            )]
+          })}
+        </div>
+      )}
       <h2>Hosts</h2>
       {(catalog.hosts ?? []).length === 0 ? <div className="muted">No computers yet: install the Mr. Robot app on one and pair it (your name → Hosts).</div> : (
         <div className="check-grid">

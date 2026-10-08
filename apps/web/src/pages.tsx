@@ -2,6 +2,7 @@ import { Empty } from './components/States.tsx'
 import { ThisComputer } from './components/ThisComputer.tsx'
 import { PairHost } from './components/Hosts.tsx'
 import { FilesView } from './components/FilesView.tsx'
+import { PluginDetail, PluginsPage } from './components/Plugins.tsx'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/reactivity'
@@ -42,6 +43,17 @@ export function Pages({ route, me, robots }: { route: Route; me: Me; robots: rea
       <div className="page">
         <PageHead title="Pair a computer" back={{ page: 'home' }} />
         <PairHost code={route.code} />
+      </div>
+    )
+    case 'plugins': return (
+      <div className="page">
+        <PageHead title="Plugins" back={{ page: 'home' }} />
+        <PluginsPage isAdmin={me.role === 'admin'} />
+      </div>
+    )
+    case 'plugin': return (
+      <div className="page">
+        <PluginDetail name={route.name} isAdmin={me.role === 'admin'} />
       </div>
     )
     case 'files': return <FilesPage id={route.id} path={route.path} robot={robots.find((robot) => robot.id === route.id)} me={me} />
