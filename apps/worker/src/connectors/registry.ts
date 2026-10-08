@@ -4,5 +4,8 @@
  */
 import type { ConnectorKind } from '@mr-robot/protocol'
 import type { ConnectorPlugin } from './connector.ts'
+import { GooglePlugin } from './google/plugin.ts'
 
-export const CONNECTOR_PLUGINS: Partial<Record<ConnectorKind, ConnectorPlugin>> = {}
+export const CONNECTOR_PLUGINS: Partial<Record<ConnectorKind, ConnectorPlugin>> = {
+  google: GooglePlugin,
+}

@@ -138,6 +138,16 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
     expect(await toolsOf(ANNA, id)).not.toContain('fake_whoami')
   })
 
+  it('the real Google connector offers sending only with the write grant (cn-z1di)', async () => {
+    const mail = await env.MEMBER.getByName(annaId).addConnection({ kind: 'google', label: 'Private', account: 'anna@gmail.test', services: ['gmail', 'gmail-send', 'calendar'], shared: false, meta: { expiresAt: Date.now() + 3_600_000 }, secrets: { accessToken: 'a', refreshToken: 'r' } })
+    const id = await robotOf(ANNA, { connections: [mail.id] })
+    const reading = await toolsOf(ANNA, id)
+    expect(reading).toEqual(expect.arrayContaining(['gmail_search', 'gmail_thread', 'gmail_draft', 'calendar_create']))
+    expect(reading.filter((name) => ['gmail_send', 'gmail_reply', 'gmail_forward'].includes(name))).toEqual([])
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: [], skills: [], recipients: [], secrets: [], connections: [mail.id, `${mail.id}:write`] } } })
+    expect(await toolsOf(ANNA, id)).toEqual(expect.arrayContaining(['gmail_send', 'gmail_reply', 'gmail_forward']))
+  })
+
   it('refused credentials show on the owner\'s row (cn-9s7r)', async () => {
     fakeConnectors.set('google', fakeConnector('google'))
     const revoked = await addConnection(annaId, 'Old', 'anna@old.test', 'revoked-token')
