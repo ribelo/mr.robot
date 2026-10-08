@@ -20,12 +20,12 @@ export function AtomView<A>({ atom, what, errorTitle, children }: {
   return <>{renderResult(result, { ...(what === undefined ? {} : { what }), ...(errorTitle === undefined ? {} : { errorTitle }), retry: refresh }, children)}</>
 }
 
-export function renderResult<A>(result: AsyncResult.AsyncResult<A, ApiFailure>, options: { what?: string; errorTitle?: string; retry?: () => void }, children: (value: A) => ReactNode): ReactNode {
+export function renderResult<A>(result: AsyncResult.AsyncResult<A, ApiFailure>, options: { what?: string; errorTitle?: string; retry?: () => void; back?: { label: string; onClick: () => void } }, children: (value: A) => ReactNode): ReactNode {
   if (AsyncResult.isSuccess(result)) return children(result.value)
   if (AsyncResult.isFailure(result)) {
     const failure = Cause.findErrorOption(result.cause)
     const message = failure._tag === 'Some' ? describeFailure(failure.value) : 'something unexpected happened; reload the page'
-    return <ErrorState {...(options.errorTitle === undefined ? {} : { title: options.errorTitle })} message={message} {...(options.retry === undefined ? {} : { onRetry: options.retry })} />
+    return <ErrorState {...(options.errorTitle === undefined ? {} : { title: options.errorTitle })} message={message} {...(options.retry === undefined ? {} : { onRetry: options.retry })} {...(options.back === undefined ? {} : { back: options.back })} />
   }
   return <Loading {...(options.what === undefined ? {} : { what: options.what })} />
 }
