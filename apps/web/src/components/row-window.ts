@@ -79,15 +79,17 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
   useEffect(() => {
     const pane = scrollElement.current
     if (pane === null || !enabled) return
-    const read = () => {
+    const read = () => setViewport({ top: pane.scrollTop - margin, height: pane.clientHeight || initialViewport })
+    // Only a scroll decides whether the view follows the end; growing rows fire none.
+    const scrolled = () => {
       following.current = pane.scrollHeight - pane.clientHeight - pane.scrollTop <= followThreshold
-      setViewport({ top: pane.scrollTop - margin, height: pane.clientHeight || initialViewport })
+      read()
     }
     read()
-    pane.addEventListener('scroll', read, { passive: true })
+    pane.addEventListener('scroll', scrolled, { passive: true })
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(read)
     observer?.observe(pane)
-    return () => { pane.removeEventListener('scroll', read); observer?.disconnect() }
+    return () => { pane.removeEventListener('scroll', scrolled); observer?.disconnect() }
   }, [scrollElement, enabled, margin, initialViewport, followThreshold])
 
   // Before rows change: remember the first visible row by key and whether the view sat at the end.
@@ -96,7 +98,8 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
   if (previousRows.current !== rows) {
     const pane = scrollElement.current
     const before = previousRows.current
-    if (pane !== null && enabled && before.length > 0) {
+    if (pane !== null && enabled && before.length === 0 && following.current) anchor.current = { key: '', offset: 0, atEnd: true }
+    else if (pane !== null && enabled && before.length > 0) {
       const beforeOffsets = rowOffsets(before)
       const top = pane.scrollTop - margin
       const index = rowAt(beforeOffsets, Math.max(0, top))
@@ -114,6 +117,8 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
     if (pane === null || remembered === null || !enabled) return
     if (remembered.atEnd) {
       pane.scrollTop = pane.scrollHeight
+      // Render the rows at the end now, not one scroll event later.
+      setViewport({ top: pane.scrollTop - margin, height: pane.clientHeight || initialViewport })
       return
     }
     const index = rows.findIndex((row) => row.key === remembered.key)
