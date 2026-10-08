@@ -217,6 +217,8 @@ export const RobotSettings = Schema.Struct({
   wakeOnScreenNotifications: Schema.Boolean,
   /** This Robot's browser backend; null follows the Home default (rb-wgtd). */
   browserBackend: Schema.NullOr(BrowserBackend),
+  /** The Discord channel this Robot talks in (cn-y1ac); null: no Discord. */
+  discordChannel: Schema.NullOr(Schema.String),
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -232,6 +234,7 @@ export const SettingsPatch = Schema.Struct({
   grants: Schema.optional(GrantSet),
   notifications: Schema.optional(NotificationSettings),
   spendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
+  discordChannel: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 
@@ -659,6 +662,9 @@ export const ConnectionView = Schema.Struct({
   services: Schema.Array(Schema.String),
   status: ConnectionStatus,
   statusNote: Schema.NullOr(Schema.String),
+  /** A link the person may still need at the service (Discord: invite the bot to a server). */
+  setupLink: Schema.NullOr(Schema.String),
+  setupLabel: Schema.NullOr(Schema.String),
   createdAt: Schema.Number,
 })
 export type ConnectionView = typeof ConnectionView.Type

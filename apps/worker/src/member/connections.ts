@@ -59,6 +59,8 @@ export class ConnectionStore {
     return {
       id: row.id, kind: row.kind, label: row.label, account: row.account, shared: row.shared === 1, isDefault: row.is_default === 1,
       services: JSON.parse(row.services) as string[], status: row.status, statusNote: row.status_note, createdAt: row.created_at,
+      setupLink: typeof (JSON.parse(row.meta) as Record<string, unknown>)['setupLink'] === 'string' ? (JSON.parse(row.meta) as Record<string, string>)['setupLink']! : null,
+      setupLabel: typeof (JSON.parse(row.meta) as Record<string, unknown>)['setupLabel'] === 'string' ? (JSON.parse(row.meta) as Record<string, string>)['setupLabel']! : null,
     }
   }
 

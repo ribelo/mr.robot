@@ -17,7 +17,7 @@ const panel: RobotPanel = {
     identity: { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a' },
     sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: { tools: [], skills: [], recipients: [], secrets: [] },
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: null,
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: null, discordChannel: null,
   },
   routines: [{
     id: 'rt-1', robotId: 'r-1', name: 'Overnight outbound', prompt: 'Work the queue', schedule: { kind: 'weekly', time: '02:00', weekdays: [7] },

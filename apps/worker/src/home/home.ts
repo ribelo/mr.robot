@@ -33,6 +33,8 @@ import { backendOptions } from '../browser/backends.ts'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
+import { DiscordAtHome, type BotConnection } from './discord.ts'
+import type { GatewayMessage } from '../connectors/discord-gateway.ts'
 import type { PlainValue } from '../connectors/schema-form.ts'
 import type { ConnectionChange, ConnectionMeta, OwnConnection } from '../member/connections.ts'
 import { liveModels, type ListingAccess } from '../providers/live-catalog.ts'
@@ -1096,6 +1098,85 @@ export class Home extends DurableObject<Env> {
   pluginSettings(name: string): Promise<{ values: Record<string, PlainValue>; secrets: Record<string, string> }> { return this.pluginsOf.settings(name) }
 
   connectionShared(ownerId: string, connection: OwnConnection, shared: boolean): void { this.pluginsOf.connectionShared(ownerId, connection, shared) }
+
+  // ---------------------------------------------------------------- Discord (v1.5 ticket 05)
+
+  private discordAt: DiscordAtHome | undefined
+  private get discord(): DiscordAtHome {
+    this.discordAt ??= new DiscordAtHome(this.ctx.storage.sql, (memberId) => this.discordBot(memberId), this.connectorFetch(), async (message, ownerId) => { await this.discordReceived(message, ownerId) }, async (at) => {
+      const current = await this.ctx.storage.getAlarm()
+      if (current === null || current > at) await this.ctx.storage.setAlarm(at)
+    })
+    return this.discordAt
+  }
+
+  /** The bot token of a Member's Discord connection (their own, or one shared with the Home). */
+  private async discordBot(memberId: string | null): Promise<BotConnection | null> {
+    // For the gateway (no Member): any Member's Discord bot; for a Robot's reply: its owner's own or a shared one.
+    const owners = memberId === null
+      ? this.ctx.storage.sql.exec<{ id: string }>("SELECT id FROM member WHERE status = 'active'").toArray().map((row) => row.id)
+      : [memberId]
+    const candidates: Array<{ ownerId: string; connection: { id: string } }> = []
+    for (const owner of owners) {
+      for (const connection of await this.connectionsFor(owner)) {
+        if (connection.kind === 'discord' && connection.status === 'connected' && !candidates.some((known) => known.connection.id === connection.id)) candidates.push({ ownerId: connection.ownerId, connection })
+      }
+    }
+    for (const candidate of candidates) {
+      const use = await this.env.MEMBER.getByName(candidate.ownerId).useConnection(candidate.connection.id)
+      const token = use?.secrets['token']
+      if (token !== undefined) return { ownerId: candidate.ownerId, connectionId: candidate.connection.id, token }
+    }
+    return null
+  }
+
+  /**
+   * A message arrived through the gateway (cn-65gg): in a Robot's channel it wakes that Robot; a direct
+   * message to the bot reaches the bot owner's Mr. Robot, who can pass it on. Returns who got it.
+   */
+  async discordReceived(message: GatewayMessage, ownerId: string): Promise<string | null> {
+    const mapped = this.discord.robotOf(message.channelId)
+    const robotId = mapped?.robotId ?? (message.direct ? await this.mrRobotOf(ownerId) : null)
+    if (robotId === null) return null
+    const outcome = await this.env.ROBOT.getByName(robotId).channelEvent({
+      channel: 'discord',
+      eventId: message.id,
+      from: message.authorName,
+      text: message.text,
+      route: { channel: 'discord', address: message.channelId },
+    }).catch((error: unknown) => { console.warn('discord wake failed', error); return { accepted: false } })
+    return outcome.accepted ? robotId : null
+  }
+
+  /** The Discord channel someone gave a Robot (cn-y1ac). */
+  discordChannelChanged(robotId: string, channelId: string | null): void {
+    const ownerId = this.ctx.storage.sql.exec<{ owner_id: string }>('SELECT owner_id FROM robot WHERE id = ?', robotId).toArray()[0]?.owner_id ?? ''
+    this.discord.mapping(robotId, ownerId, channelId)
+    void this.discord.ensure().catch(() => undefined)
+  }
+
+  /** Post to a Discord channel with the Home's bot (the Channel side of a Robot's reply). */
+  discordPost(memberId: string, channelId: string, text: string): Promise<boolean> { return this.discord.post(memberId, channelId, text) }
+
+  /** The owner's Mr. Robot: where a direct message to the bot goes. */
+  private async mrRobotOf(ownerId: string): Promise<string | null> {
+    return this.ctx.storage.sql.exec<{ id: string }>("SELECT id FROM robot WHERE owner_id = ? AND kind = 'mr-robot' AND status <> 'deleted' LIMIT 1", ownerId).toArray()[0]?.id ?? null
+  }
+
+  /** Keep the gateway socket up while a Discord bot is connected. */
+  async ensureDiscordGateway(): Promise<void> {
+    await this.discord.ensure().catch((error: unknown) => console.warn('discord gateway failed', error))
+  }
+
+  /** The Home's alarm keeps the Discord gateway alive: heartbeats, and reconnects after a drop or a restart. */
+  override async alarm(): Promise<void> {
+    await this.ensureDiscordGateway()
+  }
+
+  /** fetch for Discord HTTP; tests substitute recorded responses. */
+  protected connectorFetch(): typeof globalThis.fetch {
+    return (input, init) => fetch(input, init)
+  }
 
   /** A Member's own connections and the ones others share with the Home (cn-qs78). */
   async connectionsFor(memberId: string): Promise<ConnectionView[]> {

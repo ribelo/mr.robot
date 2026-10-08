@@ -62,6 +62,7 @@ import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.t
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
+import { DiscordChannel } from '../channels/discord.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
 import { containerOpenStages } from '../browser/driver.ts'
 import { mount, type Mount } from '../plugins/define.ts'
@@ -499,7 +500,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The Channel adapters this Robot can use; v1 has the PWA. Tests add a fake one. */
   protected channels(): Map<string, ChannelAdapter> {
     const pwa = new PwaChannel({ notify: (memberId, event) => this.env.MEMBER.getByName(memberId).notify(event) })
-    return new Map([[pwa.id, pwa]])
+    const channels = new Map<string, ChannelAdapter>([[pwa.id, pwa]])
+    // A Robot with a Discord channel talks there too (cn-65gg): its replies and notifications go out.
+    const config = this.store.config()
+    const channelId = config?.discordChannel ?? null
+    if (config !== undefined && channelId !== null && channelId !== '' && config.notifications.channels.includes('discord')) {
+      const discord = new DiscordChannel(config.ownerId, channelId, { post: (memberId, channel, text) => this.home().discordPost(memberId, channel, text) })
+      channels.set(discord.id, discord)
+    }
+    return channels
   }
 
   /** Output leaves through every enabled Channel; a failing Channel never fails the Turn. */

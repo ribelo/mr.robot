@@ -37,6 +37,8 @@ export interface RobotConfig {
   readonly wakeOnScreenNotifications?: boolean
   /** Absent or null: the Home default backend. */
   readonly browserBackend?: BrowserBackend | null
+  /** The Discord channel this Robot talks in (cn-y1ac); absent or null: none. */
+  readonly discordChannel?: string | null
   readonly compactionInstruction: string
   readonly notifications: NotificationSettings
   readonly spendLimitUsd: number | null

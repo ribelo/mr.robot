@@ -24,11 +24,18 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
   const [identity, setIdentity] = useState<Identity>(panel.settings.identity)
   const [notify, setNotify] = useState(panel.settings.notifications.enabled)
   const [watch, setWatch] = useState(panel.settings.wakeOnScreenNotifications)
+  const [discord, setDiscord] = useState(panel.settings.notifications.channels.includes('discord'))
+  const [discordChannel, setDiscordChannel] = useState(panel.settings.discordChannel ?? '')
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
   const save = async () => {
     setSaving(true)
-    const failure = exitFailure(await command((api) => api.updateSettings(robotId, { identity, notifications: { ...panel.settings.notifications, enabled: notify }, wakeOnScreenNotifications: watch }), [keys.robot(robotId), keys.robots]))
+    const failure = exitFailure(await command((api) => api.updateSettings(robotId, {
+      identity,
+      notifications: { ...panel.settings.notifications, enabled: notify, channels: [...panel.settings.notifications.channels.filter((channel) => channel !== 'discord'), ...(discord ? ['discord'] : [])] },
+      wakeOnScreenNotifications: watch,
+      discordChannel: discord && discordChannel.trim() !== '' ? discordChannel.trim() : null,
+    }), [keys.robot(robotId), keys.robots]))
     if (failure === undefined) onClose()
     else {
       setError(failure)
@@ -63,6 +70,14 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
         </div>
         <button type="button" role="switch" aria-checked={notify} aria-label="Notifications" disabled={!editable} className={notify ? 'switch on' : 'switch'} onClick={() => setNotify(!notify)}><span /></button>
       </div>
+      <div className="toggle-card">
+        <div>
+          <div>Talk to this Robot on Discord</div>
+          <div className="muted">Messages in its channel wake it, and its replies and notifications go there. Direct messages to the bot reach Mr. Robot. Needs the Discord bot (your name → Connections).</div>
+        </div>
+        <button type="button" role="switch" aria-checked={discord} aria-label="Talk on Discord" disabled={!editable} className={discord ? 'switch on' : 'switch'} onClick={() => setDiscord(!discord)}><span /></button>
+      </div>
+      {discord ? <label>Discord channel ID<input value={discordChannel} disabled={!editable} placeholder="Right-click the channel → Copy Channel ID" onChange={(event) => setDiscordChannel(event.target.value)} /></label> : null}
       <h3 className="panel-section">Routines</h3>
       <RoutineList routines={panel.routines} onOpen={onOpenRoutine} />
       {error === undefined ? null : <div className="muted">{error}</div>}

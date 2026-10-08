@@ -81,6 +81,7 @@ function ConnectorPanel({ plugin, connections }: { plugin: PluginView; connectio
                 {connection.services.length > 0 ? <div className="muted">{connection.services.join(', ')}</div> : null}
                 {connection.status === 'connected' ? null : <div className="host-log-failed">{connection.status === 'needs-reconsent' ? 'Needs consent again' : 'Paste again'}{connection.statusNote === null ? '' : `: ${connection.statusNote}`}</div>}
                 {connection.mine && connection.status === 'needs-reconsent' && connector.connect.method === 'oauth' ? <a className="button" href={`/api/connections/${connector.kind}/oauth/start?reconnect=${encodeURIComponent(connection.id)}`}>Reconnect</a> : null}
+                {connection.setupLink === null ? null : <a className="button" href={connection.setupLink} target="_blank" rel="noreferrer">{connection.setupLabel ?? 'Finish setup'}</a>}
               </div>
               {connection.mine ? (
                 <div className="connection-actions">

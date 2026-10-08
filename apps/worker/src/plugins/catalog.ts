@@ -109,6 +109,15 @@ export const PLUGINS: readonly PluginEntry[] = [
   {
     name: 'discord', title: 'Discord', icon: 'discord', group: 'connector', toolGroups: [],
     description: 'A Discord bot on your server: Robots read and post in channels and DMs, and talk to you through their own channel.',
+    guide: () => [
+      'Do this once for the Home. The bot belongs to you, not to Mr. Robot: nothing is published anywhere.',
+      '',
+      '1. Open [discord.com/developers/applications](https://discord.com/developers/applications) → **New Application**, name it **Mr. Robot** (or anything you like).',
+      '2. Open **Bot**. Press **Reset Token** → **Yes, do it**, then **Copy**. Paste it into the form below and press **Connect**.',
+      '3. On the same page, switch on **Message Content Intent** under *Privileged Gateway Intents* and press **Save Changes** — without it the bot cannot read messages.',
+      '4. The row below then shows **Invite the bot to a server**: open it, pick your server and allow. The bot appears in the member list.',
+      '5. Give a robot its channel: open the robot → ⚙ profile → *Talk to this Robot on Discord*, and paste the channel id (right-click the channel → Copy Channel ID with Developer Mode on).',
+    ].join('\n'),
     connector: {
       kind: 'discord',
       connect: {

@@ -15,7 +15,15 @@ import type { PushNotification } from '../src/platform/push.ts'
 
 export const delivered = new Map<string, PushNotification[]>()
 
-export { default, Home } from '../src/index.ts'
+export { default } from '../src/index.ts'
+import { Home as ProductionHome } from '../src/index.ts'
+
+/** The production Home with recorded HTTP for Discord. */
+export class Home extends ProductionHome {
+  protected override connectorFetch(): typeof globalThis.fetch {
+    return connectorFixtures.fetch
+  }
+}
 
 /** The production Member with a clock hook for OAuth expiry. */
 export class Member extends ProductionMember {

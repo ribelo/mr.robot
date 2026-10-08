@@ -336,6 +336,7 @@ export const settings = Effect.gen(function* () {
     codeMode: current.codeMode,
     wakeOnScreenNotifications: current.wakeOnScreenNotifications === true,
     browserBackend: current.browserBackend ?? null,
+    discordChannel: current.discordChannel ?? null,
     compactionInstruction: current.compactionInstruction,
     grants: store.grants(),
     notifications: current.notifications,
@@ -401,12 +402,18 @@ export const updateSettings = (patch: SettingsPatch) => Effect.gen(function* () 
       ...(patch.wakeOnScreenNotifications === undefined ? {} : { wakeOnScreenNotifications: patch.wakeOnScreenNotifications }),
       ...(patch.browserBackend === undefined ? {} : { browserBackend: patch.browserBackend }),
       ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
+      ...(patch.discordChannel === undefined ? {} : { discordChannel: patch.discordChannel === null || patch.discordChannel.trim() === '' ? null : patch.discordChannel.trim() }),
       ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels])] } }),
       ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))
   })
   yield* platform.changed()
+  // The Home routes Discord messages by channel, so it hears about the mapping (cn-y1ac).
+  if (patch.discordChannel !== undefined) {
+    const current = yield* config
+    yield* promise(() => platform.env.HOME.getByName(HOME_ID).discordChannelChanged(current.id, current.discordChannel ?? null))
+  }
   if (patch.spendLimitUsd !== undefined) yield* checkLimits
   if (patch.wakeOnScreenNotifications === false) yield* platform.stopWatching()
   return yield* settings

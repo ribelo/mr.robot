@@ -621,7 +621,7 @@ export class Member extends DurableObject<Env> {
     if (connector?.verifyPasted === undefined) throw new Error(`${input.kind} is not available yet`)
     const outcome = await Effect.runPromise(Effect.result(connector.verifyPasted(input.secrets, this.connectorFetch())))
     if (outcome._tag === 'Failure') throw new Error(outcome.failure._tag === 'ConnectorUnauthorized' ? `the pasted values were refused: ${outcome.failure.message}` : describeConnectorFailure(outcome.failure))
-    return this.connectionsOf.add({
+    const added = await this.connectionsOf.add({
       kind: input.kind,
       label: input.label === null || input.label.trim() === '' ? outcome.success.label : input.label.trim(),
       account: outcome.success.account,
@@ -630,6 +630,9 @@ export class Member extends DurableObject<Env> {
       meta: outcome.success.meta,
       secrets: input.secrets,
     })
+    // A Discord bot starts listening at once (the Home holds its gateway).
+    if (input.kind === 'discord') await this.env.HOME.getByName(HOME_ID).ensureDiscordGateway().catch(() => undefined)
+    return added
   }
 
   startGoogleConsent(origin: string, services: string[], shared: boolean, reconnect: string | null): Promise<string> { return this.google.start(origin, services, shared, reconnect) }
