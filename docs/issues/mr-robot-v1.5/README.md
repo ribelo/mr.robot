@@ -4,7 +4,7 @@ Spec: ../mr-robot-v1.5.md. 01 first; then 02 → 03, 04; 05 and 06 in parallel; 
 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
-| 01 | [Connector core, Plugins page, per-plugin settings rows](01-connector-core-plugins-page-settings.md) | — | ready-for-agent |
+| 01 | [Connector core, Plugins page, per-plugin settings rows](01-connector-core-plugins-page-settings.md) | — | done |
 | 02 | [Google: guided OAuth client setup and Connect Google](02-google-connect.md) | 01 | ready-for-agent |
 | 03 | [Gmail and Calendar tools](03-gmail-calendar-tools.md) | 02 | ready-for-agent |
 | 04 | [Drive, Docs, Sheets and Contacts tools](04-drive-docs-sheets-contacts-tools.md) | 02 | ready-for-agent |
