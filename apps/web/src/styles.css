@@ -479,6 +479,8 @@ a.button { text-decoration: none; color: var(--text); }
 .connection { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }
 .connection-actions { display: flex; align-items: center; gap: 14px; }
 .connect-form { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+a.button { text-decoration: none; display: inline-flex; align-items: center; }
+a.button.button-primary { color: #111; }
 a.button.disabled { opacity: 0.5; pointer-events: none; }
 .note-ok { border-color: #2f5130; background: #1d2a1d; color: #b8dcae; }
 .plugin-guide { border: 1px solid var(--line); border-radius: 12px; padding: 4px 16px 12px; margin-bottom: 18px; }

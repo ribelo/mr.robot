@@ -231,12 +231,12 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
   const only = accounts[0]!
   return tool<A & { account?: string }>({
     name: spec.name,
-    description: `${spec.description}${several ? '' : ` Acts on ${only.label} (${only.account}).`}`,
+    description: `${spec.description}${several ? '' : ` Acts on ${only.label === only.account ? only.label : `${only.label} (${only.account})`}.`}`,
     parameters: { properties, ...(spec.parameters.required === undefined ? {} : { required: [...spec.parameters.required] }) } as never,
     execute: async (args) => {
       const picked = pickAccount(accounts, args.account, false)
       if (picked instanceof ConnectorRefused) return `Not done: ${picked.message}`
-      const header = `[${host.kind} · ${picked.label} (${picked.account})] ${spec.action(args)}`
+      const header = `[${host.kind} · ${picked.label === picked.account ? picked.label : `${picked.label} (${picked.account})`}] ${spec.action(args)}`
       const use = await host.use(picked.id)
       const outcome = await Effect.runPromise(Effect.result(spec.run(args, use, picked)))
       if (outcome._tag === 'Success') return `${header}\n${typeof outcome.success === 'string' ? outcome.success : JSON.stringify(outcome.success, null, 2)}`
