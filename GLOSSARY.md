@@ -36,3 +36,5 @@ Vocabulary for Mr. Robot. Specs, code and tests use these words and no synonyms.
 - **Host tools** — host_read, host_write, host_run on a granted Host.
 - **Work details** — a per-Member setting (Compact, Standard, Detailed, Verbose) for how much of a Robot's tool work the Conversation shows; Compact is the default.
 - **Memory scope** — member (about the person), robot (the Robot's own), Home (shared household facts); each a set of files injected as the Robot's baseline message.
+- **Connector** — a plugin that gives Robots tools on an external service (Google, Slack, Discord) through a Connection.
+- **Connection** — one linked account of a Connector (a Google account, a Slack workspace, a Discord bot), owned by a Member, private or Home-shared, granted per Robot.
