@@ -111,9 +111,12 @@ describe('live view and takeover', () => {
 
     scripts.set(id, [{ text: 'Thanks, I can continue.' }])
     await anna.send({ type: 'handback' })
-    await settle(id)
+    // The hand-back reaches the Robot over the socket; under load settle() can return before its Turn starts.
+    await vi.waitFor(async () => {
+      await settle(id)
+      expect(JSON.stringify(requests.get(id)!.at(-1)!.messages.at(-1))).toContain('handed the browser back after')
+    }, { timeout: 15_000 })
     const last = JSON.stringify(requests.get(id)!.at(-1)!.messages.at(-1))
-    expect(last).toContain('handed the browser back after')
     expect(last).toContain('https://shop.test/login')
     expect(last).toMatch(/screens\/.+\.png/)
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
@@ -160,7 +163,7 @@ describe('live view and takeover', () => {
 
     const viewer = await connect(ANNA, body.id)
     await viewer.send({ type: 'live', on: true })
-    expect(browserLog).toEqual(['open', 'goto:https://shop.test/login'])
+    await vi.waitFor(() => expect(browserLog).toEqual(['open', 'goto:https://shop.test/login']))
     await vi.waitFor(() => expect(viewer.received.some((message) => message.type === 'frame')).toBe(true))
 
     // The owner takes the idle browser without being asked; hand-back does not wake the Robot.
