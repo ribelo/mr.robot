@@ -13,7 +13,7 @@ export interface ChatViewProps {
   /** The tool running now, while working. */
   readonly activity?: string
   readonly canAnswer: boolean
-  readonly onAnswer?: (proposal: ProposalView, approve: boolean) => void
+  readonly onAnswer?: (proposal: ProposalView, approve: boolean, approved?: readonly string[]) => void
   readonly now?: number
   /** How much of the Robot's work to show (pl-6eir); Compact by default. */
   readonly workDetails?: WorkDetails
@@ -158,7 +158,7 @@ function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatI
       return level === 'detailed' || level === 'verbose' ? <ThinkingRow text={item.text} level={level} /> : null
     case 'question':
       // The ask itself is answered where the owner types (rb-dat4); the stream keeps one line of it.
-      return <div className="chat-separator ask-line" data-status={item.proposal.status}>{`${askTitle(item.proposal)} · ${item.proposal.status === 'open' ? (canAnswer ? 'answer below' : 'waiting for the owner') : statusText(item.proposal.status)}`}</div>
+      return <div className="chat-separator ask-line" data-status={item.proposal.status}>{`${askTitle(item.proposal)} · ${item.proposal.status === 'open' ? (canAnswer ? 'answer below' : 'waiting for the owner') : statusText(item.proposal)}`}</div>
     case 'working':
       return null
   }
@@ -173,7 +173,8 @@ export function askTitle(proposal: ProposalView): string {
     : proposal.kind === 'grants' ? 'Asks for more Grants'
       : proposal.kind === 'member-file' ? `Proposes an edit to ${proposal.file?.name ?? 'your file'}`
         : proposal.kind === 'skill' ? 'Proposes a skill for the library'
-          : 'Needs you'
+          : proposal.kind === 'review' ? `Review: ${proposal.review?.title ?? proposal.purpose}`
+            : 'Needs you'
 }
 
 export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; counter?: string }) {
@@ -193,19 +194,59 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { propo
         <ul className="grant-list">{lines.map(([kind, name]) => <li key={`${kind}-${name}`}><span className="grant-kind">{kind}</span> {name}</li>)}</ul>
       ) : grants !== null ? <div className="question-purpose">No Grants.</div> : null}
       {proposal.file === null ? null : <pre className="file-preview">{proposal.file.content}</pre>}
+      {proposal.review === undefined ? null : <ReviewItems proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />}
       {proposal.skill === null ? null : <div className="question-purpose"><b>{proposal.skill.name}</b>: {proposal.skill.description}</div>}
-      {proposal.status === 'open' && canAnswer ? (
+      {proposal.review !== undefined ? (proposal.status === 'open' && canAnswer ? null : <div className="question-status">{statusText(proposal)}</div>)
+      : proposal.status === 'open' && canAnswer ? (
         <div className="question-actions">
           <button type="button" className="button" onClick={() => onAnswer?.(proposal, false)}>Reject</button>
           <button type="button" className="button button-primary" onClick={() => onAnswer?.(proposal, true)}>Approve</button>
         </div>
-      ) : <div className="question-status">{statusText(proposal.status)}</div>}
+      ) : <div className="question-status">{statusText(proposal)}</div>}
     </div>
   )
 }
 
-export function statusText(status: ProposalView['status']): string {
-  switch (status) {
+/** A review Ask (cd-ueft): per-item checkboxes and three actions, answered as one. Decided, it lists the outcome per item. */
+function ReviewItems({ proposal, canAnswer, onAnswer }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
+  const review = proposal.review!
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+  const open = proposal.status === 'open' && canAnswer
+  const toggle = (id: string) => setSelected((current) => {
+    const next = new Set(current)
+    if (!next.delete(id)) next.add(id)
+    return next
+  })
+  return (
+    <>
+      <ul className="review-list">
+        {review.items.map((item) => {
+          const decided = review.decision === undefined ? undefined : review.decision.approved.includes(item.id) ? 'approved' : 'rejected'
+          return (
+            <li key={item.id} className="review-item" {...(decided === undefined ? {} : { 'data-decision': decided })}>
+              {open ? <label><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggle(item.id)} /> <b>{item.title}</b></label> : <span><b>{item.title}</b>{decided === undefined ? '' : ` · ${decided}`}</span>}
+              {item.action === undefined ? null : <span className="review-action"> [{item.action}]</span>}
+              <div className="question-purpose review-body">{item.body}</div>
+            </li>
+          )
+        })}
+      </ul>
+      {open ? (
+        <div className="question-actions">
+          <button type="button" className="button" onClick={() => onAnswer?.(proposal, false)}>Reject</button>
+          <button type="button" className="button" disabled={selected.size === 0} onClick={() => onAnswer?.(proposal, true, review.items.filter((item) => selected.has(item.id)).map((item) => item.id))}>Approve selected</button>
+          <button type="button" className="button button-primary" onClick={() => onAnswer?.(proposal, true, review.items.map((item) => item.id))}>Approve all</button>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+/** The status line of an Ask; a decided review shows its counts (cd-ueft). */
+export function statusText(proposal: ProposalView): string {
+  const decision = proposal.review?.decision
+  if (decision !== undefined) return `${decision.approved.length} approved, ${decision.rejected.length} rejected`
+  switch (proposal.status) {
     case 'open': return 'Waiting for the owner'
     case 'approved': return 'Approved'
     case 'rejected': return 'Rejected'

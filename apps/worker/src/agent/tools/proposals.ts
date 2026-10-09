@@ -36,6 +36,34 @@ export function grantProposalTools(host: RobotHost): ToolDefinition[] {
   ]
 }
 
+interface ReviewInput { title: string; items: Array<{ id: string; title: string; body: string; action?: string }> }
+
+/** Many decisions in one Ask (cd-dt2x): the owner approves all, some or none of the items. */
+export function reviewTools(host: RobotHost): ToolDefinition[] {
+  return [
+    tool<ReviewInput>({
+      name: 'propose_review',
+      description: 'Put a list of items to your owner for approval in one Ask, e.g. drafted messages to send. Each item has a unique id, a title, a body (what the owner reads) and optionally an action label (what approving does). The owner approves all, some or none; you are woken with the approved and rejected ids and act on exactly those.',
+      parameters: {
+        properties: {
+          title: { type: 'string', description: 'What is being reviewed' },
+          items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, action: { type: 'string' } }, required: ['id', 'title', 'body'] } },
+        },
+        required: ['title', 'items'],
+      },
+      execute: async ({ title, items }) => {
+        if (title.trim() === '') throw new Error('A review needs a title')
+        if (items.length === 0) throw new Error('A review needs at least one item')
+        const ids = items.map((item) => item.id)
+        const repeated = ids.find((id, index) => id.trim() === '' || ids.indexOf(id) !== index)
+        if (repeated !== undefined) throw new Error(`Review item ids must be non-empty and unique; check "${repeated}"`)
+        const proposal = host.propose('review', title, { review: { title, items: items.map(({ id, title: itemTitle, body, action }) => ({ id, title: itemTitle, body, ...(action === undefined || action.trim() === '' ? {} : { action }) })) } })
+        return { proposalId: proposal.id, status: 'waiting for your owner; you are woken with the approved and rejected ids', items: items.length }
+      },
+    }),
+  ]
+}
+
 /** Setup (robot-btct, robot-cobv): the Robot defines itself, then proposes one Grant summary. */
 export function setupTools(host: RobotHost): ToolDefinition[] {
   return [

@@ -3,7 +3,7 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { ConnectionView, HostView, LoginView, PluginView } from '@mr-robot/protocol'
+import type { ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -1007,6 +1007,37 @@ export class Home extends DurableObject<Env> {
   }
   skills(memberId: string): Promise<SkillView[]> { return this.run(skills(memberId)) }
   loadableSkills(memberId: string, names: readonly string[]): Promise<SkillView[]> { return this.run(loadableSkills(memberId, names)) }
+  /**
+   * The library as one Robot of this owner sees it (cd-wfn2). With `holders` (Mr. Robot, cd-56kk) each row
+   * names the owner's other Robots that hold the skill, by grant or through a connector grant.
+   */
+  async skillLibrary(ownerId: string, held: readonly string[], holders: boolean): Promise<SkillLibraryRow[]> {
+    const library = await this.run(skills(ownerId))
+    const connectorOf = new Map<string, ConnectorKind>(Object.entries(CONNECTOR_SKILLS).flatMap(([kind, entries]) => entries.map((entry) => [entry.name, kind as ConnectorKind] as const)))
+    const holding = new Map<string, string[]>()
+    if (holders) {
+      const robots = (await this.run(reachable(ownerId))).filter((robot) => robot.kind === 'robot')
+      const kinds = new Map<string, Map<string, ConnectorKind>>()
+      for (const robot of robots) {
+        const admin = await this.env.ROBOT.getByName(robot.id).adminRow()
+        if (admin === null) continue
+        if (!kinds.has(robot.ownerId)) kinds.set(robot.ownerId, new Map((await this.connectionsFor(robot.ownerId)).map((connection) => [connection.id, connection.kind])))
+        const connectionKinds = new Set((admin.grants.connections ?? []).map((id) => kinds.get(robot.ownerId)?.get(id.replace(/:write$/, ''))))
+        const names = new Set([...admin.grants.skills.filter((name) => !connectorOf.has(name)), ...[...connectionKinds].flatMap((kind) => (kind === undefined ? [] : CONNECTOR_SKILLS[kind].map((entry) => entry.name)))])
+        for (const name of names) holding.set(name, [...(holding.get(name) ?? []), robot.identity.name])
+      }
+    }
+    return library.map((skill) => {
+      const kind = connectorOf.get(skill.name)
+      return {
+        name: skill.name,
+        description: skill.description,
+        held: held.includes(skill.name),
+        source: kind === undefined ? skill.source : `connector:${kind}`,
+        ...(holders ? { holders: holding.get(skill.name) ?? [] } : {}),
+      }
+    })
+  }
   skillRepository(): Promise<SkillRepository | null> { return this.run(skillRepository) }
   setSkillRepository(repository: SkillRepository, token: string | undefined): Promise<void> { return this.run(setSkillRepository(repository, token)) }
   syncSkills(): Promise<{ synced: string[] }> { return this.run(syncSkills) }

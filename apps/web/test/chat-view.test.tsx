@@ -59,6 +59,33 @@ describe('ChatView (robot-q4b2)', () => {
     expect(onReplyInstead).toHaveBeenCalled()
   })
 
+  it('lets the owner approve all, some or none of a review in one answer; the decided card shows counts (cd-dt2x, cd-ueft)', () => {
+    const review: ProposalView = {
+      id: 'p-9', kind: 'review', revision: 1, status: 'open', purpose: 'Replies to send', grants: null, file: null, skill: null,
+      review: { title: 'Replies to send', items: [
+        { id: 'm1', title: 'Reply to Ola', body: 'Thanks, see you Friday.', action: 'Send' },
+        { id: 'm2', title: 'Reply to Piotr', body: 'Not this week.' },
+        { id: 'm3', title: 'Reply to Kasia', body: 'Yes.' },
+      ] },
+    }
+    const onAnswer = vi.fn()
+    const { rerender } = render(<AskBar asks={[review]} onAnswer={onAnswer} onReplyInstead={vi.fn()} />)
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3)
+    expect((screen.getByText('Approve selected') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getAllByRole('checkbox')[0]!)
+    fireEvent.click(screen.getAllByRole('checkbox')[2]!)
+    fireEvent.click(screen.getByText('Approve selected'))
+    expect(onAnswer).toHaveBeenLastCalledWith(review, true, ['m1', 'm3'])
+    fireEvent.click(screen.getByText('Approve all'))
+    expect(onAnswer).toHaveBeenLastCalledWith(review, true, ['m1', 'm2', 'm3'])
+    fireEvent.click(screen.getByText('Reject'))
+    expect(onAnswer).toHaveBeenLastCalledWith(review, false)
+
+    const decided: ProposalView = { ...review, status: 'approved', review: { ...review.review!, decision: { approved: ['m1', 'm3'], rejected: ['m2'] } } }
+    rerender(<ChatView items={[{ kind: 'question', id: 'q', seq: 1, at, proposal: decided }]} meId="m-1" working={false} canAnswer={true} now={at} />)
+    expect(screen.getByText('Review: Replies to send · 2 approved, 1 rejected')).toBeTruthy()
+  })
+
   it("shows another Member's message as theirs, not mine", () => {
     const other: ChatItem = { kind: 'message', id: 'x', seq: 1, at, sender: { kind: 'member', memberId: 'm-2', name: 'Ben' }, text: 'hello', attachments: [], reaction: null }
     const { container } = render(<ChatView items={[other]} meId="m-1" working={false} canAnswer={false} now={at} />)

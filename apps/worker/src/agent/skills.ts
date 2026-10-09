@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import SkillRegistry, { type SkillCandidate } from '@deepseek-ai/dsh-skill'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { SkillView } from '@mr-robot/protocol'
+import type { SkillLibraryRow, SkillView } from '@mr-robot/protocol'
 import { tool } from './tools/define.ts'
 
 export interface SkillSource {
@@ -50,6 +50,8 @@ export interface SkillHost {
   writeSkill(name: string, content: string): Promise<{ path: string; scope: 'local' | 'global' }>
   /** Propose one of the Robot's local skills for the Home library (an ask). */
   promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }>
+  /** Every skill in the Home library this Robot's owner can see, with whether this Robot holds it (cd-wfn2). */
+  skillLibrary(): Promise<SkillLibraryRow[]>
 }
 
 /** The name and description in a SKILL.md's frontmatter. */
@@ -63,6 +65,14 @@ export function skillFrontmatter(content: string): { name?: string; description:
 /** A Robot writes its own skills and proposes them to the library (rb-kkqu, rb-lqwr). */
 export function skillProposalTools(host: SkillHost): ToolDefinition[] {
   return [
+    tool<Record<string, never>>({
+      name: 'skill_library',
+      description: 'List every skill in the Home library: name, description, held (whether you hold it) and source (where it comes from; a connector skill names the connector that brings it). Mr. Robot also gets holders, the Robots that hold each skill. Use it to propose exactly the skills you need.',
+      parameters: { properties: {} },
+      concurrencySafe: true,
+      // Rows are copied: an RPC result is not plain JSON to the tool output check.
+      execute: async () => (await host.skillLibrary()).map((row) => ({ ...row })),
+    }),
     tool<{ name: string; content: string }>({
       name: 'skill_write',
       description: 'Create or replace one of your own local skills (skills/<name>/SKILL.md in your Workspace). content is the full SKILL.md: Markdown with "name" and "description" frontmatter. Skills from the Home library are read-only; write a local skill with another name instead.',

@@ -33,7 +33,7 @@ export const Edge = Effect.gen(function* () {
     assets: {
       directory: './apps/web/dist',
       notFoundHandling: 'single-page-application',
-      runWorkerFirst: ['/api/*'],
+      runWorkerFirst: ['/api/*', '/hooks/*'],
     },
     access: {
       name: 'Mr. Robot',
@@ -69,6 +69,20 @@ export const Edge = Effect.gen(function* () {
       OPENAI_OAUTH_CLIENT_ID: Config.Redacted('MR_ROBOT_OPENAI_OAUTH_CLIENT_ID').pipe(Config.withDefault(Redacted.make('app_EMoamEEZ73f0CkXaXp7hrann'))),
       ANTHROPIC_OAUTH_CLIENT_ID: Config.Redacted('MR_ROBOT_ANTHROPIC_OAUTH_CLIENT_ID').pipe(Config.withDefault(Redacted.make('9d1c250a-e61b-44d9-88ed-5944d1962f5e'))),
     },
+  })
+})
+
+/**
+ * The webhook Channel (v1.6 ticket 07): /hooks/* is outside the Access login (a bypass application
+ * on that path); the key in the URL is the credential and the Worker checks it.
+ */
+export const HookChannel = Effect.gen(function* () {
+  const edge = yield* Edge
+  return yield* Cloudflare.Access.Application('HookChannel', {
+    type: 'self_hosted',
+    name: 'Mr. Robot webhooks',
+    domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/hooks`)),
+    policies: [{ name: 'Webhook key checked by the Worker', decision: 'bypass', include: ['everyone'] }],
   })
 })
 

@@ -99,6 +99,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .question-purpose { color: var(--muted); font-size: 14px; }
 .grant-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .grant-kind { display: inline-block; min-width: 72px; color: var(--faint); font-size: 12.5px; }
+.review-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.review-item[data-decision="rejected"] { opacity: 0.6; }
+.review-action { color: var(--muted); font-size: 13px; }
+.review-body { white-space: pre-wrap; margin-left: 24px; }
 .question-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .question-status { color: var(--faint); font-size: 13px; margin-top: 8px; }
 .file-preview { white-space: pre-wrap; font-size: 12.5px; background: #1a1a1a; border-radius: 8px; padding: 8px; max-height: 240px; overflow: auto; }

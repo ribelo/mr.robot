@@ -421,6 +421,8 @@ export const api = new Router<ApiContext>()
     yield* call(() => robot(c, id).deleteFile(path))
     return { ok: true }
   }))
+  .on('GET', '/api/robots/:id/webhook', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).webhook()))))
+  .on('POST', '/api/robots/:id/webhook/regenerate', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).regenerateWebhook()))))
   .on('GET', '/api/robots/:id/prompt', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).promptPreview()))))
   .on('POST', '/api/robots/:id/retry', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).retry())), Effect.map((retried) => ({ retried }))))
   .on('GET', '/api/robots/:id/events', (c, { id }) => Effect.gen(function* () {
@@ -468,7 +470,7 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/robots/:id/proposals/:proposal', (c, { id, proposal }) => Effect.gen(function* () {
     yield* owner(c, id)
     const answer = yield* decodeBody(c.request, ProposalAnswer)
-    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve))
+    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved))
     if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : notFound('no such proposal'))
     return result.proposal
   }))

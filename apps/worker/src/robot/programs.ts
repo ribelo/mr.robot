@@ -6,7 +6,7 @@
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
-import type { NotificationKind, ProposalView, RobotSettings, RoutineView, SettingsPatch } from '@mr-robot/protocol'
+import type { NotificationKind, ProposalView, ReviewView, RobotSettings, RoutineView, SettingsPatch } from '@mr-robot/protocol'
 import type { MemberFileName } from '../member/member.ts'
 import { currentMonth } from '../home/home.ts'
 import { HOME_ID, type Env } from '../env.ts'
@@ -425,7 +425,7 @@ export const updateSettings = (patch: SettingsPatch) => Effect.gen(function* () 
 // ------------------------------------------------------------------ proposals and the owner's answers (robot-cobv, robot-vy9z)
 
 export function proposalView(row: ProposalRow): ProposalView {
-  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill }
+  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill, ...(row.review === undefined ? {} : { review: row.review }) }
 }
 
 function approvedNote(proposal: ProposalRow): string {
@@ -434,6 +434,16 @@ function approvedNote(proposal: ProposalRow): string {
     case 'grants': return `Your owner approved your Grant proposal (${proposal.purpose}). The new Grants are available from now on.`
     default: return `Your owner approved your ${proposal.kind} proposal (${proposal.purpose}).`
   }
+}
+
+/** The answer to a review, as text the model reads (cd-7gwt). */
+function reviewNote(review: ReviewView, decision: { approved: readonly string[]; rejected: readonly string[] }): string {
+  const lines = (ids: readonly string[]) => ids.length === 0 ? ['- none'] : ids.map((id) => `- ${id}: ${review.items.find((item) => item.id === id)?.title ?? ''}`)
+  return [
+    `Your owner answered your review "${review.title}": ${decision.approved.length} approved, ${decision.rejected.length} rejected.`,
+    'Approved (go ahead with exactly these):', ...lines(decision.approved),
+    'Rejected (do not do these, and do not ask for them again unless your owner brings them up):', ...lines(decision.rejected),
+  ].join('\n')
 }
 
 const NO_GRANTS = { tools: [], skills: [], recipients: [], secrets: [] }
@@ -486,20 +496,31 @@ export type AnswerResult =
  * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
  * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
  */
-export const answer = (proposalId: string, revision: number, approve: boolean) => Effect.gen(function* () {
+export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[]) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
-  if (store.proposal(proposalId) === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
-  const answered = store.answerProposal(proposalId, revision, approve, Date.now())
+  const pending = store.proposal(proposalId)
+  if (pending === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
+  // A review is one answer: the listed ids are approved, every other item is rejected (cd-ueft).
+  const review = pending.kind === 'review' ? pending.review : undefined
+  const ids = review?.items.map((item) => item.id) ?? []
+  const approvedSet = new Set(approve ? (approvedIds ?? ids) : [])
+  const decision = review === undefined ? undefined : { approved: ids.filter((id) => approvedSet.has(id)), rejected: ids.filter((id) => !approvedSet.has(id)) }
+  const approved = decision === undefined ? approve : decision.approved.length > 0
+  const answered = store.answerProposal(proposalId, revision, approved, Date.now(), decision)
   if (answered === undefined) return { ok: false, reason: 'stale' } as AnswerResult
-  if (approve) yield* apply(answered)
+  if (approved) yield* apply(answered)
   yield* platform.changed()
   yield* wake({
     kind: 'platform',
     sender: { kind: 'platform' },
-    text: approve ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
+    text: review !== undefined && decision !== undefined ? reviewNote(review, decision)
+      : approved ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
     // The chat shows what happened, not the instruction to the model.
-    payload: { summary: approve ? (answered.kind === 'setup' ? 'Setup approved' : 'Approved') : 'Rejected' },
+    payload: {
+      summary: decision !== undefined ? `Review: ${decision.approved.length} approved, ${decision.rejected.length} rejected` : approved ? (answered.kind === 'setup' ? 'Setup approved' : 'Approved') : 'Rejected',
+      ...(decision === undefined ? {} : { approved: decision.approved, rejected: decision.rejected }),
+    },
   })
   return { ok: true, proposal: proposalView(answered) } as AnswerResult
 })

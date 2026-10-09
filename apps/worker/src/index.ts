@@ -6,6 +6,7 @@
 import * as Effect from 'effect/Effect'
 import { api, type ApiContext } from './edge/api.ts'
 import { call, forbidden, json, notFound, respond, type ApiError } from './edge/http.ts'
+import { hookChannel, isHookPath } from './edge/hooks.ts'
 import { identityEmail } from './edge/identity.ts'
 import { HOME_ID, type Env } from './env.ts'
 import type { SignIn } from './home/home.ts'
@@ -52,6 +53,13 @@ export default {
         const status = typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : 500
         if (status === 500) console.error('host channel failed', error)
         return json({ error: error instanceof Error ? error.message : String(error) }, status)
+      })
+    }
+    // The webhook Channel is outside Access too; its key is the credential (v1.6 ticket 07).
+    if (isHookPath(path)) {
+      return hookChannel(request, env).catch((error: unknown) => {
+        console.error('webhook failed', error)
+        return json({ error: 'the webhook could not be delivered' }, 500)
       })
     }
     const program = Effect.gen(function* () {

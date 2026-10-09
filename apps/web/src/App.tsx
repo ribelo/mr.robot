@@ -143,8 +143,8 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
     end?.scrollTo({ top: end.scrollHeight })
   }, [conversation.items.length, conversation.working, stream?.text.length])
 
-  const answer = async (proposal: ProposalView, approve: boolean) => {
-    setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve), [keys.robot(id), keys.robots])))
+  const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[]) => {
+    setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved), [keys.robot(id), keys.robots])))
   }
 
   // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
@@ -198,7 +198,7 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
         {header}
         <div className="chat-scroll" ref={scrollRef}>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} />
+          <ChatView items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved) => void answer(proposal, approve, approved)} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>
@@ -207,7 +207,7 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
           ) : null}
         </div>
         {asks.length > 0 && !replyingInstead ? (
-          <AskBar asks={asks} onAnswer={(proposal, approve) => void answer(proposal, approve)} onReplyInstead={() => setReplyingInstead(true)} />
+          <AskBar asks={asks} onAnswer={(proposal, approve, approved) => void answer(proposal, approve, approved)} onReplyInstead={() => setReplyingInstead(true)} />
         ) : (
         <Composer
           placeholder={`Message ${identity.name}`}

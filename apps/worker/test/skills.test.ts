@@ -1,6 +1,6 @@
-import { reset } from 'cloudflare:test'
+import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Conversation, SkillView } from '@mr-robot/protocol'
+import type { Conversation, RobotSummary, SkillView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
@@ -147,3 +147,39 @@ describe('the Home skill library', () => {
     expect((await api(BEN, '/api/admin/skills/tdd', { method: 'PUT', body: { description: 'x', content: 'x' } })).status).toBe(403)
   })
 })
+
+describe('skill_library', () => {
+  const lastResult = (id: string) => JSON.parse(requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join('')).at(-1)!) as Array<Record<string, unknown>>
+
+  it('lists the library with description, held and source for a Robot (cd-wfn2)', async () => {
+    await syncLibrary()
+    const id = await robotWithSkills(['tdd'])
+    scripts.set(id, [{ calls: [{ name: 'skill_library', args: {} }] }, { text: 'Listed.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'what is in the library?' } })
+    await settle(id)
+    expect(lastResult(id)).toEqual([
+      { name: 'sage', description: 'Structure documentation', held: false, source: 'git' },
+      { name: 'tdd', description: 'Test-driven development', held: true, source: 'git' },
+    ])
+  })
+
+  it("names the connector that brings a skill and, for Mr. Robot, the Robots that hold each skill (cd-wfn2, cd-56kk)", async () => {
+    await syncLibrary()
+    const annaId = (await api<{ id: string }>(ANNA, '/api/me')).body.id
+    const gmail = await env.MEMBER.getByName(annaId).addConnection({ kind: 'google', label: 'Private', account: 'anna@gmail.test', services: ['gmail'], shared: false, meta: { expiresAt: Date.now() + 3_600_000 }, secrets: { accessToken: 'a', refreshToken: 'r' } })
+    const reader = await robotWithSkills(['tdd'])
+    await api(ANNA, `/api/robots/${reader}/settings`, { method: 'PATCH', body: { grants: { tools: ['skills'], skills: ['tdd'], recipients: [], secrets: [], connections: [gmail.id] } } })
+    const readerName = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.id === reader)!.identity.name
+    const chief = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    await settle(chief)
+    await api(ANNA, `/api/robots/${chief}/settings`, { method: 'PATCH', body: { codeMode: false } })
+    scripts.set(chief, [{ calls: [{ name: 'skill_library', args: {} }] }, { text: 'Listed.' }])
+    await api(ANNA, `/api/robots/${chief}/messages`, { body: { text: 'who knows what?' } })
+    await settle(chief)
+    const rows = lastResult(chief)
+    expect(rows.find((row) => row.name === 'tdd')).toMatchObject({ source: 'git', holders: [readerName] })
+    expect(rows.find((row) => row.name === 'sage')).toMatchObject({ holders: [] })
+    expect(rows.find((row) => row.name === 'google-workspace')).toMatchObject({ source: 'connector:google', holders: [readerName] })
+  })
+})
+
