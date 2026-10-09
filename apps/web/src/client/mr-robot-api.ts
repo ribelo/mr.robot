@@ -27,7 +27,7 @@ const enc = encodeURIComponent
 
 export type LoginChange = { readonly username?: string; readonly password?: string; readonly websites?: readonly string[]; readonly notes?: string; readonly allowRead?: boolean; readonly shared: boolean }
 export type ListPrefChange = { readonly pinned?: boolean; readonly hidden?: boolean; readonly unread?: boolean }
-export type MePatch = Partial<Pick<Me, 'name' | 'timeZone' | 'quietHours' | 'workDetails'>>
+export type MePatch = Partial<Pick<Me, 'name' | 'timeZone' | 'quietHours' | 'workDetails' | 'theme'>>
 
 const make = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient

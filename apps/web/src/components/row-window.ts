@@ -57,7 +57,7 @@ export interface RowWindow {
   scrollToEnd(): void
 }
 
-export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, initialViewport, followThreshold }: {
+export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, initialViewport, followThreshold, following: shared }: {
   readonly rows: ReadonlyArray<WindowRow>
   readonly scrollElement: RefObject<HTMLElement | null>
   readonly enabled: boolean
@@ -67,11 +67,14 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
   readonly initialViewport: number
   /** Within this many pixels of the bottom, new rows keep the view at the end. */
   readonly followThreshold: number
+  /** Whether to follow the end, decided by the caller; the threshold then decides nothing. */
+  readonly following?: RefObject<boolean>
 }): RowWindow {
   const [viewport, setViewport] = useState({ top: 0, height: initialViewport })
   const offsets = rowOffsets(enabled ? rows : [])
   /** At the end as of the last scroll; rows growing under it fire no scroll, so it stays true until the person scrolls away. */
-  const following = useRef(true)
+  const own = useRef(true)
+  const following = shared ?? own
   const totalHeight = offsets[offsets.length - 1] ?? 0
 
   // Track the scroll position and the pane's height. A passive effect: the scrolling element may be
@@ -82,7 +85,7 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
     const read = () => setViewport({ top: pane.scrollTop - margin, height: pane.clientHeight || initialViewport })
     // Only a scroll decides whether the view follows the end; growing rows fire none.
     const scrolled = () => {
-      following.current = pane.scrollHeight - pane.clientHeight - pane.scrollTop <= followThreshold
+      if (shared === undefined) own.current = pane.scrollHeight - pane.clientHeight - pane.scrollTop <= followThreshold
       read()
     }
     read()
@@ -90,7 +93,7 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(read)
     observer?.observe(pane)
     return () => { pane.removeEventListener('scroll', scrolled); observer?.disconnect() }
-  }, [scrollElement, enabled, margin, initialViewport, followThreshold])
+  }, [scrollElement, enabled, margin, initialViewport, followThreshold, shared])
 
   // Before rows change: remember the first visible row by key and whether the view sat at the end.
   const anchor = useRef<{ key: string | number; offset: number; atEnd: boolean } | null>(null)
@@ -141,7 +144,7 @@ export function useRowWindow({ rows, scrollElement, enabled, overscan, margin, i
     const pane = scrollElement.current
     if (pane !== null) pane.scrollTop = pane.scrollHeight
     following.current = true
-  }, [scrollElement])
+  }, [scrollElement, following])
 
   return {
     range,

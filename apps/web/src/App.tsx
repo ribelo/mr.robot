@@ -1,6 +1,6 @@
 import { Empty as EmptyState, ErrorState } from './components/States.tsx'
 import { hostBridge } from './components/ThisComputer.tsx'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
 import * as Effect from 'effect/Effect'
 import { AsyncResult } from 'effect/reactivity'
@@ -13,10 +13,13 @@ import { go, useRoute, type Route } from './route.ts'
 import { Avatar } from './components/Avatar.tsx'
 import { ChatView } from './components/ChatView.tsx'
 import { Composer } from './components/Composer.tsx'
+import { ChatScroll } from './components/ChatScroll.tsx'
+import { usePendingSends, type OutgoingMessage } from './components/use-pending-sends.ts'
 import { AskBar } from './components/AskBar.tsx'
 import { Panel } from './components/Panel.tsx'
 import { RobotList } from './components/RobotList.tsx'
 import { Pages } from './pages.tsx'
+import { applyTheme } from './theme/theme.ts'
 import { NewRobot } from './components/NewRobot.tsx'
 import { EditProfileSheet, RoutineSheet } from './components/RobotSheets.tsx'
 
@@ -31,6 +34,8 @@ function SignedIn({ me }: { me: Me }) {
   const refreshRobots = useAtomRefresh(robotsAtom)
   const robots: readonly RobotSummary[] = AsyncResult.getOrElse(robotsResult, () => [])
   const command = useCommand()
+  // The Member's stored theme wins over this device's remembered one (ap-itj1).
+  useEffect(() => { applyTheme(me.theme ?? 'system') }, [me.theme])
   // The desktop app's tray badge follows the list's unread robots (pl-mhyg).
   const unreadCount = robots.filter((robot) => robot.unread).length
   // Re-sent on every list refresh: the app may have counted notifications on top of it meanwhile.
@@ -122,7 +127,7 @@ function RobotView({ route, me, robot, onSheet }: { route: Extract<Route, { page
   return <RobotConversation route={route} me={me} robot={robot} conversation={conversation} panel={panel} stream={feed.stream} onSheet={onSheet} />
 }
 
-function RobotConversation({ route, me, robot, conversation, panel, stream, onSheet }: {
+export function RobotConversation({ route, me, robot, conversation, panel, stream, onSheet }: {
   route: Extract<Route, { page: 'robot' }>
   me: Me
   robot: RobotSummary | undefined
@@ -136,13 +141,9 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
   const [replyingInstead, setReplyingInstead] = useState(false)
   const [search, setSearch] = useState<{ query: string; index: number }>()
   const [failure, setFailure] = useState<string>()
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const end = scrollRef.current
-    end?.scrollTo({ top: end.scrollHeight })
-  }, [conversation.items.length, conversation.working, stream?.text.length])
-
+  const [sentCount, setSentCount] = useState(0)
+  const post = useCallback((message: OutgoingMessage) => command((api) => api.send(id, message), [keys.robot(id), keys.robots]), [command, id])
+  const outgoing = usePendingSends(conversation.items, me.id, post)
   const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[]) => {
     setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved), [keys.robot(id), keys.robots])))
   }
@@ -161,7 +162,7 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
   const header: ReactNode = (
     <header className="conversation-head">
       <button type="button" className="icon-button back" aria-label="Back" onClick={() => go({ page: 'home' })}>‹</button>
-      <Avatar color={identity.avatarColor} size={22} />
+      <Avatar color={identity.avatarColor} size={22} state={robot?.fleetState ?? panel.summary.fleetState} />
       <span className="conversation-name">{identity.name}</span>
       {panel.summary.status === 'setup' ? <span className="pill">setup</span> : null}
       {panel.summary.status === 'paused' ? <span className="pill">paused</span> : null}
@@ -196,16 +197,18 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
     <div className={route.panel ? 'conversation with-panel' : 'conversation'}>
       <section className="conversation-main">
         {header}
-        <div className="chat-scroll" ref={scrollRef}>
+        <ChatScroll itemCount={conversation.items.length + outgoing.pending.length} pinSignal={sentCount} growth={(stream?.text.length ?? 0) + (stream?.thinking.length ?? 0) + (conversation.working ? 1 : 0)}>
+          {(scrollRef, following) => (<>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved) => void answer(proposal, approve, approved)} />
+          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved) => void answer(proposal, approve, approved)} pending={outgoing.pending} onRetry={outgoing.retry} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>
               <button type="button" className="link" onClick={() => go({ page: 'advanced', id })}>Change the model</button>
             </div>
           ) : null}
-        </div>
+          </>)}
+        </ChatScroll>
         {asks.length > 0 && !replyingInstead ? (
           <AskBar asks={asks} onAnswer={(proposal, approve, approved) => void answer(proposal, approve, approved)} onReplyInstead={() => setReplyingInstead(true)} />
         ) : (
@@ -215,10 +218,10 @@ function RobotConversation({ route, me, robot, conversation, panel, stream, onSh
             const bytes = new Uint8Array(await file.arrayBuffer())
             return command((api) => api.upload(id, { name: file.name, type: file.type, bytes }), [keys.files(id)])
           }}
-          onSend={async (text, attachments) => {
-            const sent = await command((api) => api.send(id, { text, attachments }), [keys.robot(id), keys.robots])
+          onSend={(text, attachments) => {
+            outgoing.send(text, attachments)
             setReplyingInstead(false)
-            return sent
+            setSentCount((count) => count + 1)
           }}
         />
         )}

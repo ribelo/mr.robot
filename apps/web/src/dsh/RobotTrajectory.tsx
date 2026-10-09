@@ -38,8 +38,7 @@ import './theme.css'
 
 const PAGE = 400
 
-// DSH's dark palette is keyed on this attribute; Mr. Robot is always dark.
-if (typeof document !== 'undefined') document.body.setAttribute('data-ds-dark-theme', '')
+// DSH's dark palette is keyed on an attribute of <body>; src/theme/theme.ts sets it with the app theme.
 
 /** The definitions DSH's trajectory plugin registers, collected without a Cordis context. */
 function trajectoryDefinitions() {

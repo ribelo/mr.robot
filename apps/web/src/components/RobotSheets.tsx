@@ -6,8 +6,7 @@ import { exitFailure } from '../client/api-failure.ts'
 import { renderResult } from './AtomView.tsx'
 import { Avatar } from './Avatar.tsx'
 import { ClockIcon } from './ChatView.tsx'
-
-const COLORS = ['#5ec4b6', '#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
+import { ColorPicker } from './ColorPicker.tsx'
 
 /** Edit profile (robot-lulc, reference 09): avatar, name, title, description, notifications, Routines. */
 export function EditProfileSheet({ robotId, onClose, onOpenRoutine }: {
@@ -49,11 +48,7 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
     <Sheet onClose={onClose} footer={editable ? <button type="button" className="button button-primary" disabled={saving || identity.name.trim() === ''} onClick={() => void save()}>Save</button> : null}>
       <div className="sheet-avatar"><Avatar color={identity.avatarColor} size={72} /></div>
       {editable ? (
-        <div className="color-row" role="radiogroup" aria-label="Avatar colour">
-          {COLORS.map((color) => (
-            <button key={color} type="button" role="radio" aria-checked={identity.avatarColor === color} aria-label={color} className={identity.avatarColor === color ? 'color-dot on' : 'color-dot'} style={{ background: color }} onClick={() => setIdentity({ ...identity, avatarColor: color })} />
-          ))}
-        </div>
+        <ColorPicker value={identity.avatarColor} onChange={(color) => setIdentity({ ...identity, avatarColor: color })} />
       ) : null}
       <label>Name<input value={identity.name} disabled={!editable} onChange={(event) => setIdentity({ ...identity, name: event.target.value })} /></label>
       <label>Title (optional)<input value={identity.title} disabled={!editable} onChange={(event) => setIdentity({ ...identity, title: event.target.value })} /></label>

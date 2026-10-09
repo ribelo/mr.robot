@@ -26,6 +26,9 @@ export type MemberView = typeof MemberView.Type
 
 export const WorkDetails = Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])
 export type WorkDetails = typeof WorkDetails.Type
+/** The Member's theme choice: follow the system, or pin light or dark (ap-itj1). */
+export const ThemeChoice = Schema.Literals(['system', 'light', 'dark'])
+export type ThemeChoice = typeof ThemeChoice.Type
 
 export const QuietHours = Schema.Struct({
   /** Local start, "HH:MM". */
@@ -43,6 +46,8 @@ export const Me = Schema.Struct({
   vapidPublicKey: Schema.String,
   /** How much of a Robot's work the chat shows (pl-6eir). */
   workDetails: WorkDetails,
+  /** System, light or dark (ap-itj1). */
+  theme: ThemeChoice,
 })
 export type Me = typeof Me.Type
 
@@ -51,6 +56,7 @@ export const MemberPreferences = Schema.Struct({
   timeZone: Schema.optional(Schema.String),
   quietHours: Schema.optional(Schema.NullOr(QuietHours)),
   workDetails: Schema.optional(Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])),
+  theme: Schema.optional(ThemeChoice),
 })
 
 // ---------------------------------------------------------------- Robots
@@ -415,7 +421,11 @@ const itemFields = { id: Schema.String, seq: Schema.Number, at: Schema.Number }
 
 /** One item of the simple chat view. */
 export const ChatItem = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('message'), ...itemFields, sender: Sender, text: Schema.String, attachments: Schema.Array(Attachment), reaction: Schema.NullOr(Schema.String) }),
+  Schema.Struct({
+    kind: Schema.Literal('message'), ...itemFields, sender: Sender, text: Schema.String, attachments: Schema.Array(Attachment), reaction: Schema.NullOr(Schema.String),
+    /** The client id the Member's app sent it with: the app's pending copy of it is this item (ap-3si6). */
+    clientId: Schema.optional(Schema.String),
+  }),
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
   /** A Routine card; `by` names who changed it when it was not the Robot itself (Mr. Robot, cd-n9pi). */
   Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran', 'paused', 'resumed']), name: Schema.String, by: Schema.optional(Schema.String) }),
@@ -828,6 +838,8 @@ export const SkillsSynced = Schema.Struct({ synced: Schema.Array(Schema.String) 
 
 export const SendMessage = Schema.Struct({
   text: Schema.String,
+  /** Chosen by the client for each message; a repeated send with the same id is accepted once (ap-ceqx). */
+  clientId: Schema.optional(Schema.String.check(Schema.isMaxLength(128))),
   attachments: Schema.optional(Schema.Array(Schema.Struct({
     name: Schema.String,
     path: Schema.String,

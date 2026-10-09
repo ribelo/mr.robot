@@ -5,7 +5,8 @@ import { exitFailure, type ApiFailure } from '../client/api-failure.ts'
 
 export interface ComposerProps {
   readonly placeholder: string
-  readonly onSend: (text: string, attachments: Attachment[]) => Promise<Exit.Exit<void, ApiFailure>>
+  /** Called at Enter; the Composer is already empty. Whether the send works is the Conversation's to show (ap-3si6). */
+  readonly onSend: (text: string, attachments: Attachment[]) => void
   readonly onUpload: (file: File) => Promise<Exit.Exit<Attachment, ApiFailure>>
 }
 
@@ -17,22 +18,18 @@ export function Composer({ placeholder, onSend, onUpload }: ComposerProps) {
   const [failure, setFailure] = useState<string>()
   const input = useRef<HTMLInputElement>(null)
 
-  const send = async () => {
+  const send = () => {
     if (busy || (text.trim() === '' && files.length === 0)) return
-    setBusy(true)
-    const sent = await onSend(text.trim(), files)
-    setFailure(exitFailure(sent))
-    if (Exit.isSuccess(sent)) {
-      setText('')
-      setFiles([])
-    }
-    setBusy(false)
+    onSend(text.trim(), files)
+    setText('')
+    setFiles([])
+    setFailure(undefined)
   }
 
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !matchMedia('(pointer: coarse)').matches) {
       event.preventDefault()
-      void send()
+      send()
     }
   }
 
@@ -66,7 +63,7 @@ export function Composer({ placeholder, onSend, onUpload }: ComposerProps) {
           onChange={(event) => setText(event.target.value)}
           onKeyDown={keyDown}
         />
-        <button type="button" className="send-button" aria-label="Send" onClick={() => void send()} disabled={busy || (text.trim() === '' && files.length === 0)}>
+        <button type="button" className="send-button" aria-label="Send" onClick={send} disabled={busy || (text.trim() === '' && files.length === 0)}>
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
       </div>

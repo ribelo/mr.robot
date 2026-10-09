@@ -32,6 +32,8 @@ export interface WakeInput {
   readonly text: string
   readonly attachments?: readonly Attachment[]
   readonly payload?: Record<string, unknown>
+  /** The sender's id for this message; a repeated Wake-up with the same id is queued once. */
+  readonly clientId?: string
 }
 
 /** A message between Robots, as the platform carries it (robot-mv15). */
@@ -99,12 +101,24 @@ const config = Effect.gen(function* () {
 
 // ------------------------------------------------------------------ wake-ups and lifecycle (robot-qo06)
 
+/** The latest client ids with their Wake-up ids: a retry comes within seconds, so a short list is enough to accept a send once. */
+const RECENT_CLIENT_IDS = 'recent-client-ids'
+const RECENT_CLIENT_ID_LIMIT = 200
+
 /** Queue a Wake-up and make sure the queue is being drained. */
 export const wake = (input: WakeInput) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   if ((yield* config).status === 'deleted') return yield* invalid('robot is deleted')
-  const id = store.enqueue(input.kind, input.sender, input.text, { ...input.payload, attachments: input.attachments ?? [] }, Date.now())
+  const recent = store.get<ReadonlyArray<readonly [string, number]>>(RECENT_CLIENT_IDS) ?? []
+  const seen = input.clientId === undefined ? undefined : recent.find(([clientId]) => clientId === input.clientId)
+  if (seen !== undefined) return seen[1]
+  const id = store.enqueue(input.kind, input.sender, input.text, {
+    ...input.payload,
+    attachments: input.attachments ?? [],
+    ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
+  }, Date.now())
+  if (input.clientId !== undefined) store.set(RECENT_CLIENT_IDS, [...recent, [input.clientId, id] as const].slice(-RECENT_CLIENT_ID_LIMIT))
   yield* platform.drain()
   return id
 })

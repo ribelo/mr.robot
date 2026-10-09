@@ -38,7 +38,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
   const row = (robot: RobotSummary) => (
     <li key={robot.id} className="robot-item" onContextMenu={(event) => { event.preventDefault(); setMenu(robot.id) }}>
       <button type="button" className={robot.id === selected ? 'robot-row selected' : 'robot-row'} onClick={() => onSelect(robot.id)}>
-        <Avatar color={robot.identity.avatarColor} size={34} badge={robot.fleetState === 'waiting for you'} />
+        <Avatar color={robot.identity.avatarColor} size={34} state={robot.fleetState} />
         <span className="robot-row-text">
           <span className="robot-row-top">
             <span className={robot.unread ? 'robot-name unread' : 'robot-name'}>{robot.pinned === true ? <span className="pin" aria-label="pinned">📌 </span> : null}{robot.identity.name}</span>
