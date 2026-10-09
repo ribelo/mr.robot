@@ -140,7 +140,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_draft',
       service: 'gmail',
       description: 'Create a draft (not sent): to, cc, subject, body, optional Workspace files as attachments, optional replyTo message id to draft a reply in its thread. The owner can review and send it in Gmail.',
-      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: 'Message text, plain text' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace paths.' }, replyTo: { type: 'string', description: 'Id of the message this draft answers; the draft joins its thread' } }, required: ['to', 'subject', 'body'] },
+      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: 'Message text, plain text' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace paths.' }, replyTo: { type: 'string', description: 'Id of the message this draft answers; the draft joins its thread' } }, required: ['to', 'subject', 'body'], emptyAllowed: ['subject', 'body'] },
       action: (args) => `draft "${str(args, 'subject')}" to ${list(args['to']).join(', ')}`,
       run: (args, use) => Effect.gen(function* () {
         const reply = str(args, 'replyTo') === '' ? undefined : yield* getMessage(host, use, str(args, 'replyTo'), 'metadata')
@@ -156,7 +156,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       service: 'gmail',
       write: true,
       description: 'Send an e-mail now: to, cc, bcc, subject, body, optional Workspace files as attachments. Prefer gmail_draft when the owner should check it first.',
-      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, bcc: { type: 'array', items: { type: 'string' }, description: 'Bcc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: 'Message text, plain text' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['to', 'subject', 'body'] },
+      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, bcc: { type: 'array', items: { type: 'string' }, description: 'Bcc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: 'Message text, plain text' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['to', 'subject', 'body'], emptyAllowed: ['subject', 'body'] },
       action: (args) => `send "${str(args, 'subject')}" to ${list(args['to']).join(', ')}`,
       run: (args, use) => Effect.gen(function* () {
         const files = yield* filesOf(host, list(args['attachments']))
@@ -169,7 +169,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       service: 'gmail',
       write: true,
       description: 'Reply in the thread of a message, to its sender (or to everyone with replyAll); optional Workspace files as attachments.',
-      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, body: { type: 'string', description: 'Message text, plain text' }, replyAll: { type: 'boolean', description: 'Answer everyone on the message, not only the sender' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['messageId', 'body'] },
+      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, body: { type: 'string', description: 'Message text, plain text' }, replyAll: { type: 'boolean', description: 'Answer everyone on the message, not only the sender' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['messageId', 'body'], emptyAllowed: ['body'] },
       action: (args) => `reply to message ${str(args, 'messageId')}${args['replyAll'] === true ? ' (all)' : ''}`,
       run: (args, use, account) => Effect.gen(function* () {
         const original = yield* getMessage(host, use, str(args, 'messageId'), 'metadata')

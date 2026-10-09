@@ -64,6 +64,15 @@ function eventBody(args: Args): Record<string, unknown> {
   }
 }
 
+/** An inverted range makes Google answer with an empty list; refuse it before the call (ts-3d3n). */
+function rangeInOrder(args: Args): ConnectorRefused | undefined {
+  const from = Date.parse(str(args, 'from'))
+  const to = Date.parse(str(args, 'to'))
+  return Number.isFinite(from) && Number.isFinite(to) && from > to
+    ? new ConnectorRefused({ message: `from (${str(args, 'from')}) is after to (${str(args, 'to')}); give a range that starts before it ends` })
+    : undefined
+}
+
 const eventProperties = {
   calendarId: { type: 'string', description: 'Default: the primary calendar.' },
   summary: { type: 'string', description: 'Event title' },
@@ -92,16 +101,11 @@ export function calendarTools(host: ConnectorHost): ReadonlyArray<ConnectorToolS
       description: 'List events between from and to (RFC 3339), recurring ones expanded, in time order; query searches titles, descriptions, places and attendees.',
       parameters: { properties: { calendarId: eventProperties.calendarId, from: { type: 'string', description: 'Start of the range, RFC 3339 date-time (2026-10-09T00:00:00+02:00)' }, to: { type: 'string', description: 'End of the range, RFC 3339 date-time; not before from' }, query: { type: 'string', description: 'Words to look for in titles, descriptions, places and attendees' }, max: { type: 'number', description: 'Most events to return (default 50, at most 250)' } }, required: ['from', 'to'] },
       action: (args) => `events ${str(args, 'from')} – ${str(args, 'to')}${str(args, 'query') === '' ? '' : ` matching "${str(args, 'query')}"`}`,
-      run: (args, use) => Effect.gen(function* () {
-        // An inverted range would answer with an empty list; refuse it before the call (ts-3d3n).
-        const from = Date.parse(str(args, 'from'))
-        const to = Date.parse(str(args, 'to'))
-        if (Number.isFinite(from) && Number.isFinite(to) && from > to) return yield* new ConnectorRefused({ message: `from (${str(args, 'from')}) is after to (${str(args, 'to')}); give a range that starts before it ends` })
-        return yield* Effect.map(
+      check: rangeInOrder,
+      run: (args, use) => Effect.map(
         google(host, use, { method: 'GET', url: `${CALENDAR}/calendars/${calendarOf(args)}/events${query({ timeMin: str(args, 'from'), timeMax: str(args, 'to'), q: str(args, 'query') || undefined, singleEvents: true, orderBy: 'startTime', maxResults: Math.min(Number(args['max'] ?? 50) || 50, 250) })}` }, Events),
         (body) => ({ timeZone: body.timeZone ?? null, events: (body.items ?? []).map(shown) }),
-        )
-      }),
+      ),
     },
     {
       name: 'calendar_event',
@@ -162,6 +166,7 @@ export function calendarTools(host: ConnectorHost): ReadonlyArray<ConnectorToolS
       description: 'Busy times between from and to (RFC 3339) for the account\'s calendars or the ones named (e-mail addresses work for colleagues who share free/busy).',
       parameters: { properties: { from: { type: 'string', description: 'Start of the range, RFC 3339 date-time (2026-10-09T00:00:00+02:00)' }, to: { type: 'string', description: 'End of the range, RFC 3339 date-time; not before from' }, calendars: { type: 'array', items: { type: 'string' }, description: 'Calendar ids to check (default: the primary calendar)' } }, required: ['from', 'to'] },
       action: (args) => `free/busy ${str(args, 'from')} – ${str(args, 'to')}`,
+      check: rangeInOrder,
       run: (args, use) => Effect.map(
         google(host, use, { method: 'POST', url: `${CALENDAR}/freeBusy`, json: { timeMin: str(args, 'from'), timeMax: str(args, 'to'), items: (Array.isArray(args['calendars']) && args['calendars'].length > 0 ? (args['calendars'] as string[]) : ['primary']).map((id) => ({ id })) } }, FreeBusy),
         (body) => Object.fromEntries(Object.entries(body.calendars).map(([id, entry]) => [id, entry.busy ?? []])),

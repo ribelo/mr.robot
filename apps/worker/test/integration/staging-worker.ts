@@ -4,7 +4,6 @@
  * scripts/browser-staging.ts.
  */
 import { RenderingDriver } from '../../src/browser/driver.ts'
-import { BrowserSearchProvider } from '../../src/agent/web.ts'
 
 const FIXTURE = `<!doctype html><title>Fixture shop</title>
 <h1>Fixture shop</h1>
@@ -124,13 +123,6 @@ export default {
       }
     } catch (error) {
       report.watchError = error instanceof Error ? error.message : String(error)
-    }
-    try {
-      const found = await new BrowserSearchProvider(env.BROWSER).search({ query: 'otodom mokotow 2 pokoje' })
-      report.searchCount = found.sources.length
-      report.searchFirst = found.sources[0]?.url
-    } catch (error) {
-      report.searchError = error instanceof Error ? error.message : String(error)
     }
     return Response.json(report)
   },

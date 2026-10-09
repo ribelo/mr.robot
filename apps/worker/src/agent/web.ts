@@ -1,15 +1,12 @@
 /**
- * Web fetch and search through the DSH web seam (robot-o6lf): dsh-web holds the providers,
- * dsh-tool-web turns them into the model's web_fetch tool. The generic web_search tool is not
- * mounted (v1.8, ts-6b3k): it answered mostly to the first word of the query; search is Exa's.
+ * Web fetch through the DSH web seam (robot-o6lf): dsh-web holds the fetch provider, dsh-tool-web
+ * turns it into the model's web_fetch tool. The generic web_search tool and its search providers are
+ * not mounted (v1.8, ts-6b3k): it answered mostly to the first word of the query; search is Exa's.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import puppeteer from '@cloudflare/puppeteer'
-import WebRuntime, { WebError, type WebFetchProvider, type WebFetchRequest, type WebFetchResult, type WebSearchProvider, type WebSearchRequest, type WebSearchResult } from '@deepseek-ai/dsh-web'
+import WebRuntime, { WebError, type WebFetchProvider, type WebFetchRequest, type WebFetchResult } from '@deepseek-ai/dsh-web'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import { withToolRewrite } from './tool-wording.ts'
-import { DeepSeekSearchProvider, DEEPSEEK_DEFAULT_API_VERSION, DEEPSEEK_DEFAULT_BASE_URL, DEEPSEEK_DEFAULT_MAX_TOKENS, DEEPSEEK_DEFAULT_MAX_USES, DEEPSEEK_DEFAULT_MODEL } from '@deepseek-ai/dsh-web-search-deepseek'
-import type { CredentialSource } from './providers.ts'
 
 const MAX_BODY_BYTES = 2_000_000
 
@@ -46,54 +43,6 @@ class WorkerFetchProvider implements WebFetchProvider {
   }
 }
 
-/**
- * Search without a search key (robot-o6lf): Bing's results page in Browser Rendering. A real
- * browser is needed; DuckDuckGo, Google and Brave answer a Cloudflare browser with a bot check,
- * Bing with results (checked 2026-10-07).
- */
-export class BrowserSearchProvider implements WebSearchProvider {
-  readonly id = 'browser-bing'
-
-  constructor(private readonly browser: Fetcher) {}
-
-  available(): boolean {
-    return true
-  }
-
-  async search(request: WebSearchRequest): Promise<WebSearchResult> {
-    const max = Math.min(request.maxResults ?? 8, 20)
-    const browser = await puppeteer.launch(this.browser as never)
-    try {
-      const page = await browser.newPage()
-      await page.goto(`https://www.bing.com/search?q=${encodeURIComponent(request.query)}&setlang=en&count=${max}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-      const found = await page.evaluate(`[...document.querySelectorAll('li.b_algo')].map((item) => ({
-        title: item.querySelector('h2')?.innerText ?? '',
-        href: item.querySelector('h2 a')?.href ?? '',
-        snippet: (item.querySelector('.b_caption p, p')?.innerText ?? '').trim(),
-      }))`) as Array<{ title: string; href: string; snippet: string }>
-      const sources = found.map((result) => ({ url: bingTarget(result.href), title: result.title, ...(result.snippet === '' ? {} : { snippet: result.snippet }) }))
-        .filter((source) => /^https?:\/\//.test(source.url)).slice(0, max)
-      if (sources.length === 0) throw new WebError('the search returned no results; try other words, or use the browser', 'SEARCH_FAILED' as never)
-      return { sources, truncated: false }
-    } finally {
-      await browser.close().catch(() => undefined)
-    }
-  }
-}
-
-/** Bing wraps results in bing.com/ck/a?…&u=a1<base64url of the target>; unwrap to the real address. */
-export function bingTarget(href: string): string {
-  try {
-    const url = new URL(href)
-    const wrapped = url.hostname.endsWith('bing.com') ? url.searchParams.get('u') : null
-    if (wrapped === null || !wrapped.startsWith('a1')) return href
-    const base64 = wrapped.slice(2).replace(/-/g, '+').replace(/_/g, '/')
-    return atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4))
-  } catch {
-    return href
-  }
-}
-
 const FETCH_DESCRIPTION = 'Fetch the content of a specific HTTP(S) URL and return it decoded to text. A page that answers with an error (404, 500) does not throw: the result carries its statusCode, so check it. This does not search; to search the web use web_search_exa.'
 
 /** dsh-tool-web with fetch only, and a web_fetch description that states the status behaviour and where search is. */
@@ -102,28 +51,9 @@ const FetchOnly = {
   apply: (ctx: Context, config: unknown) => ToolWeb.apply(withToolRewrite(ctx, (tool) => (tool.name === 'web_fetch' ? { ...tool, description: FETCH_DESCRIPTION } : tool)) as never, config as never),
 }
 
-export function webPlugin(credentials: CredentialSource, browser?: Fetcher): (ctx: Context) => Promise<void> {
-  return async (ctx) => {
-    await ctx.plugin(WebRuntime)
-    ctx.web.registerFetchProvider(new WorkerFetchProvider())
-    // DeepSeek's search when the owner can use a DeepSeek key, otherwise Bing in Browser Rendering.
-    const deepseek = await credentials.resolve('deepseek').catch(() => undefined)
-    if (deepseek?.kind !== 'api-key' && browser !== undefined) {
-      ctx.web.registerSearchProvider(new BrowserSearchProvider(browser))
-      await ctx.plugin(FetchOnly as never, { search: false } as never)
-      return
-    }
-    ctx.web.registerSearchProvider(new DeepSeekSearchProvider(() => ({
-      resolveApiKey: async () => {
-        const credential = await credentials.resolve('deepseek')
-        return credential?.kind === 'api-key' ? credential.key : undefined
-      },
-      baseURL: DEEPSEEK_DEFAULT_BASE_URL,
-      model: DEEPSEEK_DEFAULT_MODEL,
-      apiVersion: DEEPSEEK_DEFAULT_API_VERSION,
-      maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
-      maxUses: DEEPSEEK_DEFAULT_MAX_USES,
-    }) as never))
-    await ctx.plugin(FetchOnly as never, { search: false } as never)
-  }
+/** The web seam with the Worker's fetch provider, and dsh-tool-web with web_fetch only. */
+export async function webPlugin(ctx: Context): Promise<void> {
+  await ctx.plugin(WebRuntime)
+  ctx.web.registerFetchProvider(new WorkerFetchProvider())
+  await ctx.plugin(FetchOnly as never, { search: false } as never)
 }

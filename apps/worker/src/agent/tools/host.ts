@@ -22,7 +22,7 @@ export function hostTools(host: HostToolHost, granted: { files: readonly string[
       tool<{ host: string; path: string; content: string; encoding?: 'text' | 'base64' }>({
         name: 'host_write',
         description: `Write a file on one of your owner's computers (${list(granted.files)}), creating its folders.`,
-        parameters: { properties: { host: { type: 'string' }, path: { type: 'string' }, content: { type: 'string' }, encoding: { type: 'string', enum: ['text', 'base64'] } }, required: ['host', 'path', 'content'] },
+        parameters: { properties: { host: { type: 'string', description: 'host name' }, path: { type: 'string', description: 'absolute path, or relative to the home directory' }, content: { type: 'string', description: 'The complete file content' }, encoding: { type: 'string', enum: ['text', 'base64'], description: 'How content is written: text (default) or base64 for binary files' } }, required: ['host', 'path', 'content'] },
         emptyAllowed: ['content'],
         execute: async ({ host: name, path, content, encoding }) => host.hostWrite(name, path, content, encoding ?? 'text'),
       }),
@@ -32,7 +32,7 @@ export function hostTools(host: HostToolHost, granted: { files: readonly string[
     tools.push(tool<{ host: string; command: string; cwd?: string; timeout_seconds?: number }>({
       name: 'host_run',
       description: `Run a shell command on one of your owner's computers (${list(granted.shell)}) as your owner's user, in their login shell and environment. Returns stdout, stderr and the exit code.`,
-      parameters: { properties: { host: { type: 'string' }, command: { type: 'string' }, cwd: { type: 'string' }, timeout_seconds: { type: 'number', description: 'default 120, at most 600' } }, required: ['host', 'command'] },
+      parameters: { properties: { host: { type: 'string', description: 'host name' }, command: { type: 'string', description: 'The shell command line to run' }, cwd: { type: 'string', description: 'Directory to run in (default: the home directory)' }, timeout_seconds: { type: 'number', description: 'default 120, at most 600' } }, required: ['host', 'command'] },
       execute: async ({ host: name, command, cwd, timeout_seconds }) => host.hostRun(name, command, cwd, timeout_seconds),
     }))
   }

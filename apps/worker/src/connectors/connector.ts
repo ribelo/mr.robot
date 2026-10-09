@@ -212,8 +212,10 @@ export interface ConnectorToolSpec<A> {
   readonly write?: boolean
   /** Which service of the account the tool needs (Google: gmail, calendar, …). */
   readonly service?: string
-  /** One line naming what the call did, for the result header and the trajectory. */
+  /** One line naming what the call did, for the failure header and the trajectory. */
   readonly action: (args: A) => string
+  /** Refuse arguments the service would misread, before any secret is resolved or request sent (ts-3d3n). */
+  readonly check?: (args: A) => ConnectorRefused | undefined
   readonly run: (args: A, use: ConnectionUse, account: GrantedConnection) => Effect.Effect<unknown, ConnectorFailure>
 }
 
@@ -222,7 +224,7 @@ function eligible(host: ConnectorHost, spec: { readonly write?: boolean; readonl
   return host.accounts.filter((account) => (spec.service === undefined || account.services.length === 0 || account.services.includes(spec.service)) && (spec.write !== true || account.write))
 }
 
-/** A connector tool: account routing, fresh secrets, the account/action header, failures as readable results. */
+/** A connector tool: account routing, fresh secrets, JSON results with the account; a failure rejects with the account/action header. */
 export function connectorTool<A extends Record<string, unknown>>(host: ConnectorHost, spec: ConnectorToolSpec<A>): ToolDefinition | undefined {
   const accounts = eligible(host, spec)
   if (accounts.length === 0) return undefined
@@ -240,6 +242,8 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
       const picked = pickAccount(accounts, args.account, false)
       if (picked instanceof ConnectorRefused) throw new Error(`Not done: ${picked.message}`)
       const header = `[${host.kind} · ${picked.label === picked.account ? picked.label : `${picked.label} (${picked.account})`}] ${spec.action(args)}`
+      const refused = spec.check?.(args)
+      if (refused !== undefined) throw new Error(`${header}\nFailed: ${refused.message}`)
       const use = await host.use(picked.id)
       const outcome = await Effect.runPromise(Effect.result(spec.run(args, use, picked)))
       if (outcome._tag === 'Success') return withAccount(picked.account, outcome.success)

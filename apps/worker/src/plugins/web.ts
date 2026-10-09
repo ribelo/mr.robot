@@ -1,11 +1,10 @@
-/** Web search and fetch (DSH tool-web) with Mr. Robot's providers. */
+/** Web fetch (DSH tool-web) with Mr. Robot's fetch provider; web search is the Exa capability's. */
 import z from '@deepseek-ai/schemastery'
-import type { CredentialSource } from '../agent/providers.ts'
 import { webPlugin } from '../agent/web.ts'
 import { capability } from './define.ts'
 
-export const Web = capability<{ credentials: CredentialSource; browser?: Fetcher }>({
+export const Web = capability<Record<string, never>>({
   name: 'web',
-  Config: z.object({ credentials: z.any().required(), browser: z.any() }) as never,
-  seams: (ctx, { credentials, browser }) => webPlugin(credentials, browser)(ctx),
+  Config: z.object({}) as never,
+  seams: (ctx) => webPlugin(ctx),
 })

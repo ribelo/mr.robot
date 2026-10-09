@@ -734,7 +734,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('browser')) mounts.push(mount(Browser, { host: this }))
     if (granted.has('robots') && config.kind === 'mr-robot') mounts.push(mount(Robots, { host: this }))
     if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }))
-    if (granted.has('web')) mounts.push(mount(Web, { credentials: this.credentials(), browser: this.env.BROWSER }))
+    if (granted.has('web')) mounts.push(mount(Web, {}))
     if (granted.has('routines')) mounts.push(mount(Routines, { schedule: this.schedule() }))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()

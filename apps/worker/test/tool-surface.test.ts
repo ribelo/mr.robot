@@ -2,10 +2,10 @@
  * The tool surface contract (v1.8): every tool a Robot sees throws on failure, returns JSON, validates its
  * inputs before any call, is described in the Glossary's words and reaches code mode with typed parameters.
  */
-import { env, reset } from 'cloudflare:test'
+import { env, reset, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { jsonSchemaToTs } from '@deepseek-ai/dsh-tools'
-import type { RobotSummary } from '@mr-robot/protocol'
+import type { RobotSummary, Trajectory } from '@mr-robot/protocol'
 import { TOOL_GROUP_NAMES } from '../src/agent/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../src/connectors/registry.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -96,7 +96,7 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
     const id = await robotWith({ tools: ['exa-agent'] })
     const [result] = await say(id, [{ name: 'exa_agent_list_events', args: {} }])
     expect(result).toContain('parameter "id" is required')
-    const blank = (await say(id, [{ name: 'exa_agent_get_run', args: { id: '  ' } }])).at(-1)
+    const blank = (await say(id, [{ name: 'exa_agent_get_run', args: { id: '' } }])).at(-1)
     expect(blank).toContain('parameter "id" is required and must not be empty')
   })
 })
@@ -117,40 +117,102 @@ describe("the platform prompt names the shared-file tool a Robot has (ts-uldn)",
   })
 })
 
-describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-pg3q, ts-hhdz, ts-x0kl, ts-zd12, ts-h8oy)', () => {
-  it('describes every tool and parameter, types every parameter for code mode, and offers no generic web_search', async () => {
-    const connections: string[] = []
-    for (const [kind, label, address, services] of [['google', 'Private', 'anna@gmail.test', ['gmail', 'gmail-send', 'calendar', 'drive']], ['slack', 'Acme', 'acme.slack.com', []], ['discord', 'Bot', 'mr-robot', []]] as const) {
-      const connection = await env.MEMBER.getByName(annaId).addConnection({ kind, label, account: address, services: [...services], shared: false, meta: { expiresAt: Date.now() + 3_600_000 }, secrets: { accessToken: 'a', refreshToken: 'r', token: 't', cookie: 'c' } })
-      connections.push(connection.id, `${connection.id}:write`)
+/** A paired host of Anna's (HTTP pairing only; no socket is needed for its tools to be mounted). */
+async function pairedHost(): Promise<string> {
+  const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Desk', platform: 'linux' }) })
+  const { code } = (await start.json()) as { code: string }
+  await api(ANNA, `/api/hosts/pair/${code}`, { body: {} })
+  return ((await (await SELF.fetch(`https://mr-robot.test/api/host/pair/poll?code=${code}`)).json()) as { hostId: string }).hostId
+}
+
+/** Every grant there is: each tool group, a connection of every connector kind with writing, a host's files and shell. */
+async function fullGrants(): Promise<{ tools: string[]; skills: string[]; recipients: string[]; secrets: string[]; hosts: string[]; connections: string[] }> {
+  const connections: string[] = []
+  for (const [kind, label, address, services] of [['google', 'Private', 'anna@gmail.test', ['gmail', 'gmail-send', 'calendar', 'drive', 'contacts']], ['slack', 'Acme', 'acme.slack.com', []], ['discord', 'Bot', 'mr-robot', []]] as const) {
+    const connection = await env.MEMBER.getByName(annaId).addConnection({ kind, label, account: address, services: [...services], shared: false, meta: { expiresAt: Date.now() + 3_600_000 }, secrets: { accessToken: 'a', refreshToken: 'r', token: 't', cookie: 'c' } })
+    connections.push(connection.id, `${connection.id}:write`)
+  }
+  const hostId = await pairedHost()
+  return { tools: [...TOOL_GROUP_NAMES], skills: [], recipients: [], secrets: [], hosts: [`${hostId}:files`, `${hostId}:shell`], connections }
+}
+
+type Offered = ReturnType<typeof lastTools>
+
+/** What breaks the contract in a mounted tool list: a missing description, an undescribed parameter, untyped SDK parameters. */
+function contractProblems(offered: Offered): string[] {
+  const problems: string[] = []
+  for (const tool of offered) {
+    if (tool.description.trim() === '') problems.push(`${tool.name}: no description`)
+    const schema = tool.parameters as { properties?: Record<string, { description?: string }> }
+    for (const [name, property] of Object.entries(schema.properties ?? {})) {
+      if ((property.description ?? '').trim() === '') problems.push(`${tool.name}.${name}: no description`)
     }
-    const id = await robotWith({ tools: [...TOOL_GROUP_NAMES], connections })
+    if (jsonSchemaToTs(tool.parameters).includes('unknown')) problems.push(`${tool.name}: parameters are unknown in the SDK`)
+  }
+  return problems
+}
+
+/**
+ * Call every offered tool that has required parameters with none, from a code-mode program: each call
+ * must reject with a ToolCallError (ts-jbep, ts-yf1d). Returns the tools that returned instead.
+ */
+async function returnedWithoutArguments(id: string, offered: Offered): Promise<string[]> {
+  const names = offered.filter((tool) => ((tool.parameters as { required?: string[] }).required ?? []).length > 0).map((tool) => tool.name)
+  expect(names.length).toBeGreaterThan(30)
+  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true } })
+  const program = [
+    `const names = ${JSON.stringify(names)}`,
+    'const returned = []',
+    "for (const name of names) { try { await tools[name]({}); returned.push(name) } catch (error) { if (error.name !== 'ToolCallError') returned.push(name + ': ' + error.name) } }",
+    "return 'RETURNED:' + JSON.stringify(returned)",
+  ].join('\n')
+  scripts.set(id, [{ calls: [{ name: 'run_code', args: { code: program, description: 'call every tool without arguments' } }] }, { text: 'Done.' }])
+  await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+  await settle(id)
+  const { events } = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body
+  const result = events.filter((event) => event.type === 'tool/result').at(-1)!.data
+  const found = /RETURNED:(\[[^\]]*\])/.exec(result.replace(/\\"/g, '"'))
+  if (found === null) throw new Error(`the program did not finish: ${result.slice(0, 2000)}`)
+  return JSON.parse(found[1]!) as string[]
+}
+
+describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-pg3q, ts-hhdz, ts-x0kl, ts-zd12, ts-h8oy)', () => {
+  it('describes every tool and parameter, types every parameter for code mode, rejects on failure, and offers no generic web_search', async () => {
+    const id = await robotWith({})
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: await fullGrants() } })
     await say(id, [])
     const offered = lastTools(id)
     const names = offered.map((tool) => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'schedule_create', 'drive_replace', 'browser_wait', 'discord_accounts']))
+    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'schedule_create', 'drive_replace', 'browser_wait', 'discord_accounts', 'host_write', 'host_run', 'login_fill', 'propose_member_file_edit']))
     expect(names).not.toContain('web_search')
     expect(names).not.toContain('drive_import')
-
-    const problems: string[] = []
-    for (const tool of offered) {
-      if (tool.description.trim() === '') problems.push(`${tool.name}: no description`)
-      const schema = tool.parameters as { properties?: Record<string, { description?: string }> }
-      for (const [name, property] of Object.entries(schema.properties ?? {})) {
-        if ((property.description ?? '').trim() === '') problems.push(`${tool.name}.${name}: no description`)
-      }
-      if (jsonSchemaToTs(tool.parameters).includes('unknown')) problems.push(`${tool.name}: parameters are unknown in the SDK`)
-    }
-    if (process.env['LIST']) throw new Error(problems.join('\n'))
-    expect(problems).toEqual([])
+    expect(contractProblems(offered)).toEqual([])
 
     const describedAs = (name: string) => offered.find((tool) => tool.name === name)!.description
     expect(describedAs('web_fetch')).toContain('web_search_exa')
     expect(describedAs('web_fetch')).toContain('statusCode')
-    for (const tool of offered.filter((entry) => entry.name.startsWith('schedule_'))) expect(tool.description + JSON.stringify(tool.parameters)).not.toMatch(/reminder/i)
+    // The rewrite of DSH's "reminder" wording must have happened, not merely found nothing to change.
+    const schedule = offered.filter((entry) => entry.name.startsWith('schedule_'))
+    expect(schedule.length).toBeGreaterThan(2)
+    for (const tool of schedule) expect(tool.description + JSON.stringify(tool.parameters)).not.toMatch(/reminder/i)
+    expect(describedAs('schedule_create') + describedAs('schedule_delete')).toMatch(/Routine/)
     expect(describedAs('browser_wait')).toMatch(/page title/)
     expect(describedAs('browser_wait')).toMatch(/30 000/)
     expect(describedAs('drive_replace')).toContain('Overwrite')
+
+    expect(await returnedWithoutArguments(id, offered)).toEqual([])
+  })
+
+  it("holds for Mr. Robot's own tools too (robots, memory_write_shared)", async () => {
+    const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    await settle(mr)
+    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: await fullGrants() } })
+    await testRobot(mr).activateForTest()
+    await say(mr, [])
+    const offered = lastTools(mr)
+    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write']))
+    expect(contractProblems(offered)).toEqual([])
+    expect(await returnedWithoutArguments(mr, offered)).toEqual([])
   })
 })
 

@@ -19,6 +19,9 @@ export interface WorkerLoaderPtcConfig {
   readonly cpuMs?: number
 }
 
+/** One call's outcome as the isolate receives it: a failed tool call is a value, not an RPC exception. */
+type BridgeOutcome = { readonly ok: true; readonly json: string } | { readonly ok: false; readonly message: string }
+
 /** What the isolate may call: one method, routed to a granted binding. */
 class Bridge extends RpcTarget {
   calls = 0
@@ -26,13 +29,18 @@ class Bridge extends RpcTarget {
     super()
   }
 
-  async call(global: string, name: string, argsJson: string): Promise<string> {
-    if (this.signal?.aborted === true) throw new Error('the program was cancelled')
+  async call(global: string, name: string, argsJson: string): Promise<BridgeOutcome> {
+    if (this.signal?.aborted === true) return { ok: false, message: 'the program was cancelled' }
     this.calls += 1
-    if (this.calls > MAX_CALLS) throw new Error(`a program may make at most ${MAX_CALLS} tool calls`)
+    if (this.calls > MAX_CALLS) return { ok: false, message: `a program may make at most ${MAX_CALLS} tool calls` }
     const fn = this.bindings.find((binding) => binding.global === global)?.functions[name]
-    if (fn === undefined) throw new Error(`${global}.${name} is not available to this Robot`)
-    return JSON.stringify(await fn(JSON.parse(argsJson) as unknown))
+    if (fn === undefined) return { ok: false, message: `${global}.${name} is not available to this Robot` }
+    try {
+      return { ok: true, json: JSON.stringify(await fn(JSON.parse(argsJson) as unknown)) }
+    } catch (error) {
+      // A failed tool call (ts-jbep) reaches the program as its ToolCallError.
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
   }
 }
 
@@ -63,11 +71,14 @@ export default class Program extends WorkerEntrypoint {
       const namespace = Object.create(null)
       for (const name of names) {
         namespace[name] = async (args) => {
+          let outcome
           try {
-            return JSON.parse(await bridge.call(global, name, JSON.stringify(args ?? null)))
+            outcome = await bridge.call(global, name, JSON.stringify(args ?? null))
           } catch (error) {
             throw new ErrorClass(error instanceof Error ? error.message : String(error), name)
           }
+          if (!outcome.ok) throw new ErrorClass(outcome.message, name)
+          return JSON.parse(outcome.json)
         }
       }
       namespaces[global] = namespace

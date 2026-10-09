@@ -165,7 +165,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
       service: 'discord',
       write: true,
       description: 'Send a message to a channel; one Workspace file may go with it as an attachment.',
-      parameters: { properties: { channelId: { type: 'string', description: 'Discord channel id (from discord_channels)' }, text: { type: 'string', description: 'Message text' }, attachment: { type: 'string', description: 'A Workspace path to send as a file.' } }, required: ['channelId', 'text'] },
+      parameters: { properties: { channelId: { type: 'string', description: 'Discord channel id (from discord_channels)' }, text: { type: 'string', description: 'Message text' }, attachment: { type: 'string', description: 'A Workspace path to send as a file.' } }, required: ['channelId', 'text'], emptyAllowed: ['text'] },
       action: (args) => 'send to ' + str(args, 'channelId'),
       run: (args, use) => Effect.gen(function* () {
         const path = str(args, 'attachment')

@@ -98,6 +98,7 @@ export function memberFileTools(host: RobotHost): ToolDefinition[] {
         },
         required: ['file', 'content', 'purpose'],
       },
+      emptyAllowed: ['content'],
       execute: async ({ file, content, purpose }) => {
         if (!MEMBER_FILE_NAMES.includes(file as MemberFileName)) throw new Error(`Only ${MEMBER_FILE_NAMES.join(' and ')} can be proposed`)
         const proposal = host.propose('member-file', purpose, { file: { name: file, content } })
