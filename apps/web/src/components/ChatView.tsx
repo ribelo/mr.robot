@@ -5,6 +5,9 @@ import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
 import { Avatar } from './Avatar.tsx'
+import { FOLLOW_THRESHOLD_PX } from './ChatScroll.tsx'
+import type { PendingSend } from './pending-sends.ts'
+import { robotTint } from './tint.ts'
 
 export interface ChatViewProps {
   readonly items: readonly ChatItem[]
@@ -19,6 +22,12 @@ export interface ChatViewProps {
   readonly workDetails?: WorkDetails
   /** The reply and thinking streaming in now (pl-jzr7). */
   readonly stream?: { readonly text: string; readonly thinking: string }
+  /** Messages sent but not yet in the Conversation, shown after its items (ap-3si6). */
+  readonly pending?: readonly PendingSend[]
+  /** The colour of the Robot whose Conversation this is: its replies are tinted with it (ap-yzs4). */
+  readonly robotColor?: string
+  /** Send a failed message again with the same client id (ap-ceqx). */
+  readonly onRetry?: (clientId: string) => void
   /** For attachment links. */
   readonly robotId?: string
   /** The search match to scroll to and mark (pl-8594). */
@@ -35,7 +44,7 @@ const ROW_GAP_PX = 8
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream, robotId, highlight, scrollRef }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream, robotId, highlight, scrollRef, pending = [], onRetry, robotColor }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -63,15 +72,16 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
         </div>,
       )
     }
-    rows.push(<div key={item.id} data-item={item.id} className={highlight === item.id ? 'chat-item search-hit' : 'chat-item'}><Item item={item} meId={meId} canAnswer={canAnswer} level={workDetails} {...(robotId === undefined ? {} : { robotId })} {...(onAnswer === undefined ? {} : { onAnswer })} /></div>)
+    rows.push(<div key={item.id} data-item={item.id} className={highlight === item.id ? 'chat-item search-hit' : 'chat-item'}><Item item={item} meId={meId} robotColor={robotColor} canAnswer={canAnswer} level={workDetails} {...(robotId === undefined ? {} : { robotId })} {...(onAnswer === undefined ? {} : { onAnswer })} /></div>)
   }
+  for (const send of pending) rows.push(<PendingBubble key={`pending-${send.clientId}`} send={send} {...(onRetry === undefined ? {} : { onRetry })} />)
   const showThinking = workDetails === 'detailed' || workDetails === 'verbose'
   if (working && stream !== undefined && showThinking && stream.thinking !== '') rows.push(<ThinkingRow key="live-thinking" text={stream.thinking} level={workDetails} running={stream.text === ''} />)
   if (working && stream !== undefined && stream.text !== '') {
-    rows.push(<div key="live" className="row"><div className="bubble bubble-robot"><Markdown text={stream.text} streaming /></div></div>)
+    rows.push(<div key="live" className="row"><div className="bubble bubble-robot" style={robotTint(robotColor)}><Markdown text={stream.text} streaming /></div></div>)
   } else if (working) {
     rows.push(activity === undefined
-      ? <div key="working" className="bubble bubble-robot typing" aria-label="working"><span /><span /><span /></div>
+      ? <div key="working" className="bubble bubble-robot typing" style={robotTint(robotColor)} aria-label="working"><span /><span /><span /></div>
       : <div key="working" className="activity-now" aria-label="working"><span className="spinner" /> Using {toolLabel(activity)}…</div>)
   }
   return <ChatRows rows={rows} highlight={highlight} {...(scrollRef === undefined ? {} : { scrollRef })} />
@@ -89,7 +99,7 @@ function ChatRows({ rows, highlight, scrollRef }: { rows: ReactNode[]; highlight
     overscan: 6,
     margin: 0,
     initialViewport: 900,
-    followThreshold: 120,
+    followThreshold: FOLLOW_THRESHOLD_PX,
   })
   // A search match far up the conversation is brought into view, then outlined (pl-8594).
   useEffect(() => {
@@ -115,7 +125,27 @@ function ChatRows({ rows, highlight, scrollRef }: { rows: ReactNode[]; highlight
   )
 }
 
-function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; level: WorkDetails; robotId?: string }) {
+/** A message not in the Conversation yet: a clock instead of a time while pending, "Not sent" with the error and Retry when refused (ap-7b3p, ap-ceqx). */
+function PendingBubble({ send, onRetry }: { send: PendingSend; onRetry?: (clientId: string) => void }) {
+  return (
+    <div className={send.state === 'failed' ? 'row row-own pending-send failed' : 'row row-own pending-send'} data-state={send.state}>
+      <div className="bubble bubble-own">
+        <RichText text={send.text} />
+        {send.attachments.length > 0 ? <div className="attachments">{send.attachments.map((file) => <span key={file.path} className="attachment">📎 {file.name}</span>)}</div> : null}
+      </div>
+      {send.state === 'pending'
+        ? <span className="pending-mark" role="img" aria-label="sending"><ClockIcon /></span>
+        : (
+          <span className="pending-mark failed" role="alert">
+            Not sent{send.error === undefined ? '' : `: ${send.error}`}
+            {onRetry === undefined ? null : <> <button type="button" className="link" onClick={() => onRetry(send.clientId)}>Retry</button></>}
+          </span>
+        )}
+    </div>
+  )
+}
+
+function Item({ item, meId, canAnswer, onAnswer, level, robotId, robotColor }: { robotColor: string | undefined; item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; level: WorkDetails; robotId?: string }) {
   switch (item.kind) {
     case 'message': {
       const own = item.sender.kind === 'member' && item.sender.memberId === meId
@@ -128,7 +158,7 @@ function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatI
             : null
       return (
         <div className={own ? 'row row-own' : 'row'}>
-          <div className={own ? 'bubble bubble-own' : 'bubble bubble-robot'}>
+          <div className={own ? 'bubble bubble-own' : 'bubble bubble-robot'} style={item.sender.kind === 'robot' ? robotTint(item.sender.avatarColor) : undefined}>
             {label === null ? null : <>{label} </>}
             <RichText text={item.text} />
             {item.attachments.length > 0 ? (
@@ -142,7 +172,7 @@ function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatI
       )
     }
     case 'reply':
-      return <div className="row"><div className="bubble bubble-robot"><Markdown text={item.text} /></div></div>
+      return <div className="row"><div className="bubble bubble-robot" style={robotTint(robotColor)}><Markdown text={item.text} /></div></div>
     case 'routine':
       return (
         <div className="chat-separator routine-line">

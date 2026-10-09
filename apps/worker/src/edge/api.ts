@@ -68,7 +68,7 @@ export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ me
   .on('GET', '/api/me', (c) => call(async (): Promise<Me> => {
     const profile = await c.env.MEMBER.getByName(c.member.id).profile()
-    return { ...c.member, home: c.env.HOME_NAME, timeZone: profile.timeZone, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact' }
+    return { ...c.member, home: c.env.HOME_NAME, timeZone: profile.timeZone, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system' }
   }))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
     const patch = yield* decodeBody(c.request, MemberPreferences)
@@ -349,7 +349,7 @@ export const api = new Router<ApiContext>()
     const message = yield* decodeBody(c.request, SendMessage)
     if (message.text.trim() === '' && (message.attachments ?? []).length === 0) return yield* Effect.fail(badRequest('empty message'))
     const sender = { kind: 'member' as const, memberId: c.member.id, name: c.member.name }
-    const wakeup = yield* call(() => robot(c, id).wake({ kind: 'member', sender, text: message.text, attachments: message.attachments ?? [] }))
+    const wakeup = yield* call(() => robot(c, id).wake({ kind: 'member', sender, text: message.text, attachments: message.attachments ?? [], ...(message.clientId === undefined ? {} : { clientId: message.clientId }) }))
     return { wakeup }
   }))
   .on('PUT', '/api/robots/:id/files', (c, { id }) => Effect.gen(function* () {

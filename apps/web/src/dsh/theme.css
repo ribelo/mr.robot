@@ -437,3 +437,14 @@ body[data-ds-dark-theme] {
   --shiki-token-punctuation: #ced4da;
   --shiki-token-link: #74c0fc;
 }
+
+/* The app's design tokens (src/theme/tokens.json) drive the aliases the trajectory uses most, in both themes. */
+html[data-theme] body {
+  --dsw-alias-bg-base: var(--surface);
+  --dsw-alias-bg-layer-1: var(--surface-raised);
+  --dsw-alias-label-primary: var(--text);
+  --dsw-alias-label-secondary: var(--muted);
+  --dsw-alias-label-tertiary: var(--faint);
+  --dsw-alias-state-error-primary: var(--danger);
+  --dsw-alias-state-success-primary: var(--success);
+}

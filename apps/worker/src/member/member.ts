@@ -14,7 +14,7 @@ import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
-import type { ConnectorKind, NotificationKind, ProviderView, QuietHours, WorkDetails } from '@mr-robot/protocol'
+import type { ConnectorKind, NotificationKind, ProviderView, QuietHours, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -35,6 +35,7 @@ export interface MemberProfile {
   readonly timeZone: string
   readonly quietHours: QuietHours | null
   readonly workDetails?: WorkDetails
+  readonly theme?: ThemeChoice
 }
 
 /** What a Member's programs need besides its SQLite: vaults, sign-in clients, push, the Home and its alarm. */
@@ -83,7 +84,7 @@ const init = (input: { id: string; email: string; name: string }) => Effect.gen(
   return created
 })
 
-const updateProfile = (patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null; workDetails?: WorkDetails }) => Effect.gen(function* () {
+const updateProfile = (patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null; workDetails?: WorkDetails; theme?: ThemeChoice }) => Effect.gen(function* () {
   const next = { ...(yield* profile), ...patch }
   yield* kvSet('profile', next)
   return next
@@ -521,7 +522,7 @@ export class Member extends DurableObject<Env> {
 
   init(input: { id: string; email: string; name: string }): Promise<MemberProfile> { return this.run(init(input)) }
   profile(): Promise<MemberProfile> { return this.run(profile) }
-  updateProfile(patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null }): Promise<MemberProfile> { return this.run(updateProfile(patch)) }
+  updateProfile(patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null; workDetails?: WorkDetails; theme?: ThemeChoice }): Promise<MemberProfile> { return this.run(updateProfile(patch)) }
   file(name: MemberFileName): Promise<string> { return this.run(file(name)) }
   files(): Promise<Record<MemberFileName, string>> { return this.run(files) }
   /** A shared memory file changed: every Robot of this Member hears who changed it (pl-9n7w). */

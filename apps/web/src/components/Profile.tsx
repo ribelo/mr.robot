@@ -6,7 +6,8 @@ import { Connections } from './Connections.tsx'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import type { Me, OpencodeKeysView, ProvidersView } from '@mr-robot/protocol'
+import type { Me, OpencodeKeysView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
+import { applyTheme } from '../theme/theme.ts'
 import { keys, memberFileAtom, opencodeKeysAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
@@ -23,6 +24,7 @@ export function Profile({ me }: { me: Me }) {
   return (
     <div className="form">
       <Preferences me={me} />
+      <ThemeSetting me={me} />
       <WorkDetailsSetting me={me} />
       <ResetEverything me={me} />
       <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
@@ -400,6 +402,26 @@ function LoginForm({ draft, onChange, onSave, onCancel }: { draft: LoginDraft; o
         <button type="button" className="button button-primary" disabled={draft.name === '' || (!draft.existing && draft.password === '')} onClick={() => void onSave(draft)}>Save</button>
       </div>
     </div>
+  )
+}
+
+const THEMES = [{ id: 'system', label: 'System' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }] as const
+
+/** Theme (ap-itj1): follow the system or pin light or dark; per person, applied at once. */
+function ThemeSetting({ me }: { me: Me }) {
+  const command = useCommand()
+  const [value, setValue] = useState<ThemeChoice>(me.theme ?? 'system')
+  return (
+    <>
+      <h2>Theme</h2>
+      <div className="muted">System follows your device's light or dark setting.</div>
+      <div className="segmented" role="radiogroup" aria-label="Theme">
+        {THEMES.map((option) => (
+          <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? 'segment active' : 'segment'}
+            onClick={() => { setValue(option.id); applyTheme(option.id); void command((api) => api.updateMe({ theme: option.id }), [keys.me]) }}>{option.label}</button>
+        ))}
+      </div>
+    </>
   )
 }
 

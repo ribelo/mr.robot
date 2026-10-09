@@ -31,6 +31,8 @@ export interface WakeInput {
   readonly text: string
   readonly attachments?: readonly Attachment[]
   readonly payload?: Record<string, unknown>
+  /** The sender's id for this message; a repeated Wake-up with the same id is queued once. */
+  readonly clientId?: string
 }
 
 /** A message between Robots, as the platform carries it (robot-mv15). */
@@ -101,7 +103,10 @@ export const wake = (input: WakeInput) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   if ((yield* config).status === 'deleted') return yield* invalid('robot is deleted')
+  const seen = input.clientId === undefined ? undefined : store.get<number>(`client:${input.clientId}`)
+  if (seen !== undefined) return seen
   const id = store.enqueue(input.kind, input.sender, input.text, { ...input.payload, attachments: input.attachments ?? [] }, Date.now())
+  if (input.clientId !== undefined) store.set(`client:${input.clientId}`, id)
   yield* platform.drain()
   return id
 })
