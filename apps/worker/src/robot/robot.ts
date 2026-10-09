@@ -62,7 +62,7 @@ import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.t
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
-import { WebhookChannel, webhookText } from '../channels/webhook.ts'
+import { rememberIdempotencyKey, WebhookChannel, webhookText } from '../channels/webhook.ts'
 import { DiscordChannel } from '../channels/discord.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
 import { containerOpenStages } from '../browser/driver.ts'
@@ -79,7 +79,7 @@ import { Host } from '../plugins/host.ts'
 import { connectorCapability } from '../plugins/connector.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
-import { CONNECTOR_SKILLS, CONNECTOR_SKILL_NAMES } from '../connectors/skills.ts'
+import { heldSkillNames } from '../connectors/skills.ts'
 import type { ConnectorHost, ConnectorPlugin, GrantedConnection } from '../connectors/connector.ts'
 import type { ConnectionView, ConnectorKind, SkillLibraryRow, WebhookView } from '@mr-robot/protocol'
 import { Logins } from '../plugins/logins.ts'
@@ -553,10 +553,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Discord messages arrive only for Robots the Home routes them to (their channel, or Mr. Robot for a DM).
     if (event.channel !== 'discord' && event.channel !== 'webhook' && !this.store.requireConfig().notifications.channels.includes(event.channel)) return { accepted: false }
     const wakeup = adapter.inbound(event)
-    // A webhook request without an Idempotency-Key has no event id and is never a duplicate.
-    const dedupe = event.channel !== 'webhook' || event.eventId !== ''
-    if (dedupe && this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
-    if (dedupe) this.store.set(`inbound:${wakeup.dedupeKey}`, true)
+    if (wakeup.dedupeKey !== null) {
+      if (this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
+      this.store.set(`inbound:${wakeup.dedupeKey}`, true)
+    }
     await this.wake({ kind: 'channel', sender: wakeup.sender, text: wakeup.text, payload: { route: wakeup.route } })
     return { accepted: true }
   }
@@ -585,10 +585,18 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return given.byteLength === wanted.byteLength && crypto.subtle.timingSafeEqual(given, wanted)
   }
 
-  /** A webhook request wakes the Robot once per Idempotency-Key (every request, without one). */
+  /**
+   * A webhook request wakes the Robot once per Idempotency-Key (every request, without one). Only the
+   * last IDEMPOTENCY_KEYS_KEPT keys are remembered, so the list stays bounded.
+   */
   async receiveWebhook(key: string, request: { contentType: string; body: string; idempotencyKey: string | null }): Promise<{ accepted: boolean }> {
     if (!this.webhookAccepts(key)) return { accepted: false }
     const config = this.store.requireConfig()
+    if (request.idempotencyKey !== null) {
+      const remembered = rememberIdempotencyKey(this.store.get<string[]>('webhook-idempotency-keys') ?? [], request.idempotencyKey)
+      if (remembered.duplicate) return { accepted: true }
+      this.store.set('webhook-idempotency-keys', remembered.seen)
+    }
     return this.channelEvent({
       channel: 'webhook',
       eventId: request.idempotencyKey ?? '',
@@ -781,7 +789,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('routines')) mounts.push(mount(Routines, { schedule: this.schedule() }))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
-    const skillNames = () => [...this.store.effectiveGrants().skills.filter((name) => !CONNECTOR_SKILL_NAMES.has(name)), ...this.connectorSkillNames()]
+    const skillNames = () => this.heldSkills()
     if (granted.has('skills') || connectorSkills.length > 0) {
       mounts.push(mount(Skills, {
         host: this,
@@ -809,8 +817,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Skills of the connector kinds this Robot holds a granted connection for (and whose plugin is on). */
   private connectorSkillNames(): string[] {
-    const kinds = new Set(Object.keys(this.connectorPlugins()).filter((kind) => this.pluginsOn[kind] !== false && this.grantedConnections(kind as ConnectorKind).length > 0) as ConnectorKind[])
-    return [...kinds].flatMap((kind) => CONNECTOR_SKILLS[kind].map((entry) => entry.name))
+    return heldSkillNames({ skills: [], connections: this.store.effectiveGrants().connections }, this.knownConnections, this.connectorKindsOn())
+  }
+
+  /** Every skill this Robot holds: granted, or brought by a connector it holds. */
+  private heldSkills(): string[] {
+    return heldSkillNames(this.store.effectiveGrants(), this.knownConnections, this.connectorKindsOn())
+  }
+
+  /** Connector kinds with an implementation whose plugin the Home has on. */
+  private connectorKindsOn(): ConnectorKind[] {
+    return (Object.keys(this.connectorPlugins()) as ConnectorKind[]).filter((kind) => this.pluginsOn[kind] !== false)
   }
 
   /** The connector implementations; tests substitute fakes. */
@@ -1804,8 +1821,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   async skillLibrary(): Promise<SkillLibraryRow[]> {
     const config = this.store.requireConfig()
-    const held = [...this.store.effectiveGrants().skills.filter((name) => !CONNECTOR_SKILL_NAMES.has(name)), ...this.connectorSkillNames()]
-    return this.home().skillLibrary(config.ownerId, held, config.kind === 'mr-robot')
+    return this.home().skillLibrary(config.ownerId, this.heldSkills(), config.kind === 'mr-robot')
   }
 
   async promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }> {

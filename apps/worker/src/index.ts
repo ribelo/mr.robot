@@ -1,7 +1,7 @@
 /**
  * The edge Worker: Access identity, the HTTP and WebSocket API, and routing to the
  * Durable Objects that own the data. Static PWA assets are served by the assets
- * binding before the Worker runs; only /api/* reaches this code.
+ * binding before the Worker runs; only /api/* and /hooks/* reach this code.
  */
 import * as Effect from 'effect/Effect'
 import { api, type ApiContext } from './edge/api.ts'
@@ -56,12 +56,7 @@ export default {
       })
     }
     // The webhook Channel is outside Access too; its key is the credential (v1.6 ticket 07).
-    if (isHookPath(path)) {
-      return hookChannel(request, env).catch((error: unknown) => {
-        console.error('webhook failed', error)
-        return json({ error: 'the webhook could not be delivered' }, 500)
-      })
-    }
+    if (isHookPath(path)) return Effect.runPromise(hookChannel(request, env))
     const program = Effect.gen(function* () {
       const email = yield* identityEmail(request, env, ctx)
       const signIn = yield* call((): Promise<SignIn> => env.HOME.getByName(HOME_ID).signIn(email))

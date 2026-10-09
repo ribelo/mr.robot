@@ -86,6 +86,20 @@ describe('ChatView (robot-q4b2)', () => {
     expect(screen.getByText('Review: Replies to send · 2 approved, 1 rejected')).toBeTruthy()
   })
 
+  it('starts the next review with nothing selected, even when its item ids repeat (cd-ueft)', () => {
+    const first: ProposalView = {
+      id: 'p-1', kind: 'review', revision: 1, status: 'open', purpose: 'Batch 1', grants: null, file: null, skill: null,
+      review: { title: 'Batch 1', items: [{ id: 'm1', title: 'One', body: 'a' }, { id: 'm2', title: 'Two', body: 'b' }] },
+    }
+    const second: ProposalView = { ...first, id: 'p-2', purpose: 'Batch 2', review: { ...first.review!, title: 'Batch 2' } }
+    const { rerender } = render(<AskBar asks={[first, second]} onAnswer={vi.fn()} onReplyInstead={vi.fn()} />)
+    fireEvent.click(screen.getAllByRole('checkbox')[0]!)
+    expect((screen.getByText('Approve selected') as HTMLButtonElement).disabled).toBe(false)
+    rerender(<AskBar asks={[second]} onAnswer={vi.fn()} onReplyInstead={vi.fn()} />)
+    expect(screen.getAllByRole('checkbox').every((box) => !(box as HTMLInputElement).checked)).toBe(true)
+    expect((screen.getByText('Approve selected') as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it("shows another Member's message as theirs, not mine", () => {
     const other: ChatItem = { kind: 'message', id: 'x', seq: 1, at, sender: { kind: 'member', memberId: 'm-2', name: 'Ben' }, text: 'hello', attachments: [], reaction: null }
     const { container } = render(<ChatView items={[other]} meId="m-1" working={false} canAnswer={false} now={at} />)

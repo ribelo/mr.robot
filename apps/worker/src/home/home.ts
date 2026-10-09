@@ -33,7 +33,7 @@ import { backendOptions } from '../browser/backends.ts'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
-import { CONNECTOR_SKILLS } from '../connectors/skills.ts'
+import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
 import type { GatewayMessage } from '../connectors/discord-gateway.ts'
 import type { PlainValue } from '../connectors/schema-form.ts'
@@ -1017,15 +1017,21 @@ export class Home extends DurableObject<Env> {
     const holding = new Map<string, string[]>()
     if (holders) {
       const robots = (await this.run(reachable(ownerId))).filter((robot) => robot.kind === 'robot')
-      const kinds = new Map<string, Map<string, ConnectorKind>>()
-      for (const robot of robots) {
-        const admin = await this.env.ROBOT.getByName(robot.id).adminRow()
-        if (admin === null) continue
-        if (!kinds.has(robot.ownerId)) kinds.set(robot.ownerId, new Map((await this.connectionsFor(robot.ownerId)).map((connection) => [connection.id, connection.kind])))
-        const connectionKinds = new Set((admin.grants.connections ?? []).map((id) => kinds.get(robot.ownerId)?.get(id.replace(/:write$/, ''))))
-        const names = new Set([...admin.grants.skills.filter((name) => !connectorOf.has(name)), ...[...connectionKinds].flatMap((kind) => (kind === undefined ? [] : CONNECTOR_SKILLS[kind].map((entry) => entry.name)))])
-        for (const name of names) holding.set(name, [...(holding.get(name) ?? []), robot.identity.name])
+      const enabled = this.pluginsOf.enabled()
+      const kindsOn = (Object.keys(CONNECTOR_SKILLS) as ConnectorKind[]).filter((kind) => enabled[kind] !== false)
+      const connections = new Map<string, Promise<ConnectionView[]>>()
+      const connectionsOf = (memberId: string) => {
+        const known = connections.get(memberId) ?? this.connectionsFor(memberId)
+        connections.set(memberId, known)
+        return known
       }
+      const robotSkills = await Promise.all(robots.map(async (robot) => {
+        const admin = await this.env.ROBOT.getByName(robot.id).adminRow()
+        return admin === null ? [] : heldSkillNames(admin.grants, await connectionsOf(robot.ownerId), kindsOn)
+      }))
+      robots.forEach((robot, index) => {
+        for (const name of new Set(robotSkills[index])) holding.set(name, [...(holding.get(name) ?? []), robot.identity.name])
+      })
     }
     return library.map((skill) => {
       const kind = connectorOf.get(skill.name)

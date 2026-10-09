@@ -194,7 +194,7 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { propo
         <ul className="grant-list">{lines.map(([kind, name]) => <li key={`${kind}-${name}`}><span className="grant-kind">{kind}</span> {name}</li>)}</ul>
       ) : grants !== null ? <div className="question-purpose">No Grants.</div> : null}
       {proposal.file === null ? null : <pre className="file-preview">{proposal.file.content}</pre>}
-      {proposal.review === undefined ? null : <ReviewItems proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />}
+      {proposal.review === undefined ? null : <ReviewItems key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />}
       {proposal.skill === null ? null : <div className="question-purpose"><b>{proposal.skill.name}</b>: {proposal.skill.description}</div>}
       {proposal.review !== undefined ? (proposal.status === 'open' && canAnswer ? null : <div className="question-status">{statusText(proposal)}</div>)
       : proposal.status === 'open' && canAnswer ? (
@@ -207,7 +207,10 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { propo
   )
 }
 
-/** A review Ask (cd-ueft): per-item checkboxes and three actions, answered as one. Decided, it lists the outcome per item. */
+/**
+ * A review Ask (cd-ueft): per-item checkboxes and three actions, answered as one. Decided, it lists the
+ * outcome per item. Keyed by proposal, so a selection never carries over to the next Ask.
+ */
 function ReviewItems({ proposal, canAnswer, onAnswer }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
   const review = proposal.review!
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
