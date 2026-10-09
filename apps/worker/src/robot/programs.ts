@@ -12,8 +12,9 @@ import { currentMonth } from '../home/home.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { cronOf, describeSchedule } from './schedule.ts'
-import { displaySchedule, resumed } from '../agent/schedule.ts'
-import type { ProposalRow, RobotConfig, RobotStore, RoutineRow, WakeupKind } from './store.ts'
+import { displaySchedule, resumed, type AlarmSchedule } from '../agent/schedule.ts'
+import type { ScheduleCreateRequest, ScheduleTimingChange } from '@deepseek-ai/dsh-schedule'
+import type { NoticeCard, ProposalRow, RobotConfig, RobotStore, RoutineRow, RoutineRun, WakeupKind } from './store.ts'
 import { dueDelivery } from '../agent/schedule.ts'
 import { MR_ROBOT_TOOLS } from '../agent/catalog.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
@@ -73,6 +74,8 @@ export interface RobotPlatformShape {
   setAlarm(at: number | null): Effect.Effect<void>
   /** Write the Muse persona files into a new Workspace (robot-om9f). */
   seedWorkspace(): Effect.Effect<void>
+  /** ctx.schedule over the Routine table: DSH's records, stored here, fired by the alarm. */
+  schedule(): Effect.Effect<AlarmSchedule>
   /** A Turn is running or about to run. */
   working(): Effect.Effect<boolean>
   /** Dispose the DSH agent so the next Turn composes over the current live session. */
@@ -137,7 +140,7 @@ export const remove = Effect.gen(function* () {
 
 // ------------------------------------------------------------------ Routines (robot-gbbt, robot-qyd5, robot-qhll)
 
-export function routineView(robotId: string, routine: RoutineRow, runs: RoutineView['runs']): RoutineView {
+export function routineView(robotId: string, routine: RoutineRow, runs: readonly RoutineRun[]): RoutineView {
   const schedule = displaySchedule(routine.record)
   const timeZone = 'timeZone' in routine.record ? routine.record.timeZone : routine.timeZone
   return {
@@ -154,21 +157,97 @@ const view = (routine: RoutineRow) => Effect.gen(function* () {
   return routineView((yield* config).id, routine, store.routineRuns(routine.id))
 })
 
-/** The owner deletes a Routine from the panel (robot-qyd5). */
-export const removeRoutine = (id: string) => Effect.gen(function* () {
+/** A Routine another Robot changed shows in the Conversation as a card naming who did it (cd-n9pi). */
+function routineCard(store: RobotStore, sessionId: string, card: NoticeCard): void {
+  const verb = { created: 'created', updated: 'updated', deleted: 'deleted', paused: 'paused', resumed: 'resumed' }[card.action]
+  store.addNotice(sessionId, storedLength(store.sql, sessionId), `Routine ${verb} by ${card.by}: ${card.name}`, Date.now(), card)
+}
+
+/** The owner deletes a Routine from the panel (robot-qyd5); `by` names another Robot doing it for the owner. */
+export const removeRoutine = (id: string, by?: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
+  const routine = store.routine(id)
   if (!store.deleteRoutine(id)) return yield* notFound(`no Routine ${id}`)
+  if (by !== undefined && routine !== undefined) routineCard(store, (yield* config).liveSessionId, { kind: 'routine', action: 'deleted', name: routine.record.title, by })
   yield* platform.rearm()
   yield* platform.changed()
 })
 
+/** The timing selectors of a Routine request, with the Robot's time zone where a selector names none. */
+const TIMING = ['at', 'after_seconds', 'every_seconds', 'daily', 'weekly', 'cron'] as const
+
+export interface RoutineInput {
+  /** Absent: create a Routine; present: edit that one. */
+  readonly id?: string
+  readonly title?: string
+  readonly prompt?: string
+  readonly at?: unknown
+  readonly after_seconds?: number
+  readonly every_seconds?: number
+  readonly daily?: { time: string; time_zone?: string }
+  readonly weekly?: { time: string; time_zone?: string; weekdays: number[] }
+  readonly cron?: { expression: string; time_zone?: string }
+}
+
+const inZone = <T extends object | undefined>(value: T, timeZone: string): T =>
+  (value !== undefined && typeof value === 'object' && !('time_zone' in value) ? { ...value, time_zone: timeZone } : value)
+
+/** Create or edit a Routine of this Robot for another Robot (cd-n9pi): DSH's own rules and this Robot's limits apply. */
+export const setRoutine = (input: RoutineInput, by: string) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  const schedule = yield* platform.schedule()
+  const failed = (error: unknown) => invalid(error instanceof Error ? error.message : String(error))
+  const given = TIMING.filter((key) => input[key] !== undefined)
+  if (given.length > 1) return yield* invalid(`give one timing, not ${given.join(' and ')}`)
+  const zone = current.timeZone
+  const timing = {
+    ...(input.at === undefined ? {} : { at: inZone(input.at as object, zone) }),
+    ...(input.after_seconds === undefined ? {} : { after_seconds: input.after_seconds }),
+    ...(input.every_seconds === undefined ? {} : { every_seconds: input.every_seconds }),
+    ...(input.daily === undefined ? {} : { daily: inZone(input.daily, zone) }),
+    ...(input.weekly === undefined ? {} : { weekly: inZone(input.weekly, zone) }),
+    ...(input.cron === undefined ? {} : { cron: inZone(input.cron, zone) }),
+  }
+  if (input.id === undefined) {
+    if (input.title === undefined || input.prompt === undefined || given.length === 0) return yield* invalid('a new Routine needs title, prompt and one timing (at, after_seconds, every_seconds, daily, weekly or cron)')
+    const record = yield* Effect.tryPromise({ try: () => schedule.create(current.liveSessionId, { title: input.title!, prompt: input.prompt!, ...timing } as ScheduleCreateRequest), catch: failed })
+    routineCard(store, current.liveSessionId, { kind: 'routine', action: 'created', name: record.title, by })
+    yield* platform.changed()
+    return routineView(current.id, store.routine(record.id)!, store.routineRuns(record.id))
+  }
+  const row = store.routine(input.id)
+  if (row === undefined) return yield* notFound(`no Routine ${input.id}`)
+  const change: ScheduleTimingChange | undefined =
+    timing.at !== undefined ? { kind: 'at', at: timing.at as never }
+      : timing.after_seconds !== undefined ? { kind: 'at', at: new Date(Date.now() + timing.after_seconds * 1000).toISOString() }
+        : timing.every_seconds !== undefined ? { kind: 'every', every_seconds: timing.every_seconds }
+          : timing.daily !== undefined ? { kind: 'daily', daily: timing.daily as never }
+            : timing.weekly !== undefined ? { kind: 'weekly', weekly: timing.weekly as never }
+              : timing.cron !== undefined ? { kind: 'cron', cron: timing.cron as never } : undefined
+  const result = yield* Effect.tryPromise({
+    try: () => schedule.update({ sessionId: row.sessionId as never, id: row.id as never, expected: row.record, ...(change === undefined ? {} : { change }), ...(input.title === undefined ? {} : { title: input.title }), ...(input.prompt === undefined ? {} : { prompt: input.prompt }) }),
+    catch: failed,
+  })
+  if (!('record' in result)) {
+    const code = 'code' in result ? result.code : 'unknown'
+    return yield* (code === 'schedule_not_found' ? notFound(`no Routine ${input.id}`) : invalid('message' in result ? String(result.message) : `the Routine could not be changed (${code}); it may have ended`))
+  }
+  const saved = store.routine(row.id)!
+  if (result.updated) routineCard(store, current.liveSessionId, { kind: 'routine', action: 'updated', name: result.record.title, by })
+  yield* platform.changed()
+  return routineView(current.id, saved, store.routineRuns(saved.id))
+})
+
 /** Pause keeps the Routine and its schedule but stops its alarm; resume plans the next run from now (robot-qhll). */
-export const pauseRoutine = (id: string, paused: boolean) => Effect.gen(function* () {
+export const pauseRoutine = (id: string, paused: boolean, by?: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const routine = store.routine(id)
   if (routine === undefined) return yield* notFound('no such Routine')
+  if (by !== undefined) routineCard(store, (yield* config).liveSessionId, { kind: 'routine', action: paused ? 'paused' : 'resumed', name: routine.record.title, by })
   // Resuming skips what a recurring Routine missed while paused (DSH's recurrence arithmetic).
   const record = paused ? routine.record : resumed(routine.record, Date.now())
   const saved = { ...routine, paused, record: record ?? routine.record, nextRun: paused || record === null ? null : Date.parse(record.scheduledAt) }
@@ -312,17 +391,6 @@ export const createRobot = (brief: string) => Effect.gen(function* () {
   return { id: entry.id, status: 'created; it is interviewing your owner in its own Conversation and will propose its Grants there' }
 })
 
-export const configureRobot = (id: string, change: { name?: string; title?: string; description?: string }) => Effect.gen(function* () {
-  const platform = yield* RobotPlatform
-  const current = yield* config
-  if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot configures Robots')
-  const entry = yield* promise(() => platform.env.HOME.getByName(HOME_ID).entry(id))
-  if (entry === undefined || entry.ownerId !== current.ownerId || entry.kind !== 'robot' || entry.status === 'deleted') return yield* invalid(`${id} is not one of your owner's Robots`)
-  const identity = { ...entry.identity, ...Object.fromEntries(Object.entries(change).filter(([, value]) => typeof value === 'string' && value.trim() !== '')) }
-  const settings = yield* promise(() => platform.env.ROBOT.getByName(id).updateSettings({ identity }))
-  return { id, identity: settings.identity as unknown }
-})
-
 // ------------------------------------------------------------------ settings and Grants (robot-vqtw)
 
 export const settings = Effect.gen(function* () {
@@ -390,9 +458,33 @@ export const checkLimits = Effect.gen(function* () {
 })
 
 /** Advanced settings (robot-vqtw): every change takes effect on the next Turn. */
-export const updateSettings = (patch: SettingsPatch) => Effect.gen(function* () {
+/** One system line per setting a deputy changed (cd-2zx9): what the Conversation shows the owner. */
+function changeNotes(by: string, before: RobotConfig, after: RobotConfig): string[] {
+  const short = (text: string) => (text.length > 80 ? `${text.slice(0, 80)}…` : text)
+  const notes: string[] = []
+  const note = (changed: boolean, text: string) => { if (changed) notes.push(`${by} ${text}`) }
+  note(before.identity.name !== after.identity.name, `changed the name to "${short(after.identity.name)}".`)
+  note(before.identity.title !== after.identity.title, `changed the title to "${short(after.identity.title)}".`)
+  note(before.identity.description !== after.identity.description, `changed the description to "${short(after.identity.description)}".`)
+  note(before.identity.avatarColor !== after.identity.avatarColor, `changed the avatar colour to ${after.identity.avatarColor}.`)
+  note(before.model.provider !== after.model.provider || before.model.model !== after.model.model, `changed model to ${after.model.model} (${after.model.provider}).`)
+  note(before.model.effort !== after.model.effort, `changed thinking to ${after.model.effort}.`)
+  note(before.codeMode !== after.codeMode, `changed code mode to ${after.codeMode ? 'on' : 'off'}.`)
+  note(before.contextBudget !== after.contextBudget, `changed the context budget to ${after.contextBudget} tokens.`)
+  note(before.compactionInstruction !== after.compactionInstruction, 'changed the compaction instruction.')
+  note((before.discordChannel ?? null) !== (after.discordChannel ?? null), after.discordChannel ? `set the Discord channel to ${after.discordChannel}.` : 'removed the Discord channel.')
+  note((before.discordProactive !== false) !== (after.discordProactive !== false), `changed Discord proactive messages to ${after.discordProactive !== false ? 'on' : 'off'}.`)
+  note((before.browserBackend ?? null) !== (after.browserBackend ?? null), `changed the browser backend to ${after.browserBackend ?? 'the Home default'}.`)
+  note(before.notifications.enabled !== after.notifications.enabled, `switched notifications ${after.notifications.enabled ? 'on' : 'off'}.`)
+  note(before.notifications.channels.join(',') !== after.notifications.channels.join(','), `changed notification channels to ${after.notifications.channels.join(', ')}.`)
+  note((before.wakeOnScreenNotifications === true) !== (after.wakeOnScreenNotifications === true), `switched waking on screen notifications ${after.wakeOnScreenNotifications === true ? 'on' : 'off'}.`)
+  return notes
+}
+
+export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
+  const before = yield* config
   store.transaction(() => {
     if (patch.grants !== undefined) store.setGrants(patch.grants)
     store.updateConfig((current) => ({
@@ -411,6 +503,10 @@ export const updateSettings = (patch: SettingsPatch) => Effect.gen(function* () 
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))
   })
+  if (by !== undefined) {
+    const after = yield* config
+    for (const text of changeNotes(by, before, after)) store.addNotice(after.liveSessionId, storedLength(store.sql, after.liveSessionId), text, Date.now())
+  }
   yield* platform.changed()
   // The Home routes Discord messages by channel, so it hears about the mapping (cn-y1ac).
   if (patch.discordChannel !== undefined) {
@@ -644,8 +740,12 @@ export const fireRoutines = (now: number) => Effect.gen(function* () {
     if (routine.paused || routine.nextRun === null || routine.nextRun > now) continue
     const delivery = dueDelivery(routine.record, now)
     store.transaction(() => {
-      const wakeupId = store.enqueue('routine', { kind: 'routine', routineId: routine.id, name: routine.record.title }, delivery.text, { routineId: routine.id, due: routine.nextRun }, now)
-      store.addRoutineRun(routine.id, wakeupId, now)
+      // A Routine whose last run is still waiting or running does not queue a second one (cd-d14a).
+      if (store.routineRunPending(routine.id)) store.addSkippedRoutineRun(routine.id, now, 'The previous run had not finished.')
+      else {
+        const wakeupId = store.enqueue('routine', { kind: 'routine', routineId: routine.id, name: routine.record.title }, delivery.text, { routineId: routine.id, due: routine.nextRun }, now)
+        store.addRoutineRun(routine.id, wakeupId, now)
+      }
       store.saveRoutine({ ...routine, lastRun: now, record: delivery.next ?? routine.record, nextRun: delivery.next === null ? null : Date.parse(delivery.next.scheduledAt) })
     })
   }

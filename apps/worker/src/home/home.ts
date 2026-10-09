@@ -30,7 +30,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { backendOptions } from '../browser/backends.ts'
-import { TOOL_GROUPS } from '../agent/catalog.ts'
+import { MR_ROBOT_ONLY_GROUPS, TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_SKILLS } from '../connectors/skills.ts'
@@ -581,7 +581,7 @@ const grantableSecrets = (memberId: string) => Effect.gen(function* () {
 /** What a Member can grant a Robot and which models it can run on. */
 const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
   return {
-    toolGroups: yield* Effect.map(setting<string>('exa-key'), (key) => Object.entries(TOOL_GROUPS).filter(([name]) => name !== 'robots').map(([name, description]) => ({ name, description: name.startsWith('exa') && key === undefined ? `${description} Needs the Home's Exa API key: the Home admin adds it under Admin → Exa.` : description }))),
+    toolGroups: yield* Effect.map(setting<string>('exa-key'), (key) => Object.entries(TOOL_GROUPS).filter(([name]) => !MR_ROBOT_ONLY_GROUPS.includes(name)).map(([name, description]) => ({ name, description: name.startsWith('exa') && key === undefined ? `${description} Needs the Home's Exa API key: the Home admin adds it under Admin → Exa.` : description }))),
     skills: (yield* skills(memberId)).map(({ name, description }) => ({ name, description })),
     robots: (yield* reachable(memberId)).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
     secrets: yield* grantableSecrets(memberId),

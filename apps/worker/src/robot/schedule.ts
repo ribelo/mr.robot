@@ -212,6 +212,18 @@ function cronDayMatches(cron: Cron, date: LocalDate & { weekday: number }): bool
   return dayOk && weekdayOk
 }
 
+/** The shortest wait, in minutes, between two runs of a cron expression within a day (and across midnight). */
+export function cronMinGapMinutes(expression: string): number {
+  const cron = parseCron(expression)
+  const times = cron.hours.flatMap((hour) => cron.minutes.map((minute) => hour * 60 + minute)).sort((a, b) => a - b)
+  let gap = 24 * 60
+  for (let index = 0; index < times.length; index += 1) {
+    const next = times[(index + 1) % times.length]! + (index + 1 === times.length ? 24 * 60 : 0)
+    gap = Math.min(gap, next - times[index]!)
+  }
+  return gap
+}
+
 // ---------------------------------------------------------------- summary
 
 const WEEKDAY_PLURAL = ['', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays', 'Sundays']

@@ -13,6 +13,7 @@ export const TOOL_GROUPS = {
   skills: 'Load the skills granted to it and propose new skills to the library.',
   notify: 'Send its owner a push notification.',
   robots: 'Create Robots and configure the Robots its owner can reach (Mr. Robot only).',
+  deputy: "Read the Conversations, files, Grants, Routines and settings of the Robots its owner can reach, and change their files, settings and Routines (Mr. Robot only).",
   exa: 'Exa research: web search, page crawling and code context, paid per call from the Home\'s Exa key.',
   'exa-agent': 'Exa agent runs: long research jobs that can cost dollars each. Grant separately.',
 } as const
@@ -20,9 +21,12 @@ export const TOOL_GROUPS = {
 export type ToolGroup = keyof typeof TOOL_GROUPS
 export const TOOL_GROUP_NAMES = Object.keys(TOOL_GROUPS) as ToolGroup[]
 
+/** Groups only Mr. Robot holds: never offered to an ordinary Robot's settings. */
+export const MR_ROBOT_ONLY_GROUPS: readonly string[] = ['robots', 'deputy']
+
 export function isToolGroup(name: string): name is ToolGroup {
   return Object.hasOwn(TOOL_GROUPS, name)
 }
 
 /** What Mr. Robot holds from the start; his recipient Grants follow reachability. */
-export const MR_ROBOT_TOOLS: readonly ToolGroup[] = ['files', 'web', 'routines', 'messaging', 'notify', 'robots']
+export const MR_ROBOT_TOOLS: readonly ToolGroup[] = ['files', 'web', 'routines', 'messaging', 'notify', 'robots', 'deputy']

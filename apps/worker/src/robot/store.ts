@@ -5,6 +5,7 @@
  */
 import { TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
+import { ConversationIndex } from '../agent/conversation-search.ts'
 import { recordFromLegacy, type ScheduleRecord } from '../agent/schedule.ts'
 import type {
   GrantKind,
@@ -85,17 +86,52 @@ export interface ProposalRow extends ProposalView {
   readonly payload: Record<string, unknown>
 }
 
+/** A notice the chat shows as a Routine card instead of a line of text (a Routine another Robot changed). */
+export interface NoticeCard {
+  readonly kind: 'routine'
+  readonly action: 'created' | 'updated' | 'deleted' | 'paused' | 'resumed'
+  readonly name: string
+  /** Who changed it. */
+  readonly by: string
+}
+
 export interface NoticeRow {
   readonly id: string
   readonly afterSeq: number
   readonly at: number
   readonly text: string
   readonly sessionId: string
+  readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 5
+/** How many runs of one Routine the Robot keeps (cd-3t0p). */
+export const ROUTINE_RUNS_KEPT = 20
+
+export type RoutineRunOutcome = 'running' | 'ok' | 'failed' | 'skipped'
+
+export interface RoutineRun {
+  readonly startedAt: number
+  readonly finishedAt: number | null
+  readonly outcome: RoutineRunOutcome
+  readonly firstLine: string
+}
+
+const SCHEMA_VERSION = 6
 
 const MIGRATIONS: Record<number, readonly string[]> = {
+  // Run records with a finish time and the 20-run window (cd-3t0p); a Routine card in the chat (cd-n9pi).
+  6: [
+    `CREATE TABLE routine_run_v6 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, wakeup_id INTEGER, routine_id TEXT NOT NULL,
+      started_at INTEGER NOT NULL, finished_at INTEGER, outcome TEXT NOT NULL, first_line TEXT NOT NULL
+    )`,
+    `INSERT INTO routine_run_v6 (wakeup_id, routine_id, started_at, finished_at, outcome, first_line)
+      SELECT wakeup_id, routine_id, at, CASE WHEN outcome = 'running' THEN NULL ELSE at END, CASE outcome WHEN 'done' THEN 'ok' ELSE outcome END, summary FROM routine_run ORDER BY at`,
+    'DROP TABLE routine_run',
+    'ALTER TABLE routine_run_v6 RENAME TO routine_run',
+    'CREATE INDEX routine_run_by_routine ON routine_run (routine_id, started_at)',
+    'ALTER TABLE notice ADD COLUMN card TEXT',
+  ],
   // Paid services per month (Exa, rb-pb26).
   5: ['CREATE TABLE service_usage (month TEXT NOT NULL, service TEXT NOT NULL, calls INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, service)) WITHOUT ROWID'],
   // Browser time per backend (rb-y50l).
@@ -139,6 +175,9 @@ const MIGRATIONS: Record<number, readonly string[]> = {
 }
 
 export class RobotStore {
+  /** Full-text search over the live Conversation (cd-ggem). */
+  search!: ConversationIndex
+
   constructor(private readonly storage: DurableObjectStorage) {
     this.prepare()
   }
@@ -147,6 +186,7 @@ export class RobotStore {
   prepare(): void {
     this.migrate()
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
+    this.search = new ConversationIndex(this.sql)
   }
 
   get sql(): SqlStorage {
@@ -323,22 +363,51 @@ export class RobotStore {
     )
   }
 
+  /** A run starts: its Turn is queued as the given wake-up. Only the newest ROUTINE_RUNS_KEPT runs of the Routine are kept. */
   addRoutineRun(routineId: string, wakeupId: number, at: number): void {
-    this.sql.exec("INSERT OR REPLACE INTO routine_run (wakeup_id, routine_id, at, outcome, summary) VALUES (?, ?, ?, 'running', '')", wakeupId, routineId, at)
+    this.sql.exec("INSERT INTO routine_run (wakeup_id, routine_id, started_at, outcome, first_line) VALUES (?, ?, ?, 'running', '')", wakeupId, routineId, at)
+    this.pruneRoutineRuns(routineId)
   }
 
-  finishRoutineRun(wakeupId: number, outcome: 'done' | 'failed', summary: string): void {
-    this.sql.exec('UPDATE routine_run SET outcome = ?, summary = ? WHERE wakeup_id = ?', outcome, summary, wakeupId)
+  /** A due run that did not start because the previous one has not finished (cd-d14a keeps a Routine from flooding its Robot). */
+  addSkippedRoutineRun(routineId: string, at: number, firstLine: string): void {
+    this.sql.exec("INSERT INTO routine_run (wakeup_id, routine_id, started_at, finished_at, outcome, first_line) VALUES (NULL, ?, ?, ?, 'skipped', ?)", routineId, at, at, firstLine)
+    this.pruneRoutineRuns(routineId)
   }
 
-  routineRuns(routineId: string, limit = 10): Array<{ at: number; outcome: 'running' | 'done' | 'failed'; summary: string }> {
-    return this.sql.exec<{ at: number; outcome: 'running' | 'done' | 'failed'; summary: string }>(
-      'SELECT at, outcome, summary FROM routine_run WHERE routine_id = ? ORDER BY at DESC LIMIT ?', routineId, limit,
-    ).toArray()
+  finishRoutineRun(wakeupId: number, outcome: 'ok' | 'failed', firstLine: string, at: number): void {
+    this.sql.exec('UPDATE routine_run SET outcome = ?, first_line = ?, finished_at = ? WHERE wakeup_id = ?', outcome, firstLine, at, wakeupId)
+  }
+
+  /** Whether an earlier run of the Routine is still queued or running. */
+  routineRunPending(routineId: string): boolean {
+    return this.sql.exec(
+      "SELECT 1 FROM routine_run WHERE routine_id = ? AND outcome = 'running' AND wakeup_id IN (SELECT id FROM wakeup)", routineId,
+    ).toArray().length > 0
+  }
+
+  /** Runs whose Turn can no longer happen (the Conversation was cleared) end as failed. */
+  abandonRoutineRuns(at: number): void {
+    this.sql.exec("UPDATE routine_run SET outcome = 'failed', first_line = 'Cleared with the Conversation.', finished_at = ? WHERE outcome = 'running'", at)
+  }
+
+  routineRuns(routineId: string): RoutineRun[] {
+    return this.sql.exec<{ started_at: number; finished_at: number | null; outcome: RoutineRunOutcome; first_line: string }>(
+      'SELECT started_at, finished_at, outcome, first_line FROM routine_run WHERE routine_id = ? ORDER BY started_at DESC, id DESC LIMIT ?', routineId, ROUTINE_RUNS_KEPT,
+    ).toArray().map((row) => ({ startedAt: row.started_at, finishedAt: row.finished_at, outcome: row.outcome, firstLine: row.first_line }))
+  }
+
+  private pruneRoutineRuns(routineId: string): void {
+    this.sql.exec(
+      'DELETE FROM routine_run WHERE routine_id = ? AND id NOT IN (SELECT id FROM routine_run WHERE routine_id = ? ORDER BY started_at DESC, id DESC LIMIT ?)',
+      routineId, routineId, ROUTINE_RUNS_KEPT,
+    )
   }
 
   deleteRoutine(id: string): boolean {
-    return this.sql.exec('DELETE FROM routine WHERE id = ?', id).rowsWritten > 0
+    const deleted = this.sql.exec('DELETE FROM routine WHERE id = ?', id).rowsWritten > 0
+    if (deleted) this.sql.exec('DELETE FROM routine_run WHERE routine_id = ?', id)
+    return deleted
   }
 
   // ------------------------------------------------------------ wake-ups and the active turn
@@ -389,16 +458,16 @@ export class RobotStore {
 
   // ------------------------------------------------------------ notices
 
-  addNotice(sessionId: string, afterSeq: number, text: string, now: number): NoticeRow {
-    const notice = { id: `n-${crypto.randomUUID()}`, sessionId, afterSeq, at: now, text }
-    this.sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text) VALUES (?, ?, ?, ?, ?)', notice.id, sessionId, afterSeq, now, text)
+  addNotice(sessionId: string, afterSeq: number, text: string, now: number, card?: NoticeCard): NoticeRow {
+    const notice = { id: `n-${crypto.randomUUID()}`, sessionId, afterSeq, at: now, text, ...(card === undefined ? {} : { card }) }
+    this.sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, ?)', notice.id, sessionId, afterSeq, now, text, card === undefined ? null : JSON.stringify(card))
     return notice
   }
 
   notices(sessionId: string): NoticeRow[] {
-    return this.sql.exec<{ id: string; session_id: string; after_seq: number; at: number; text: string }>(
+    return this.sql.exec<{ id: string; session_id: string; after_seq: number; at: number; text: string; card: string | null }>(
       'SELECT * FROM notice WHERE session_id = ? ORDER BY after_seq, at', sessionId,
-    ).toArray().map((row) => ({ id: row.id, sessionId: row.session_id, afterSeq: row.after_seq, at: row.at, text: row.text }))
+    ).toArray().map((row) => ({ id: row.id, sessionId: row.session_id, afterSeq: row.after_seq, at: row.at, text: row.text, ...(row.card === null ? {} : { card: JSON.parse(row.card) as NoticeCard }) }))
   }
 
   // ------------------------------------------------------------ rewinds (robot-0q6a, robot-8v1t)

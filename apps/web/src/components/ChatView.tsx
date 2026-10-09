@@ -146,7 +146,7 @@ function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatI
     case 'routine':
       return (
         <div className="chat-separator routine-line">
-          {item.action === 'ran' ? null : <span>{routineVerb(item.action)} </span>}
+          {item.action === 'ran' ? null : <span>{item.by === undefined ? routineVerb(item.action) : `Routine ${item.action} by ${item.by}`} </span>}
           <span className="routine-name"><ClockIcon /> {item.name}</span>
         </div>
       )
@@ -164,8 +164,8 @@ function Item({ item, meId, canAnswer, onAnswer, level, robotId }: { item: ChatI
   }
 }
 
-function routineVerb(action: 'created' | 'updated' | 'deleted' | 'ran'): string {
-  return action === 'created' ? 'Created routine' : action === 'updated' ? 'Updated routine' : action === 'deleted' ? 'Deleted routine' : ''
+function routineVerb(action: 'created' | 'updated' | 'deleted' | 'ran' | 'paused' | 'resumed'): string {
+  return action === 'created' ? 'Created routine' : action === 'updated' ? 'Updated routine' : action === 'deleted' ? 'Deleted routine' : action === 'paused' ? 'Paused routine' : action === 'resumed' ? 'Resumed routine' : ''
 }
 
 export function askTitle(proposal: ProposalView): string {

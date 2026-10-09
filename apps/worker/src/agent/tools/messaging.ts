@@ -58,7 +58,7 @@ export function replyTools(host: MessagingHost): ToolDefinition[] {
 export interface RobotsHost {
   createRobot(brief: string): Promise<{ id: string; status: string }>
   proposeGrantsFor(robotId: string, purpose: string, grants: { tools: string[]; skills: string[]; recipients: string[]; secrets: string[] }): Promise<{ proposalId: string; status: string }>
-  configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }>
+  configureRobot(id: string, change: { name?: string; title?: string; description?: string; avatarColor?: string }): Promise<{ id: string; identity: unknown }>
 }
 
 /** Mr. Robot's coordination tools (robot-hk2s): new Robots still get their Grants from the owner. */
@@ -83,10 +83,10 @@ export function robotsTools(host: RobotsHost): ToolDefinition[] {
       },
       execute: async ({ robot_id, purpose, tools, skills, logins, recipients }) => host.proposeGrantsFor(robot_id, purpose, { tools: tools ?? [], skills: skills ?? [], recipients: recipients ?? [], secrets: logins ?? [] }),
     }),
-    tool<{ robot_id: string; name?: string; title?: string; description?: string }>({
+    tool<{ robot_id: string; name?: string; title?: string; description?: string; avatarColor?: string }>({
       name: 'robot_configure',
-      description: "Rename or re-describe one of your owner's Robots. Grants are never changed this way.",
-      parameters: { properties: { robot_id: { type: 'string' }, name: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['robot_id'] },
+      description: "Change the identity of one of your owner's Robots: name, title, description and avatar colour (#rrggbb). Its Conversation shows a line naming you. Grants are never changed this way.",
+      parameters: { properties: { robot_id: { type: 'string' }, name: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, avatarColor: { type: 'string', description: '#rrggbb' } }, required: ['robot_id'] },
       execute: async ({ robot_id, ...change }) => host.configureRobot(robot_id, change),
     }),
   ]

@@ -22,6 +22,9 @@ import type {
   BrowserBackend,
   ChatItem,
   Conversation,
+  ConversationPage,
+  ConversationSearchResult,
+  TrajectoryExcerpt,
   FleetState,
   GrantSet,
   Identity,
@@ -85,6 +88,8 @@ import { Logins } from '../plugins/logins.ts'
 import { Messaging } from '../plugins/messaging.ts'
 import { Notify } from '../plugins/notify.ts'
 import { Robots } from '../plugins/robots.ts'
+import { Deputy } from '../plugins/deputy.ts'
+import * as DeputyPrograms from './deputy.ts'
 import { Routines } from '../plugins/routines.ts'
 import { Setup } from '../plugins/setup.ts'
 import { Skills } from '../plugins/skills.ts'
@@ -173,6 +178,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         stopWatching: () => Effect.promise(() => this.stopWatching()),
         setAlarm: (at) => Effect.promise(() => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at))),
         seedWorkspace: () => Effect.promise(() => this.seedWorkspace()),
+        schedule: () => Effect.sync(() => this.schedule()),
         notifyMembers: (kind, body) => Effect.promise(() => this.notifyMembers(kind, body).catch(() => 0)),
         rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
         working: () => Effect.sync(() => this.store.activeTurn() !== undefined || this.pumping !== undefined),
@@ -256,6 +262,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.releaseComposition()
     const sql = this.ctx.storage.sql
     for (const table of ['session_event', 'session_log', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
+    this.store.search.clear()
+    this.store.abandonRoutineRuns(Date.now())
     for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen']) this.store.delete(key)
     this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
     if (memory) {
@@ -452,7 +460,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     if (wakeup.kind === 'routine') {
       const reply = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
-      this.store.finishRoutineRun(wakeup.id, failedTurn ? 'failed' : 'done', failedTurn ? 'The Turn failed.' : (reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'))
+      this.store.finishRoutineRun(wakeup.id, failedTurn ? 'failed' : 'ok', failedTurn ? 'The Turn failed.' : (reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'), Date.now())
     }
     await this.loadSecretMasks()
     await this.deliverReplies(wakeup, startSeq)
@@ -578,7 +586,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const wakeup = active !== undefined ? this.store.wakeup(active.wakeupId) : this.starting
     // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
     if (wakeup !== undefined) {
-      if (wakeup.kind === 'routine') this.store.finishRoutineRun(wakeup.id, 'failed', 'The Turn failed.')
+      if (wakeup.kind === 'routine') this.store.finishRoutineRun(wakeup.id, 'failed', 'The Turn failed.', Date.now())
       this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
       this.store.endTurn(wakeup.id)
     }
@@ -733,6 +741,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('messaging')) mounts.push(mount(Messaging, { host: this }))
     if (granted.has('browser')) mounts.push(mount(Browser, { host: this }))
     if (granted.has('robots') && config.kind === 'mr-robot') mounts.push(mount(Robots, { host: this }))
+    if (granted.has('deputy') && config.kind === 'mr-robot') mounts.push(mount(Deputy, { host: DeputyPrograms.deputyHost((program) => this.program(program)) }))
     if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }))
     if (granted.has('web')) mounts.push(mount(Web, { credentials: this.credentials(), browser: this.env.BROWSER }))
     if (granted.has('routines')) mounts.push(mount(Routines, { schedule: this.schedule() }))
@@ -1226,8 +1235,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   /** Advanced settings (robot-vqtw): every change takes effect on the next Turn. */
-  updateSettings(patch: SettingsPatch): Promise<RobotSettings> {
-    return this.program(Programs.updateSettings(patch))
+  updateSettings(patch: SettingsPatch, by?: string): Promise<RobotSettings> {
+    return this.program(Programs.updateSettings(patch, by))
   }
 
 
@@ -1619,16 +1628,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return proposal
   }
 
-  configureRobot(id: string, change: { name?: string; title?: string; description?: string }): Promise<{ id: string; identity: unknown }> {
-    return this.program(Programs.configureRobot(id, change))
+  configureRobot(id: string, change: { name?: string; title?: string; description?: string; avatarColor?: string }): Promise<{ id: string; identity: unknown }> {
+    return this.program(DeputyPrograms.configure(id, change))
   }
 
 
   // ---------------------------------------------------------------- Routines (robot-gbbt, robot-qyd5)
 
   /** Pause keeps the Routine and its schedule but stops its alarm; resume plans the next run from now (robot-qhll). */
-  pauseRoutine(id: string, paused: boolean): Promise<RoutineView> {
-    return this.program(Programs.pauseRoutine(id, paused))
+  pauseRoutine(id: string, paused: boolean, by?: string): Promise<RoutineView> {
+    return this.program(Programs.pauseRoutine(id, paused, by))
+  }
+
+  /** Mr. Robot creates or edits a Routine of this Robot for his owner (cd-n9pi); the Conversation shows a card naming `by`. */
+  setRoutine(input: Programs.RoutineInput, by: string): Promise<RoutineView> {
+    return this.program(Programs.setRoutine(input, by))
   }
 
 
@@ -1641,8 +1655,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   /** The owner deletes a Routine from the panel (robot-qyd5). */
-  removeRoutine(id: string): Promise<void> {
-    return this.program(Programs.removeRoutine(id))
+  removeRoutine(id: string, by?: string): Promise<void> {
+    return this.program(Programs.removeRoutine(id, by))
   }
 
 
@@ -1675,6 +1689,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   conversation(): Promise<Conversation> {
     return this.program(Views.conversation())
+  }
+
+  /** The chat, newest item first, a page at a time: what another Robot reads for the owner (cd-gjhb). */
+  conversationPage(page = 1): Promise<ConversationPage> {
+    return this.program(Views.conversationPage(page))
+  }
+
+  /** A capped excerpt of the Trajectory around one chat item (cd-9te1). */
+  trajectoryAround(itemId: string, before = 3, after = 15): Promise<TrajectoryExcerpt> {
+    return this.program(Views.trajectoryAround(itemId, before, after))
+  }
+
+  /** Text search over this Robot's Conversation, newest first, paged (cd-ggem). */
+  searchConversation(query: string, page = 1): Promise<ConversationSearchResult> {
+    return this.program(Views.searchConversation(query, page))
   }
 
 
@@ -1723,13 +1752,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The owner saved a file; the Robot hears about it at its next Turn (rb-xwks). */
-  async saveFile(path: string, content: string): Promise<WorkspaceFileContent> {
+  async saveFile(path: string, content: string, by?: string): Promise<WorkspaceFileContent> {
     const current = await this.run(this.workspace.stat(path))
     if (current !== undefined && current.size > MAX_EDITABLE_BYTES) throw Object.assign(new Error('this file is too large to edit here'), { name: 'Invalid', status: 400 })
     await this.run(this.workspace.write(path, content, path.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8'))
-    await this.memoryChanged(path, 'your owner')
+    await this.memoryChanged(path, by ?? 'your owner')
     const config = this.store.requireConfig()
-    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${this.owner().name} edited ${path}.`, Date.now())
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${by ?? this.owner().name} edited ${path}.`, Date.now())
     await this.changed()
     return this.fileContent(path)
   }
@@ -1823,9 +1852,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The owner deleted a file (a local skill, an old note). */
-  async deleteFile(path: string): Promise<void> {
+  async deleteFile(path: string, by?: string): Promise<void> {
     await this.run(this.workspace.remove(path))
-    await this.memoryChanged(path, 'your owner (deleted)')
+    await this.memoryChanged(path, `${by ?? 'your owner'} (deleted)`)
+    if (by !== undefined) {
+      const config = this.store.requireConfig()
+      this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${by} deleted ${path}.`, Date.now())
+      await this.changed()
+    }
   }
 
   exaKey(): Promise<string | null> {
@@ -1947,6 +1981,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   protected routineViews(): Promise<RoutineView[]> {
+    return this.program(Views.routineViews)
+  }
+
+  /** The Routines with their last runs, as the panel shows them. */
+  routineList(): Promise<RoutineView[]> {
     return this.program(Views.routineViews)
   }
 
