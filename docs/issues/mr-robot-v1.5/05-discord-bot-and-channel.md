@@ -57,3 +57,8 @@
   - Messages in #general arrive in Mr. Robot's conversation as Discord messages from "rk".
   - A post from Mr. Robot to #general works: his failure notice for check two appeared in the channel.
 - **Not yet seen live:** an ordinary reply in #general. From check three on, every Turn failed with Anthropic 429 rate_limit_error ("would exceed your account's rate limit"), on the owner's Anthropic account. That is outside Mr. Robot.
+
+## Live, 2026-10-09: reply routing
+- A question asked in the app was answered in the app only. Nothing new appeared in #general.
+- A question asked in #general got one answer there, as a Discord reply that quotes the question. No "Mr. Robot: …" copy followed (![](img/05-discord-reply-routing.png)).
+- The first two answers after the deploy still came without the quote; from the third message on, the quote was there (Discord API: message type 19 with message_reference). We think the old Durable Object code ran for a few minutes after the deploy.
