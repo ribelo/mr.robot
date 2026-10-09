@@ -66,7 +66,7 @@ export function skillProposalTools(host: SkillHost): ToolDefinition[] {
     tool<{ name: string; content: string }>({
       name: 'skill_write',
       description: 'Create or replace one of your own local skills (skills/<name>/SKILL.md in your Workspace). content is the full SKILL.md: Markdown with "name" and "description" frontmatter. Skills from the Home library are read-only; write a local skill with another name instead.',
-      parameters: { properties: { name: { type: 'string', description: 'lowercase-with-dashes' }, content: { type: 'string' } }, required: ['name', 'content'] },
+      parameters: { properties: { name: { type: 'string', description: 'lowercase-with-dashes' }, content: { type: 'string', description: 'The full SKILL.md: Markdown with name and description frontmatter' } }, required: ['name', 'content'] },
       execute: async ({ name, content }) => {
         if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw new Error('a skill name is lowercase letters, digits and dashes')
         return host.writeSkill(name, content)
@@ -75,7 +75,7 @@ export function skillProposalTools(host: SkillHost): ToolDefinition[] {
     tool<{ name: string; visibility?: 'home' | 'private' }>({
       name: 'propose_skill',
       description: 'Propose one of your local skills for the Home library, so other Robots can be granted it. Your owner approves it first. visibility "private" keeps it to your owner\'s Robots.',
-      parameters: { properties: { name: { type: 'string' }, visibility: { type: 'string', enum: ['home', 'private'] } }, required: ['name'] },
+      parameters: { properties: { name: { type: 'string', description: 'Skill name' }, visibility: { type: 'string', enum: ['home', 'private'], description: 'home (default) shares it in the Home library; private keeps it to your owner\'s Robots' } }, required: ['name'] },
       execute: async ({ name, visibility }) => ({ ...(await host.promoteSkill(name, visibility ?? 'home')), status: 'waiting for your owner' }),
     }),
   ]

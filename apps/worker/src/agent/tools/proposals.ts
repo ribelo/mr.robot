@@ -27,7 +27,7 @@ export function grantProposalTools(host: RobotHost): ToolDefinition[] {
     tool<{ purpose: string } & Partial<Record<keyof GrantSet, unknown>>>({
       name: 'propose_grants',
       description: `Ask your owner for additional Grants. Name exactly what you need and why; they approve or reject the stored list. Tool groups:\n${catalogText}`,
-      parameters: { properties: { purpose: { type: 'string' }, ...grantSchema }, required: ['purpose'] },
+      parameters: { properties: { purpose: { type: 'string', description: 'Why you need this, in one or two sentences' }, ...grantSchema }, required: ['purpose'] },
       execute: async ({ purpose, ...grants }) => {
         const proposal = host.propose('grants', purpose, { grants: grantSet(grants) })
         return { proposalId: proposal.id, status: 'waiting for your owner', grants: proposal.grants }

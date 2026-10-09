@@ -5,7 +5,7 @@
  */
 export const TOOL_GROUPS = {
   files: 'Read, write, edit, glob and grep files in its own Workspace.',
-  web: 'Fetch web pages and search the web.',
+  web: 'Fetch web pages by address (searching the web is the exa group).',
   browser: 'Use a headless browser: open, observe, act, screenshot; ask the owner for a takeover.',
   routines: 'Create, update and delete its own Routines.',
   messaging: 'List and message the Robots it has recipient Grants for.',

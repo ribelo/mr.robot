@@ -83,7 +83,7 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'drive_search',
       service: 'drive',
       description: 'Find files: plain words search names and content; or a Drive query (e.g. "mimeType = \'application/vnd.google-apps.spreadsheet\' and modifiedTime > \'2026-10-01\'"). folderId lists one folder. Newest first.',
-      parameters: { properties: { query: { type: 'string' }, folderId: { type: 'string' }, max: { type: 'number' } } },
+      parameters: { properties: { query: { type: 'string', description: 'Words to search for in names and content, or a Drive query such as "mimeType = \'application/pdf\'"' }, folderId: { type: 'string', description: 'Drive folder id' }, max: { type: 'number', description: 'Most files to return' } } },
       action: (args) => `search "${str(args, 'query')}"${str(args, 'folderId') === '' ? '' : ` in ${str(args, 'folderId')}`}`,
       run: (args, use) => {
         const words = str(args, 'query').trim()
@@ -103,7 +103,7 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'drive_download',
       service: 'drive',
       description: 'Download a file into your Workspace under drive/. Google Docs come as text and Sheets as CSV (use drive_export for other formats).',
-      parameters: { properties: { fileId: { type: 'string' } }, required: ['fileId'] },
+      parameters: { properties: { fileId: { type: 'string', description: 'Drive file id (from drive_search)' } }, required: ['fileId'] },
       action: (args) => `download ${str(args, 'fileId')}`,
       run: (args, use) => Effect.gen(function* () {
         const file = yield* getFile(use, str(args, 'fileId'))
@@ -120,7 +120,7 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'drive_export',
       service: 'drive',
       description: 'Export a Google Doc (text, markdown, docx, pdf) or Sheet (csv of its first sheet, xlsx, pdf) into your Workspace under drive/.',
-      parameters: { properties: { fileId: { type: 'string' }, format: { type: 'string', enum: Object.keys(EXPORTS) } }, required: ['fileId', 'format'] },
+      parameters: { properties: { fileId: { type: 'string', description: 'Drive file id (from drive_search)' }, format: { type: 'string', enum: Object.keys(EXPORTS), description: 'Export format' } }, required: ['fileId', 'format'] },
       action: (args) => `export ${str(args, 'fileId')} as ${str(args, 'format')}`,
       run: (args, use) => Effect.gen(function* () {
         const file = yield* getFile(use, str(args, 'fileId'))
@@ -136,7 +136,7 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'drive_upload',
       service: 'drive',
       description: 'Upload a Workspace file to Drive, optionally into a folder and under another name; convert: true turns CSV/XLSX into a Google Sheet and text/DOCX/HTML into a Google Doc.',
-      parameters: { properties: { path: { type: 'string' }, folderId: { type: 'string' }, name: { type: 'string' }, convert: { type: 'boolean' } }, required: ['path'] },
+      parameters: { properties: { path: { type: 'string', description: 'Workspace path of the file' }, folderId: { type: 'string', description: 'Drive folder id' }, name: { type: 'string', description: 'File or folder name' }, convert: { type: 'boolean', description: 'Turn CSV/XLSX into a Google Sheet and text/DOCX/HTML into a Google Doc' } }, required: ['path'] },
       action: (args) => `upload ${str(args, 'path')}`,
       run: (args, use) => Effect.gen(function* () {
         const path = str(args, 'path')
@@ -149,14 +149,14 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       }),
     },
     {
-      name: 'drive_import',
+      name: 'drive_replace',
       service: 'drive',
-      description: 'Replace the content of an existing Google Doc or Sheet with a Workspace file (text/markdown/docx into a Doc, CSV into the first sheet of a Sheet); the file keeps its id, link and sharing.',
-      parameters: { properties: { fileId: { type: 'string' }, path: { type: 'string' } }, required: ['fileId', 'path'] },
-      action: (args) => `import ${str(args, 'path')} into ${str(args, 'fileId')}`,
+      description: 'Overwrite the content of an existing Google Doc or Sheet with a Workspace file (drive_upload creates a new file instead) (text/markdown/docx into a Doc, CSV into the first sheet of a Sheet); the file keeps its id, link and sharing.',
+      parameters: { properties: { fileId: { type: 'string', description: 'Drive file id (from drive_search)' }, path: { type: 'string', description: 'Workspace path of the file' } }, required: ['fileId', 'path'] },
+      action: (args) => `replace ${str(args, 'fileId')} with ${str(args, 'path')}`,
       run: (args, use) => Effect.gen(function* () {
         const file = yield* getFile(use, str(args, 'fileId'))
-        if (file.mimeType !== DOC && file.mimeType !== SHEET) return yield* new ConnectorRefused({ message: 'drive_import replaces Google Docs and Sheets; use drive_upload for other files' })
+        if (file.mimeType !== DOC && file.mimeType !== SHEET) return yield* new ConnectorRefused({ message: 'drive_replace overwrites Google Docs and Sheets; use drive_upload to create other files' })
         const bytes = yield* readWorkspace(str(args, 'path'))
         return shown(yield* google(host, use, { method: 'PATCH', url: `${UPLOAD}/files/${encodeURIComponent(file.id)}${query({ uploadType: 'media', fields: FIELDS, supportsAllDrives: true })}`, bytes: { data: bytes, contentType: mimeOf(str(args, 'path')) } }, File))
       }),
@@ -165,7 +165,7 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'drive_create_folder',
       service: 'drive',
       description: 'Create a folder, optionally inside another.',
-      parameters: { properties: { name: { type: 'string' }, parentId: { type: 'string' } }, required: ['name'] },
+      parameters: { properties: { name: { type: 'string', description: 'File or folder name' }, parentId: { type: 'string', description: 'Folder to create it in (default: the Drive root)' } }, required: ['name'] },
       action: (args) => `create folder "${str(args, 'name')}"`,
       run: (args, use) => Effect.map(google(host, use, { method: 'POST', url: `${DRIVE}/files${query({ fields: FIELDS, supportsAllDrives: true })}`, json: { name: str(args, 'name'), mimeType: FOLDER, ...(str(args, 'parentId') === '' ? {} : { parents: [str(args, 'parentId')] }) } }, File), shown),
     },
@@ -173,7 +173,7 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'drive_move',
       service: 'drive',
       description: 'Move a file into a folder (out of its current folders); a new name renames it too.',
-      parameters: { properties: { fileId: { type: 'string' }, folderId: { type: 'string' }, name: { type: 'string' } }, required: ['fileId', 'folderId'] },
+      parameters: { properties: { fileId: { type: 'string', description: 'Drive file id (from drive_search)' }, folderId: { type: 'string', description: 'Drive folder id' }, name: { type: 'string', description: 'File or folder name' } }, required: ['fileId', 'folderId'] },
       action: (args) => `move ${str(args, 'fileId')} to ${str(args, 'folderId')}`,
       run: (args, use) => Effect.gen(function* () {
         const file = yield* getFile(use, str(args, 'fileId'))
@@ -184,7 +184,7 @@ export function driveTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'drive_share',
       service: 'drive',
       description: 'Share a file or folder with a person as reader, commenter or writer; Google e-mails them unless notify is false.',
-      parameters: { properties: { fileId: { type: 'string' }, email: { type: 'string' }, role: { type: 'string', enum: ['reader', 'commenter', 'writer'] }, notify: { type: 'boolean' }, message: { type: 'string' } }, required: ['fileId', 'email', 'role'] },
+      parameters: { properties: { fileId: { type: 'string', description: 'Drive file id (from drive_search)' }, email: { type: 'string', description: 'E-mail address of the person' }, role: { type: 'string', enum: ['reader', 'commenter', 'writer'], description: 'What the person may do' }, notify: { type: 'boolean', description: 'Whether Google e-mails the person (default true)' }, message: { type: 'string', description: 'Note included in the sharing e-mail' } }, required: ['fileId', 'email', 'role'] },
       action: (args) => `share ${str(args, 'fileId')} with ${str(args, 'email')} as ${str(args, 'role')}`,
       run: (args, use) => Effect.map(
         google(host, use, { method: 'POST', url: `${DRIVE}/files/${encodeURIComponent(str(args, 'fileId'))}/permissions${query({ sendNotificationEmail: args['notify'] !== false, emailMessage: str(args, 'message') || undefined, supportsAllDrives: true })}`, json: { type: 'user', role: str(args, 'role'), emailAddress: str(args, 'email') } }, Permission),

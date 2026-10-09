@@ -24,7 +24,9 @@ export function messagingTools(host: MessagingHost): ToolDefinition[] {
       concurrencySafe: true,
       execute: async () => {
         const entries = await host.directory()
-        return entries.length === 0 ? 'You have no recipients. Ask your owner with propose_grants (recipients).' : entries
+        return entries.length === 0
+          ? { robots: [], hint: 'You have no recipients. Ask your owner with propose_grants (recipients).' }
+          : { robots: entries }
       },
     }),
     tool<{ to: string; request: string; idempotency_key: string }>({
@@ -33,8 +35,8 @@ export function messagingTools(host: MessagingHost): ToolDefinition[] {
       parameters: {
         properties: {
           to: { type: 'string', description: 'Robot id from robot_directory' },
-          request: { type: 'string' },
-          idempotency_key: { type: 'string' },
+          request: { type: 'string', description: 'The self-contained work request' },
+          idempotency_key: { type: 'string', description: 'A fresh key per distinct request; resending a key does not send twice' },
         },
         required: ['to', 'request', 'idempotency_key'],
       },
@@ -49,7 +51,7 @@ export function replyTools(host: MessagingHost): ToolDefinition[] {
     tool<{ handle: string; reply: string }>({
       name: 'robot_reply',
       description: 'Answer a request another Robot sent you, using the reply handle from its message. Each handle answers once.',
-      parameters: { properties: { handle: { type: 'string' }, reply: { type: 'string' } }, required: ['handle', 'reply'] },
+      parameters: { properties: { handle: { type: 'string', description: 'Reply handle from the message you answer' }, reply: { type: 'string', description: 'Your answer' } }, required: ['handle', 'reply'] },
       execute: async ({ handle, reply }) => host.replyRobotMessage(handle, reply),
     }),
   ]

@@ -1,11 +1,13 @@
 /**
  * Web fetch and search through the DSH web seam (robot-o6lf): dsh-web holds the providers,
- * dsh-tool-web turns them into the model's web_fetch and web_search tools.
+ * dsh-tool-web turns them into the model's web_fetch tool. The generic web_search tool is not
+ * mounted (v1.8, ts-6b3k): it answered mostly to the first word of the query; search is Exa's.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import puppeteer from '@cloudflare/puppeteer'
 import WebRuntime, { WebError, type WebFetchProvider, type WebFetchRequest, type WebFetchResult, type WebSearchProvider, type WebSearchRequest, type WebSearchResult } from '@deepseek-ai/dsh-web'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import { withToolRewrite } from './tool-wording.ts'
 import { DeepSeekSearchProvider, DEEPSEEK_DEFAULT_API_VERSION, DEEPSEEK_DEFAULT_BASE_URL, DEEPSEEK_DEFAULT_MAX_TOKENS, DEEPSEEK_DEFAULT_MAX_USES, DEEPSEEK_DEFAULT_MODEL } from '@deepseek-ai/dsh-web-search-deepseek'
 import type { CredentialSource } from './providers.ts'
 
@@ -92,6 +94,14 @@ export function bingTarget(href: string): string {
   }
 }
 
+const FETCH_DESCRIPTION = 'Fetch the content of a specific HTTP(S) URL and return it decoded to text. A page that answers with an error (404, 500) does not throw: the result carries its statusCode, so check it. This does not search; to search the web use web_search_exa.'
+
+/** dsh-tool-web with fetch only, and a web_fetch description that states the status behaviour and where search is. */
+const FetchOnly = {
+  ...ToolWeb,
+  apply: (ctx: Context, config: unknown) => ToolWeb.apply(withToolRewrite(ctx, (tool) => (tool.name === 'web_fetch' ? { ...tool, description: FETCH_DESCRIPTION } : tool)) as never, config as never),
+}
+
 export function webPlugin(credentials: CredentialSource, browser?: Fetcher): (ctx: Context) => Promise<void> {
   return async (ctx) => {
     await ctx.plugin(WebRuntime)
@@ -100,7 +110,7 @@ export function webPlugin(credentials: CredentialSource, browser?: Fetcher): (ct
     const deepseek = await credentials.resolve('deepseek').catch(() => undefined)
     if (deepseek?.kind !== 'api-key' && browser !== undefined) {
       ctx.web.registerSearchProvider(new BrowserSearchProvider(browser))
-      await ctx.plugin(ToolWeb, {})
+      await ctx.plugin(FetchOnly as never, { search: false } as never)
       return
     }
     ctx.web.registerSearchProvider(new DeepSeekSearchProvider(() => ({
@@ -114,6 +124,6 @@ export function webPlugin(credentials: CredentialSource, browser?: Fetcher): (ct
       maxTokens: DEEPSEEK_DEFAULT_MAX_TOKENS,
       maxUses: DEEPSEEK_DEFAULT_MAX_USES,
     }) as never))
-    await ctx.plugin(ToolWeb, {})
+    await ctx.plugin(FetchOnly as never, { search: false } as never)
   }
 }

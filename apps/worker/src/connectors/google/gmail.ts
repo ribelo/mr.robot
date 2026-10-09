@@ -101,7 +101,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_search',
       service: 'gmail',
       description: 'Search the mailbox with Gmail search syntax (e.g. "is:unread in:inbox", "from:bank newer_than:7d", "has:attachment invoice"). Returns threads newest first: id, latest message from, subject, date, snippet, unread, labels, attachments.',
-      parameters: { properties: { query: { type: 'string' }, max: { type: 'number', description: 'At most this many threads (default 20, up to 50).' } }, required: ['query'] },
+      parameters: { properties: { query: { type: 'string', description: 'Gmail search query, for example "is:unread in:inbox" or "from:bank newer_than:7d"' }, max: { type: 'number', description: 'At most this many threads (default 20, up to 50).' } }, required: ['query'] },
       action: (args) => `search "${str(args, 'query')}"`,
       run: (args, use) => Effect.gen(function* () {
         const max = Math.min(Math.max(Number(args['max'] ?? 20) || 20, 1), 50)
@@ -118,7 +118,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_thread',
       service: 'gmail',
       description: 'Read a whole thread: every message with from, to, date, subject, its text and its attachments (ids and names for gmail_attachment).',
-      parameters: { properties: { threadId: { type: 'string' } }, required: ['threadId'] },
+      parameters: { properties: { threadId: { type: 'string', description: 'Gmail thread id (from gmail_search)' } }, required: ['threadId'] },
       action: (args) => `read thread ${str(args, 'threadId')}`,
       run: (args, use) => Effect.map(google(host, use, { method: 'GET', url: `${GMAIL}/threads/${encodeURIComponent(str(args, 'threadId'))}?format=full` }, Thread), (thread) => ({ threadId: thread.id, messages: (thread.messages ?? []).map((message) => summary(message, true)) })),
     },
@@ -126,7 +126,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_attachment',
       service: 'gmail',
       description: 'Save an attachment of a message into your Workspace under attachments/gmail/; returns its path.',
-      parameters: { properties: { messageId: { type: 'string' }, attachmentId: { type: 'string' }, filename: { type: 'string' } }, required: ['messageId', 'attachmentId', 'filename'] },
+      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, attachmentId: { type: 'string', description: 'Attachment id (from gmail_thread)' }, filename: { type: 'string', description: 'Name to save the file under in your Workspace' } }, required: ['messageId', 'attachmentId', 'filename'] },
       action: (args) => `save attachment "${str(args, 'filename')}"`,
       run: (args, use) => Effect.gen(function* () {
         const body = yield* google(host, use, { method: 'GET', url: `${GMAIL}/messages/${encodeURIComponent(str(args, 'messageId'))}/attachments/${encodeURIComponent(str(args, 'attachmentId'))}` }, AttachmentBody)
@@ -140,7 +140,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_draft',
       service: 'gmail',
       description: 'Create a draft (not sent): to, cc, subject, body, optional Workspace files as attachments, optional replyTo message id to draft a reply in its thread. The owner can review and send it in Gmail.',
-      parameters: { properties: { to: { type: 'array', items: { type: 'string' } }, cc: { type: 'array', items: { type: 'string' } }, subject: { type: 'string' }, body: { type: 'string' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace paths.' }, replyTo: { type: 'string' } }, required: ['to', 'subject', 'body'] },
+      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: 'Message text, plain text' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace paths.' }, replyTo: { type: 'string', description: 'Id of the message this draft answers; the draft joins its thread' } }, required: ['to', 'subject', 'body'] },
       action: (args) => `draft "${str(args, 'subject')}" to ${list(args['to']).join(', ')}`,
       run: (args, use) => Effect.gen(function* () {
         const reply = str(args, 'replyTo') === '' ? undefined : yield* getMessage(host, use, str(args, 'replyTo'), 'metadata')
@@ -156,7 +156,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       service: 'gmail',
       write: true,
       description: 'Send an e-mail now: to, cc, bcc, subject, body, optional Workspace files as attachments. Prefer gmail_draft when the owner should check it first.',
-      parameters: { properties: { to: { type: 'array', items: { type: 'string' } }, cc: { type: 'array', items: { type: 'string' } }, bcc: { type: 'array', items: { type: 'string' } }, subject: { type: 'string' }, body: { type: 'string' }, attachments: { type: 'array', items: { type: 'string' } } }, required: ['to', 'subject', 'body'] },
+      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, bcc: { type: 'array', items: { type: 'string' }, description: 'Bcc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: 'Message text, plain text' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['to', 'subject', 'body'] },
       action: (args) => `send "${str(args, 'subject')}" to ${list(args['to']).join(', ')}`,
       run: (args, use) => Effect.gen(function* () {
         const files = yield* filesOf(host, list(args['attachments']))
@@ -169,7 +169,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       service: 'gmail',
       write: true,
       description: 'Reply in the thread of a message, to its sender (or to everyone with replyAll); optional Workspace files as attachments.',
-      parameters: { properties: { messageId: { type: 'string' }, body: { type: 'string' }, replyAll: { type: 'boolean' }, attachments: { type: 'array', items: { type: 'string' } } }, required: ['messageId', 'body'] },
+      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, body: { type: 'string', description: 'Message text, plain text' }, replyAll: { type: 'boolean', description: 'Answer everyone on the message, not only the sender' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['messageId', 'body'] },
       action: (args) => `reply to message ${str(args, 'messageId')}${args['replyAll'] === true ? ' (all)' : ''}`,
       run: (args, use, account) => Effect.gen(function* () {
         const original = yield* getMessage(host, use, str(args, 'messageId'), 'metadata')
@@ -189,7 +189,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       service: 'gmail',
       write: true,
       description: 'Forward a message with its text and attachments to new recipients, with an optional note above it.',
-      parameters: { properties: { messageId: { type: 'string' }, to: { type: 'array', items: { type: 'string' } }, note: { type: 'string' } }, required: ['messageId', 'to'] },
+      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, note: { type: 'string', description: 'Text to put above the forwarded message' } }, required: ['messageId', 'to'] },
       action: (args) => `forward message ${str(args, 'messageId')} to ${list(args['to']).join(', ')}`,
       run: (args, use) => Effect.gen(function* () {
         const original = yield* getMessage(host, use, str(args, 'messageId'), 'full')
@@ -216,7 +216,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_label',
       service: 'gmail',
       description: 'Add and remove labels on a thread by name; names that do not exist are created when create is true.',
-      parameters: { properties: { threadId: { type: 'string' }, add: { type: 'array', items: { type: 'string' } }, remove: { type: 'array', items: { type: 'string' } }, create: { type: 'boolean' } }, required: ['threadId'] },
+      parameters: { properties: { threadId: { type: 'string', description: 'Gmail thread id (from gmail_search)' }, add: { type: 'array', items: { type: 'string' }, description: 'Label names to add' }, remove: { type: 'array', items: { type: 'string' }, description: 'Label names to remove' }, create: { type: 'boolean', description: 'Create a label that does not exist yet' } }, required: ['threadId'] },
       action: (args) => `label thread ${str(args, 'threadId')}: +${list(args['add']).join(',') || '-'} -${list(args['remove']).join(',') || '-'}`,
       run: (args, use) => Effect.gen(function* () {
         const add = yield* labelIds(host, use, list(args['add']), args['create'] === true)
@@ -229,7 +229,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_archive',
       service: 'gmail',
       description: 'Archive a thread (take it out of the inbox; nothing is deleted).',
-      parameters: { properties: { threadId: { type: 'string' } }, required: ['threadId'] },
+      parameters: { properties: { threadId: { type: 'string', description: 'Gmail thread id (from gmail_search)' } }, required: ['threadId'] },
       action: (args) => `archive thread ${str(args, 'threadId')}`,
       run: (args, use) => Effect.as(modifyThread(host, use, str(args, 'threadId'), [], ['INBOX']), { archived: true }),
     },
@@ -237,7 +237,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_mark_read',
       service: 'gmail',
       description: 'Mark a thread read (or unread with read: false).',
-      parameters: { properties: { threadId: { type: 'string' }, read: { type: 'boolean' } }, required: ['threadId'] },
+      parameters: { properties: { threadId: { type: 'string', description: 'Gmail thread id (from gmail_search)' }, read: { type: 'boolean', description: 'true marks the thread read (default), false marks it unread' } }, required: ['threadId'] },
       action: (args) => `mark thread ${str(args, 'threadId')} ${args['read'] === false ? 'unread' : 'read'}`,
       run: (args, use) => Effect.as(args['read'] === false ? modifyThread(host, use, str(args, 'threadId'), ['UNREAD'], []) : modifyThread(host, use, str(args, 'threadId'), [], ['UNREAD']), { done: true }),
     },
@@ -245,7 +245,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_unsubscribe',
       service: 'gmail',
       description: 'Unsubscribe from the mailing list a message came from, through its List-Unsubscribe header (one-click when the sender supports it). Archives the thread afterwards.',
-      parameters: { properties: { messageId: { type: 'string' } }, required: ['messageId'] },
+      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' } }, required: ['messageId'] },
       action: (args) => `unsubscribe via message ${str(args, 'messageId')}`,
       run: (args, use) => Effect.gen(function* () {
         const message = yield* getMessage(host, use, str(args, 'messageId'), 'metadata')

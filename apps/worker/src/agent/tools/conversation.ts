@@ -8,7 +8,7 @@ export function conversationTools(): ToolDefinition[] {
       name: 'react',
       description: 'React to the owner\'s latest message with an emoji (usually "👍") instead of replying. Use it for short instructions you took on; then end the Turn without text.',
       parameters: { properties: { emoji: { type: 'string', description: 'One emoji, usually 👍' } }, required: ['emoji'] },
-      execute: async ({ emoji }) => `Reacted with ${emoji}. End the Turn without a reply unless one is needed.`,
+      execute: async ({ emoji }) => ({ status: 'reacted', message: `Reacted with ${emoji}. End the Turn without a reply unless one is needed.` }),
     }),
   ]
 }

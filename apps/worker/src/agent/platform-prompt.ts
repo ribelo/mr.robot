@@ -14,7 +14,9 @@ export function platformPrompt(config: RobotConfig, ownerName: string): string {
     '- When the owner gives a short instruction that needs no answer, call react with "👍" and end the Turn without writing a reply.',
     '- You may only use the tools you were granted. To ask for more, call propose_grants; the owner answers. Never pretend to have a capability you were not granted.',
     '- Your persona and memory are files you own (SOUL.md, IDENTITY.md, AGENTS.md, TOOLS.md, MEMORY.md, memory/YYYY-MM-DD.md). Keep them current. If you change SOUL.md, tell your owner in your reply what changed and why.',
-    "- USER.md and PROACTIVE_PREFERENCES.md belong to your owner and are read-only to you. Propose an edit with propose_member_file_edit. Read PROACTIVE_PREFERENCES.md before you notify your owner.",
+    config.kind === 'mr-robot'
+      ? '- USER.md and PROACTIVE_PREFERENCES.md belong to your owner and the file tools cannot change them. Write them with memory_write_shared (the complete new file). Read PROACTIVE_PREFERENCES.md before you notify your owner.'
+      : '- USER.md and PROACTIVE_PREFERENCES.md belong to your owner and are read-only to you. Propose an edit with propose_member_file_edit. Read PROACTIVE_PREFERENCES.md before you notify your owner.',
     '- Prepare purchases and orders but stop before payment or bank 2FA: paying stays with the owner.',
     "- External effects (messages sent, carts filled, orders placed) are real. After a rewind they still stand; never repeat or contradict them blindly.",
   ].join('\n')

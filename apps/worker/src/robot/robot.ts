@@ -1879,7 +1879,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     this.remember(name, entry.password)
     const filled = await page.fillLogin(entry.username, entry.password)
-    if (!filled.password) return `No password field is visible on ${url}. Open the login form (or its next step) and try again.`
+    if (!filled.password) throw new Error(`No password field is visible on ${url}. Open the login form (or its next step) and try again.`)
     return `Filled ${filled.username && entry.username !== '' ? 'the username and ' : ''}the password of "${name}". Submit the form yourself.`
   }
 

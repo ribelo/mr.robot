@@ -26,13 +26,22 @@ export function testHost(kind: ConnectorKind, accounts: GrantedConnection[], sec
   return { host, files, statuses }
 }
 
-/** Run a tool by name with arguments; the result text as the model sees it. */
+/** Run a tool by name with arguments; the result as JSON text. A failed call rejects (ts-jbep). */
 export async function runTool(tools: ReadonlyArray<{ name: string; execute: (args: never, exec: never) => Promise<unknown> }>, name: string, args: Record<string, unknown>): Promise<string> {
   const found = tools.find((tool) => tool.name === name)
   if (found === undefined) throw new Error(`no tool ${name}; tools: ${tools.map((tool) => tool.name).join(', ')}`)
   const value = await found.execute(args as never, {} as never)
-  return typeof value === 'string' ? value : JSON.stringify(value)
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 }
 
 export const decodeRaw = (raw: string): string => new TextDecoder().decode(Uint8Array.from(atob(raw.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (raw.length % 4)) % 4)), (char) => char.charCodeAt(0)))
 export const b64url = (text: string): string => btoa(String.fromCharCode(...new TextEncoder().encode(text))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+/** A connector result without its account field; a list comes back as its items, a text as its message. */
+export function bodyOf(text: string): any {
+  const { account: _account, ...rest } = JSON.parse(text) as Record<string, unknown>
+  const keys = Object.keys(rest)
+  if (keys.length === 1 && keys[0] === 'items') return rest['items']
+  if (keys.length === 1 && keys[0] === 'message') return rest['message']
+  return rest
+}

@@ -22,13 +22,13 @@ export function secretTools(host: SecretHost, granted: readonly string[]): ToolD
     tool<{ name: string }>({
       name: 'login_fill',
       description: 'Fill a granted login entry into the username and password fields of the page open in your browser. The platform types it; you never see the password. Refused when the page is not on one of the entry\'s websites. Submit the form yourself afterwards.',
-      parameters: { properties: { name: { type: 'string' } }, required: ['name'] },
-      execute: async ({ name }) => host.fillLogin(name),
+      parameters: { properties: { name: { type: 'string', description: 'Name of the granted login or secret (see login_list)' } }, required: ['name'] },
+      execute: async ({ name }) => ({ status: 'filled', message: await host.fillLogin(name) }),
     }),
     tool<{ name: string }>({
       name: 'secret_get',
       description: 'Read the raw value of a granted entry marked "allow reading" (API keys and the like). For website logins use login_fill instead. Never repeat a value in your replies, notes or messages.',
-      parameters: { properties: { name: { type: 'string' } }, required: ['name'] },
+      parameters: { properties: { name: { type: 'string', description: 'Name of the granted login or secret (see login_list)' } }, required: ['name'] },
       execute: async ({ name }) => host.secret(name),
     }),
   ]

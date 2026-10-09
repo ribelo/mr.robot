@@ -44,6 +44,7 @@ Every tool names the account it acts on; when several accounts are granted, pass
 ## Fill a spreadsheet
 - sheets_info, then sheets_read the header row to learn the columns.
 - sheets_append for new rows; sheets_write to change cells in place. Never re-upload a Sheet to edit it.
+- To overwrite a whole Doc or Sheet from a Workspace file, use drive_replace (the file keeps its id, link and sharing). drive_upload creates a new file; it never replaces one.
 `)
 
 const MBANK = skill('mbank-notifications', 'Report mBank balance and transactions from the bank\'s notification e-mails in Gmail, without logging in to the bank.', `

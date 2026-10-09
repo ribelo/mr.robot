@@ -50,7 +50,7 @@ export function docsSheetsTools(host: ConnectorHost): ReadonlyArray<ConnectorToo
       name: 'docs_read',
       service: 'drive',
       description: 'Read a Google Doc as text (headings marked with #, tables as tab-separated rows).',
-      parameters: { properties: { documentId: { type: 'string' } }, required: ['documentId'] },
+      parameters: { properties: { documentId: { type: 'string', description: 'Google Doc id (a Drive file id, from drive_search)' } }, required: ['documentId'] },
       action: (args) => `read doc ${str(args, 'documentId')}`,
       run: (args, use) => Effect.map(google(host, use, { method: 'GET', url: `${DOCS}/${encodeURIComponent(str(args, 'documentId'))}` }, Document), (document) => ({ title: document.title ?? '', text: documentText(document) })),
     },
@@ -58,7 +58,7 @@ export function docsSheetsTools(host: ConnectorHost): ReadonlyArray<ConnectorToo
       name: 'docs_replace',
       service: 'drive',
       description: 'Replace every occurrence of a text in a Google Doc, in place (formatting around it stays).',
-      parameters: { properties: { documentId: { type: 'string' }, find: { type: 'string' }, replace: { type: 'string' }, matchCase: { type: 'boolean' } }, required: ['documentId', 'find', 'replace'] },
+      parameters: { properties: { documentId: { type: 'string', description: 'Google Doc id (a Drive file id, from drive_search)' }, find: { type: 'string', description: 'Text to find' }, replace: { type: 'string', description: 'Replacement text; empty deletes the matches' }, matchCase: { type: 'boolean', description: 'Match upper and lower case exactly (default true)' } }, required: ['documentId', 'find', 'replace'], emptyAllowed: ['replace'] },
       action: (args) => `replace "${str(args, 'find')}" in doc ${str(args, 'documentId')}`,
       run: (args, use) => Effect.map(
         google(host, use, { method: 'POST', url: `${DOCS}/${encodeURIComponent(str(args, 'documentId'))}:batchUpdate`, json: { requests: [{ replaceAllText: { containsText: { text: str(args, 'find'), matchCase: args['matchCase'] !== false }, replaceText: str(args, 'replace') } }] } }, BatchReply),
@@ -69,7 +69,7 @@ export function docsSheetsTools(host: ConnectorHost): ReadonlyArray<ConnectorToo
       name: 'docs_append',
       service: 'drive',
       description: 'Append text at the end of a Google Doc.',
-      parameters: { properties: { documentId: { type: 'string' }, text: { type: 'string' } }, required: ['documentId', 'text'] },
+      parameters: { properties: { documentId: { type: 'string', description: 'Google Doc id (a Drive file id, from drive_search)' }, text: { type: 'string', description: 'Text to add at the end of the Doc' } }, required: ['documentId', 'text'] },
       action: (args) => `append to doc ${str(args, 'documentId')}`,
       run: (args, use) => Effect.as(
         google(host, use, { method: 'POST', url: `${DOCS}/${encodeURIComponent(str(args, 'documentId'))}:batchUpdate`, json: { requests: [{ insertText: { endOfSegmentLocation: {}, text: str(args, 'text') } }] } }, BatchReply),
@@ -80,7 +80,7 @@ export function docsSheetsTools(host: ConnectorHost): ReadonlyArray<ConnectorToo
       name: 'sheets_info',
       service: 'drive',
       description: 'A spreadsheet\'s title and its sheets with their sizes.',
-      parameters: { properties: { spreadsheetId: { type: 'string' } }, required: ['spreadsheetId'] },
+      parameters: { properties: { spreadsheetId: { type: 'string', description: 'Google Sheet id (a Drive file id, from drive_search)' } }, required: ['spreadsheetId'] },
       action: (args) => `sheets of ${str(args, 'spreadsheetId')}`,
       run: (args, use) => Effect.map(
         google(host, use, { method: 'GET', url: sheetUrl(args, query({ fields: 'spreadsheetId,properties.title,sheets.properties' })) }, Spreadsheet),
@@ -91,7 +91,7 @@ export function docsSheetsTools(host: ConnectorHost): ReadonlyArray<ConnectorToo
       name: 'sheets_read',
       service: 'drive',
       description: 'Read cells in A1 notation (e.g. "Budget!A1:F40"); values as shown in the sheet.',
-      parameters: { properties: { spreadsheetId: { type: 'string' }, range: { type: 'string' } }, required: ['spreadsheetId', 'range'] },
+      parameters: { properties: { spreadsheetId: { type: 'string', description: 'Google Sheet id (a Drive file id, from drive_search)' }, range: { type: 'string', description: 'A1 range, for example Sheet1!A1:C10' } }, required: ['spreadsheetId', 'range'] },
       action: (args) => `read ${str(args, 'range')}`,
       run: (args, use) => Effect.map(google(host, use, { method: 'GET', url: sheetUrl(args, `/values/${encodeURIComponent(str(args, 'range'))}`) }, Values), (body) => ({ range: body.range ?? str(args, 'range'), values: body.values ?? [] })),
     },
@@ -99,7 +99,7 @@ export function docsSheetsTools(host: ConnectorHost): ReadonlyArray<ConnectorToo
       name: 'sheets_write',
       service: 'drive',
       description: 'Write cells in place starting at a range (rows of values; formulas like =SUM(B2:B9) work, as typed by a person).',
-      parameters: { properties: { spreadsheetId: { type: 'string' }, range: { type: 'string' }, values: { type: 'array', items: { type: 'array', items: {} } } }, required: ['spreadsheetId', 'range', 'values'] },
+      parameters: { properties: { spreadsheetId: { type: 'string', description: 'Google Sheet id (a Drive file id, from drive_search)' }, range: { type: 'string', description: 'A1 range, for example Sheet1!A1:C10' }, values: { type: 'array', items: { type: 'array', items: {} }, description: 'Rows of cell values, an array of arrays' } }, required: ['spreadsheetId', 'range', 'values'] },
       action: (args) => `write ${str(args, 'range')}`,
       run: (args, use) => Effect.map(
         google(host, use, { method: 'PUT', url: sheetUrl(args, `/values/${encodeURIComponent(str(args, 'range'))}${query({ valueInputOption: 'USER_ENTERED' })}`), json: { range: str(args, 'range'), majorDimension: 'ROWS', values: rows(args['values']) } }, Updated),
@@ -110,7 +110,7 @@ export function docsSheetsTools(host: ConnectorHost): ReadonlyArray<ConnectorToo
       name: 'sheets_append',
       service: 'drive',
       description: 'Append rows after the last row of a table (range names the sheet or table, e.g. "Expenses!A:D").',
-      parameters: { properties: { spreadsheetId: { type: 'string' }, range: { type: 'string' }, values: { type: 'array', items: { type: 'array', items: {} } } }, required: ['spreadsheetId', 'range', 'values'] },
+      parameters: { properties: { spreadsheetId: { type: 'string', description: 'Google Sheet id (a Drive file id, from drive_search)' }, range: { type: 'string', description: 'A1 range, for example Sheet1!A1:C10' }, values: { type: 'array', items: { type: 'array', items: {} }, description: 'Rows of cell values, an array of arrays' } }, required: ['spreadsheetId', 'range', 'values'] },
       action: (args) => `append ${rows(args['values']).length} rows to ${str(args, 'range')}`,
       run: (args, use) => Effect.map(
         google(host, use, { method: 'POST', url: sheetUrl(args, `/values/${encodeURIComponent(str(args, 'range'))}:append${query({ valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS' })}`), json: { majorDimension: 'ROWS', values: rows(args['values']) } }, Updated),

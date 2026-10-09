@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { GooglePlugin } from '../src/connectors/google/plugin.ts'
 import { connectorFixtures, type RecordedCall } from './connector-fixtures.ts'
-import { account, runTool, testHost } from './connector-host.ts'
+import { account, runTool, testHost, bodyOf } from './connector-host.ts'
 
 const DRIVE = 'https://www.googleapis.com/drive/v3'
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3'
@@ -18,7 +18,6 @@ const setup = () => {
 }
 const json = (call: RecordedCall) => JSON.parse(call.body ?? 'null') as Record<string, unknown>
 const last = () => connectorFixtures.calls.at(-1)!
-const bodyOf = (text: string) => JSON.parse(text.split('\n').slice(1).join('\n'))
 
 const sheet = { id: 'f-sheet', name: 'Budget 2026', mimeType: 'application/vnd.google-apps.spreadsheet', modifiedTime: '2026-10-07T10:00:00Z', parents: ['folder-home'], webViewLink: 'https://docs.google.com/spreadsheets/d/f-sheet' }
 const doc = { id: 'f-doc', name: 'Lease', mimeType: 'application/vnd.google-apps.document', parents: ['folder-home'] }
@@ -48,7 +47,7 @@ describe('Drive tools against recorded responses (cn-9mzm)', () => {
     expect(new TextDecoder().decode(files.get('drive/Budget 2026.csv'))).toBe('Month,Amount\nOct,100')
     expect(bodyOf(await runTool(tools, 'drive_export', { fileId: 'f-sheet', format: 'xlsx' })).path).toBe('drive/Budget 2026.xlsx')
     expect(new URL(last().url).searchParams.get('mimeType')).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    expect(await runTool(tools, 'drive_export', { fileId: 'f-sheet', format: 'docx' })).toContain('Failed: a Google Sheet cannot be exported as docx')
+    await expect(runTool(tools, 'drive_export', { fileId: 'f-sheet', format: 'docx' })).rejects.toThrow('Failed: a Google Sheet cannot be exported as docx')
   })
 
   it('uploads a Workspace file as multipart, converting a CSV into a Sheet', async () => {
@@ -72,7 +71,7 @@ describe('Drive tools against recorded responses (cn-9mzm)', () => {
     connectorFixtures.on('POST', `${DRIVE}/files/f-doc/permissions`, { id: 'perm-1', role: 'writer' })
     const { tools, host } = setup()
     await host.saveFile('lease.md', new TextEncoder().encode('# Lease\nUpdated.'))
-    await runTool(tools, 'drive_import', { fileId: 'f-doc', path: 'lease.md' })
+    await runTool(tools, 'drive_replace', { fileId: 'f-doc', path: 'lease.md' })
     expect(new URL(last().url).searchParams.get('uploadType')).toBe('media')
     expect(last().body).toBe('# Lease\nUpdated.')
     expect(bodyOf(await runTool(tools, 'drive_create_folder', { name: 'Invoices' }))).toMatchObject({ id: 'folder-new', type: 'folder' })

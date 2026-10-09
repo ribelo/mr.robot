@@ -4,7 +4,8 @@ import type { ConnectionView, Conversation, Me, RobotPanel } from '@mr-robot/pro
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { scripts, requests } from './stub-llm.ts'
 import { connectorFixtures, type RecordedCall } from './connector-fixtures.ts'
-import { account, runTool, testHost } from './connector-host.ts'
+import { account, runTool, testHost, bodyOf } from './connector-host.ts'
+import { accountsTool } from '../src/connectors/connector.ts'
 import { DiscordPlugin, inviteUrl, BOT_PERMISSIONS } from '../src/connectors/discord.ts'
 import { gatewayStep, initialGateway, INTENTS, readPayload } from '../src/connectors/discord-gateway.ts'
 
@@ -15,7 +16,6 @@ const BOT = account('discord', 'Bot Mr. Robot', 'mr-robot', ['discord'], true)
 
 const json = (call: RecordedCall) => JSON.parse(call.body ?? 'null') as Record<string, unknown>
 const last = () => connectorFixtures.calls.at(-1)!
-const bodyOf = (text: string) => JSON.parse(text.split('\n').slice(1).join('\n'))
 const setup = (accounts = [BOT]) => {
   const test = testHost('discord', accounts, { [BOT.id]: { token: TOKEN } })
   return { ...test, tools: DiscordPlugin.tools(test.host) }
@@ -103,10 +103,17 @@ describe('Discord tools against recorded responses (cn-q259)', () => {
     expect(json(connectorFixtures.calls.find((call) => call.url.endsWith('/users/@me/channels'))!)).toEqual({ recipient_id: 'U-anna' })
   })
 
+  it('discord_accounts lists the services the bot grants (ts-z0ip)', async () => {
+    const bare = account('discord', 'Bot Mr. Robot', 'mr-robot', [], true)
+    const { host } = setup([bare])
+    const list = [accountsTool(host, DiscordPlugin.defaultServices), ...DiscordPlugin.tools(host)]
+    expect(JSON.parse(await runTool(list, 'discord_accounts', {}))).toEqual([{ label: bare.label, account: bare.account, services: ['channels', 'messages', 'dms'], write: true, isDefault: true }])
+  })
+
   it('a refused token marks the connection "paste again"', async () => {
     connectorFixtures.on('GET', `${API}/users/@me/guilds`, { message: '401: Unauthorized', code: 0 }, 401)
     const { tools, statuses } = setup()
-    expect(await runTool(tools, 'discord_guilds', {})).toContain('Failed: the account\'s credentials were refused: Discord refused the bot token')
+    await expect(runTool(tools, 'discord_guilds', {})).rejects.toThrow('Failed: the account\'s credentials were refused: Discord refused the bot token')
     expect(statuses).toEqual([{ id: BOT.id, status: 'rejected', note: 'Discord refused the bot token' }])
   })
 })

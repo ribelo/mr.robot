@@ -52,7 +52,8 @@ function memoryTools(config: MemoryConfig) {
     return [tool<{ file: SharedFile; content: string }>({
       name: 'memory_write_shared',
       description: "Write the complete new version of one of your owner's shared memory files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) or the Home's HOME.md. Every Robot that reads it is told it changed.",
-      parameters: { properties: { file: { type: 'string', enum: [...SHARED_FILES] }, content: { type: 'string' } }, required: ['file', 'content'] },
+      parameters: { properties: { file: { type: 'string', enum: [...SHARED_FILES], description: 'Which shared memory file to write' }, content: { type: 'string' } }, required: ['file', 'content'] },
+      emptyAllowed: ['content'],
       execute: async ({ file, content }) => {
         if (!SHARED_FILES.includes(file)) throw new Error(`only ${SHARED_FILES.join(', ')} are shared memory files`)
         await write(file, content)
@@ -65,7 +66,7 @@ function memoryTools(config: MemoryConfig) {
     description: "Propose a new full version of a shared memory file: your owner's USER.md, PROACTIVE_PREFERENCES.md or memory/world.md, or the Home's HOME.md, with what you learned. Your owner approves or rejects it.",
     parameters: {
       properties: {
-        file: { type: 'string', enum: [...SHARED_FILES] },
+        file: { type: 'string', enum: [...SHARED_FILES], description: 'Which shared memory file to write' },
         content: { type: 'string', description: 'The complete new file' },
         purpose: { type: 'string', description: 'What changed and why, in one sentence' },
       },

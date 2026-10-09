@@ -23,6 +23,7 @@ export function hostTools(host: HostToolHost, granted: { files: readonly string[
         name: 'host_write',
         description: `Write a file on one of your owner's computers (${list(granted.files)}), creating its folders.`,
         parameters: { properties: { host: { type: 'string' }, path: { type: 'string' }, content: { type: 'string' }, encoding: { type: 'string', enum: ['text', 'base64'] } }, required: ['host', 'path', 'content'] },
+        emptyAllowed: ['content'],
         execute: async ({ host: name, path, content, encoding }) => host.hostWrite(name, path, content, encoding ?? 'text'),
       }),
     )
