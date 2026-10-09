@@ -77,4 +77,24 @@ describe('review Ask (v1.6 ticket 06)', () => {
     const all = await api(ANNA, `/api/robots/${id}/proposals/${second.id}`, { body: { revision: second.revision, approve: true } })
     expect(all.body).toMatchObject({ status: 'approved', review: { decision: { approved: ['m1', 'm2', 'm3'], rejected: [] } } })
   })
+
+  it('refuses more than 200 items or an item body over 8 KB, and asks nothing (cd-dt2x)', async () => {
+    const id = await activeRobot()
+    const items = (count: number, body = 'x') => Array.from({ length: count }, (_, index) => ({ id: `i${index}`, title: `Item ${index}`, body }))
+    const toolResult = () => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join('')).at(-1)!
+    const questions = async () => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'question')
+
+    for (const [tooMany, expected] of [[items(201), 'at most 200 items'], [items(1, 'x'.repeat(8 * 1024 + 1)), 'at most 8 KB']] as const) {
+      scripts.set(id, [{ calls: [{ name: 'propose_review', args: { title: 'Too much', items: tooMany } }] }, { text: 'Too much.' }])
+      await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'draft' } })
+      await settle(id)
+      expect(toolResult()).toContain(expected)
+    }
+    expect(await questions()).toHaveLength(0)
+
+    scripts.set(id, [{ calls: [{ name: 'propose_review', args: { title: 'Just enough', items: [...items(199), { id: 'big', title: 'Big', body: 'x'.repeat(8 * 1024) }] } }] }, { text: 'Asked.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'draft' } })
+    await settle(id)
+    expect(await questions()).toHaveLength(1)
+  })
 })

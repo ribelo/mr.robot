@@ -50,8 +50,28 @@ export interface SkillHost {
   writeSkill(name: string, content: string): Promise<{ path: string; scope: 'local' | 'global' }>
   /** Propose one of the Robot's local skills for the Home library (an ask). */
   promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }>
+}
+
+export interface SkillLibraryHost {
   /** Every skill in the Home library this Robot's owner can see, with whether this Robot holds it (cd-wfn2). */
   skillLibrary(): Promise<SkillLibraryRow[]>
+}
+
+/**
+ * The Home skill library as this Robot sees it (cd-wfn2, cd-56kk). Every Robot has it, skills grant
+ * or not: a Robot without skills needs it most, to propose exactly the ones it needs.
+ */
+export function skillLibraryTools(host: SkillLibraryHost): ToolDefinition[] {
+  return [
+    tool<Record<string, never>>({
+      name: 'skill_library',
+      description: 'List every skill in the Home library: name, description, held (whether you hold it) and source (where it comes from; a connector skill names the connector that brings it). Mr. Robot also gets holders, the Robots that hold each skill. Use it to propose exactly the skills you need.',
+      parameters: { properties: {} },
+      concurrencySafe: true,
+      // Rows are copied: an RPC result is not plain JSON to the tool output check.
+      execute: async () => (await host.skillLibrary()).map((row) => ({ ...row })),
+    }),
+  ]
 }
 
 /** The name and description in a SKILL.md's frontmatter. */
@@ -65,14 +85,6 @@ export function skillFrontmatter(content: string): { name?: string; description:
 /** A Robot writes its own skills and proposes them to the library (rb-kkqu, rb-lqwr). */
 export function skillProposalTools(host: SkillHost): ToolDefinition[] {
   return [
-    tool<Record<string, never>>({
-      name: 'skill_library',
-      description: 'List every skill in the Home library: name, description, held (whether you hold it) and source (where it comes from; a connector skill names the connector that brings it). Mr. Robot also gets holders, the Robots that hold each skill. Use it to propose exactly the skills you need.',
-      parameters: { properties: {} },
-      concurrencySafe: true,
-      // Rows are copied: an RPC result is not plain JSON to the tool output check.
-      execute: async () => (await host.skillLibrary()).map((row) => ({ ...row })),
-    }),
     tool<{ name: string; content: string }>({
       name: 'skill_write',
       description: 'Create or replace one of your own local skills (skills/<name>/SKILL.md in your Workspace). content is the full SKILL.md: Markdown with "name" and "description" frontmatter. Skills from the Home library are read-only; write a local skill with another name instead.',

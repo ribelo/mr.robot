@@ -163,6 +163,22 @@ describe('skill_library', () => {
     ])
   })
 
+  it('is there for a Robot with no skills grant and no connector, so it can propose the right skills (cd-wfn2)', async () => {
+    await syncLibrary()
+    scripts.set('*', [{ text: 'Hello.' }])
+    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+    await settle(body.id)
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: [], skills: [], recipients: [], secrets: [] } } })
+    await testRobot(body.id).activateForTest()
+    scripts.set(body.id, [{ calls: [{ name: 'skill_library', args: {} }] }, { text: 'Listed.' }])
+    await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'which skills could help?' } })
+    await settle(body.id)
+    expect(lastResult(body.id)).toEqual([
+      { name: 'sage', description: 'Structure documentation', held: false, source: 'git' },
+      { name: 'tdd', description: 'Test-driven development', held: false, source: 'git' },
+    ])
+  })
+
   it("names the connector that brings a skill and, for Mr. Robot, the Robots that hold each skill (cd-wfn2, cd-56kk)", async () => {
     await syncLibrary()
     const annaId = (await api<{ id: string }>(ANNA, '/api/me')).body.id

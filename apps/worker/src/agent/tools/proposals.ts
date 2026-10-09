@@ -38,12 +38,17 @@ export function grantProposalTools(host: RobotHost): ToolDefinition[] {
 
 interface ReviewInput { title: string; items: Array<{ id: string; title: string; body: string; action?: string }> }
 
+/** The most items one review may hold. */
+export const REVIEW_MAX_ITEMS = 200
+/** The largest body of one review item, in bytes (UTF-8). */
+export const REVIEW_MAX_BODY_BYTES = 8 * 1024
+
 /** Many decisions in one Ask (cd-dt2x): the owner approves all, some or none of the items. */
 export function reviewTools(host: RobotHost): ToolDefinition[] {
   return [
     tool<ReviewInput>({
       name: 'propose_review',
-      description: 'Put a list of items to your owner for approval in one Ask, e.g. drafted messages to send. Each item has a unique id, a title, a body (what the owner reads) and optionally an action label (what approving does). The owner approves all, some or none; you are woken with the approved and rejected ids and act on exactly those.',
+      description: 'Put a list of items to your owner for approval in one Ask, e.g. drafted messages to send. Each item has a unique id, a title, a body (what the owner reads, at most 8 KB) and optionally an action label (what approving does). At most 200 items per review. The owner approves all, some or none; you are woken with the approved and rejected ids and act on exactly those.',
       parameters: {
         properties: {
           title: { type: 'string', description: 'What is being reviewed' },
@@ -54,6 +59,10 @@ export function reviewTools(host: RobotHost): ToolDefinition[] {
       execute: async ({ title, items }) => {
         if (title.trim() === '') throw new Error('A review needs a title')
         if (items.length === 0) throw new Error('A review needs at least one item')
+        if (items.length > REVIEW_MAX_ITEMS) throw new Error(`A review holds at most ${REVIEW_MAX_ITEMS} items; this one has ${items.length}. Split it into several reviews.`)
+        const encoder = new TextEncoder()
+        const large = items.find((item) => encoder.encode(item.body).byteLength > REVIEW_MAX_BODY_BYTES)
+        if (large !== undefined) throw new Error(`A review item body is at most ${REVIEW_MAX_BODY_BYTES / 1024} KB; item "${large.id}" is larger. Shorten it or put the full text in a Workspace file and name the file.`)
         const ids = items.map((item) => item.id)
         const repeated = ids.find((id, index) => id.trim() === '' || ids.indexOf(id) !== index)
         if (repeated !== undefined) throw new Error(`Review item ids must be non-empty and unique; check "${repeated}"`)

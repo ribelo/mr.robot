@@ -86,6 +86,30 @@ describe('webhook Channel (v1.6 ticket 07)', () => {
     expect(await webhookMessages(id)).toHaveLength(1)
   })
 
+  it('remembers the last 100 Idempotency-Keys: an older key wakes the Robot again, a recent one does not (cd-q7mc)', async () => {
+    const id = await activeRobot()
+    const { path } = (await api<WebhookView>(ANNA, `/api/robots/${id}/webhook`)).body
+    scripts.set(id, Array.from({ length: 110 }, () => ({ text: 'Noted.' })))
+    for (let index = 0; index <= 100; index += 1) expect((await hook(path, { body: 'tick', type: 'text/plain', idempotencyKey: `evt-${index}` })).status).toBe(202)
+    await settle(id)
+    expect(await webhookMessages(id)).toHaveLength(101)
+    // evt-0 fell out of the last 100; evt-100 is the newest.
+    await hook(path, { body: 'tick', type: 'text/plain', idempotencyKey: 'evt-100' })
+    await hook(path, { body: 'tick', type: 'text/plain', idempotencyKey: 'evt-0' })
+    await settle(id)
+    expect(await webhookMessages(id)).toHaveLength(102)
+  })
+
+  it('refuses an Idempotency-Key longer than 200 characters with 400 and wakes nobody', async () => {
+    const id = await activeRobot()
+    const { path } = (await api<WebhookView>(ANNA, `/api/robots/${id}/webhook`)).body
+    expect((await hook(path, { body: 'x', idempotencyKey: 'k'.repeat(201) })).status).toBe(400)
+    scripts.set(id, [{ text: 'Seen.' }])
+    expect((await hook(path, { body: 'x', idempotencyKey: 'k'.repeat(200) })).status).toBe(202)
+    await settle(id)
+    expect(await webhookMessages(id)).toHaveLength(1)
+  })
+
   it('answers like a Routine: in the app, and to the Channels the Robot hears everything on (cd-pqt8)', async () => {
     const id = await activeRobot(['pwa', 'fake'])
     const { path } = (await api<WebhookView>(ANNA, `/api/robots/${id}/webhook`)).body
