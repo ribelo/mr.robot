@@ -15,9 +15,9 @@ export function connectorCapability(kind: ConnectorKind) {
     found = capability<ConnectorConfig>({
       name: `connector-${kind}`,
       Config: z.object({ plugin: z.any().required(), host: z.any().required() }) as never,
-      tools: ({ plugin, host }) => [accountsTool(host), ...plugin.tools(host)],
+      tools: ({ plugin, host }) => [accountsTool(host, plugin.defaultServices), ...plugin.tools(host)],
       prompt: ({ plugin, host }) => [
-        `- ${host.kind} accounts granted to you: ${host.accounts.map((account) => `${account.label} (${account.account}${account.write ? ', writing granted' : ''})`).join('; ')}. Every ${host.kind} tool result starts with the account it acted on; when several are granted, name the one you mean with the account parameter.`,
+        `- ${host.kind} accounts granted to you: ${host.accounts.map((account) => `${account.label} (${account.account}${account.write ? ', writing granted' : ''})`).join('; ')}. Every ${host.kind} tool result is JSON with an account field naming the account it acted on, and a failed call throws; when several are granted, name the one you mean with the account parameter.`,
         plugin.prompt?.(host) ?? '',
       ].filter(Boolean).join('\n'),
     })

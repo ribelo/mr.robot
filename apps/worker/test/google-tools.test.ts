@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { GooglePlugin } from '../src/connectors/google/plugin.ts'
 import { connectorFixtures, type RecordedCall } from './connector-fixtures.ts'
-import { account, b64url, decodeRaw, runTool, testHost } from './connector-host.ts'
+import { account, b64url, bodyOf, decodeRaw, runTool, testHost } from './connector-host.ts'
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me'
 const CAL = 'https://www.googleapis.com/calendar/v3'
@@ -39,11 +39,11 @@ describe('Gmail tools against recorded responses (cn-426k, cn-z1di)', () => {
     connectorFixtures.on('GET', `${GMAIL}/threads/t-1?format=metadata`, { id: 't-1', messages: [invoice] })
     const { tools: list } = tools()
     const text = await runTool(list, 'gmail_search', { query: 'is:unread in:inbox', max: 5 })
-    expect(text).toContain('[google · Private (anna@gmail.test)] search "is:unread in:inbox"')
+    expect(JSON.parse(text).account).toBe('anna@gmail.test')
     expect(new URL(callTo(`${GMAIL}/threads?`).url).searchParams.get('q')).toBe('is:unread in:inbox')
     expect(new URL(callTo(`${GMAIL}/threads?`).url).searchParams.get('maxResults')).toBe('5')
     expect(callTo(`${GMAIL}/threads?`).headers['authorization']).toBe('Bearer token-c-Private')
-    const [thread] = JSON.parse(text.split('\n').slice(1).join('\n'))
+    const [thread] = bodyOf(text)
     expect(thread).toMatchObject({ threadId: 't-1', unread: true, from: 'Shop <billing@shop.test>', subject: 'Invoice 10/2026', snippet: 'Your invoice for October', attachments: [{ attachmentId: 'att-1', filename: 'invoice-10.pdf' }] })
   })
 
@@ -51,7 +51,7 @@ describe('Gmail tools against recorded responses (cn-426k, cn-z1di)', () => {
     const htmlOnly = { ...invoice, id: 'm-2', payload: { mimeType: 'text/html', headers: headers({ From: 'news@shop.test', Subject: 'News' }), body: { data: b64url('<html><style>p{}</style><p>Sale &amp; more</p><a href="https://shop.test/x">here</a></html>') } } }
     connectorFixtures.on('GET', `${GMAIL}/threads/t-1?format=full`, { id: 't-1', messages: [invoice, htmlOnly] })
     const text = await runTool(tools().tools, 'gmail_thread', { threadId: 't-1' })
-    const body = JSON.parse(text.split('\n').slice(1).join('\n'))
+    const body = bodyOf(text)
     expect(body.messages[0].text).toBe('Hello Anna,\nyour invoice is attached.\nTotal: 123,45 zł')
     expect(body.messages[0].attachments).toEqual([{ attachmentId: 'att-1', filename: 'invoice-10.pdf', mimeType: 'application/pdf', size: 2048 }])
     expect(body.messages[1].text).toBe('Sale & more\nhere (https://shop.test/x)')
@@ -61,7 +61,7 @@ describe('Gmail tools against recorded responses (cn-426k, cn-z1di)', () => {
     connectorFixtures.on('GET', `${GMAIL}/messages/m-1/attachments/att-1`, { data: b64url('%PDF-1.4 invoice'), size: 16 })
     const { tools: list, files } = tools()
     const text = await runTool(list, 'gmail_attachment', { messageId: 'm-1', attachmentId: 'att-1', filename: 'invoice/10.pdf' })
-    const path = JSON.parse(text.split('\n').slice(1).join('\n')).path as string
+    const path = bodyOf(text).path as string
     expect(path).toMatch(/^attachments\/gmail\/\d{4}-\d{2}-\d{2}\/invoice_10\.pdf$/)
     expect(new TextDecoder().decode(files.get(path))).toBe('%PDF-1.4 invoice')
   })
@@ -125,8 +125,7 @@ describe('Gmail tools against recorded responses (cn-426k, cn-z1di)', () => {
     expect(json(connectorFixtures.calls.at(-1)!)).toEqual({ addLabelIds: [], removeLabelIds: ['INBOX'] })
     await runTool(list, 'gmail_mark_read', { threadId: 't-1' })
     expect(json(connectorFixtures.calls.at(-1)!)).toEqual({ addLabelIds: [], removeLabelIds: ['UNREAD'] })
-    const missing = await runTool(list, 'gmail_label', { threadId: 't-1', add: ['Nope'] })
-    expect(missing).toContain('Failed: No label "Nope"')
+    await expect(runTool(list, 'gmail_label', { threadId: 't-1', add: ['Nope'] })).rejects.toThrow('Failed: No label "Nope"')
   })
 
   it('gmail_unsubscribe uses RFC 8058 one-click and archives the thread', async () => {
@@ -140,17 +139,22 @@ describe('Gmail tools against recorded responses (cn-426k, cn-z1di)', () => {
     expect(post.headers['authorization']).toBeUndefined()
   })
 
-  it('a 401 is reported in the result and on the connection', async () => {
+  it('a 401 rejects the call and shows on the connection', async () => {
     connectorFixtures.on('GET', `${GMAIL}/labels`, { error: { code: 401, message: 'Request had invalid authentication credentials.' } }, 401)
     const { tools: list, statuses } = tools()
-    const text = await runTool(list, 'gmail_labels', {})
-    expect(text).toContain("Failed: the account's credentials were refused: Request had invalid authentication credentials.")
+    await expect(runTool(list, 'gmail_labels', {})).rejects.toThrow("Failed: the account's credentials were refused: Request had invalid authentication credentials.")
     expect(statuses).toEqual([{ id: 'c-Private', status: 'needs-reconsent', note: 'Request had invalid authentication credentials.' }])
   })
 })
 
 describe('Calendar tools against recorded responses (cn-s04t)', () => {
   const meeting = { id: 'e-1', status: 'confirmed', summary: 'Dentist', start: { dateTime: '2026-10-09T10:00:00+02:00' }, end: { dateTime: '2026-10-09T10:30:00+02:00' }, htmlLink: 'https://calendar.google.com/e-1', attendees: [{ email: 'anna@gmail.test', self: true, responseStatus: 'needsAction' }, { email: 'dr@clinic.test', responseStatus: 'accepted' }] }
+
+  it('calendar_events refuses a range that starts after it ends, before any call (ts-3d3n)', async () => {
+    const { tools: list } = tools()
+    await expect(runTool(list, 'calendar_events', { from: '2026-10-10T00:00:00+02:00', to: '2026-10-09T00:00:00+02:00' })).rejects.toThrow('is after to')
+    expect(connectorFixtures.calls).toEqual([])
+  })
 
   it('lists calendars and events with recurring events expanded in time order', async () => {
     connectorFixtures.on('GET', `${CAL}/users/me/calendarList`, { items: [{ id: 'anna@gmail.test', summary: 'Anna', primary: true, accessRole: 'owner', timeZone: 'Europe/Warsaw' }] })

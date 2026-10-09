@@ -8,10 +8,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import {
   createAfterScheduleRecord, createAtScheduleRecord, createCronScheduleRecord, createDailyScheduleRecord, createEveryScheduleRecord,
   createWeeklyScheduleRecord, isRecurringScheduleRecord, registerScheduleTools, renderRecurringReminderBatchFraming, renderReminderFraming,
-  resolveRecurringOccurrence, ScheduleId, ScheduleInputError, scheduleTitle,
+  resolveRecurringOccurrence, MIN_EVERY_INTERVAL_SECONDS, ScheduleId, ScheduleInputError, scheduleTitle,
   type ScheduleCatalogEntry, type ScheduleCreateRequest, type ScheduleDeleteRequest, type ScheduleDeleteResult, type ScheduleRecord,
   type ScheduleUpdateRequest, type ScheduleUpdateResult,
 } from '@deepseek-ai/dsh-schedule'
+import { withToolRewrite, routineWords, withDescriptions } from './tool-wording.ts'
 import { resolveScheduleUpdate } from './schedule-update.ts'
 import type { RoutineSchedule } from '@mr-robot/protocol'
 
@@ -39,7 +40,8 @@ export class AlarmSchedule {
 
   async create(sessionId: string, request: ScheduleCreateRequest): Promise<ScheduleRecord> {
     const selectors = [request.at, request.after_seconds, request.every_seconds, request.daily, request.weekly, request.cron].filter((value) => value !== undefined)
-    if (selectors.length !== 1) throw new ScheduleInputError('invalid_selector', 'Exactly one reminder selector is required.')
+    if (selectors.length !== 1) throw new ScheduleInputError('invalid_selector', 'Exactly one timing parameter is required for a Routine: after_seconds, at, every_seconds, daily, weekly or cron.')
+    if (request.after_seconds !== undefined && request.after_seconds < MIN_EVERY_INTERVAL_SECONDS) throw new ScheduleInputError('frequency_too_high', `after_seconds must be at least ${MIN_EVERY_INTERVAL_SECONDS}; a Routine fires no sooner than a minute from now.`)
     const title = scheduleTitle(request.title)
     const id = ScheduleId(`schedule-${crypto.randomUUID()}`)
     const now = Date.now()
@@ -89,7 +91,9 @@ export function schedulePlugin(service: AlarmSchedule): (ctx: Context) => Promis
     ;(ctx as unknown as { provide(name: string, value: unknown): void }).provide('schedule', service)
     const on = ctx as unknown as { on(event: string, listener: (input: { agent: { ctx: { effect(body: () => () => void): void } } }) => void): void }
     on.on('agent/created', ({ agent }) => {
-      agent.ctx.effect(() => registerScheduleTools(ctx, agent.ctx as never, agent as never))
+      // DSH words its tools "reminder"; the product says Routine (ts-x0kl).
+      const toolCtx = withToolRewrite(agent.ctx, (definition) => withDescriptions(definition, routineWords))
+      agent.ctx.effect(() => registerScheduleTools(ctx, toolCtx as never, agent as never))
     })
   }
 }

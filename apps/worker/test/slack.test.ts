@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { ConnectionView, Me } from '@mr-robot/protocol'
 import { api, stubModels } from './api.ts'
 import { connectorFixtures, type RecordedCall } from './connector-fixtures.ts'
-import { account, runTool, testHost } from './connector-host.ts'
+import { account, runTool, testHost, bodyOf } from './connector-host.ts'
 import { SlackPlugin } from '../src/connectors/slack.ts'
 
 const ANNA = 'anna@example.com'
@@ -24,7 +24,6 @@ const setup = (accounts = [TEAM]) => {
 }
 const json = (call: RecordedCall) => JSON.parse(call.body ?? 'null') as Record<string, unknown>
 const last = () => connectorFixtures.calls.at(-1)!
-const bodyOf = (text: string) => JSON.parse(text.split('\n').slice(1).join('\n'))
 
 const USERS = { ok: true, members: [
   { id: 'U1', name: 'anna', real_name: 'Anna Nowak', profile: { display_name: 'Anna', email: 'anna@acme.test', title: 'Ops' } },
@@ -49,7 +48,7 @@ describe('Slack from a pasted session (cn-3cnb, cn-clwd, cn-aljt, cn-bxmu)', () 
     expect(call.headers['cookie']).toBe('d=' + COOKIE)
     expect(call.headers['content-type']).toMatch(/^application\/json/)
     expect(call.body).toBe('{}')
-    expect(text).toContain('[slack · Acme (acme.slack.com)] list unreads')
+    expect(JSON.parse(text).account).toBe('acme.slack.com')
     expect(text).not.toContain(TOKEN)
     expect(text).not.toContain(COOKIE)
     expect(bodyOf(text)).toEqual([
@@ -114,20 +113,19 @@ describe('Slack from a pasted session (cn-3cnb, cn-clwd, cn-aljt, cn-bxmu)', () 
     expect(json(last())).toEqual({ channel: 'C1', ts: '1791400200.000300' })
   })
 
-  it('a refused session is reported in the result and marks the connection "paste again" (cn-bxmu)', async () => {
+  it('a refused session rejects the call and marks the connection "paste again" (cn-bxmu)', async () => {
     connectorFixtures.on('POST', 'https://slack.com/api/client.counts', { ok: false, error: 'invalid_auth' })
     const { tools, statuses } = setup()
-    const text = await runTool(tools, 'slack_list_unreads', {})
-    expect(text).toContain("Failed: the account's credentials were refused: Slack says invalid_auth")
-    expect(text).toContain('The owner sees this on the connection\'s row')
+    const failure = await runTool(tools, 'slack_list_unreads', {}).catch((error: Error) => error.message)
+    expect(failure).toContain("Failed: the account's credentials were refused: Slack says invalid_auth")
+    expect(failure).toContain('The owner sees this on the connection\'s row')
     expect(statuses).toEqual([{ id: TEAM.id, status: 'rejected', note: 'Slack says invalid_auth' }])
   })
 
   it('a non-auth failure reads as its own message, not as a broken session', async () => {
     connectorFixtures.on('POST', 'https://slack.com/api/conversations.history', { ok: false, error: 'channel_not_found' })
     const { tools, statuses } = setup()
-    const text = await runTool(tools, 'slack_read_channel', { channel: 'C9' })
-    expect(text).toContain('Failed: Slack refused conversations.history: channel_not_found')
+    await expect(runTool(tools, 'slack_read_channel', { channel: 'C9' })).rejects.toThrow('Failed: Slack refused conversations.history: channel_not_found')
     expect(statuses).toEqual([])
   })
 })

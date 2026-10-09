@@ -18,6 +18,7 @@ export const fakeService = (input: RequestInfo | URL, init?: RequestInit): Promi
   const auth = new Headers(init?.headers).get('authorization') ?? ''
   const token = auth.replace(/^Bearer /, '')
   fakeServiceTokens.push(token)
+  if (token === 'missing-token') return Promise.resolve(Response.json({ error: 'not_found' }, { status: 404 }))
   if (token === 'revoked-token') return Promise.resolve(Response.json({ error: 'invalid_token' }, { status: 401 }))
   return Promise.resolve(Response.json({ who: token === 'token-private' ? 'anna@private.test' : token === 'token-work' ? 'anna@work.test' : 'ben@home.test', url: String(input) }))
 }

@@ -99,7 +99,8 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
     await settle(id)
     const settings = await testRobot(id).settings()
     expect([...settings.grants.tools].sort()).toEqual(['files', 'web'])
-    expect(toolNames(id)).toEqual(expect.arrayContaining(['read', 'web_fetch', 'web_search']))
+    expect(toolNames(id)).toEqual(expect.arrayContaining(['read', 'web_fetch']))
+    expect(toolNames(id)).not.toContain('web_search')
   })
 })
 

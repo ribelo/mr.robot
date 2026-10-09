@@ -94,10 +94,9 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
     expect(await toolsOf(ANNA, id)).toEqual(expect.arrayContaining(['google_accounts', 'fake_whoami']))
     expect(await toolsOf(ANNA, id)).not.toContain('fake_send')
     const [result] = await say(ANNA, id, [{ name: 'fake_whoami', args: {} }])
-    expect(result).toContain('[google · Private (anna@private.test)] whoami')
-    expect(result).toContain('anna@private.test')
+    expect(JSON.parse(result!)).toEqual({ account: 'anna@private.test', message: 'The service says: anna@private.test (token token-private)' })
     const trajectory = JSON.stringify((await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body)
-    expect(trajectory).toContain('[google · Private (anna@private.test)] whoami')
+    expect(trajectory).toContain('anna@private.test')
     expect(trajectory).not.toContain('token-private')
   })
 
@@ -111,15 +110,15 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
       { name: 'fake_whoami', args: {} },
       { name: 'fake_send', args: { text: 'hi' } },
     ])
-    expect(toWork).toContain('[google · Work (anna@work.test)]')
+    expect(JSON.parse(toWork!)).toMatchObject({ account: 'anna@work.test' })
     expect(toWork).toContain('The service says: anna@work.test')
-    expect(byDefault).toContain('[google · Private (anna@private.test)]')
+    expect(JSON.parse(byDefault!)).toMatchObject({ account: 'anna@private.test' })
     // Only Work carries the write grant, so sending acts on Work.
-    expect(sendWork).toContain('[google · Work (anna@work.test)] send "hi"')
+    expect(JSON.parse(sendWork!)).toEqual({ account: 'anna@work.test', message: 'sent' })
     // The default moves when the person marks another one.
     await api(ANNA, `/api/connections/${work.id}`, { method: 'PATCH', body: { isDefault: true } })
     const [moved] = await say(ANNA, id, [{ name: 'fake_whoami', args: {} }])
-    expect(moved).toContain('[google · Work (anna@work.test)]')
+    expect(JSON.parse(moved!)).toMatchObject({ account: 'anna@work.test' })
   })
 
   it("a Home-shared connection is usable by another Member's robot once granted, and stops when unshared (cn-qs78)", async () => {
@@ -156,10 +155,34 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
     const id = await robotOf(ANNA, { connections: [mail.id, team.id] })
     expect(await toolsOf(ANNA, id)).toEqual(expect.arrayContaining(['google_accounts', 'slack_accounts']))
     const results = await say(ANNA, id, [{ name: 'fake_whoami', args: {} }, { name: 'fakeslack_whoami', args: {} }])
-    expect(results[0]).toContain('[google · Private (anna@private.test)]')
-    expect(results[1]).toContain('[slack · Acme (acme.slack.com)]')
+    expect(JSON.parse(results[0]!)).toMatchObject({ account: 'anna@private.test' })
+    expect(JSON.parse(results[1]!)).toMatchObject({ account: 'acme.slack.com' })
     const conversation = (await api<{ items: Array<{ kind: string; text?: string }> }>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'Done.' })
+  })
+
+  it('a failed call rejects so try/catch sees it; a success is JSON with the account (ts-jbep, ts-uy4d)', async () => {
+    fakeConnectors.set('google', fakeConnector('google'))
+    const gone = await addConnection(annaId, 'Gone', 'anna@gone.test', 'missing-token')
+    const priv = await addConnection(annaId, 'Private', 'anna@private.test', 'token-private')
+    const id = await robotOf(ANNA, { connections: [gone.id, priv.id] })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true } })
+    const program = [
+      'let caught = null',
+      "try { await tools.fake_whoami({ account: 'Gone' }) } catch (error) { caught = { name: error.name, message: error.message } }",
+      "const ok = await tools.fake_whoami({ account: 'Private' })",
+      'return { caught, ok }',
+    ].join('\n')
+    scripts.set(id, [{ calls: [{ name: 'run_code', args: { code: program, description: 'catch a 404' } }] }, { text: 'Done.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+    await settle(id)
+    const { events } = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body
+    const output = JSON.parse(events.find((event) => event.type === 'tool/result')!.data) as { content?: Array<{ text?: string }> }
+    const text = JSON.stringify(output)
+    expect(text).toContain('ToolCallError')
+    expect(text).toContain('Failed: the service answered 404')
+    expect(text).toContain('anna@gone.test')
+    expect(text).toContain('anna@private.test')
   })
 
   it('refused credentials show on the owner\'s row (cn-9s7r)', async () => {

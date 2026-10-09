@@ -17,7 +17,7 @@ export function browserTools(host: BrowserHost): ToolDefinition[] {
     tool<{ url: string }>({
       name: 'browser_open',
       description: 'Open a URL in your browser (it keeps your cookies and logins between Turns). Returns what is on the page.',
-      parameters: { properties: { url: { type: 'string' } }, required: ['url'] },
+      parameters: { properties: { url: { type: 'string', description: 'The http or https address to open' } }, required: ['url'] },
       execute: async ({ url }) => renderObservation(await host.browserOpen(url)),
     }),
     tool<Record<string, never>>({
@@ -31,14 +31,14 @@ export function browserTools(host: BrowserHost): ToolDefinition[] {
       description: 'Act on the page: click, type (into a text field, optionally submit with Enter), select (an option of a select), check (set a checkbox), press (a key such as Enter or Escape), scroll (up or down). Elements are referenced by the index from the latest observation. Returns the page after the action. Stop before payment or bank confirmation steps.',
       parameters: {
         properties: {
-          action: { type: 'string', enum: ['click', 'type', 'select', 'check', 'press', 'scroll'] },
-          index: { type: 'integer' },
-          text: { type: 'string' },
-          submit: { type: 'boolean' },
-          option: { type: 'string' },
-          checked: { type: 'boolean' },
-          key: { type: 'string' },
-          direction: { type: 'string', enum: ['up', 'down'] },
+          action: { type: 'string', enum: ['click', 'type', 'select', 'check', 'press', 'scroll'], description: 'What to do on the element' },
+          index: { type: 'integer', description: 'Element number from the latest observation (click, type, select, check)' },
+          text: { type: 'string', description: 'Text to type (type)' },
+          submit: { type: 'boolean', description: 'Press Enter after typing' },
+          option: { type: 'string', description: 'Option to choose (select)' },
+          checked: { type: 'boolean', description: 'true to tick the box, false to clear it (check; default true)' },
+          key: { type: 'string', description: 'Key to press, for example Enter or Escape (press; default Enter)' },
+          direction: { type: 'string', enum: ['up', 'down'], description: 'Scroll direction (scroll; default down)' },
         },
         required: ['action'],
       },
@@ -46,8 +46,8 @@ export function browserTools(host: BrowserHost): ToolDefinition[] {
     }),
     tool<{ text?: string; ms?: number }>({
       name: 'browser_wait',
-      description: 'Wait until some text appears on the page, or for a number of milliseconds.',
-      parameters: { properties: { text: { type: 'string' }, ms: { type: 'integer' } } },
+      description: 'Wait until some text is visible on the page: the visible page text and the page title are searched (exact match, case-sensitive). With text, ms is the timeout (default 30 000 ms, at most 60 000) and the call throws when the text does not appear in time. Without text, wait ms milliseconds (default 1 000, at most 30 000).',
+      parameters: { properties: { text: { type: 'string', description: 'Text to wait for in the visible page text or the page title' }, ms: { type: 'integer', description: 'With text: the timeout in milliseconds (default 30000). Without text: how long to wait (default 1000)' } } },
       execute: async (input) => renderObservation(await host.browserWait(input)),
     }),
     {

@@ -24,7 +24,9 @@ export function messagingTools(host: MessagingHost): ToolDefinition[] {
       concurrencySafe: true,
       execute: async () => {
         const entries = await host.directory()
-        return entries.length === 0 ? 'You have no recipients. Ask your owner with propose_grants (recipients).' : entries
+        return entries.length === 0
+          ? { robots: [], hint: 'You have no recipients. Ask your owner with propose_grants (recipients).' }
+          : { robots: entries }
       },
     }),
     tool<{ to: string; request: string; idempotency_key: string }>({
@@ -33,8 +35,8 @@ export function messagingTools(host: MessagingHost): ToolDefinition[] {
       parameters: {
         properties: {
           to: { type: 'string', description: 'Robot id from robot_directory' },
-          request: { type: 'string' },
-          idempotency_key: { type: 'string' },
+          request: { type: 'string', description: 'The self-contained work request' },
+          idempotency_key: { type: 'string', description: 'A fresh key per distinct request; resending a key does not send twice' },
         },
         required: ['to', 'request', 'idempotency_key'],
       },
@@ -49,7 +51,7 @@ export function replyTools(host: MessagingHost): ToolDefinition[] {
     tool<{ handle: string; reply: string }>({
       name: 'robot_reply',
       description: 'Answer a request another Robot sent you, using the reply handle from its message. Each handle answers once.',
-      parameters: { properties: { handle: { type: 'string' }, reply: { type: 'string' } }, required: ['handle', 'reply'] },
+      parameters: { properties: { handle: { type: 'string', description: 'Reply handle from the message you answer' }, reply: { type: 'string', description: 'Your answer' } }, required: ['handle', 'reply'] },
       execute: async ({ handle, reply }) => host.replyRobotMessage(handle, reply),
     }),
   ]
@@ -75,9 +77,9 @@ export function robotsTools(host: RobotsHost): ToolDefinition[] {
       description: "Ask your owner to grant one of their Robots tool groups, skills, logins or recipient Robots. It appears as a question in that Robot's chat; nothing is granted until your owner approves. You cannot grant anything yourself.",
       parameters: {
         properties: {
-          robot_id: { type: 'string' }, purpose: { type: 'string', description: 'Why that Robot needs it, in one sentence' },
-          tools: { type: 'array', items: { type: 'string' } }, skills: { type: 'array', items: { type: 'string' } },
-          logins: { type: 'array', items: { type: 'string' } }, recipients: { type: 'array', items: { type: 'string' } },
+          robot_id: { type: 'string', description: 'Robot id from robot_directory' }, purpose: { type: 'string', description: 'Why that Robot needs it, in one sentence' },
+          tools: { type: 'array', items: { type: 'string' }, description: 'Tool group names to grant' }, skills: { type: 'array', items: { type: 'string' }, description: 'Skill names to grant' },
+          logins: { type: 'array', items: { type: 'string' }, description: 'Login or secret names to grant' }, recipients: { type: 'array', items: { type: 'string' }, description: 'Robot ids it may send requests to' },
         },
         required: ['robot_id', 'purpose'],
       },
@@ -86,7 +88,7 @@ export function robotsTools(host: RobotsHost): ToolDefinition[] {
     tool<{ robot_id: string; name?: string; title?: string; description?: string }>({
       name: 'robot_configure',
       description: "Rename or re-describe one of your owner's Robots. Grants are never changed this way.",
-      parameters: { properties: { robot_id: { type: 'string' }, name: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['robot_id'] },
+      parameters: { properties: { robot_id: { type: 'string', description: 'Robot id from robot_directory' }, name: { type: 'string', description: 'New name' }, title: { type: 'string', description: 'New title, a few words on its role' }, description: { type: 'string', description: 'New description of what the Robot does' } }, required: ['robot_id'] },
       execute: async ({ robot_id, ...change }) => host.configureRobot(robot_id, change),
     }),
   ]

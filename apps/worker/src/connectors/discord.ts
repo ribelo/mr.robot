@@ -153,7 +153,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
       name: 'discord_read_messages',
       service: 'discord',
       description: 'Read recent messages of a channel or direct message, newest first.',
-      parameters: { properties: { channelId: { type: 'string' }, limit: { type: 'number' }, before: { type: 'string', description: 'A message id: only messages before it.' } }, required: ['channelId'] },
+      parameters: { properties: { channelId: { type: 'string', description: 'Discord channel id (from discord_channels)' }, limit: { type: 'number', description: 'Most messages to return (default 25, at most 100)' }, before: { type: 'string', description: 'A message id: only messages before it.' } }, required: ['channelId'] },
       action: (args) => 'read ' + str(args, 'channelId'),
       run: (args, use) => Effect.map(
         discordCall(host, use, 'GET', '/channels/' + encodeURIComponent(str(args, 'channelId')) + '/messages?limit=' + num(args, 'limit', 50, 100) + (str(args, 'before') === '' ? '' : '&before=' + encodeURIComponent(str(args, 'before'))), Schema.Array(Message)),
@@ -165,7 +165,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
       service: 'discord',
       write: true,
       description: 'Send a message to a channel; one Workspace file may go with it as an attachment.',
-      parameters: { properties: { channelId: { type: 'string' }, text: { type: 'string' }, attachment: { type: 'string', description: 'A Workspace path to send as a file.' } }, required: ['channelId', 'text'] },
+      parameters: { properties: { channelId: { type: 'string', description: 'Discord channel id (from discord_channels)' }, text: { type: 'string', description: 'Message text' }, attachment: { type: 'string', description: 'A Workspace path to send as a file.' } }, required: ['channelId', 'text'], emptyAllowed: ['text'] },
       action: (args) => 'send to ' + str(args, 'channelId'),
       run: (args, use) => Effect.gen(function* () {
         const path = str(args, 'attachment')
@@ -183,7 +183,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
       service: 'discord',
       write: true,
       description: 'Reply to a message in its channel (Discord shows it as a reply).',
-      parameters: { properties: { channelId: { type: 'string' }, messageId: { type: 'string' }, text: { type: 'string' } }, required: ['channelId', 'messageId', 'text'] },
+      parameters: { properties: { channelId: { type: 'string', description: 'Discord channel id (from discord_channels)' }, messageId: { type: 'string', description: 'Id of the message' }, text: { type: 'string', description: 'Message text' } }, required: ['channelId', 'messageId', 'text'] },
       action: (args) => 'reply to ' + str(args, 'messageId'),
       run: (args, use) => Effect.map(
         discordCall(host, use, 'POST', '/channels/' + encodeURIComponent(str(args, 'channelId')) + '/messages', Message, { content: str(args, 'text'), message_reference: { message_id: str(args, 'messageId'), channel_id: str(args, 'channelId') } }),
@@ -195,7 +195,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
       service: 'discord',
       write: true,
       description: 'Add a reaction to a message (a unicode emoji, or a custom one as name:id).',
-      parameters: { properties: { channelId: { type: 'string' }, messageId: { type: 'string' }, emoji: { type: 'string' } }, required: ['channelId', 'messageId', 'emoji'] },
+      parameters: { properties: { channelId: { type: 'string', description: 'Discord channel id (from discord_channels)' }, messageId: { type: 'string', description: 'Id of the message' }, emoji: { type: 'string', description: 'The emoji to react with, for example ✅' } }, required: ['channelId', 'messageId', 'emoji'] },
       action: (args) => 'react ' + str(args, 'emoji') + ' to ' + str(args, 'messageId'),
       run: (args, use) => Effect.as(
         discordCall(host, use, 'PUT', '/channels/' + encodeURIComponent(str(args, 'channelId')) + '/messages/' + encodeURIComponent(str(args, 'messageId')) + '/reactions/' + encodeURIComponent(str(args, 'emoji')) + '/@me', Ignored),
@@ -207,7 +207,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
       service: 'discord',
       write: true,
       description: 'Send a direct message to a person the bot shares a server with (a user id from discord_read_messages, or the owner\'s id).',
-      parameters: { properties: { userId: { type: 'string' }, text: { type: 'string' } }, required: ['userId', 'text'] },
+      parameters: { properties: { userId: { type: 'string', description: 'Discord user id' }, text: { type: 'string', description: 'Message text' } }, required: ['userId', 'text'] },
       action: (args) => 'DM ' + str(args, 'userId'),
       run: (args, use) => Effect.gen(function* () {
         const channel = yield* dmChannel(host, use, str(args, 'userId'))
@@ -236,6 +236,7 @@ export const DiscordPlugin: ConnectorPlugin = {
       meta: { applicationId: bot.id, setupLink: inviteUrl(bot.id), setupLabel: 'Invite the bot to a server' },
     }))
   },
+  defaultServices: ['channels', 'messages', 'dms'],
   tools: (host: ConnectorHost) => connectorTools(host, discordTools(host) as never),
   prompt: () => [
     '- Discord: the bot is in the servers its owner invited it to. Read tools need no extra grant; sending, replying, reacting and DMs need the write grant.',

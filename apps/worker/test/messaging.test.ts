@@ -43,7 +43,7 @@ describe('Robot-to-Robot messaging', () => {
     await api(ANNA, `/api/robots/${paused}/pause`, { body: {} })
     const sender = await robot('Sales', ['messaging'], [active, paused, 'r-not-reachable'])
     await say(sender, 'who can help?', [{ calls: [{ name: 'robot_directory', args: {} }] }, { text: 'ok' }])
-    const directory = JSON.parse(lastToolResult(sender)) as Array<{ id: string; name: string }>
+    const directory = (JSON.parse(lastToolResult(sender)) as { robots: Array<{ id: string; name: string }> }).robots
     expect(directory).toEqual([expect.objectContaining({ id: active, name: 'Accountant', description: 'Accountant does things' })])
   })
 

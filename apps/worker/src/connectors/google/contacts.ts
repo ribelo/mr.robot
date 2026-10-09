@@ -40,7 +40,7 @@ export function contactsTools(host: ConnectorHost): ReadonlyArray<ConnectorToolS
       name: 'contacts_search',
       service: 'contacts',
       description: 'Find people in Google Contacts by name, e-mail, phone or company: their addresses, phones and e-mails.',
-      parameters: { properties: { query: { type: 'string' }, max: { type: 'number' } }, required: ['query'] },
+      parameters: { properties: { query: { type: 'string', description: 'A name, e-mail address, phone number or company' }, max: { type: 'number', description: 'Most contacts to return (default 10, at most 30)' } }, required: ['query'] },
       action: (args) => `search contacts "${str(args, 'query')}"`,
       run: (args, use) => Effect.gen(function* () {
         const url = (text: string) => `${PEOPLE}/people:searchContacts${query({ query: text, readMask: MASK, pageSize: Math.min(Number(args['max'] ?? 10) || 10, 30) })}`
@@ -54,7 +54,7 @@ export function contactsTools(host: ConnectorHost): ReadonlyArray<ConnectorToolS
       name: 'contacts_get',
       service: 'contacts',
       description: 'Read one contact by its id (people/…) from contacts_search.',
-      parameters: { properties: { id: { type: 'string' } }, required: ['id'] },
+      parameters: { properties: { id: { type: 'string', description: 'Contact id, people/… (from contacts_search)' } }, required: ['id'] },
       action: (args) => `read contact ${str(args, 'id')}`,
       run: (args, use) => Effect.map(google(host, use, { method: 'GET', url: `${PEOPLE}/${str(args, 'id').split('/').map(encodeURIComponent).join('/')}${query({ personFields: MASK })}` }, Person), shown),
     },

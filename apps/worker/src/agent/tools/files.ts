@@ -17,7 +17,7 @@ function memberFileName(path: string): MemberFileName | undefined {
   return MEMBER_FILE_NAMES.find((name) => name === normalized)
 }
 
-const READ_ONLY = (name: string) => `${name} belongs to your owner and is read-only to you. To change it, call propose_member_file_edit with the full new content; your owner approves or rejects it.`
+const READ_ONLY = (name: string) => `${name} belongs to your owner and is read-only to you. To change it, use the tool you were given for shared files: memory_write_shared, or propose_member_file_edit (your owner approves or rejects the new full content).`
 
 export function fileTools(host: WorkspaceHost): ToolDefinition[] {
   const ws = host.workspace
@@ -31,31 +31,34 @@ export function fileTools(host: WorkspaceHost): ToolDefinition[] {
     tool<{ path: string }>({
       name: 'delete_file',
       description: 'Delete a file from your Workspace.',
-      parameters: { properties: { path: { type: 'string' } }, required: ['path'] },
+      parameters: { properties: { path: { type: 'string', description: 'Workspace path of the file' } }, required: ['path'] },
       execute: async ({ path }) => {
         const member = memberFileName(path)
         if (member !== undefined) throw new Error(READ_ONLY(member))
-        await host.run(ws.remove(relative(path)))
-        return { deleted: normalizePath(relative(path)) }
+        const target = normalizePath(relative(path))
+        if (target === undefined) throw new Error(`"${path}" is not a file path inside your Workspace; nothing was deleted.`)
+        if ((await host.run(ws.stat(target))) === undefined) throw new Error(`No file "${target}" in your Workspace; nothing was deleted.`)
+        await host.run(ws.remove(target))
+        return { deleted: target }
       },
     }),
     tool<{ pattern: string }>({
       name: 'glob',
-      description: 'List Workspace files matching a glob (* within a segment, ** across segments, ?). Use "**" to list everything.',
-      parameters: { properties: { pattern: { type: 'string' } }, required: ['pattern'] },
+      description: 'List Workspace files matching a glob (* within a segment, ** across segments, ?), as an array of paths (empty when none match). Use "**" to list everything.',
+      parameters: { properties: { pattern: { type: 'string', description: 'The pattern to match' } }, required: ['pattern'] },
       concurrencySafe: true,
       execute: async ({ pattern }) => {
         const matcher = globToRegExp(pattern)
         const entries = await host.run(ws.list())
         const paths = [...MEMBER_FILE_NAMES, ...entries.map((entry) => entry.path)].filter((path) => matcher.test(path)).sort()
-        return paths.length === 0 ? 'No files match.' : paths.join('\n')
+        return paths
       },
     }),
     tool<{ pattern: string; glob?: string; ignore_case?: boolean }>({
       name: 'grep',
-      description: 'Search text files in your Workspace with a regular expression; returns path:line: text.',
+      description: 'Search text files in your Workspace with a regular expression; returns an array of { path, line, text } (empty when nothing matches).',
       parameters: {
-        properties: { pattern: { type: 'string' }, glob: { type: 'string', description: 'Limit to files matching this glob' }, ignore_case: { type: 'boolean' } },
+        properties: { pattern: { type: 'string', description: 'The pattern to match' }, glob: { type: 'string', description: 'Limit to files matching this glob' }, ignore_case: { type: 'boolean', description: 'Match upper and lower case alike' } },
         required: ['pattern'],
       },
       concurrencySafe: true,
@@ -65,17 +68,17 @@ export function fileTools(host: WorkspaceHost): ToolDefinition[] {
         const entries = await host.run(ws.list())
         const paths = [...MEMBER_FILE_NAMES, ...entries.filter((entry) => entry.size <= 1_000_000).map((entry) => entry.path)]
           .filter((path) => files === undefined || files.test(path))
-        const matches: string[] = []
+        const matches: Array<{ path: string; line: number; text: string }> = []
         for (const path of paths) {
           if (matches.length >= MAX_GREP_MATCHES) break
           const text = await readText(path)
           if (text === undefined || text.includes('\u0000')) continue
           for (const [index, line] of text.split('\n').entries()) {
-            if (regex.test(line)) matches.push(`${path}:${index + 1}: ${line.slice(0, 300)}`)
+            if (regex.test(line)) matches.push({ path, line: index + 1, text: line.slice(0, 300) })
             if (matches.length >= MAX_GREP_MATCHES) break
           }
         }
-        return matches.length === 0 ? 'No matches.' : matches.join('\n')
+        return matches
       },
     }),
   ]
@@ -89,12 +92,13 @@ export function memberFileTools(host: RobotHost): ToolDefinition[] {
       description: "Propose a new full version of your owner's USER.md or PROACTIVE_PREFERENCES.md, with what you learned. Your owner approves or rejects it.",
       parameters: {
         properties: {
-          file: { type: 'string', enum: [...MEMBER_FILE_NAMES] },
+          file: { type: 'string', enum: [...MEMBER_FILE_NAMES], description: 'Which owner file to change' },
           content: { type: 'string', description: 'The complete new file' },
           purpose: { type: 'string', description: 'What changed and why, in one sentence' },
         },
         required: ['file', 'content', 'purpose'],
       },
+      emptyAllowed: ['content'],
       execute: async ({ file, content, purpose }) => {
         if (!MEMBER_FILE_NAMES.includes(file as MemberFileName)) throw new Error(`Only ${MEMBER_FILE_NAMES.join(' and ')} can be proposed`)
         const proposal = host.propose('member-file', purpose, { file: { name: file, content } })

@@ -290,7 +290,7 @@ export class RenderingPage implements BrowserPage {
 
   async waitFor(input: { text?: string; ms?: number }): Promise<void> {
     if (input.text !== undefined) {
-      await this.page.waitForFunction(`document.body && document.body.innerText.includes(${JSON.stringify(input.text)})`, { timeout: Math.min(input.ms ?? 30_000, 60_000) })
+      await this.page.waitForFunction(`(document.body && document.body.innerText.includes(${JSON.stringify(input.text)})) || document.title.includes(${JSON.stringify(input.text)})`, { timeout: Math.min(input.ms ?? 30_000, 60_000) })
     } else {
       await new Promise((resolve) => setTimeout(resolve, Math.min(input.ms ?? 1000, 30_000)))
     }

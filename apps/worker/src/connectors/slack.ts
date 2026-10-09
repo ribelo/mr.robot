@@ -167,7 +167,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'slack_read_channel',
       service: 'slack',
       description: "Read a channel's recent messages, newest first (slack_list_user_channels gives the ids).",
-      parameters: { properties: { channel: { type: 'string' }, limit: { type: 'number' }, oldest: { type: 'string', description: 'A ts or ISO time: only messages after it.' }, latest: { type: 'string' } }, required: ['channel'] },
+      parameters: { properties: { channel: { type: 'string', description: 'Slack channel id (from slack_list_user_channels)' }, limit: { type: 'number', description: 'Most messages to return' }, oldest: { type: 'string', description: 'A ts or ISO time: only messages after it.' }, latest: { type: 'string', description: 'Only messages before this timestamp (ts)' } }, required: ['channel'] },
       action: (args) => 'read ' + str(args, 'channel'),
       run: (args, use) => Effect.gen(function* () {
         const history = yield* slackCall(host, use, 'conversations.history', {
@@ -185,7 +185,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'slack_read_thread',
       service: 'slack',
       description: 'Read a thread: the parent message and its replies, oldest first.',
-      parameters: { properties: { channel: { type: 'string' }, threadTs: { type: 'string' }, limit: { type: 'number' } }, required: ['channel', 'threadTs'] },
+      parameters: { properties: { channel: { type: 'string', description: 'Slack channel id (from slack_list_user_channels)' }, threadTs: { type: 'string', description: 'Timestamp (ts) of the thread\'s first message' }, limit: { type: 'number', description: 'Most messages to return' } }, required: ['channel', 'threadTs'] },
       action: (args) => 'read thread ' + str(args, 'threadTs') + ' in ' + str(args, 'channel'),
       run: (args, use) => Effect.gen(function* () {
         const replies = yield* slackCall(host, use, 'conversations.replies', { channel: str(args, 'channel'), ts: str(args, 'threadTs'), limit: num(args, 'limit', 100, 200) }, History)
@@ -199,7 +199,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'slack_search_channels',
       service: 'slack',
       description: 'Find channels and direct messages by name, topic or purpose.',
-      parameters: { properties: { query: { type: 'string' }, max: { type: 'number' } }, required: ['query'] },
+      parameters: { properties: { query: { type: 'string', description: 'Words to search for' }, max: { type: 'number', description: 'Most results to return' } }, required: ['query'] },
       action: (args) => 'search channels "' + str(args, 'query') + '"',
       run: (args, use) => Effect.gen(function* () {
         const found = yield* directory(use)
@@ -214,7 +214,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'slack_search_users',
       service: 'slack',
       description: 'Find people by name, display name or e-mail address.',
-      parameters: { properties: { query: { type: 'string' }, max: { type: 'number' } }, required: ['query'] },
+      parameters: { properties: { query: { type: 'string', description: 'Words to search for' }, max: { type: 'number', description: 'Most results to return' } }, required: ['query'] },
       action: (args) => 'search people "' + str(args, 'query') + '"',
       run: (args, use) => Effect.gen(function* () {
         const found = yield* directory(use)
@@ -252,7 +252,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'slack_search_public_and_private',
       service: 'slack',
       description: 'Search messages across the workspace channels and direct messages (Slack search syntax, e.g. "from:@anna invoice", "in:#finance budget").',
-      parameters: { properties: { query: { type: 'string' }, max: { type: 'number' } }, required: ['query'] },
+      parameters: { properties: { query: { type: 'string', description: 'Words to search for' }, max: { type: 'number', description: 'Most results to return' } }, required: ['query'] },
       action: (args) => 'search messages "' + str(args, 'query') + '"',
       run: (args, use) => Effect.map(
         slackCall(host, use, 'search.messages', { query: str(args, 'query'), count: num(args, 'max', 20, 100), sort: 'timestamp' }, Found),
@@ -264,7 +264,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       service: 'slack',
       write: true,
       description: 'Send a message to a channel or a direct message, or reply in a thread by giving threadTs.',
-      parameters: { properties: { channel: { type: 'string' }, text: { type: 'string' }, threadTs: { type: 'string' } }, required: ['channel', 'text'] },
+      parameters: { properties: { channel: { type: 'string', description: 'Slack channel id (from slack_list_user_channels)' }, text: { type: 'string', description: 'Message text' }, threadTs: { type: 'string', description: 'Timestamp (ts) of the thread\'s first message' } }, required: ['channel', 'text'] },
       action: (args) => (str(args, 'threadTs') === '' ? 'send to ' : 'reply in ') + str(args, 'channel'),
       run: (args, use) => Effect.map(
         slackCall(host, use, 'chat.postMessage', { channel: str(args, 'channel'), text: str(args, 'text'), ...(str(args, 'threadTs') === '' ? {} : { thread_ts: str(args, 'threadTs') }), unfurl_links: false }, Posted),
@@ -276,7 +276,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       service: 'slack',
       write: true,
       description: 'Mark a channel read up to now, or up to a given ts.',
-      parameters: { properties: { channel: { type: 'string' }, ts: { type: 'string', description: 'Defaults to the latest activity.' } }, required: ['channel'] },
+      parameters: { properties: { channel: { type: 'string', description: 'Slack channel id (from slack_list_user_channels)' }, ts: { type: 'string', description: 'Defaults to the latest activity.' } }, required: ['channel'] },
       action: (args) => 'mark ' + str(args, 'channel') + ' read',
       run: (args, use) => Effect.gen(function* () {
         let ts = str(args, 'ts')

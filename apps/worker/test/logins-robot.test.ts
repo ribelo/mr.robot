@@ -56,7 +56,7 @@ describe('login entries (v1.1 ticket 05)', () => {
     expect(before).toContain('"matchesPage": false')
     expect(before).not.toContain('bank')
     expect(onPage).toContain('"matchesPage": true')
-    expect(fill).toContain('Filled the password of "shop"')
+    expect(JSON.parse(fill!)).toMatchObject({ status: 'filled', message: expect.stringContaining('Filled the password of "shop"') })
     expect(signedIn).toContain('Hello, signed-in customer')
     expect(read).toContain('website login: use login_fill')
     expect(elsewhere).toContain('belongs to https://shop.test, not to https://other.test/login')

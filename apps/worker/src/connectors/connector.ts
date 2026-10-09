@@ -67,6 +67,8 @@ export interface ConnectorPlugin {
   /** Check pasted secrets with the service before they are stored (paste connectors). */
   verifyPasted?(secrets: Readonly<Record<string, string>>, fetch: typeof globalThis.fetch): Effect.Effect<VerifiedConnection, ConnectorFailure>
   tools(host: ConnectorHost): ToolDefinition[]
+  /** The services a connection of this kind grants when it names none (a Discord bot: channels, messages, dms). */
+  readonly defaultServices?: readonly string[]
   /** Standing rules for the model when the connector is mounted. */
   prompt?(host: ConnectorHost): string
 }
@@ -205,13 +207,15 @@ export interface ConnectorToolSpec<A> {
   readonly name: string
   readonly description: string
   /** JSON Schema properties and required names, without the account parameter. */
-  readonly parameters: { readonly properties: Record<string, unknown>; readonly required?: readonly string[] }
+  readonly parameters: { readonly properties: Record<string, unknown>; readonly required?: readonly string[]; readonly emptyAllowed?: readonly string[] }
   /** A write tool (send, post): offered only when an account has the write grant. */
   readonly write?: boolean
   /** Which service of the account the tool needs (Google: gmail, calendar, …). */
   readonly service?: string
-  /** One line naming what the call did, for the result header and the trajectory. */
+  /** One line naming what the call did, for the failure header and the trajectory. */
   readonly action: (args: A) => string
+  /** Refuse arguments the service would misread, before any secret is resolved or request sent (ts-3d3n). */
+  readonly check?: (args: A) => ConnectorRefused | undefined
   readonly run: (args: A, use: ConnectionUse, account: GrantedConnection) => Effect.Effect<unknown, ConnectorFailure>
 }
 
@@ -220,7 +224,7 @@ function eligible(host: ConnectorHost, spec: { readonly write?: boolean; readonl
   return host.accounts.filter((account) => (spec.service === undefined || account.services.length === 0 || account.services.includes(spec.service)) && (spec.write !== true || account.write))
 }
 
-/** A connector tool: account routing, fresh secrets, the account/action header, failures as readable results. */
+/** A connector tool: account routing, fresh secrets, JSON results with the account; a failure rejects with the account/action header. */
 export function connectorTool<A extends Record<string, unknown>>(host: ConnectorHost, spec: ConnectorToolSpec<A>): ToolDefinition | undefined {
   const accounts = eligible(host, spec)
   if (accounts.length === 0) return undefined
@@ -233,18 +237,33 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
     name: spec.name,
     description: `${spec.description}${several ? '' : ` Acts on ${only.label === only.account ? only.label : `${only.label} (${only.account})`}.`}`,
     parameters: { properties, ...(spec.parameters.required === undefined ? {} : { required: [...spec.parameters.required] }) } as never,
+    ...(spec.parameters.emptyAllowed === undefined ? {} : { emptyAllowed: spec.parameters.emptyAllowed }),
     execute: async (args) => {
       const picked = pickAccount(accounts, args.account, false)
-      if (picked instanceof ConnectorRefused) return `Not done: ${picked.message}`
+      if (picked instanceof ConnectorRefused) throw new Error(`Not done: ${picked.message}`)
       const header = `[${host.kind} · ${picked.label === picked.account ? picked.label : `${picked.label} (${picked.account})`}] ${spec.action(args)}`
+      const refused = spec.check?.(args)
+      if (refused !== undefined) throw new Error(`${header}\nFailed: ${refused.message}`)
       const use = await host.use(picked.id)
       const outcome = await Effect.runPromise(Effect.result(spec.run(args, use, picked)))
-      if (outcome._tag === 'Success') return `${header}\n${typeof outcome.success === 'string' ? outcome.success : JSON.stringify(outcome.success, null, 2)}`
+      if (outcome._tag === 'Success') return withAccount(picked.account, outcome.success)
       const failure = outcome.failure
       if (failure._tag === 'ConnectorUnauthorized') await host.markStatus(picked.id, host.kind === 'google' ? 'needs-reconsent' : 'rejected', failure.message).catch(() => undefined)
-      return `${header}\nFailed: ${describeConnectorFailure(failure)}${failure._tag === 'ConnectorUnauthorized' ? ' The owner sees this on the connection\'s row and can reconnect it there.' : ''}`
+      // A failure rejects (ts-jbep): the header keeps account and action in the Trajectory, the wording stays "Failed: …".
+      throw new Error(`${header}\nFailed: ${describeConnectorFailure(failure)}${failure._tag === 'ConnectorUnauthorized' ? ' The owner sees this on the connection\'s row and can reconnect it there.' : ''}`)
     },
   })
+}
+
+/**
+ * A connector result as JSON with the account it acted on (ts-uy4d): an object keeps its fields,
+ * a list becomes items, a text becomes message.
+ */
+export function withAccount(account: string, result: unknown): Record<string, unknown> {
+  if (Array.isArray(result)) return { account, items: result }
+  if (typeof result === 'string') return { account, message: result }
+  if (result !== null && typeof result === 'object') return { account, ...result }
+  return { account, result: result ?? null }
 }
 
 /** The tools of the specs that have an eligible account. */
@@ -253,11 +272,11 @@ export function connectorTools(host: ConnectorHost, specs: ReadonlyArray<Connect
 }
 
 /** A tool listing the granted accounts of a connector, so the model knows what it can act on. */
-export function accountsTool(host: ConnectorHost): ToolDefinition {
+export function accountsTool(host: ConnectorHost, defaultServices: readonly string[] = []): ToolDefinition {
   return tool<Record<string, never>>({
     name: `${host.kind}_accounts`,
     description: `List the ${host.kind} accounts granted to you: label, account, services, whether writing is granted, and the default.`,
     parameters: { properties: {} },
-    execute: async () => host.accounts.map(({ label, account, services, write, isDefault }) => ({ label, account, services, write, isDefault })),
+    execute: async () => host.accounts.map(({ label, account, services, write, isDefault }) => ({ label, account, services: services.length === 0 ? [...defaultServices] : services, write, isDefault })),
   })
 }

@@ -172,7 +172,7 @@ export class R2FileSystem extends FileSystem {
     const key = String(fsTarget.targetKey)
     const member = memberFile(key)
     if (member !== undefined) {
-      throw new FsError(`${member} belongs to your owner and is read-only to you. Propose a change with propose_member_file_edit.`, 'FS_PERMISSION_DENIED')
+      throw new FsError(`${member} belongs to your owner and is read-only to you. Change it with the tool you were given for shared files: memory_write_shared, or propose_member_file_edit.`, 'FS_PERMISSION_DENIED')
     }
     if (key === '') throw new FsError('the Workspace root is a directory', 'FS_NOT_REGULAR_FILE')
     return key
