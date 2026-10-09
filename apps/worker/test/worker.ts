@@ -11,6 +11,7 @@ import type { BrowserDriver } from '../src/browser/driver.ts'
 import type { BrowserBackend } from '@mr-robot/protocol'
 
 import { Member as ProductionMember } from '../src/member/member.ts'
+import { ConversationIndex } from '../src/agent/conversation-search.ts'
 import type { PushNotification } from '../src/platform/push.ts'
 
 export const delivered = new Map<string, PushNotification[]>()
@@ -141,5 +142,18 @@ export class Robot extends ProductionRobot {
 
   async alarmForTest(): Promise<number | null> {
     return this.ctx.storage.getAlarm()
+  }
+
+  /** How this runtime searches the Conversation. */
+  async searchModeForTest(): Promise<'fts5' | 'like'> {
+    return this.store.search.mode
+  }
+
+  /** Search with the LIKE fallback from now on, as a runtime without FTS5 would; the index is rebuilt at the next search. */
+  async searchWithoutFullTextForTest(): Promise<'fts5' | 'like'> {
+    this.store.sql.exec('DROP TABLE chat_search')
+    this.store.sql.exec('DELETE FROM chat_search_state')
+    this.store.search = new ConversationIndex(this.store.sql, false)
+    return this.store.search.mode
   }
 }

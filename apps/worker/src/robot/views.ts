@@ -4,11 +4,11 @@
  * platform; nothing here writes except the registry report.
  */
 import * as Effect from 'effect/Effect'
-import type { ChatItem, Conversation, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, RoutineView, ScreenView, Trajectory, TrajectoryEvent, UsageView } from '@mr-robot/protocol'
+import type { ChatItem, Conversation, ConversationPage, ConversationSearchResult, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, RoutineView, ScreenView, Trajectory, TrajectoryEvent, TrajectoryExcerpt, UsageView } from '@mr-robot/protocol'
 import { readStoredEvents } from '../agent/session-log.ts'
 import { HOME_ID } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
-import { notFound } from '../platform/durable.ts'
+import { invalid, notFound } from '../platform/durable.ts'
 import { proposalView, RobotPlatform, RobotState, routineView, settings } from './programs.ts'
 import { projectChat } from './projection.ts'
 import type { RobotConfig } from './store.ts'
@@ -102,6 +102,75 @@ export const conversationView = (details = false) => Effect.gen(function* () {
   const mask = yield* platform.masker()
   const view = yield* conversation(details)
   return { ...view, items: view.items.map((item) => maskItem(item, mask)) } as Conversation
+})
+
+/** Items on one page of a Conversation read by another Robot (cd-gjhb). */
+export const CONVERSATION_PAGE_SIZE = 20
+/** A Trajectory excerpt stays within this many characters of event data in all (cd-9te1), and each event's data within the second. */
+export const TRAJECTORY_EXCERPT_CHARS = 12_000
+export const TRAJECTORY_EVENT_CHARS = 1_500
+/** Most events either side of the centre an excerpt may ask for. */
+const TRAJECTORY_REACH = 40
+
+/** The chat as a viewer gets it, newest item first, a page at a time (page is 1-based); the same items the PWA shows. */
+export const conversationPage = (page: number) => Effect.gen(function* () {
+  const view = yield* conversationView(false)
+  const number = Number.isInteger(page) && page >= 1 ? page : 1
+  const newest = [...view.items].reverse()
+  return {
+    robotId: view.robotId,
+    working: view.working,
+    items: newest.slice((number - 1) * CONVERSATION_PAGE_SIZE, number * CONVERSATION_PAGE_SIZE),
+    nextPage: newest.length > number * CONVERSATION_PAGE_SIZE ? number + 1 : null,
+  } as ConversationPage
+})
+
+/**
+ * The events of the live log around one chat item (its id, or an event number), secrets masked and
+ * cut to TRAJECTORY_EXCERPT_CHARS of event data so a diagnosis never floods the reader's context (cd-9te1).
+ */
+export const trajectoryAround = (itemId: string, before: number, after: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const mask = yield* (yield* RobotPlatform).masker()
+  const item = (yield* conversation()).items.find((entry) => entry.id === itemId)
+  const centre = item?.seq ?? (/^\d+$/.test(itemId) ? Number(itemId) : undefined)
+  if (centre === undefined) return yield* notFound(`no item "${itemId}" in this Conversation`)
+  const reach = (count: number) => Math.min(Math.max(Math.trunc(count), 0), TRAJECTORY_REACH)
+  const rows = store.sql.exec<{ event: string }>(
+    'SELECT event FROM session_event WHERE session_id = ? AND seq BETWEEN ? AND ? ORDER BY seq',
+    current.liveSessionId, Math.max(0, centre - reach(before)), centre + reach(after),
+  ).toArray()
+  const events: TrajectoryEvent[] = []
+  let used = 0
+  let truncated = false
+  for (const row of rows) {
+    const event = JSON.parse(row.event) as { seq: number; type: string; time: number; data: Record<string, unknown> }
+    const text = mask(JSON.stringify(event.data))
+    const data = text.length > TRAJECTORY_EVENT_CHARS ? `${text.slice(0, TRAJECTORY_EVENT_CHARS)}… (${text.length - TRAJECTORY_EVENT_CHARS} more characters)` : text
+    if (used + data.length > TRAJECTORY_EXCERPT_CHARS) {
+      truncated = true
+      break
+    }
+    used += data.length
+    events.push({ seq: event.seq, type: event.type, time: event.time, turn: typeof event.data['turn'] === 'number' ? event.data['turn'] : null, data })
+  }
+  return { robotId: current.id, seq: centre, events, truncated } as TrajectoryExcerpt
+})
+
+/** Text search over the live Conversation, newest first, paged (cd-ggem); snippets are masked like the chat. */
+export const searchConversation = (query: string, page: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const mask = yield* (yield* RobotPlatform).masker()
+  const result = yield* Effect.try({
+    try: () => store.search.search(current.liveSessionId, query, page),
+    catch: (error) => invalid(error instanceof Error ? error.message : String(error)),
+  })
+  return {
+    items: result.hits.map((hit) => ({ id: hit.id, sender: hit.sender ?? current.identity.name, at: hit.at, snippet: mask(hit.snippet) })),
+    nextPage: result.nextPage,
+  } as ConversationSearchResult
 })
 
 const trajectoryEvents = (sessionId: string) => Effect.gen(function* () {

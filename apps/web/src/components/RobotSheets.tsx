@@ -167,10 +167,10 @@ function RoutineDetail({ routine, canEdit, onClose, onBack, error, onDelete, onT
       {routine.runs.length === 0 ? <div className="detail-block muted">No runs yet</div> : (
         <ul className="detail-block runs">
           {routine.runs.map((run) => (
-            <li key={run.at}>
-              <span className={`run-${run.outcome}`}>{run.outcome === 'done' ? '✓' : run.outcome === 'failed' ? '✕' : '…'}</span>
-              <span className="muted">{new Date(run.at).toLocaleString()}</span>
-              <span>{run.summary}</span>
+            <li key={run.startedAt}>
+              <span className={`run-${run.outcome}`} title={run.outcome}>{run.outcome === 'ok' ? '✓' : run.outcome === 'failed' ? '✕' : run.outcome === 'skipped' ? '–' : '…'}</span>
+              <span className="muted">{new Date(run.startedAt).toLocaleString()}{run.finishedAt === null ? '' : ` – ${new Date(run.finishedAt).toLocaleTimeString()}`}</span>
+              <span>{run.outcome === 'skipped' ? `Skipped: ${run.firstLine}` : run.firstLine}</span>
             </li>
           ))}
         </ul>

@@ -40,7 +40,9 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
   const flushNotices = (seq: number) => {
     while (notices.length > 0 && notices[0]!.afterSeq < seq) {
       const notice = notices.shift()!
-      items.push({ kind: 'notice', id: notice.id, seq: notice.afterSeq, at: notice.at, text: notice.text })
+      items.push(notice.card === undefined
+        ? { kind: 'notice', id: notice.id, seq: notice.afterSeq, at: notice.at, text: notice.text }
+        : { kind: 'routine', id: notice.id, seq: notice.afterSeq, at: notice.at, action: notice.card.action, name: notice.card.name, by: notice.card.by })
     }
   }
 
@@ -173,6 +175,38 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
   }
   flushNotices(Number.POSITIVE_INFINITY)
   return items
+}
+
+/** The words of one chat item that has any, for full-text search over the Conversation (cd-ggem). */
+export interface ChatText {
+  /** The id the chat item has in the Conversation view. */
+  readonly id: string
+  readonly kind: 'message' | 'reply'
+  /** Who said it; null when the Robot itself did (a reply). */
+  readonly sender: string | null
+  readonly text: string
+}
+
+/** The searchable text of a session event, by the same rules the chat view projects it; undefined when the chat shows no words for it. */
+export function chatTextOf(event: SessionEvent): ChatText | undefined {
+  const data = event.data as Record<string, unknown>
+  if (event.type === 'assistant/message') {
+    const message = data['message'] as MessageLike | undefined
+    const text = (message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim()
+    return message === undefined || text.length === 0 ? undefined : { id: message.id, kind: 'reply', sender: null, text }
+  }
+  if (event.type !== 'user/message') return undefined
+  const message = data as unknown as MessageLike
+  const source = message.source
+  if (source?.['kind'] === 'compact-checkpoint' || !CHAT_SOURCES.has(String(source?.['kind'] ?? 'member'))) return undefined
+  const sender = senderOf(source)
+  if (sender.kind === 'platform') return undefined
+  const text = visibleText(message, sender).trim()
+  if (text.length === 0) return undefined
+  const label = sender.kind === 'member' || sender.kind === 'robot' ? sender.name
+    : sender.kind === 'routine' ? `Routine ${sender.name}`
+      : sender.kind === 'channel' ? `${sender.channel} ${sender.from}` : ''
+  return { id: message.id, kind: 'message', sender: label, text }
 }
 
 /** Message sources that are people, Robots, Routines, Channels or Mr. Robot's platform notes. */

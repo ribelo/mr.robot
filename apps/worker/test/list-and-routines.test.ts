@@ -55,7 +55,7 @@ describe('routine detail (robot-l3gr, robot-qhll)', () => {
     await settle(id)
     const after = await routinesOf(id)
     expect(after.find((routine) => routine.id === taxes.id)!.runs).toEqual([])
-    expect(after.find((routine) => routine.id === invoices.id)!.runs).toEqual([expect.objectContaining({ outcome: 'done', summary: 'Invoices sent.' })])
+    expect(after.find((routine) => routine.id === invoices.id)!.runs).toEqual([expect.objectContaining({ outcome: 'ok', firstLine: 'Invoices sent.', finishedAt: expect.any(Number) })])
 
     const resumed = (await api<RoutineView>(ANNA, `/api/robots/${id}/routines/${taxes.id}/pause`, { body: { paused: false } })).body
     expect(resumed.paused).toBe(false)

@@ -37,6 +37,12 @@ describe('ChatView (robot-q4b2)', () => {
     expect(screen.getByText('Approve these Grants to finish setup · waiting for the owner')).toBeTruthy()
   })
 
+  it('names Mr. Robot on a Routine card he made for this Robot (cd-n9pi)', () => {
+    render(<ChatView items={[{ kind: 'routine', id: 'g', seq: 1, at, action: 'created', name: 'Weekly digest', by: 'Mr. Robot' }]} meId="m-1" working={false} canAnswer={false} now={at} />)
+    expect(screen.getByText('Routine created by Mr. Robot')).toBeTruthy()
+    expect(screen.getByText('Weekly digest')).toBeTruthy()
+  })
+
   it('keeps one line of an ask in the stream; the ask itself is answered in place of the composer (rb-dat4)', () => {
     render(<ChatView items={items} meId="m-1" working={true} canAnswer={true} now={at} />)
     expect(screen.getByText('Approve these Grants to finish setup · answer below')).toBeTruthy()

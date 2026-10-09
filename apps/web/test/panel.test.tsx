@@ -22,7 +22,10 @@ const panel: RobotPanel = {
   routines: [{
     id: 'rt-1', robotId: 'r-1', name: 'Overnight outbound', prompt: 'Work the queue', schedule: { kind: 'weekly', time: '02:00', weekdays: [7] },
     timeZone: 'Europe/Warsaw', summary: 'Sundays at 02:00', nextRun: Date.parse('2026-10-11T00:00:00Z'), lastRun: null,
-    paused: false, cron: 'CRON_TZ=Europe/Warsaw 0 2 * * 0', runs: [{ at: Date.parse('2026-10-04T00:00:00Z'), outcome: 'done', summary: 'Queue worked: 12 leads.' }],
+    paused: false, cron: 'CRON_TZ=Europe/Warsaw 0 2 * * 0', runs: [
+      { startedAt: Date.parse('2026-10-11T00:00:00Z'), finishedAt: Date.parse('2026-10-11T00:00:00Z'), outcome: 'skipped', firstLine: 'The previous run had not finished.' },
+      { startedAt: Date.parse('2026-10-04T00:00:00Z'), finishedAt: Date.parse('2026-10-04T00:03:00Z'), outcome: 'ok', firstLine: 'Queue worked: 12 leads.' },
+    ],
   }],
   screen: { path: 'screens/last.png', url: '/api/robots/r-1/screen', at: 0 },
   usage: { month: '2026-10', inputTokens: 12000, outputTokens: 3000, costUsd: 0.42, limitUsd: 5 },
@@ -78,6 +81,7 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
     expect(await screen.findByText('Work the queue')).toBeTruthy()
     expect(screen.getByText('CRON_TZ=Europe/Warsaw 0 2 * * 0')).toBeTruthy()
     expect(screen.getByText('Queue worked: 12 leads.')).toBeTruthy()
+    expect(screen.getByText('Skipped: The previous run had not finished.')).toBeTruthy()
     fireEvent.click(screen.getByText('Pause'))
     await vi.waitFor(() => expect(calls.some((call) => call.path === '/api/robots/r-1/routines/rt-1/pause')).toBe(true))
     expect(calls.find((call) => call.path.endsWith('/pause'))!.body).toEqual({ paused: true })

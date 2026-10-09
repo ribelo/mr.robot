@@ -232,6 +232,24 @@ export const WebhookView = Schema.Struct({
 })
 export type WebhookView = typeof WebhookView.Type
 
+/**
+ * What Mr. Robot, as his owner's deputy, may change in another Robot's settings (cd-hpkr). Grants, the
+ * spend limit and sharing are not here: they stay with the owner, so a patch naming them does not decode.
+ */
+export const DeputySettingsPatch = Schema.Struct({
+  model: Schema.optional(Schema.Struct({ provider: Schema.String, model: Schema.String })),
+  thinking: Schema.optional(ThinkingEffort),
+  codeMode: Schema.optional(Schema.Boolean),
+  contextBudget: Schema.optional(Schema.Number),
+  compactionInstruction: Schema.optional(Schema.String),
+  discordChannel: Schema.optional(Schema.NullOr(Schema.String)),
+  discordProactive: Schema.optional(Schema.Boolean),
+  browserBackend: Schema.optional(Schema.NullOr(BrowserBackend)),
+  notifications: Schema.optional(Schema.Struct({ enabled: Schema.optional(Schema.Boolean), channels: Schema.optional(Schema.Array(Schema.String)) })),
+  wakeOnScreenNotifications: Schema.optional(Schema.Boolean),
+})
+export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
+
 export const SettingsPatch = Schema.Struct({
   identity: Schema.optional(Identity),
   sharing: Schema.optional(Schema.Literals(['private', 'home'])),
@@ -301,8 +319,13 @@ export const RoutineView = Schema.Struct({
   paused: Schema.Boolean,
   /** The schedule as a cron line with its time zone, when it has one ("CRON_TZ=Europe/Warsaw 0 9 * * 1-5"). */
   cron: Schema.NullOr(Schema.String),
-  /** The latest runs, newest first (robot-l3gr). */
-  runs: Schema.Array(Schema.Struct({ at: Schema.Number, outcome: Schema.Literals(['running', 'done', 'failed']), summary: Schema.String })),
+  /** The last 20 runs, newest first (robot-l3gr, cd-3t0p): when it started and finished, how it ended, the first line of its reply. */
+  runs: Schema.Array(Schema.Struct({
+    startedAt: Schema.Number,
+    finishedAt: Schema.NullOr(Schema.Number),
+    outcome: Schema.Literals(['running', 'ok', 'failed', 'skipped']),
+    firstLine: Schema.String,
+  })),
 })
 export type RoutineView = typeof RoutineView.Type
 
@@ -394,7 +417,8 @@ const itemFields = { id: Schema.String, seq: Schema.Number, at: Schema.Number }
 export const ChatItem = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('message'), ...itemFields, sender: Sender, text: Schema.String, attachments: Schema.Array(Attachment), reaction: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran']), name: Schema.String }),
+  /** A Routine card; `by` names who changed it when it was not the Robot itself (Mr. Robot, cd-n9pi). */
+  Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran', 'paused', 'resumed']), name: Schema.String, by: Schema.optional(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('question'), ...itemFields, proposal: ProposalView }),
   Schema.Struct({ kind: Schema.Literal('notice'), ...itemFields, text: Schema.String }),
   /** Tools the Robot used in one step, shown collapsed (robot-gr94). */
@@ -416,6 +440,31 @@ export const Conversation = Schema.Struct({
 })
 export type Conversation = typeof Conversation.Type
 
+/** One page of a Conversation as the chat shows it, newest item first (cd-gjhb). */
+export const ConversationPage = Schema.Struct({
+  robotId: Schema.String,
+  working: Schema.Boolean,
+  items: Schema.Array(ChatItem),
+  /** The page to ask for next (1-based); null on the last page. */
+  nextPage: Schema.NullOr(Schema.Number),
+})
+export type ConversationPage = typeof ConversationPage.Type
+
+/** A page of a text search over a Conversation, newest first (cd-ggem). */
+export const ConversationSearchResult = Schema.Struct({
+  items: Schema.Array(Schema.Struct({
+    /** The id of the chat item. */
+    id: Schema.String,
+    /** Who said it: a person's or Robot's name, a Routine, a Channel, or the Robot itself. */
+    sender: Schema.String,
+    at: Schema.Number,
+    snippet: Schema.String,
+  })),
+  /** The page to ask for next (1-based); null on the last page. */
+  nextPage: Schema.NullOr(Schema.Number),
+})
+export type ConversationSearchResult = typeof ConversationSearchResult.Type
+
 /** One raw event of the Trajectory, with secrets masked; data is JSON text. */
 export const TrajectoryEvent = Schema.Struct({
   seq: Schema.Number,
@@ -425,6 +474,17 @@ export const TrajectoryEvent = Schema.Struct({
   data: Schema.String,
 })
 export type TrajectoryEvent = typeof TrajectoryEvent.Type
+
+/** A few events of the Trajectory around one point, secrets masked and capped in size (cd-9te1). */
+export const TrajectoryExcerpt = Schema.Struct({
+  robotId: Schema.String,
+  /** The event the excerpt is centred on. */
+  seq: Schema.Number,
+  events: Schema.Array(TrajectoryEvent),
+  /** Events were left out to stay within the size cap. */
+  truncated: Schema.Boolean,
+})
+export type TrajectoryExcerpt = typeof TrajectoryExcerpt.Type
 
 export const RewindView = Schema.Struct({
   id: Schema.String,

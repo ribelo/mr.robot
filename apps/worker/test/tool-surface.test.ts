@@ -203,14 +203,14 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     expect(await returnedWithoutArguments(id, offered)).toEqual([])
   })
 
-  it("holds for Mr. Robot's own tools too (robots, memory_write_shared)", async () => {
+  it("holds for Mr. Robot's own tools too (robots, deputy, memory_write_shared)", async () => {
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await settle(mr)
     await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: await fullGrants() } })
     await testRobot(mr).activateForTest()
     await say(mr, [])
     const offered = lastTools(mr)
-    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write']))
+    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write', 'robot_list', 'robot_settings_set', 'robot_routine_set', 'conversation_search']))
     expect(contractProblems(offered)).toEqual([])
     expect(await returnedWithoutArguments(mr, offered)).toEqual([])
   })

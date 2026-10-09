@@ -14,7 +14,23 @@ import {
 } from '@deepseek-ai/dsh-schedule'
 import { withToolRewrite, routineWords, withDescriptions } from './tool-wording.ts'
 import { resolveScheduleUpdate } from './schedule-update.ts'
+import { cronMinGapMinutes } from '../robot/schedule.ts'
 import type { RoutineSchedule } from '@mr-robot/protocol'
+
+/** A Robot keeps at most this many Routines that have not ended (cd-d14a). */
+export const MAX_ROUTINES = 50
+/** The shortest wait between two runs of a Routine, in seconds (cd-d14a). */
+export const MIN_ROUTINE_INTERVAL_SECONDS = 5 * 60
+
+const TOO_FREQUENT = `A Routine must wait at least 5 minutes (${MIN_ROUTINE_INTERVAL_SECONDS} seconds) between runs.`
+
+/** The refusal for a record that would run more often than every 5 minutes, or undefined. */
+function tooFrequent(record: ScheduleRecord): string | undefined {
+  if (record.kind === 'every') return record.everySeconds < MIN_ROUTINE_INTERVAL_SECONDS ? TOO_FREQUENT : undefined
+  // DSH stored the expression in its canonical numeric form, which parseCron reads; a parse error refuses the Routine.
+  if (record.kind === 'cron') return cronMinGapMinutes(record.expression) < MIN_ROUTINE_INTERVAL_SECONDS / 60 ? `${TOO_FREQUENT} This cron expression runs more often.` : undefined
+  return undefined
+}
 
 export type { ScheduleRecord } from '@deepseek-ai/dsh-schedule'
 
@@ -41,7 +57,11 @@ export class AlarmSchedule {
   async create(sessionId: string, request: ScheduleCreateRequest): Promise<ScheduleRecord> {
     const selectors = [request.at, request.after_seconds, request.every_seconds, request.daily, request.weekly, request.cron].filter((value) => value !== undefined)
     if (selectors.length !== 1) throw new ScheduleInputError('invalid_selector', 'Exactly one timing parameter is required for a Routine: after_seconds, at, every_seconds, daily, weekly or cron.')
+    if (this.storage.tasks().filter((task) => task.active).length >= MAX_ROUTINES) {
+      throw new ScheduleInputError('invalid_rule', `A Robot may have at most ${MAX_ROUTINES} Routines. Delete one before you create another.`)
+    }
     if (request.after_seconds !== undefined && request.after_seconds < MIN_EVERY_INTERVAL_SECONDS) throw new ScheduleInputError('frequency_too_high', `after_seconds must be at least ${MIN_EVERY_INTERVAL_SECONDS}; a Routine fires no sooner than a minute from now.`)
+    if (request.every_seconds !== undefined && request.every_seconds < MIN_ROUTINE_INTERVAL_SECONDS) throw new ScheduleInputError('frequency_too_high', TOO_FREQUENT)
     const title = scheduleTitle(request.title)
     const id = ScheduleId(`schedule-${crypto.randomUUID()}`)
     const now = Date.now()
@@ -52,6 +72,8 @@ export class AlarmSchedule {
             : request.daily !== undefined ? createDailyScheduleRecord(id, request.prompt, request.daily, now, title)
               : request.weekly !== undefined ? createWeeklyScheduleRecord(id, request.prompt, request.weekly, now, title)
                 : createCronScheduleRecord(id, request.prompt, request.cron!, now, title)
+    const refusal = tooFrequent(record)
+    if (refusal !== undefined) throw new ScheduleInputError('frequency_too_high', refusal)
     this.storage.save({ record, sessionId, active: true })
     this.storage.changed()
     return record
@@ -77,8 +99,11 @@ export class AlarmSchedule {
     const task = this.storage.tasks().find((entry) => entry.record.id === request.id)
     if (task === undefined || task.sessionId !== request.sessionId) return { id: request.id, updated: false, code: 'schedule_not_found' }
     if (!task.active) return { id: request.id, updated: false, code: 'schedule_ended' }
+    if (request.change?.kind === 'every' && request.change.every_seconds < MIN_ROUTINE_INTERVAL_SECONDS) return { code: 'frequency_too_high', message: TOO_FREQUENT }
     const result = resolveScheduleUpdate(task.record, request.expected, request.change, Date.now(), request)
     if (!('record' in result) || !result.updated) return result
+    const refusal = request.change === undefined ? undefined : tooFrequent(result.record)
+    if (refusal !== undefined) return { code: 'frequency_too_high', message: refusal }
     this.storage.save({ ...task, record: result.record })
     this.storage.changed()
     return result

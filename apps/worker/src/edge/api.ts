@@ -32,6 +32,7 @@ import {
 import { HOME_ID, type Env } from '../env.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
+import { modelRefusal } from '../robot/model-choice.ts'
 import type { AnswerResult } from '../robot/robot.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
 import { PLUGINS, pluginByName } from '../plugins/catalog.ts'
@@ -457,13 +458,8 @@ export const api = new Router<ApiContext>()
       // A Robot is never switched to a model its owner has no credential for (robot-mx6s).
       const chosen = patch.model
       const current = yield* call(() => robot(c, id).settings())
-      const changed = current.model.provider !== chosen.provider || current.model.model !== chosen.model
-      if (changed && (PROVIDER_IDS as readonly string[]).includes(chosen.provider)) {
-        const offered = yield* call(() => home(c.env).models(c.member.id))
-        if (!offered.some((option) => option.provider === chosen.provider && option.model === chosen.model)) {
-          return yield* Effect.fail(badRequest(`${chosen.model} is not offered to you: connect its Provider under your name → Providers first`))
-        }
-      }
+      const refusal = yield* call(() => modelRefusal(c.env, c.member.id, current.model, chosen))
+      if (refusal !== null) return yield* Effect.fail(badRequest(refusal))
     }
     return yield* call(() => robot(c, id).updateSettings(patch))
   }))

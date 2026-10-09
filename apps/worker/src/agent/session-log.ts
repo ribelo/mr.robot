@@ -31,6 +31,7 @@ import {
   type SessionPersistenceCreateOptions,
   type SessionPersistenceSnapshot,
 } from '@deepseek-ai/dsh-session-persistence'
+import { ConversationIndex } from './conversation-search.ts'
 
 export const SESSION_LOG_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS session_log (
@@ -80,6 +81,7 @@ export class SqliteSessionLog extends SessionPersistence {
   private readonly onAppend: ((sessionId: string) => void) | undefined
   private readonly redact: (json: string) => string
   private readonly sql: SqlStorage
+  private readonly index: ConversationIndex
   private readonly writers = new Map<string, SessionHandle>()
 
   constructor(ctx: Context, config: SessionLogConfig) {
@@ -89,6 +91,7 @@ export class SqliteSessionLog extends SessionPersistence {
     this.redact = config.redact ?? ((json) => json)
     this.sql = config.storage.sql
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
+    this.index = new ConversationIndex(this.sql)
     ctx.on('session/event', (session: Session, event: SessionEvent) => {
       const writer = this.writers.get(session.id)
       if (writer !== undefined) this.write(session.id, [event])
@@ -106,6 +109,7 @@ export class SqliteSessionLog extends SessionPersistence {
       'INSERT INTO session_log (id, header, inherited, length) VALUES (?, ?, ?, 0)',
       meta.id, JSON.stringify(meta), inherited,
     )
+    this.index.track(meta.id)
     return this.claim(meta.id, 'write')
   }
 
@@ -154,6 +158,7 @@ export class SqliteSessionLog extends SessionPersistence {
         this.sql.exec('INSERT INTO session_event (session_id, seq, event) VALUES (?, ?, ?)', id, event.seq, this.redact(JSON.stringify(event)))
       }
       this.sql.exec('UPDATE session_log SET length = ? WHERE id = ?', stored.length + batch.length, id)
+      this.index.extend(id)
     })
     this.onAppend?.(id)
   }

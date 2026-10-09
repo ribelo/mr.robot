@@ -52,7 +52,7 @@ export function reviewTools(host: RobotHost): ToolDefinition[] {
       parameters: {
         properties: {
           title: { type: 'string', description: 'What is being reviewed' },
-          items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, action: { type: 'string' } }, required: ['id', 'title', 'body'] } },
+          items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, action: { type: 'string' } }, required: ['id', 'title', 'body'] }, description: 'The items to approve or reject, at most 200; each a unique id, a title, a body and an optional action label' },
         },
         required: ['title', 'items'],
       },
