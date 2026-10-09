@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Component test: stream growth does not move the scroll position when scrolled up; it does when at bottom
-- [ ] Button appears with the count and disappears at bottom
-- [ ] Works on a 2000-item conversation (windowed)
+- [x] Component test: stream growth does not move the scroll position when scrolled up; it does when at bottom
+- [x] Button appears with the count and disappears at bottom
+- [x] Works on a 2000-item conversation (windowed)

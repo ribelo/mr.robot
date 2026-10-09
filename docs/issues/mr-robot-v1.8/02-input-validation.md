@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd tests for each listed case
-- [ ] Error messages name the parameter and the rule
+- [x] Workerd tests for each listed case
+- [x] Error messages name the parameter and the rule

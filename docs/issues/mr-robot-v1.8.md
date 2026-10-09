@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.8 — tool surface consistency"
-status: ready-for-agent
+status: done
 story-prefix: ts
 parent: mr-robot-v1.5.md
 ---

@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Every CSS variable used by the stylesheets (including the DSH trajectory theme where it uses variables) is defined by the token file in both themes (test)
-- [ ] Theme setting in the profile, persisted with the Member's UI settings, no flash on load
-- [ ] Colour picker shows the palette and a hex input; old colours remain valid
+- [x] Every CSS variable used by the stylesheets (including the DSH trajectory theme where it uses variables) is defined by the token file in both themes (test)
+- [x] Theme setting in the profile, persisted with the Member's UI settings, no flash on load
+- [x] Colour picker shows the palette and a hex input; old colours remain valid

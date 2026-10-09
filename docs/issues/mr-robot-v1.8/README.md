@@ -4,10 +4,10 @@ Spec: ../mr-robot-v1.8.md. 01, 02 and 03 start at once; 04 after all three.
 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
-| 01 | [Connector failures throw; JSON results with account](01-connector-failures-throw-json.md) | — | ready-for-agent |
-| 02 | [Input validation before any call](02-input-validation.md) | — | ready-for-agent |
-| 03 | [Remove web_search; glossary wording in descriptions and prompt](03-remove-web-search-wording.md) | — | ready-for-agent |
-| 04 | [Typed Exa SDK parameters and the tool contract test](04-typed-exa-params-contract-test.md) | 01, 02, 03 | ready-for-agent |
+| 01 | [Connector failures throw; JSON results with account](01-connector-failures-throw-json.md) | — | done |
+| 02 | [Input validation before any call](02-input-validation.md) | — | done |
+| 03 | [Remove web_search; glossary wording in descriptions and prompt](03-remove-web-search-wording.md) | — | done |
+| 04 | [Typed Exa SDK parameters and the tool contract test](04-typed-exa-params-contract-test.md) | 01, 02, 03 | done |
 
 
 ## Source: Mr. Robot's tool report (2026-10-09, translated)

@@ -6,8 +6,8 @@
 
 **Blocked by:** 02 Deputy reads
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] robot_routine_set (create or edit), robot_routine_pause, robot_routine_delete work on a reachable Robot and the card names Mr. Robot
-- [ ] Run records (max 20) appear in the routine detail sheet and in robot_routines after alarm runs in a workerd test
-- [ ] Limits refused for the Robot's own schedule tools and the deputy tools alike, with messages naming 50 and 5 minutes
+- [x] robot_routine_set (create or edit), robot_routine_pause, robot_routine_delete work on a reachable Robot and the card names Mr. Robot
+- [x] Run records (max 20) appear in the routine detail sheet and in robot_routines after alarm runs in a workerd test
+- [x] Limits refused for the Robot's own schedule tools and the deputy tools alike, with messages naming 50 and 5 minutes

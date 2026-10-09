@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test with a 404 fixture: the connector tool call rejects; with a 200 fixture: JSON with account
-- [ ] grep, glob and other text tools return arrays or { status, message }
-- [ ] discord_accounts shows services; web_fetch description states the 404 behaviour
+- [x] Workerd test with a 404 fixture: the connector tool call rejects; with a 200 fixture: JSON with account
+- [x] grep, glob and other text tools return arrays or { status, message }
+- [x] discord_accounts shows services; web_fetch description states the 404 behaviour

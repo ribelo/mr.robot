@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] skill_library returns [{ name, description, held, source }] for a Robot and adds holders: string[] for Mr. Robot
-- [ ] Workerd tests for both kinds
+- [x] skill_library returns [{ name, description, held, source }] for a Robot and adds holders: string[] for Mr. Robot
+- [x] Workerd tests for both kinds

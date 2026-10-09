@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.7 — app polish: scroll, optimistic send, theme tokens, robot colour"
-status: ready-for-agent
+status: done
 story-prefix: ap
 parent: mr-robot-v1.5.md
 ---

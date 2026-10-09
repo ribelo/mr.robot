@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Tool conversation_search(query, page) exists for every Robot and returns { items: [{ id, sender, at, snippet }], nextPage }
-- [ ] Search runs in the Robot Durable Object SQLite: FTS5 when workerd offers it, otherwise LIKE behind the same interface; the index is maintained on append and backfilled on first use
-- [ ] Workerd test: seed a long log, find an early and a late phrase, page through results
+- [x] Tool conversation_search(query, page) exists for every Robot and returns { items: [{ id, sender, at, snippet }], nextPage }
+- [x] Search runs in the Robot Durable Object SQLite: FTS5 when workerd offers it, otherwise LIKE behind the same interface; the index is maintained on append and backfilled on first use
+- [x] Workerd test: seed a long log, find an early and a late phrase, page through results

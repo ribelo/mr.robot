@@ -6,9 +6,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] web_search absent from a fully granted Robot's tool list; web_fetch description mentions web_search_exa
-- [ ] No 'reminder' in schedule tool descriptions or errors
-- [ ] drive_replace present, drive_import absent, skill text updated
-- [ ] Prompt test for both Robot kinds
+- [x] web_search absent from a fully granted Robot's tool list; web_fetch description mentions web_search_exa
+- [x] No 'reminder' in schedule tool descriptions or errors
+- [x] drive_replace present, drive_import absent, skill text updated
+- [x] Prompt test for both Robot kinds

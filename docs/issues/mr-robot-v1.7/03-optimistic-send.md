@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The send API accepts a client id and deduplicates on it (workerd test)
-- [ ] Component tests: pending item appears immediately, replaced on confirmation, failure shows Retry and resends once
-- [ ] Pending items show a clock mark instead of a time
+- [x] The send API accepts a client id and deduplicates on it (workerd test)
+- [x] Component tests: pending item appears immediately, replaced on confirmation, failure shows Retry and resends once
+- [x] Pending items show a clock mark instead of a time

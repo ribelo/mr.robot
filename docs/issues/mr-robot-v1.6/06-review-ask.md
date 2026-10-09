@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] ProposalKind review and tool propose_review exist; partial approval is one answer, not a new proposal
-- [ ] AskBar renders checkboxes and the three actions; the decided card shows counts (component test)
-- [ ] The wake-up carries { approved: string[], rejected: string[] } rendered for the model (workerd test)
+- [x] ProposalKind review and tool propose_review exist; partial approval is one answer, not a new proposal
+- [x] AskBar renders checkboxes and the three actions; the decided card shows counts (component test)
+- [x] The wake-up carries { approved: string[], rejected: string[] } rendered for the model (workerd test)

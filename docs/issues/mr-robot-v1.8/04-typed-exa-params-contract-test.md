@@ -6,7 +6,7 @@
 
 **Blocked by:** 01, 02, 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] SDK declarations for web_search_exa, crawling_exa, get_code_context_exa, exa_agent_* show typed parameters
-- [ ] Contract test passes over every mounted tool
+- [x] SDK declarations for web_search_exa, crawling_exa, get_code_context_exa, exa_agent_* show typed parameters
+- [x] Contract test passes over every mounted tool

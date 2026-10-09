@@ -6,7 +6,7 @@
 
 **Blocked by:** 01 Theme tokens
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Computed background of a Robot message is a color-mix of its avatarColor and the surface in both themes (test)
-- [ ] Avatar gets a state class per fleet state in the list and the header; reduced motion disables animation
+- [x] Computed background of a Robot message is a color-mix of its avatarColor and the surface in both themes (test)
+- [x] Avatar gets a state class per fleet state in the list and the header; reduced motion disables animation

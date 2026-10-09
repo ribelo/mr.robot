@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.6 — chief deputy: Mr. Robot sees and runs the owner's Robots"
-status: ready-for-agent
+status: done
 story-prefix: cd
 parent: mr-robot-v1.5.md
 ---

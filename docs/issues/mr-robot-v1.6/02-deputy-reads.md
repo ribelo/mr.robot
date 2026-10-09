@@ -6,8 +6,8 @@
 
 **Blocked by:** 01 Conversation search
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] robot_list, robot_conversation, robot_trajectory, robot_files, robot_file_read, robot_grants, robot_routines, robot_settings exist for Mr. Robot and are absent for an ordinary Robot
-- [ ] Reads reuse the Robot DO methods the PWA uses; the data matches the PWA view in a workerd test with an owner, Mr. Robot and two Robots
-- [ ] A Robot the owner cannot reach is refused with a clear message; robot_trajectory output is capped (state the cap in the description)
+- [x] robot_list, robot_conversation, robot_trajectory, robot_files, robot_file_read, robot_grants, robot_routines, robot_settings exist for Mr. Robot and are absent for an ordinary Robot
+- [x] Reads reuse the Robot DO methods the PWA uses; the data matches the PWA view in a workerd test with an owner, Mr. Robot and two Robots
+- [x] A Robot the owner cannot reach is refused with a clear message; robot_trajectory output is capped (state the cap in the description)

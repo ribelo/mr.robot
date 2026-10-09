@@ -6,9 +6,9 @@
 
 **Blocked by:** 02 Deputy reads
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] robot_file_write and robot_file_delete land in the target Workspace and the target Robot receives the existing memory-changed note with Mr. Robot as actor
-- [ ] robot_settings_set accepts model, thinking, codeMode, contextBudget, compactionInstruction, discordChannel, discordProactive, browserBackend, notifications, wakeOnScreenNotifications and rejects grants, spendLimitUsd and sharing by schema
-- [ ] robot_configure sets name, title, description and avatarColor
-- [ ] The target Conversation shows a system line per change; workerd tests cover each write and the rejections
+- [x] robot_file_write and robot_file_delete land in the target Workspace and the target Robot receives the existing memory-changed note with Mr. Robot as actor
+- [x] robot_settings_set accepts model, thinking, codeMode, contextBudget, compactionInstruction, discordChannel, discordProactive, browserBackend, notifications, wakeOnScreenNotifications and rejects grants, spendLimitUsd and sharing by schema
+- [x] robot_configure sets name, title, description and avatarColor
+- [x] The target Conversation shows a system line per change; workerd tests cover each write and the rejections

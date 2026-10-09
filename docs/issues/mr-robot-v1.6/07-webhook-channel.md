@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Settings show the address and key with Regenerate (owner), and the deputy can regenerate too once ticket 03 lands (not required here)
-- [ ] Edge tests: good key wakes once with the same Idempotency-Key, wrong key 401, 70 KB body 413
-- [ ] Replies of a webhook-woken Turn behave like a Routine's: app plus opted-in Channels
+- [x] Settings show the address and key with Regenerate (owner), and the deputy can regenerate too once ticket 03 lands (not required here)
+- [x] Edge tests: good key wakes once with the same Idempotency-Key, wrong key 401, 70 KB body 413
+- [x] Replies of a webhook-woken Turn behave like a Routine's: app plus opted-in Channels
