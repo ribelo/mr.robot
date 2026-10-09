@@ -29,6 +29,8 @@ describe('send with a client id (v1.7 ticket 03)', () => {
     await settle(body.id)
     const sent = (await api<Conversation>(ANNA, `/api/robots/${body.id}/conversation`)).body.items.filter((item) => item.kind === 'message' && item.sender.kind === 'member')
     expect(sent).toHaveLength(2)
+    // The app matches its pending copy by the id the message carries.
+    expect(sent.map((item) => (item.kind === 'message' ? item.clientId : undefined))).toEqual(['c-1', 'c-2'])
   })
 })
 

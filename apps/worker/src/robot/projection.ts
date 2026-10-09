@@ -80,6 +80,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           text: visibleText(message, sender),
           attachments: (message.source?.['attachments'] as Attachment[] | undefined) ?? [],
           reaction: null,
+          ...(typeof message.source?.['clientId'] === 'string' ? { clientId: message.source['clientId'] } : {}),
         })
         if (sender.kind === 'member') lastMemberMessage = items.length - 1
         break

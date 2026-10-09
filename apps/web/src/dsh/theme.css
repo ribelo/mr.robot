@@ -445,6 +445,12 @@ html[data-theme] body {
   --dsw-alias-label-primary: var(--text);
   --dsw-alias-label-secondary: var(--muted);
   --dsw-alias-label-tertiary: var(--faint);
+  --dsw-alias-label-caption: var(--faint);
+  --dsw-alias-border-l1: var(--line);
+  --dsw-alias-border-l2: var(--line);
+  --dsw-alias-interactive-bg-hover: var(--hover-strong);
+  --dsw-alias-markdown-code-block: var(--code-bg);
   --dsw-alias-state-error-primary: var(--danger);
   --dsw-alias-state-success-primary: var(--success);
+  --dsw-alias-state-warn-label: var(--warn-text);
 }

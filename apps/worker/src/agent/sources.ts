@@ -7,7 +7,7 @@ import type { Attachment, Sender } from '@mr-robot/protocol'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
-    member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[] } & ContextFormed
+    member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[]; clientId?: string } & ContextFormed
     robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; requestId?: string; replyTo?: string } & ContextFormed
     routine: { kind: 'routine'; routineId: string; name: string } & ContextFormed
     channel: { kind: 'channel'; channel: string; from: string } & ContextFormed
@@ -25,6 +25,8 @@ export interface WakeupMessageInput {
   readonly replyHandle?: string
   /** What the chat shows for a platform message; defaults to its first line. */
   readonly summary?: string
+  /** A Member's message: the id the app sent it with, so the app can match its pending copy. */
+  readonly clientId?: string
 }
 
 export function wakeupMessage(input: WakeupMessageInput): UserMessage {
@@ -37,7 +39,7 @@ export function wakeupMessage(input: WakeupMessageInput): UserMessage {
     case 'member':
       return createUserMessage({
         content: [{ type: 'text', text: `${input.text}${files}` }],
-        source: { kind: 'member', memberId: sender.memberId, name: sender.name, attachments: [...attachments] },
+        source: { kind: 'member', memberId: sender.memberId, name: sender.name, attachments: [...attachments], ...(input.clientId === undefined ? {} : { clientId: input.clientId }) },
       })
     case 'robot': {
       const head = input.replyTo === undefined

@@ -14,13 +14,16 @@ export interface PendingSend {
 }
 
 /**
- * The pending sends the Conversation does not hold yet. A send is confirmed by a new message of this
- * Member with the same text; each Conversation item confirms at most one send, oldest send first.
+ * The pending sends the Conversation does not hold yet. A send is confirmed by the message that carries
+ * its client id. A message without one (sent before the Worker kept client ids) confirms by text: a
+ * new message of this Member with the same text, each item at most one send, oldest send first.
  */
 export function unconfirmed(pending: readonly PendingSend[], items: readonly ChatItem[], meId: string): PendingSend[] {
+  const carried = new Set(items.flatMap((item) => (item.kind === 'message' && item.clientId !== undefined ? [item.clientId] : [])))
   const used = new Set<string>()
   return pending.filter((send) => {
-    const match = items.find((item) => item.kind === 'message' && item.sender.kind === 'member' && item.sender.memberId === meId
+    if (carried.has(send.clientId)) return false
+    const match = items.find((item) => item.kind === 'message' && item.clientId === undefined && item.sender.kind === 'member' && item.sender.memberId === meId
       && item.text === send.text && !send.knownItems.has(item.id) && !used.has(item.id))
     if (match === undefined) return true
     used.add(match.id)

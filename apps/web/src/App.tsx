@@ -198,9 +198,9 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
       <section className="conversation-main">
         {header}
         <ChatScroll itemCount={conversation.items.length + outgoing.pending.length} pinSignal={sentCount} growth={(stream?.text.length ?? 0) + (stream?.thinking.length ?? 0) + (conversation.working ? 1 : 0)}>
-          {(scrollRef) => (<>
+          {(scrollRef, following) => (<>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} pending={outgoing.pending} onRetry={outgoing.retry} />
+          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve) => void answer(proposal, approve)} pending={outgoing.pending} onRetry={outgoing.retry} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>

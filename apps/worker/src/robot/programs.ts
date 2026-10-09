@@ -99,14 +99,23 @@ const config = Effect.gen(function* () {
 // ------------------------------------------------------------------ wake-ups and lifecycle (robot-qo06)
 
 /** Queue a Wake-up and make sure the queue is being drained. */
+/** The latest client ids with their Wake-up ids: a retry comes within seconds, so a short list is enough to accept a send once. */
+const RECENT_CLIENT_IDS = 'recent-client-ids'
+const RECENT_CLIENT_ID_LIMIT = 200
+
 export const wake = (input: WakeInput) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   if ((yield* config).status === 'deleted') return yield* invalid('robot is deleted')
-  const seen = input.clientId === undefined ? undefined : store.get<number>(`client:${input.clientId}`)
-  if (seen !== undefined) return seen
-  const id = store.enqueue(input.kind, input.sender, input.text, { ...input.payload, attachments: input.attachments ?? [] }, Date.now())
-  if (input.clientId !== undefined) store.set(`client:${input.clientId}`, id)
+  const recent = store.get<ReadonlyArray<readonly [string, number]>>(RECENT_CLIENT_IDS) ?? []
+  const seen = input.clientId === undefined ? undefined : recent.find(([clientId]) => clientId === input.clientId)
+  if (seen !== undefined) return seen[1]
+  const id = store.enqueue(input.kind, input.sender, input.text, {
+    ...input.payload,
+    attachments: input.attachments ?? [],
+    ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
+  }, Date.now())
+  if (input.clientId !== undefined) store.set(RECENT_CLIENT_IDS, [...recent, [input.clientId, id] as const].slice(-RECENT_CLIENT_ID_LIMIT))
   yield* platform.drain()
   return id
 })

@@ -407,6 +407,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         ...optionalString(wakeup.payload, 'replyTo'),
         ...optionalString(wakeup.payload, 'replyHandle'),
         ...optionalString(wakeup.payload, 'summary'),
+        ...optionalString(wakeup.payload, 'clientId'),
       }))
     } else {
       agent.followup(wakeupMessage({

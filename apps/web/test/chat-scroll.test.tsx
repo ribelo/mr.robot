@@ -29,7 +29,7 @@ const items = (count: number): ChatItem[] => Array.from({ length: count }, (_, n
 function Page({ count, streamed = 0 }: { count: number; streamed?: number }) {
   return (
     <ChatScroll itemCount={count} growth={streamed}>
-      {(scrollRef) => <ChatView items={items(count)} meId="m-1" working={streamed > 0} canAnswer={false} now={at} scrollRef={scrollRef} {...(streamed > 0 ? { stream: { text: 'x'.repeat(streamed), thinking: '' } } : {})} />}
+      {(scrollRef, following) => <ChatView items={items(count)} meId="m-1" working={streamed > 0} canAnswer={false} now={at} scrollRef={scrollRef} following={following} {...(streamed > 0 ? { stream: { text: 'x'.repeat(streamed), thinking: '' } } : {})} />}
     </ChatScroll>
   )
 }
@@ -50,6 +50,21 @@ describe('stick to bottom (ap-iyej, ap-8rui, ap-oe45)', () => {
     geometry.scrollHeight = 3000
     rerender(<Page count={5} streamed={200} />)
     expect(geometry.scrollTop).toBe(200)
+  })
+
+  it('stops following on a small scroll up inside the threshold (ap-iyej)', () => {
+    const { container, rerender } = render(<Page count={5} streamed={10} />)
+    geometry.scrollTop = 1470
+    fireEvent.scroll(container.querySelector('.chat-scroll')!)
+    geometry.scrollHeight = 2400
+    rerender(<Page count={5} streamed={80} />)
+    expect(geometry.scrollTop).toBe(1470)
+    // Back down by hand: following again.
+    geometry.scrollTop = 1880
+    fireEvent.scroll(container.querySelector('.chat-scroll')!)
+    geometry.scrollHeight = 2600
+    rerender(<Page count={5} streamed={160} />)
+    expect(geometry.scrollTop).toBe(2100)
   })
 
   it('counts new messages on a button while scrolled up, and hides it at the bottom (ap-8rui)', () => {

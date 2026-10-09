@@ -15,7 +15,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (col
         ))}
       </div>
       <label className="color-hex">Custom colour
-        <input aria-label="Custom colour" value={text} maxLength={7} spellCheck={false} aria-invalid={!HEX.test(text)}
+        <input aria-label="Custom colour" value={text} maxLength={7} spellCheck={false} aria-invalid={draft !== undefined && !HEX.test(draft)}
           onChange={(event) => {
             const next = event.target.value.startsWith('#') ? event.target.value : `#${event.target.value}`
             setDraft(next)

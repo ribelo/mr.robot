@@ -82,6 +82,18 @@ describe('optimistic send (ap-3si6, ap-ceqx, ap-7b3p)', () => {
     expect(container.querySelectorAll('.pending-send')).toHaveLength(1)
   })
 
+  it('confirms the send whose client id the Conversation carries, not an older one with the same text', async () => {
+    answers.push(() => Response.json({ error: 'robot is paused' }, { status: 409 }))
+    const { container, rerender } = render(view(conversation()))
+    type('ok')
+    expect(await screen.findByText(/Not sent/)).toBeTruthy()
+    type('ok')
+    await waitFor(() => expect(posts).toHaveLength(2))
+    rerender(view(conversation({ kind: 'message', id: 'm-9', seq: 2, at, sender: { kind: 'member', memberId: 'm-1', name: 'Anna' }, text: 'ok', attachments: [], reaction: null, clientId: posts[1]!.clientId })))
+    await waitFor(() => expect(container.querySelectorAll('.pending-send')).toHaveLength(1))
+    expect(container.querySelector('.pending-send')?.getAttribute('data-state')).toBe('failed')
+  })
+
   it('shows a message nobody could reach as not sent too', async () => {
     answers.push(() => { throw new TypeError('offline') })
     render(view(conversation()))

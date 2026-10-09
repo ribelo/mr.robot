@@ -1,5 +1,5 @@
 import type { ThemeChoice } from '@mr-robot/protocol'
-import { resolveTheme, THEME_STORAGE_KEY } from './theme-css.ts'
+import { resolveTheme, THEME_STORAGE_KEY, TOKENS } from './theme-css.ts'
 
 const isChoice = (value: string | null): value is ThemeChoice => value === 'system' || value === 'light' || value === 'dark'
 
@@ -18,6 +18,8 @@ const dark = typeof matchMedia === 'function' ? matchMedia('(prefers-color-schem
 function paint(): void {
   const theme = resolveTheme(current, dark?.matches ?? true)
   document.documentElement.setAttribute('data-theme', theme)
+  // The browser and phone chrome around the app take the theme's surface.
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', TOKENS.themes[theme].color.surface)
   // The vendored DSH trajectory styles key off this body attribute.
   if (theme === 'dark') document.body.setAttribute('data-ds-dark-theme', '')
   else document.body.removeAttribute('data-ds-dark-theme')

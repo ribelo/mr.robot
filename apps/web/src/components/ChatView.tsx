@@ -34,6 +34,8 @@ export interface ChatViewProps {
   readonly highlight?: string
   /** The scrolling element around the chat; long conversations render only the rows in view (fe-3ckb). */
   readonly scrollRef?: RefObject<HTMLElement | null>
+  /** Whether the view follows the end (ChatScroll decides); without it the row window decides by distance alone. */
+  readonly following?: RefObject<boolean>
 }
 
 /** Conversations longer than this render through the row window. */
@@ -44,7 +46,7 @@ const ROW_GAP_PX = 8
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream, robotId, highlight, scrollRef, pending = [], onRetry, robotColor }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, now, workDetails = 'compact', stream, robotId, highlight, scrollRef, following, pending = [], onRetry, robotColor }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -84,11 +86,11 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
       ? <div key="working" className="bubble bubble-robot typing" style={robotTint(robotColor)} aria-label="working"><span /><span /><span /></div>
       : <div key="working" className="activity-now" aria-label="working"><span className="spinner" /> Using {toolLabel(activity)}…</div>)
   }
-  return <ChatRows rows={rows} highlight={highlight} {...(scrollRef === undefined ? {} : { scrollRef })} />
+  return <ChatRows rows={rows} highlight={highlight} {...(scrollRef === undefined ? {} : { scrollRef })} {...(following === undefined ? {} : { following })} />
 }
 
 /** The rows, all of them for a short conversation, the rows in view for a long one (fe-3ckb). */
-function ChatRows({ rows, highlight, scrollRef }: { rows: ReactNode[]; highlight: string | undefined; scrollRef?: RefObject<HTMLElement | null> }) {
+function ChatRows({ rows, highlight, scrollRef, following }: { rows: ReactNode[]; highlight: string | undefined; scrollRef?: RefObject<HTMLElement | null>; following?: RefObject<boolean> }) {
   const keys = useMemo(() => rows.map((row, index) => String((row as { key?: string | null }).key ?? index)), [rows])
   const windowed = scrollRef !== undefined && rows.length > WINDOW_THRESHOLD
   const measured = useMeasuredRows(windowed ? keys : [], ESTIMATED_ROW_PX)
@@ -100,6 +102,7 @@ function ChatRows({ rows, highlight, scrollRef }: { rows: ReactNode[]; highlight
     margin: 0,
     initialViewport: 900,
     followThreshold: FOLLOW_THRESHOLD_PX,
+    ...(following === undefined ? {} : { following }),
   })
   // A search match far up the conversation is brought into view, then outlined (pl-8594).
   useEffect(() => {

@@ -368,7 +368,11 @@ const itemFields = { id: Schema.String, seq: Schema.Number, at: Schema.Number }
 
 /** One item of the simple chat view. */
 export const ChatItem = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('message'), ...itemFields, sender: Sender, text: Schema.String, attachments: Schema.Array(Attachment), reaction: Schema.NullOr(Schema.String) }),
+  Schema.Struct({
+    kind: Schema.Literal('message'), ...itemFields, sender: Sender, text: Schema.String, attachments: Schema.Array(Attachment), reaction: Schema.NullOr(Schema.String),
+    /** The client id the Member's app sent it with: the app's pending copy of it is this item (ap-3si6). */
+    clientId: Schema.optional(Schema.String),
+  }),
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran']), name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('question'), ...itemFields, proposal: ProposalView }),
@@ -732,7 +736,7 @@ export const SkillsSynced = Schema.Struct({ synced: Schema.Array(Schema.String) 
 export const SendMessage = Schema.Struct({
   text: Schema.String,
   /** Chosen by the client for each message; a repeated send with the same id is accepted once (ap-ceqx). */
-  clientId: Schema.optional(Schema.String),
+  clientId: Schema.optional(Schema.String.check(Schema.isMaxLength(128))),
   attachments: Schema.optional(Schema.Array(Schema.Struct({
     name: Schema.String,
     path: Schema.String,
