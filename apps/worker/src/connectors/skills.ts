@@ -114,3 +114,21 @@ export const CONNECTOR_SKILLS: Readonly<Record<ConnectorKind, readonly Connector
 }
 
 export const CONNECTOR_SKILL_NAMES: ReadonlySet<string> = new Set(Object.values(CONNECTOR_SKILLS).flat().map((entry) => entry.name))
+
+/**
+ * The skills a Robot holds: its ordinary skill grants (a connector skill is never held that way), then
+ * the skills of each connector kind in `kindsOn` it holds a granted connection of. The Robot's own
+ * Turn and the Home's skill_library holders (cd-56kk) both answer through this one rule.
+ */
+export function heldSkillNames(
+  grants: { readonly skills: readonly string[]; readonly connections?: readonly string[] | undefined },
+  connections: readonly { readonly id: string; readonly kind: ConnectorKind }[],
+  kindsOn: readonly ConnectorKind[],
+): string[] {
+  const granted = new Set(grants.connections ?? [])
+  const held = new Set(connections.filter((connection) => granted.has(connection.id)).map((connection) => connection.kind))
+  return [
+    ...grants.skills.filter((name) => !CONNECTOR_SKILL_NAMES.has(name)),
+    ...kindsOn.filter((kind) => held.has(kind)).flatMap((kind) => CONNECTOR_SKILLS[kind].map((entry) => entry.name)),
+  ]
+}

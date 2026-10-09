@@ -20,7 +20,7 @@ const ROUTINE_TOOLS: Record<string, 'created' | 'updated' | 'deleted'> = {
   routine_update: 'updated',
   routine_delete: 'deleted',
 }
-const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'request_takeover', 'setup_complete'])
+const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'propose_review', 'request_takeover', 'setup_complete'])
 
 export interface ProjectionInput {
   /** Tool arguments, results and thinking for Standard, Detailed and Verbose (pl-6eir). */

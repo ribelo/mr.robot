@@ -3,7 +3,7 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { ConnectionView, HostView, LoginView, PluginView } from '@mr-robot/protocol'
+import type { ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -33,7 +33,7 @@ import { backendOptions } from '../browser/backends.ts'
 import { TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
-import { CONNECTOR_SKILLS } from '../connectors/skills.ts'
+import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
 import type { GatewayMessage } from '../connectors/discord-gateway.ts'
 import type { PlainValue } from '../connectors/schema-form.ts'
@@ -1007,6 +1007,43 @@ export class Home extends DurableObject<Env> {
   }
   skills(memberId: string): Promise<SkillView[]> { return this.run(skills(memberId)) }
   loadableSkills(memberId: string, names: readonly string[]): Promise<SkillView[]> { return this.run(loadableSkills(memberId, names)) }
+  /**
+   * The library as one Robot of this owner sees it (cd-wfn2). With `holders` (Mr. Robot, cd-56kk) each row
+   * names the owner's other Robots that hold the skill, by grant or through a connector grant.
+   */
+  async skillLibrary(ownerId: string, held: readonly string[], holders: boolean): Promise<SkillLibraryRow[]> {
+    const library = await this.run(skills(ownerId))
+    const connectorOf = new Map<string, ConnectorKind>(Object.entries(CONNECTOR_SKILLS).flatMap(([kind, entries]) => entries.map((entry) => [entry.name, kind as ConnectorKind] as const)))
+    const holding = new Map<string, string[]>()
+    if (holders) {
+      const robots = (await this.run(reachable(ownerId))).filter((robot) => robot.kind === 'robot')
+      const enabled = this.pluginsOf.enabled()
+      const kindsOn = (Object.keys(CONNECTOR_SKILLS) as ConnectorKind[]).filter((kind) => enabled[kind] !== false)
+      const connections = new Map<string, Promise<ConnectionView[]>>()
+      const connectionsOf = (memberId: string) => {
+        const known = connections.get(memberId) ?? this.connectionsFor(memberId)
+        connections.set(memberId, known)
+        return known
+      }
+      const robotSkills = await Promise.all(robots.map(async (robot) => {
+        const admin = await this.env.ROBOT.getByName(robot.id).adminRow()
+        return admin === null ? [] : heldSkillNames(admin.grants, await connectionsOf(robot.ownerId), kindsOn)
+      }))
+      robots.forEach((robot, index) => {
+        for (const name of new Set(robotSkills[index])) holding.set(name, [...(holding.get(name) ?? []), robot.identity.name])
+      })
+    }
+    return library.map((skill) => {
+      const kind = connectorOf.get(skill.name)
+      return {
+        name: skill.name,
+        description: skill.description,
+        held: held.includes(skill.name),
+        source: kind === undefined ? skill.source : `connector:${kind}`,
+        ...(holders ? { holders: holding.get(skill.name) ?? [] } : {}),
+      }
+    })
+  }
   skillRepository(): Promise<SkillRepository | null> { return this.run(skillRepository) }
   setSkillRepository(repository: SkillRepository, token: string | undefined): Promise<void> { return this.run(setSkillRepository(repository, token)) }
   syncSkills(): Promise<{ synced: string[] }> { return this.run(syncSkills) }

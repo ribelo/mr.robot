@@ -6,7 +6,7 @@ import { QuestionCard } from './ChatView.tsx'
  * Pending asks in place of the composer (rb-dat4, rb-f5um): the oldest first, counted within the
  * batch (1/2, then 2/2); "Reply instead" brings the composer back without answering (rb-r0oj).
  */
-export function AskBar({ asks, onAnswer, onReplyInstead }: { asks: readonly ProposalView[]; onAnswer: (proposal: ProposalView, approve: boolean) => void; onReplyInstead: () => void }) {
+export function AskBar({ asks, onAnswer, onReplyInstead }: { asks: readonly ProposalView[]; onAnswer: (proposal: ProposalView, approve: boolean, approved?: readonly string[]) => void; onReplyInstead: () => void }) {
   const batch = useRef(new Set<string>())
   for (const ask of asks) batch.current.add(ask.id)
   const current = asks[0]!

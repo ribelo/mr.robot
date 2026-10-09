@@ -41,7 +41,8 @@ export interface InboundWakeup {
   readonly sender: Sender
   readonly text: string
   readonly route: ReplyRoute
-  readonly dedupeKey: string
+  /** The event's key for deduplication; null when the Channel deduplicates by itself (the webhook). */
+  readonly dedupeKey: string | null
 }
 
 export type ChannelOutput =

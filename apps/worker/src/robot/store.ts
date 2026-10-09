@@ -14,6 +14,7 @@ import type {
   NotificationSettings,
   ProposalKind,
   ProposalView,
+  ReviewView,
   RewindView,
   RobotStatus,
   RoutineSchedule,
@@ -41,6 +42,8 @@ export interface RobotConfig {
   readonly discordChannel?: string | null
   /** Also send the Robot's unasked messages to its Discord channel (cn-y1ac); absent: yes. */
   readonly discordProactive?: boolean
+  /** The secret in this Robot's webhook address (v1.6 ticket 07); created on first use. */
+  readonly webhookKey?: string
   readonly compactionInstruction: string
   readonly notifications: NotificationSettings
   readonly spendLimitUsd: number | null
@@ -288,12 +291,12 @@ export class RobotStore {
    * Compare-and-swap answer: succeeds only for an open proposal at exactly this revision.
    * @returns the answered proposal, or undefined when the revision is stale or it is closed.
    */
-  answerProposal(id: string, revision: number, approve: boolean, now: number): ProposalRow | undefined {
+  answerProposal(id: string, revision: number, approve: boolean, now: number, decision?: { approved: readonly string[]; rejected: readonly string[] }): ProposalRow | undefined {
     const status = approve ? 'approved' : 'rejected'
-    const cursor = this.sql.exec(
-      "UPDATE proposal SET status = ?, answered_at = ? WHERE id = ? AND revision = ? AND status = 'open'",
-      status, now, id, revision,
-    )
+    // A review's decision is kept beside the stored payload, which itself stays as proposed.
+    const cursor = decision === undefined
+      ? this.sql.exec("UPDATE proposal SET status = ?, answered_at = ? WHERE id = ? AND revision = ? AND status = 'open'", status, now, id, revision)
+      : this.sql.exec("UPDATE proposal SET status = ?, answered_at = ?, payload = json_set(payload, '$.decision', json(?)) WHERE id = ? AND revision = ? AND status = 'open'", status, now, JSON.stringify(decision), id, revision)
     return cursor.rowsWritten === 1 ? this.proposal(id) : undefined
   }
 
@@ -497,6 +500,13 @@ type ProposalSql = {
   answered_at: number | null
 }
 
+function reviewOf(payload: Record<string, unknown>): { review: ReviewView } | Record<string, never> {
+  const review = payload['review'] as { title: string; items: ReviewView['items'] } | undefined
+  if (review === undefined) return {}
+  const decision = payload['decision'] as ReviewView['decision'] | undefined
+  return { review: { ...review, ...(decision === undefined ? {} : { decision }) } }
+}
+
 function proposalFromSql(row: ProposalSql): ProposalRow {
   const payload = JSON.parse(row.payload) as Record<string, unknown>
   return {
@@ -509,6 +519,7 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
     grants: (payload['grants'] as GrantSet | undefined) ?? null,
     file: (payload['file'] as ProposalView['file'] | undefined) ?? null,
     skill: (payload['skill'] as ProposalView['skill'] | undefined) ?? null,
+    ...reviewOf(payload),
     createdAt: row.created_at,
     answeredAt: row.answered_at,
   }

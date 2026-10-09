@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort, BrowserBackend } from '@mr-robot/protocol'
 import { ModelSelect } from './ModelSelect.tsx'
 import type * as Exit from 'effect/Exit'
-import { promptAtom } from '../client/api-atoms.ts'
+import { keys, promptAtom, useCommand, webhookAtom } from '../client/api-atoms.ts'
 import type { ApiFailure } from '../client/api-failure.ts'
 import { renderResult } from './AtomView.tsx'
 import { useAtomValue } from '@effect/atom-react'
@@ -165,6 +165,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         <span>Notifications<small>Push when it finishes, needs you, or is blocked.</small></span>
       </label>
 
+      {panel.canEdit ? <WebhookSection id={panel.summary.id} /> : null}
+
       <PromptPreview id={panel.summary.id} />
 
       <h2>Sharing and limits</h2>
@@ -198,6 +200,38 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           onCancel={() => setDanger(undefined)} onConfirm={async (memory) => { const exit = await onClear(name, memory); if (exit._tag === 'Success') setDanger(undefined); return exit }} />
       ) : null}
     </div>
+  )
+}
+
+/** The webhook address and its key (cd-pqt8): anyone holding it can wake this Robot, so only the owner sees it. */
+function WebhookSection({ id }: { id: string }) {
+  const result = useAtomValue(webhookAtom(id))
+  const command = useCommand()
+  const [failure, setFailure] = useState<string>()
+  const regenerate = async () => {
+    const exit = await command((api) => api.regenerateWebhook(id), [keys.robot(id)])
+    setFailure(exit._tag === 'Success' ? undefined : 'Could not regenerate the key.')
+  }
+  return (
+    <>
+      <h2>Webhook</h2>
+      <div className="muted">POST JSON or text (up to 64 KB) to this address to wake the Robot. The key in it is the only credential: keep it secret. Add an Idempotency-Key header to make a retry harmless.</div>
+      {renderResult(result, { what: 'the webhook' }, (hook) => (
+        <>
+          <label>Address
+            <input readOnly aria-label="Webhook address" value={`${window.location.origin}${hook.path}`} onFocus={(event) => event.target.select()} />
+          </label>
+          <label>Key
+            <input readOnly aria-label="Webhook key" value={hook.key} onFocus={(event) => event.target.select()} />
+          </label>
+          <div className="question-actions">
+            <button type="button" className="button" onClick={() => void regenerate()}>Regenerate</button>
+          </div>
+          <div className="muted">Regenerating stops the old address working at once.</div>
+          {failure === undefined ? null : <div className="muted">{failure}</div>}
+        </>
+      ))}
+    </>
   )
 }
 

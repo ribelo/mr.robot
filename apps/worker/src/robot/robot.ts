@@ -62,6 +62,7 @@ import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.t
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
+import { rememberIdempotencyKey, WebhookChannel, webhookText } from '../channels/webhook.ts'
 import { DiscordChannel } from '../channels/discord.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
 import { containerOpenStages } from '../browser/driver.ts'
@@ -78,9 +79,9 @@ import { Host } from '../plugins/host.ts'
 import { connectorCapability } from '../plugins/connector.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
-import { CONNECTOR_SKILLS, CONNECTOR_SKILL_NAMES } from '../connectors/skills.ts'
+import { heldSkillNames } from '../connectors/skills.ts'
 import type { ConnectorHost, ConnectorPlugin, GrantedConnection } from '../connectors/connector.ts'
-import type { ConnectionView, ConnectorKind } from '@mr-robot/protocol'
+import type { ConnectionView, ConnectorKind, SkillLibraryRow, WebhookView } from '@mr-robot/protocol'
 import { Logins } from '../plugins/logins.ts'
 import { Messaging } from '../plugins/messaging.ts'
 import { Notify } from '../plugins/notify.ts'
@@ -502,7 +503,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The Channel adapters this Robot can use; v1 has the PWA. Tests add a fake one. */
   protected channels(): Map<string, ChannelAdapter> {
     const pwa = new PwaChannel({ notify: (memberId, event) => this.env.MEMBER.getByName(memberId).notify(event) })
-    const channels = new Map<string, ChannelAdapter>([[pwa.id, pwa]])
+    const webhook = new WebhookChannel()
+    const channels = new Map<string, ChannelAdapter>([[pwa.id, pwa], [webhook.id, webhook]])
     // Discord is a second door into the Conversation (cn-65gg). Having a channel of its own is not required:
     // a direct message to the bot reaches the Robot and the answer goes back to that DM.
     const config = this.store.config()
@@ -549,19 +551,68 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const adapter = this.channels().get(event.channel)
     if (adapter === undefined) throw new Error(`no Channel ${event.channel}`)
     // Discord messages arrive only for Robots the Home routes them to (their channel, or Mr. Robot for a DM).
-    if (event.channel !== 'discord' && !this.store.requireConfig().notifications.channels.includes(event.channel)) return { accepted: false }
+    if (event.channel !== 'discord' && event.channel !== 'webhook' && !this.store.requireConfig().notifications.channels.includes(event.channel)) return { accepted: false }
     const wakeup = adapter.inbound(event)
-    if (this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
-    this.store.set(`inbound:${wakeup.dedupeKey}`, true)
+    if (wakeup.dedupeKey !== null) {
+      if (this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
+      this.store.set(`inbound:${wakeup.dedupeKey}`, true)
+    }
     await this.wake({ kind: 'channel', sender: wakeup.sender, text: wakeup.text, payload: { route: wakeup.route } })
     return { accepted: true }
+  }
+
+  // ---------------------------------------------------------------- webhook (v1.6 ticket 07)
+
+  /** The address and key, for the owner; a Robot older than the webhook gets its key on first use. */
+  webhook(): WebhookView {
+    const config = this.store.requireConfig()
+    const key = config.webhookKey ?? this.store.updateConfig(() => ({ webhookKey: newWebhookKey() }), false).webhookKey!
+    return { path: `/hooks/${config.id}/${key}`, key }
+  }
+
+  /** A new key; the old address stops working at once. */
+  regenerateWebhook(): WebhookView {
+    this.store.updateConfig(() => ({ webhookKey: newWebhookKey() }), false)
+    return this.webhook()
+  }
+
+  /** Whether this is the key of this Robot's webhook (compared in constant time). */
+  webhookAccepts(key: string): boolean {
+    const expected = this.store.config()?.webhookKey
+    if (expected === undefined || this.store.config()?.status === 'deleted') return false
+    const encoder = new TextEncoder()
+    const [given, wanted] = [encoder.encode(key), encoder.encode(expected)]
+    return given.byteLength === wanted.byteLength && crypto.subtle.timingSafeEqual(given, wanted)
+  }
+
+  /**
+   * A webhook request wakes the Robot once per Idempotency-Key (every request, without one). Only the
+   * last IDEMPOTENCY_KEYS_KEPT keys are remembered, so the list stays bounded.
+   */
+  async receiveWebhook(key: string, request: { contentType: string; body: string; idempotencyKey: string | null }): Promise<{ accepted: boolean }> {
+    if (!this.webhookAccepts(key)) return { accepted: false }
+    const config = this.store.requireConfig()
+    if (request.idempotencyKey !== null) {
+      const remembered = rememberIdempotencyKey(this.store.get<string[]>('webhook-idempotency-keys') ?? [], request.idempotencyKey)
+      if (remembered.duplicate) return { accepted: true }
+      this.store.set('webhook-idempotency-keys', remembered.seen)
+    }
+    return this.channelEvent({
+      channel: 'webhook',
+      eventId: request.idempotencyKey ?? '',
+      from: 'webhook',
+      text: webhookText(request.contentType, request.body),
+      route: { channel: 'webhook', address: config.id },
+    })
   }
 
   /** Replies of a Turn go back out as recipientsOf decides: to where the question came from, or unasked to the opted-in Channels. */
   private async deliverReplies(wakeup: Wakeup, startSeq: number): Promise<void> {
     const config = this.store.requireConfig()
-    const route = (wakeup.payload['route'] as ReplyRoute | undefined) ?? null
-    const unprompted = wakeup.kind !== 'member' && wakeup.kind !== 'channel'
+    // A webhook has nobody to answer: its Turn replies like a Routine's (app, and the Channels that opted in).
+    const stored = (wakeup.payload['route'] as ReplyRoute | undefined) ?? null
+    const route = stored?.channel === 'webhook' ? null : stored
+    const unprompted = wakeup.kind !== 'member' && (wakeup.kind !== 'channel' || stored?.channel === 'webhook')
     const replies = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
     for (const item of replies) {
       if (item.kind !== 'reply') continue
@@ -738,7 +789,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('routines')) mounts.push(mount(Routines, { schedule: this.schedule() }))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
-    const skillNames = () => [...this.store.effectiveGrants().skills.filter((name) => !CONNECTOR_SKILL_NAMES.has(name)), ...this.connectorSkillNames()]
+    const skillNames = () => this.heldSkills()
     if (granted.has('skills') || connectorSkills.length > 0) {
       mounts.push(mount(Skills, {
         host: this,
@@ -766,8 +817,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Skills of the connector kinds this Robot holds a granted connection for (and whose plugin is on). */
   private connectorSkillNames(): string[] {
-    const kinds = new Set(Object.keys(this.connectorPlugins()).filter((kind) => this.pluginsOn[kind] !== false && this.grantedConnections(kind as ConnectorKind).length > 0) as ConnectorKind[])
-    return [...kinds].flatMap((kind) => CONNECTOR_SKILLS[kind].map((entry) => entry.name))
+    return heldSkillNames({ skills: [], connections: this.store.effectiveGrants().connections }, this.knownConnections, this.connectorKindsOn())
+  }
+
+  /** Every skill this Robot holds: granted, or brought by a connector it holds. */
+  private heldSkills(): string[] {
+    return heldSkillNames(this.store.effectiveGrants(), this.knownConnections, this.connectorKindsOn())
+  }
+
+  /** Connector kinds with an implementation whose plugin the Home has on. */
+  private connectorKindsOn(): ConnectorKind[] {
+    return (Object.keys(this.connectorPlugins()) as ConnectorKind[]).filter((kind) => this.pluginsOn[kind] !== false)
   }
 
   /** The connector implementations; tests substitute fakes. */
@@ -1193,7 +1253,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView {
-    const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
+    const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind === 'review' ? false : kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
     this.ctx.waitUntil(this.changed())
     this.ctx.waitUntil(this.notifyMembers('needs you', `${purpose}: waiting for your answer.`).catch(() => 0))
     return proposalView(row)
@@ -1212,8 +1272,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
    * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
    */
-  answer(proposalId: string, revision: number, approve: boolean): Promise<AnswerResult> {
-    return this.program(Programs.answer(proposalId, revision, approve))
+  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[]): Promise<AnswerResult> {
+    return this.program(Programs.answer(proposalId, revision, approve, approved))
   }
 
 
@@ -1759,6 +1819,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { path, scope: 'local' }
   }
 
+  async skillLibrary(): Promise<SkillLibraryRow[]> {
+    const config = this.store.requireConfig()
+    return this.home().skillLibrary(config.ownerId, this.heldSkills(), config.kind === 'mr-robot')
+  }
+
   async promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }> {
     const content = await this.run(this.workspace.readText(`skills/${name}/SKILL.md`))
     if (content === undefined) throw new Error(`You have no local skill "${name}". Write it with skill_write first.`)
@@ -2046,6 +2111,11 @@ interface WatchState {
 
 /** How often a watched browser is checked for notifications. */
 const WATCH_INTERVAL_MS = 60_000
+
+/** 32 random bytes, URL-safe. */
+function newWebhookKey(): string {
+  return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
 
 function runnable(config: RobotConfig): boolean {
   return config.status === 'active' || config.status === 'setup'

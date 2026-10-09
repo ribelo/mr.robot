@@ -13,7 +13,7 @@ import {
   AdminView, Attachment, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, OpencodeKeysView, PromptPreview, ProposalView,
   ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
-  TextContent, Trajectory, WorkspaceFileContent, WorkspaceFileView,
+  TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
@@ -64,11 +64,13 @@ const make = Effect.gen(function* () {
       get(SessionEventsPage, `/api/robots/${enc(id)}/events?limit=${page.limit}${page.before === undefined ? '' : `&before=${page.before}`}${page.after === undefined ? '' : `&after=${page.after}`}`),
     panel: (id: string) => get(RobotPanel, `/api/robots/${enc(id)}/panel`),
     catalog: (id: string) => get(SettingsCatalog, `/api/robots/${enc(id)}/catalog`),
+    webhook: (id: string) => get(WebhookView, `/api/robots/${enc(id)}/webhook`),
+    regenerateWebhook: (id: string) => request(WebhookView, 'POST', `/api/robots/${enc(id)}/webhook/regenerate`, {}),
     prompt: (id: string) => get(PromptPreview, `/api/robots/${enc(id)}/prompt`),
     send: (id: string, message: SendMessage) => send('POST', `/api/robots/${enc(id)}/messages`, message),
     retry: (id: string) => request(RetryResult, 'POST', `/api/robots/${enc(id)}/retry`, {}),
     updateSettings: (id: string, patch: SettingsPatch) => request(RobotSettings, 'PATCH', `/api/robots/${enc(id)}/settings`, patch),
-    answer: (id: string, proposal: ProposalView, approve: boolean) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}`, { revision: proposal.revision, approve }),
+    answer: (id: string, proposal: ProposalView, approve: boolean, approved?: readonly string[]) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}`, { revision: proposal.revision, approve, ...(approved === undefined ? {} : { approved }) }),
     pause: (id: string) => send('POST', `/api/robots/${enc(id)}/pause`),
     resume: (id: string) => send('POST', `/api/robots/${enc(id)}/resume`),
     remove: (id: string, confirm: string) => send('DELETE', `/api/robots/${enc(id)}`, { confirm }),

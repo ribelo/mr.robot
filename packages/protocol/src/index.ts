@@ -224,6 +224,14 @@ export const RobotSettings = Schema.Struct({
 })
 export type RobotSettings = typeof RobotSettings.Type
 
+/** A Robot's webhook address and its secret key (cd-pqt8); shown to the owner only. */
+export const WebhookView = Schema.Struct({
+  /** Path on this deployment: /hooks/<robotId>/<key>. */
+  path: Schema.String,
+  key: Schema.String,
+})
+export type WebhookView = typeof WebhookView.Type
+
 export const SettingsPatch = Schema.Struct({
   identity: Schema.optional(Identity),
   sharing: Schema.optional(Schema.Literals(['private', 'home'])),
@@ -302,8 +310,26 @@ export type RoutineView = typeof RoutineView.Type
 
 // ---------------------------------------------------------------- Grant proposals and questions
 
-export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover'])
+export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover', 'review'])
 export type ProposalKind = typeof ProposalKind.Type
+
+/** A review Ask (cd-dt2x): a titled list of items the owner approves one by one or all at once. */
+export const ReviewItem = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  body: Schema.String,
+  /** What approving this item does, e.g. "Send"; the owner sees it beside the item. */
+  action: Schema.optional(Schema.String),
+})
+export type ReviewItem = typeof ReviewItem.Type
+
+export const ReviewView = Schema.Struct({
+  title: Schema.String,
+  items: Schema.Array(ReviewItem),
+  /** Set once the owner has answered: the ids approved and the ids rejected (cd-7gwt). */
+  decision: Schema.optional(Schema.Struct({ approved: Schema.Array(Schema.String), rejected: Schema.Array(Schema.String) })),
+})
+export type ReviewView = typeof ReviewView.Type
 
 export const ProposalView = Schema.Struct({
   id: Schema.String,
@@ -317,12 +343,16 @@ export const ProposalView = Schema.Struct({
   file: Schema.NullOr(Schema.Struct({ name: Schema.String, content: Schema.String })),
   /** Skill proposed to the library. */
   skill: Schema.NullOr(Schema.Struct({ name: Schema.String, description: Schema.String })),
+  /** Review Ask: the items and, once answered, the decision. */
+  review: Schema.optional(ReviewView),
 })
 export type ProposalView = typeof ProposalView.Type
 
 export const ProposalAnswer = Schema.Struct({
   revision: Schema.Number,
   approve: Schema.Boolean,
+  /** Review Ask only: the ids the owner approved; the rest are rejected. Left out, approve means every item. */
+  approved: Schema.optional(Schema.Array(Schema.String)),
 })
 
 // ---------------------------------------------------------------- Conversation
@@ -547,6 +577,19 @@ export const SkillView = Schema.Struct({
   edited: Schema.optional(Schema.Boolean),
 })
 export type SkillView = typeof SkillView.Type
+
+/** One row of the skill_library tool (cd-wfn2, cd-56kk). */
+export const SkillLibraryRow = Schema.Struct({
+  name: Schema.String,
+  description: Schema.String,
+  /** Whether the asking Robot holds the skill (granted, or brought by a connector it holds). */
+  held: Schema.Boolean,
+  /** "git", "robot" or "home" for a library skill; "connector:<kind>" for one a connector brings. */
+  source: Schema.String,
+  /** Mr. Robot only: names of the Robots that hold the skill. */
+  holders: Schema.optional(Schema.Array(Schema.String)),
+})
+export type SkillLibraryRow = typeof SkillLibraryRow.Type
 
 export const SkillRepositoryInput = Schema.Struct({
   repo: Schema.String,
