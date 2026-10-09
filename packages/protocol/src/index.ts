@@ -219,6 +219,8 @@ export const RobotSettings = Schema.Struct({
   browserBackend: Schema.NullOr(BrowserBackend),
   /** The Discord channel this Robot talks in (cn-y1ac); null: no Discord. */
   discordChannel: Schema.NullOr(Schema.String),
+  /** Also send the Robot's own messages (Routine results, notifications) to its Discord channel; replies to Discord messages always go back. */
+  discordProactive: Schema.Boolean,
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -235,6 +237,7 @@ export const SettingsPatch = Schema.Struct({
   notifications: Schema.optional(NotificationSettings),
   spendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
   discordChannel: Schema.optional(Schema.NullOr(Schema.String)),
+  discordProactive: Schema.optional(Schema.Boolean),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 

@@ -2,7 +2,7 @@ import { LlmAdapter, ToolCallId, type GenerateOptions, type LlmResolvedModelInfo
 
 /** One scripted model reply: text, or tool calls. */
 export type StubReply =
-  | { readonly text: string; readonly inputTokens?: number; readonly thinking?: string }
+  | { readonly text: string; readonly inputTokens?: number; readonly thinking?: string; /** Tool calls after the text: the text is an interim message of the Turn. */ readonly calls?: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   | { readonly hang: true }
   | { readonly calls: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   | ((request: GenerateOptions) => StubReply)
@@ -43,8 +43,15 @@ export class StubLlm extends LlmAdapter {
       yield { type: 'block-start', index: offset, blockType: 'text' }
       yield { type: 'text-delta', index: offset, text: reply.text }
       yield { type: 'block-end', index: offset, block: { type: 'text', text: reply.text } }
+      for (const [index, call] of (reply.calls ?? []).entries()) {
+        const id = ToolCallId(`call-${crypto.randomUUID()}`)
+        const args = JSON.stringify(call.args)
+        yield { type: 'block-start', index: offset + 1 + index, blockType: 'tool-call' }
+        yield { type: 'tool-call-delta', index: offset + 1 + index, id, name: call.name, argumentsDelta: args }
+        yield { type: 'block-end', index: offset + 1 + index, block: { type: 'tool-call', id, name: call.name, arguments: args } }
+      }
       yield { type: 'usage', usage: { inputTokens: reply.inputTokens ?? 100, outputTokens: 10 } }
-      yield { type: 'finish', reason: { kind: 'stop' } }
+      yield { type: 'finish', reason: { kind: (reply.calls ?? []).length > 0 ? 'tool-calls' : 'stop' } }
       return
     }
     for (const [index, call] of reply.calls.entries()) {

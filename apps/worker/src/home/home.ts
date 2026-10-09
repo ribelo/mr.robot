@@ -1168,7 +1168,7 @@ export class Home extends DurableObject<Env> {
   }
 
   /** Post to a Discord channel with the Home's bot (the Channel side of a Robot's reply). */
-  discordPost(memberId: string, channelId: string, text: string): Promise<boolean> { return this.discord.post(memberId, channelId, text) }
+  discordPost(memberId: string, channelId: string, text: string, replyTo?: string): Promise<boolean> { return this.discord.post(memberId, channelId, text, replyTo) }
 
   /** The owner's Mr. Robot: where a direct message to the bot goes. */
   private async mrRobotOf(ownerId: string): Promise<string | null> {

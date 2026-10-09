@@ -337,9 +337,11 @@ export const settings = Effect.gen(function* () {
     wakeOnScreenNotifications: current.wakeOnScreenNotifications === true,
     browserBackend: current.browserBackend ?? null,
     discordChannel: current.discordChannel ?? null,
+    discordProactive: current.discordProactive !== false,
     compactionInstruction: current.compactionInstruction,
     grants: store.grants(),
-    notifications: current.notifications,
+    // Discord is on by having a channel; an old 'discord' entry in the list means nothing.
+    notifications: { ...current.notifications, channels: current.notifications.channels.filter((channel) => channel !== 'discord') },
     spendLimitUsd: current.spendLimitUsd,
   } as RobotSettings
 })
@@ -403,7 +405,8 @@ export const updateSettings = (patch: SettingsPatch) => Effect.gen(function* () 
       ...(patch.browserBackend === undefined ? {} : { browserBackend: patch.browserBackend }),
       ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
       ...(patch.discordChannel === undefined ? {} : { discordChannel: patch.discordChannel === null || patch.discordChannel.trim() === '' ? null : patch.discordChannel.trim() }),
-      ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels])] } }),
+      ...(patch.discordProactive === undefined ? {} : { discordProactive: patch.discordProactive }),
+      ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels.filter((channel) => channel !== 'discord')])] } }),
       ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))

@@ -5,9 +5,17 @@
  *
  * Contract (checked by test/channel-contract.ts for every adapter):
  * 1. inbound(event) yields a Wake-up whose sender names the channel and whose route lets the
- *    reply come back to the same place;
- * 2. deliver(output) is called for every enabled Channel when the Robot replies or notifies,
- *    and for the origin Channel when the reply answers a message from it;
+ *    reply come back to the same place (and to the message that asked, when the channel has one);
+ * 2. deliver(output) is called only for the Channels recipientsOf names. The rule is one question,
+ *    "who asked for this?":
+ *    - a reply goes back where the question came from: the final reply of a Turn that a Channel
+ *      woke goes to that Channel; a Turn woken by a Member in the app answers in the app only;
+ *    - only the final reply of a Turn leaves the app; interim replies stay in the Conversation;
+ *    - what nobody asked for (the final reply of a Routine, a Robot message, a takeover, the
+ *      platform) and notifications other than "finished" go to the Channels that opted in to
+ *      hear the Robot unasked (Discord: its own channel, when the owner allows it);
+ *    - a "finished" notification only repeats the reply, so such Channels never get it;
+ *    - the Channels in the Robot's list (the app, test doubles) hear everything;
  * 3. delivery is idempotent per output id, so a retried Turn does not post twice.
  */
 import type { NotificationKind, Sender } from '@mr-robot/protocol'
@@ -16,6 +24,8 @@ import type { NotificationKind, Sender } from '@mr-robot/protocol'
 export interface ReplyRoute {
   readonly channel: string
   readonly address: string
+  /** The message that asked, when the Channel can quote it (a Discord reply). */
+  readonly messageId?: string
 }
 
 export interface InboundEvent {
@@ -35,8 +45,30 @@ export interface InboundWakeup {
 }
 
 export type ChannelOutput =
-  | { readonly kind: 'reply'; readonly id: string; readonly robotId: string; readonly robotName: string; readonly text: string; readonly route: ReplyRoute | null }
-  | { readonly kind: 'notification'; readonly id: string; readonly robotId: string; readonly robotName: string; readonly notification: NotificationKind; readonly text: string; readonly memberIds: readonly string[] }
+  | {
+      readonly kind: 'reply'
+      readonly id: string
+      readonly robotId: string
+      readonly robotName: string
+      readonly text: string
+      /** Where the question came from; null when it came from the app, or from nobody. */
+      readonly route: ReplyRoute | null
+      /** The last reply of its Turn. */
+      readonly final: boolean
+      /** Nobody asked for this Turn on any Channel: a Routine, a Robot message, a takeover, the platform. */
+      readonly unprompted: boolean
+    }
+  | {
+      readonly kind: 'notification'
+      readonly id: string
+      readonly robotId: string
+      readonly robotName: string
+      readonly notification: NotificationKind
+      readonly text: string
+      readonly memberIds: readonly string[]
+      /** The notification only repeats a Turn's reply. */
+      readonly replyCopy: boolean
+    }
 
 export interface ChannelAdapter {
   readonly id: string
@@ -50,10 +82,18 @@ export function channelSender(event: InboundEvent): Sender {
   return { kind: 'channel', channel: event.channel, from: event.from }
 }
 
-/** Which adapters receive an output: enabled ones, plus the origin of a reply. */
-export function recipientsOf(output: ChannelOutput, enabled: readonly string[]): string[] {
+/**
+ * Which adapters receive an output (the functional core of the contract above).
+ * `enabled` hear everything; `unprompted` opted in to hear only what nobody asked for.
+ */
+export function recipientsOf(output: ChannelOutput, enabled: readonly string[], unprompted: readonly string[] = []): string[] {
   const ids = new Set(enabled)
-  if (output.kind === 'reply' && output.route !== null) ids.add(output.route.channel)
+  if (output.kind === 'reply') {
+    if (output.final && output.route !== null) ids.add(output.route.channel)
+    else if (output.final && output.unprompted) for (const id of unprompted) ids.add(id)
+  } else if (!output.replyCopy) {
+    for (const id of unprompted) ids.add(id)
+  }
   return [...ids]
 }
 
@@ -63,9 +103,10 @@ export async function fanOut(
   enabled: readonly string[],
   adapters: ReadonlyMap<string, ChannelAdapter>,
   delivered: { has(key: string): boolean; add(key: string): void },
+  unprompted: readonly string[] = [],
 ): Promise<string[]> {
   const sent: string[] = []
-  for (const id of recipientsOf(output, enabled)) {
+  for (const id of recipientsOf(output, enabled, unprompted)) {
     const adapter = adapters.get(id)
     const key = `${id}:${output.id}`
     if (adapter === undefined || delivered.has(key)) continue

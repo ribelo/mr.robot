@@ -30,8 +30,8 @@ export function describeChannelContract(name: string, make: () => ChannelAdapter
       const adapters = new Map([[adapter.id, adapter]])
       const delivered = new Set<string>()
       const before = sent()
-      const reply: ChannelOutput = { kind: 'reply', id: 'out-1', robotId: 'r', robotName: 'R', text: 'done', route: null }
-      const notification: ChannelOutput = { kind: 'notification', id: 'out-2', robotId: 'r', robotName: 'R', notification: 'finished', text: 'done', memberIds: ['m-1'] }
+      const reply: ChannelOutput = { kind: 'reply', id: 'out-1', robotId: 'r', robotName: 'R', text: 'done', route: null, final: true, unprompted: false }
+      const notification: ChannelOutput = { kind: 'notification', id: 'out-2', robotId: 'r', robotName: 'R', notification: 'finished', text: 'done', memberIds: ['m-1'], replyCopy: false }
       expect(await fanOut(reply, [adapter.id], adapters, delivered)).toEqual([adapter.id])
       await fanOut(reply, [adapter.id], adapters, delivered)
       await fanOut(notification, [adapter.id], adapters, delivered)
@@ -39,11 +39,12 @@ export function describeChannelContract(name: string, make: () => ChannelAdapter
       expect(delivered.size).toBe(2)
     })
 
-    it('gets a reply that answers its own message even when not enabled, and nothing else', async () => {
+    it('gets the final reply that answers its own message even when not enabled, and nothing else', async () => {
       const adapter = make()
-      const reply: ChannelOutput = { kind: 'reply', id: 'out-3', robotId: 'r', robotName: 'R', text: 'answer', route: { channel: adapter.id, address: 'thread-7' } }
+      const reply: ChannelOutput = { kind: 'reply', id: 'out-3', robotId: 'r', robotName: 'R', text: 'answer', route: { channel: adapter.id, address: 'thread-7' }, final: true, unprompted: false }
       expect(recipientsOf(reply, [])).toEqual([adapter.id])
-      const notification: ChannelOutput = { kind: 'notification', id: 'out-4', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [] }
+      expect(recipientsOf({ ...reply, final: false }, [])).toEqual([])
+      const notification: ChannelOutput = { kind: 'notification', id: 'out-4', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [], replyCopy: false }
       expect(recipientsOf(notification, [])).toEqual([])
     })
   })

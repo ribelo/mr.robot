@@ -43,10 +43,10 @@ export class DiscordAtHome {
   }
 
   /** Post text with the Home's bot (the Channel side). */
-  async post(memberId: string, channelId: string, text: string): Promise<boolean> {
+  async post(memberId: string, channelId: string, text: string, replyTo?: string): Promise<boolean> {
     const bot = await this.bot(memberId)
     if (bot === null) return false
-    const outcome = await Effect.runPromise(Effect.result(discordPostMessage(this.fetch, bot.token, channelId, text)))
+    const outcome = await Effect.runPromise(Effect.result(discordPostMessage(this.fetch, bot.token, channelId, text, replyTo)))
     if (outcome._tag === 'Failure') {
       console.warn('discord post failed', outcome.failure._tag, outcome.failure.message)
       return false

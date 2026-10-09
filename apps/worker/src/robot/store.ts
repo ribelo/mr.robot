@@ -39,6 +39,8 @@ export interface RobotConfig {
   readonly browserBackend?: BrowserBackend | null
   /** The Discord channel this Robot talks in (cn-y1ac); absent or null: none. */
   readonly discordChannel?: string | null
+  /** Also send the Robot's unasked messages to its Discord channel (cn-y1ac); absent: yes. */
+  readonly discordProactive?: boolean
   readonly compactionInstruction: string
   readonly notifications: NotificationSettings
   readonly spendLimitUsd: number | null

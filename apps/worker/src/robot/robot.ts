@@ -60,7 +60,7 @@ import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
-import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent } from '../channels/channel.ts'
+import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
 import { PwaChannel } from '../channels/pwa.ts'
 import { DiscordChannel } from '../channels/discord.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
@@ -478,20 +478,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const last = replies.at(-1)
     if (last === undefined || last.kind !== 'reply') return
     const watcher = wakeup.sender.kind === 'member' ? wakeup.sender.memberId : undefined
-    await this.notifyMembers('finished', last.text, (memberId) => memberId === watcher && this.ctx.getWebSockets(memberId).length > 0)
+    await this.notifyMembers('finished', last.text, (memberId) => memberId === watcher && this.ctx.getWebSockets(memberId).length > 0, true)
   }
 
   /**
    * Push to the Robot's notified Members through the Member DOs (quiet hours live there).
+   * `replyCopy` marks a notification that only repeats the Turn's reply: Discord never gets it.
    * @returns how many Members were notified; 0 when notifications are off (robot-r2uz).
    */
-  async notifyMembers(kind: NotificationKind, body: string, skip: (memberId: string) => boolean = () => false): Promise<number> {
+  async notifyMembers(kind: NotificationKind, body: string, skip: (memberId: string) => boolean = () => false, replyCopy = false): Promise<number> {
     const config = this.store.requireConfig()
     if (!config.notifications.enabled) return 0
     const members = (config.notifications.members.length === 0 ? [config.ownerId] : config.notifications.members).filter((member) => !skip(member))
     await this.sendToChannels({
       kind: 'notification', id: `n-${crypto.randomUUID()}`, robotId: config.id, robotName: config.identity.name,
-      notification: kind, text: body, memberIds: members,
+      notification: kind, text: body, memberIds: members, replyCopy,
     })
     return members.length
   }
@@ -502,14 +503,29 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected channels(): Map<string, ChannelAdapter> {
     const pwa = new PwaChannel({ notify: (memberId, event) => this.env.MEMBER.getByName(memberId).notify(event) })
     const channels = new Map<string, ChannelAdapter>([[pwa.id, pwa]])
-    // A Robot with a Discord channel talks there too (cn-65gg): its replies and notifications go out.
+    // Discord is a second door into the Conversation (cn-65gg). Having a channel of its own is not required:
+    // a direct message to the bot reaches the Robot and the answer goes back to that DM.
     const config = this.store.config()
-    const channelId = config?.discordChannel ?? null
-    if (config !== undefined && channelId !== null && channelId !== '' && config.notifications.channels.includes('discord')) {
-      const discord = new DiscordChannel(config.ownerId, channelId, { post: (memberId, channel, text) => this.home().discordPost(memberId, channel, text) })
+    if (config !== undefined) {
+      const channelId = config.discordChannel ?? ''
+      const discord = new DiscordChannel(config.ownerId, channelId === '' ? null : channelId, { post: (memberId, channel, text, replyTo) => this.home().discordPost(memberId, channel, text, replyTo) })
       channels.set(discord.id, discord)
     }
     return channels
+  }
+
+  /**
+   * Who hears everything (the Channels of the Robot's list), and who hears only what nobody asked for:
+   * Discord, when the Robot has a channel of its own and its owner allows it. The old 'discord' entry
+   * in the list does nothing: Discord is on by having a channel.
+   */
+  private audience(): { readonly enabled: string[]; readonly unprompted: string[] } {
+    const config = this.store.requireConfig()
+    const hasChannel = (config.discordChannel ?? '') !== ''
+    return {
+      enabled: config.notifications.channels.filter((channel) => channel !== 'discord'),
+      unprompted: hasChannel && config.discordProactive !== false ? ['discord'] : [],
+    }
   }
 
   /** Output leaves through every enabled Channel; a failing Channel never fails the Turn. */
@@ -520,7 +536,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       add: (key: string) => this.store.set(`delivered:${key}`, true),
     }
     try {
-      return await fanOut(output, config.notifications.channels, this.channels(), delivered)
+      const { enabled, unprompted } = this.audience()
+      return await fanOut(output, enabled, this.channels(), delivered, unprompted)
     } catch (error) {
       console.warn('channel delivery failed', error)
       return []
@@ -531,7 +548,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async channelEvent(event: InboundEvent): Promise<{ accepted: boolean }> {
     const adapter = this.channels().get(event.channel)
     if (adapter === undefined) throw new Error(`no Channel ${event.channel}`)
-    if (!this.store.requireConfig().notifications.channels.includes(event.channel)) return { accepted: false }
+    // Discord messages arrive only for Robots the Home routes them to (their channel, or Mr. Robot for a DM).
+    if (event.channel !== 'discord' && !this.store.requireConfig().notifications.channels.includes(event.channel)) return { accepted: false }
     const wakeup = adapter.inbound(event)
     if (this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
     this.store.set(`inbound:${wakeup.dedupeKey}`, true)
@@ -539,13 +557,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { accepted: true }
   }
 
-  /** Replies of a Turn go back out: to the Channel the message came from, and to every enabled one. */
+  /** Replies of a Turn go back out as recipientsOf decides: to where the question came from, or unasked to the opted-in Channels. */
   private async deliverReplies(wakeup: Wakeup, startSeq: number): Promise<void> {
     const config = this.store.requireConfig()
-    const route = (wakeup.payload['route'] as { channel: string; address: string } | undefined) ?? null
-    for (const item of (await this.conversation()).items) {
-      if (item.seq < startSeq || item.kind !== 'reply') continue
-      await this.sendToChannels({ kind: 'reply', id: item.id, robotId: config.id, robotName: config.identity.name, text: this.mask(item.text), route })
+    const route = (wakeup.payload['route'] as ReplyRoute | undefined) ?? null
+    const unprompted = wakeup.kind !== 'member' && wakeup.kind !== 'channel'
+    const replies = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
+    for (const item of replies) {
+      if (item.kind !== 'reply') continue
+      await this.sendToChannels({ kind: 'reply', id: item.id, robotId: config.id, robotName: config.identity.name, text: this.mask(item.text), route, final: item === replies.at(-1), unprompted })
     }
   }
 

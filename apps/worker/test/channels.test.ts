@@ -1,6 +1,7 @@
 import { reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, RobotPanel } from '@mr-robot/protocol'
+import { recipientsOf } from '../src/channels/channel.ts'
 import { PwaChannel } from '../src/channels/pwa.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { describeChannelContract } from './channel-contract.ts'
@@ -12,6 +13,33 @@ describeChannelContract('PWA', () => new PwaChannel({ notify: async (memberId, e
 describeChannelContract('fake chat', () => new FakeChannel(), () => fakeOutbox.length)
 
 const ANNA = 'anna@example.com'
+
+describe('Who receives an output (recipientsOf)', () => {
+  const reply = { kind: 'reply', id: 'r1', robotId: 'r', robotName: 'R', text: 'x', route: null, final: true, unprompted: false } as const
+  const note = { kind: 'notification', id: 'n1', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [], replyCopy: false } as const
+  const discord = { channel: 'discord', address: 'C-1', messageId: 'M-1' }
+
+  it('sends a reply back to where the question came from, final replies only', () => {
+    expect(recipientsOf({ ...reply, route: discord }, ['pwa'], ['discord'])).toEqual(['pwa', 'discord'])
+    expect(recipientsOf({ ...reply, route: discord, final: false }, ['pwa'], ['discord'])).toEqual(['pwa'])
+  })
+
+  it('keeps an answer to the app in the app', () => {
+    expect(recipientsOf(reply, ['pwa'], ['discord'])).toEqual(['pwa'])
+  })
+
+  it('sends the final reply of an unprompted Turn to the opted-in Channels only', () => {
+    expect(recipientsOf({ ...reply, unprompted: true }, ['pwa'], ['discord'])).toEqual(['pwa', 'discord'])
+    expect(recipientsOf({ ...reply, unprompted: true, final: false }, ['pwa'], ['discord'])).toEqual(['pwa'])
+    expect(recipientsOf({ ...reply, unprompted: true }, ['pwa'], [])).toEqual(['pwa'])
+  })
+
+  it('sends notifications to the opted-in Channels, except a copy of the reply', () => {
+    expect(recipientsOf(note, ['pwa'], ['discord'])).toEqual(['pwa', 'discord'])
+    expect(recipientsOf({ ...note, notification: 'finished', replyCopy: true }, ['pwa'], ['discord'])).toEqual(['pwa'])
+    expect(recipientsOf({ ...note, notification: 'finished' }, ['pwa'], ['discord'])).toEqual(['pwa', 'discord'])
+  })
+})
 
 describe('Channels on a Robot', () => {
   beforeEach(async () => {

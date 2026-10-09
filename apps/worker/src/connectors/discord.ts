@@ -6,6 +6,7 @@
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import { ConnectorRefused, request, type ConnectorFailure, type ConnectorHost, type ConnectorToolSpec, type ConnectionUse } from './connector.ts'
+import { discordMessages } from './discord-text.ts'
 import { connectorTools, type ConnectorPlugin, type VerifiedConnection } from './connector.ts'
 
 const API = 'https://discord.com/api/v10'
@@ -43,11 +44,21 @@ export function discordCall<S extends Schema.Top>(host: ConnectorHost, use: Conn
 
 const Posted = Schema.Struct({ id: Schema.String, channel_id: Schema.String, content: Schema.optional(Schema.String) })
 
-/** Post a message with a bot token (the Channel side); true when Discord accepted it. */
-export function discordPostMessage(fetch: typeof globalThis.fetch, token: string, channelId: string, text: string): Effect.Effect<boolean, ConnectorFailure> {
-  return Effect.map(
-    request(fetch, { method: 'POST', url: API + '/channels/' + encodeURIComponent(channelId) + '/messages', headers: { authorization: 'Bot ' + token }, json: { content: text.slice(0, 1900) } }, Posted, refused),
-    () => true,
+/**
+ * Post text with a bot token (the Channel side). Tables are fenced and long text goes out as several
+ * messages; only the first one quotes `replyTo` (a Discord reply, kept even if that message is gone).
+ * True when Discord accepted every part.
+ */
+export function discordPostMessage(fetch: typeof globalThis.fetch, token: string, channelId: string, text: string, replyTo?: string): Effect.Effect<boolean, ConnectorFailure> {
+  const url = API + '/channels/' + encodeURIComponent(channelId) + '/messages'
+  return Effect.as(
+    Effect.forEach(discordMessages(text), (content, index) => request(fetch, {
+      method: 'POST',
+      url,
+      headers: { authorization: 'Bot ' + token },
+      json: { content, ...(index === 0 && replyTo !== undefined ? { message_reference: { message_id: replyTo, channel_id: channelId, fail_if_not_exists: false } } : {}) },
+    }, Posted, refused)),
+    true,
   )
 }
 
@@ -228,6 +239,6 @@ export const DiscordPlugin: ConnectorPlugin = {
   tools: (host: ConnectorHost) => connectorTools(host, discordTools(host) as never),
   prompt: () => [
     '- Discord: the bot is in the servers its owner invited it to. Read tools need no extra grant; sending, replying, reacting and DMs need the write grant.',
-    '- A robot has its own channel when its settings name one: messages there and direct messages to the bot wake it, and its replies go back to that channel.',
+    '- A robot has its own channel when its settings name one: messages there and direct messages to the bot wake it, and the answer goes back to where it was asked.',
   ].join('\n'),
 }

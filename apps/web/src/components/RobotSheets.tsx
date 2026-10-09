@@ -24,17 +24,19 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
   const [identity, setIdentity] = useState<Identity>(panel.settings.identity)
   const [notify, setNotify] = useState(panel.settings.notifications.enabled)
   const [watch, setWatch] = useState(panel.settings.wakeOnScreenNotifications)
-  const [discord, setDiscord] = useState(panel.settings.notifications.channels.includes('discord'))
+  const [discord, setDiscord] = useState((panel.settings.discordChannel ?? '') !== '')
   const [discordChannel, setDiscordChannel] = useState(panel.settings.discordChannel ?? '')
+  const [discordProactive, setDiscordProactive] = useState(panel.settings.discordProactive)
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
   const save = async () => {
     setSaving(true)
     const failure = exitFailure(await command((api) => api.updateSettings(robotId, {
       identity,
-      notifications: { ...panel.settings.notifications, enabled: notify, channels: [...panel.settings.notifications.channels.filter((channel) => channel !== 'discord'), ...(discord ? ['discord'] : [])] },
+      notifications: { ...panel.settings.notifications, enabled: notify },
       wakeOnScreenNotifications: watch,
       discordChannel: discord && discordChannel.trim() !== '' ? discordChannel.trim() : null,
+      discordProactive,
     }), [keys.robot(robotId), keys.robots]))
     if (failure === undefined) onClose()
     else {
@@ -73,11 +75,20 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
       <div className="toggle-card">
         <div>
           <div>Talk to this Robot on Discord</div>
-          <div className="muted">Messages in its channel wake it, and its replies and notifications go there. Direct messages to the bot reach Mr. Robot. Needs the Discord bot (your name → Connections).</div>
+          <div className="muted">Messages in its channel wake it, and its answer goes back to Discord as a reply to your message. Questions asked in the app are answered in the app. Direct messages to the bot reach Mr. Robot. Needs the Discord bot (your name → Connections).</div>
         </div>
         <button type="button" role="switch" aria-checked={discord} aria-label="Talk on Discord" disabled={!editable} className={discord ? 'switch on' : 'switch'} onClick={() => setDiscord(!discord)}><span /></button>
       </div>
       {discord ? <label>Discord channel ID<input value={discordChannel} disabled={!editable} placeholder="Right-click the channel → Copy Channel ID" onChange={(event) => setDiscordChannel(event.target.value)} /></label> : null}
+      {discord ? (
+        <div className="toggle-card">
+          <div>
+            <div>Also send its own messages here</div>
+            <div className="muted">Routine results and notifications go to this channel too. Replies to Discord messages always go back to Discord.</div>
+          </div>
+          <button type="button" role="switch" aria-checked={discordProactive} aria-label="Also send its own messages to Discord" disabled={!editable} className={discordProactive ? 'switch on' : 'switch'} onClick={() => setDiscordProactive(!discordProactive)}><span /></button>
+        </div>
+      ) : null}
       <h3 className="panel-section">Routines</h3>
       <RoutineList routines={panel.routines} onOpen={onOpenRoutine} />
       {error === undefined ? null : <div className="muted">{error}</div>}
