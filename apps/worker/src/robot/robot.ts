@@ -1980,9 +1980,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  protected routineViews(): Promise<RoutineView[]> {
-    return this.program(Views.routineViews)
-  }
 
   /** The Routines with their last runs, as the panel shows them. */
   routineList(): Promise<RoutineView[]> {
@@ -2013,6 +2010,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   openProposals(): ProposalView[] {
     return this.store.proposals('open').map(proposalView)
+  }
+
+  /**
+   * Mr. Robot, as his owner's deputy, calls one of this Robot's owner-side methods (cd-*). Reach and
+   * ownership were checked by the caller; an expected failure comes back as a value, not as an RPC exception.
+   */
+  forDeputy(method: DeputyPrograms.DeputyMethod, args: readonly unknown[]): Promise<DeputyPrograms.DeputyOutcome> {
+    return DeputyPrograms.answer(method, () => (this[method] as (...given: unknown[]) => unknown).apply(this, [...args]))
   }
 
   status(): Promise<{ status: RobotConfig['status']; fleetState: FleetState }> {

@@ -32,7 +32,8 @@ export class ConversationIndex {
   /** How this runtime searches: FTS5, or LIKE over the same columns. */
   readonly mode: 'fts5' | 'like'
 
-  constructor(private readonly sql: SqlStorage) {
+  /** fullText false builds a new index for LIKE even where FTS5 exists (the fallback, tested in workerd). */
+  constructor(private readonly sql: SqlStorage, fullText = true) {
     this.sql.exec('CREATE TABLE IF NOT EXISTS chat_search_state (session_id TEXT PRIMARY KEY, next_seq INTEGER NOT NULL) WITHOUT ROWID')
     const existing = this.sql.exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE name = 'chat_search'").toArray()[0]
     if (existing !== undefined) {
@@ -40,6 +41,7 @@ export class ConversationIndex {
       return
     }
     try {
+      if (!fullText) throw new Error('LIKE asked for')
       this.sql.exec('CREATE VIRTUAL TABLE chat_search USING fts5(text, id UNINDEXED, session_id UNINDEXED, seq UNINDEXED, kind UNINDEXED, sender UNINDEXED, at UNINDEXED)')
       this.mode = 'fts5'
     } catch {

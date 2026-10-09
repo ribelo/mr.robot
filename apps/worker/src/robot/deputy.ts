@@ -2,21 +2,67 @@
  * Mr. Robot as his owner's deputy (v1.6 cd-*): reads and non-dangerous writes on the Robots the owner
  * reaches, as Effect programs over the Robot Durable Object they run in. Every read and write goes
  * through the target Robot's own methods, the ones the PWA's edge API calls; there is no second path.
+ * The target answers through Robot.forDeputy, which returns an expected failure as a value: a refusal
+ * never crosses Workers RPC as an exception (workerd reports every rejected RPC call as uncaught).
  */
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
-import { DeputySettingsPatch, type ConversationPage, type RobotSettings, type SettingsPatch } from '@mr-robot/protocol'
+import { DeputySettingsPatch, type RobotSettings, type SettingsPatch } from '@mr-robot/protocol'
 import type { DeputyHost, RobotListing, RoutineChange } from '../agent/tools/deputy.ts'
 import { HOME_ID } from '../env.ts'
-import { invalid } from '../platform/durable.ts'
+import { conflict, invalid, notFound, type DurableError } from '../platform/durable.ts'
 import { normalizePath } from '../workspace/workspace.ts'
 import { modelRefusal } from './model-choice.ts'
 import { RobotPlatform, RobotState } from './programs.ts'
+import type { Robot } from './robot.ts'
 
 /** Files a deputy writes stay within what the owner can edit in the app. */
 const MAX_FILE_BYTES = 256 * 1024
 
 const promise = <A>(run: () => Promise<A>) => Effect.promise(run)
+
+/** The target Robot's methods a deputy call reaches: the ones the PWA's edge API calls, nothing else. */
+export const DEPUTY_METHODS = [
+  'conversationPage', 'searchConversation', 'trajectoryAround', 'files', 'fileContent', 'settings', 'openProposals', 'routineList',
+  'saveFile', 'deleteFile', 'updateSettings', 'setRoutine', 'pauseRoutine', 'removeRoutine',
+] as const
+export type DeputyMethod = (typeof DEPUTY_METHODS)[number]
+
+type Signature<M extends DeputyMethod> = Robot[M] extends (...args: infer P) => infer R ? { readonly args: P; readonly result: Awaited<R> } : never
+
+/** What the target Robot answers a deputy call with: the value, or the expected failure as a value. */
+export type DeputyOutcome =
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly failure: { readonly tag: DurableError['_tag']; readonly message: string } }
+
+const EXPECTED: Record<string, DurableError['_tag']> = { NotFound: 'NotFound', Invalid: 'Invalid', Conflict: 'Conflict', WorkspaceError: 'Invalid', RobotNotFound: 'NotFound' }
+
+/**
+ * The target side of a deputy call (Robot.forDeputy): run one of DEPUTY_METHODS and return its result,
+ * or its expected failure (NotFound, Invalid, Conflict, a Workspace error) as a value. Anything else is a
+ * defect and still throws.
+ */
+export async function answer(method: string, call: () => unknown): Promise<DeputyOutcome> {
+  if (!(DEPUTY_METHODS as readonly string[]).includes(method)) return { ok: false, failure: { tag: 'Invalid', message: `${method} is not open to a deputy` } }
+  try {
+    return { ok: true, value: await call() }
+  } catch (error) {
+    const named = error as { _tag?: unknown; name?: unknown; message?: unknown } | null
+    const tag = EXPECTED[String(named?._tag ?? named?.name ?? '')]
+    if (tag === undefined) throw error
+    return { ok: false, failure: { tag, message: typeof named?.message === 'string' ? named.message : String(error) } }
+  }
+}
+
+const failure = (failed: { readonly tag: DurableError['_tag']; readonly message: string }): DurableError =>
+  failed.tag === 'NotFound' ? notFound(failed.message) : failed.tag === 'Conflict' ? conflict(failed.message) : invalid(failed.message)
+
+/** The caller side: one of the target Robot's methods, its expected failures typed in the error channel. */
+const ask = <M extends DeputyMethod>(robot: DurableObjectStub<Robot>, method: M, ...args: Signature<M>['args']): Effect.Effect<Signature<M>['result'], DurableError> =>
+  Effect.flatMap(
+    promise(() => (robot.forDeputy as (method: DeputyMethod, args: readonly unknown[]) => Promise<DeputyOutcome>)(method, args)),
+    (outcome) => (outcome.ok ? Effect.succeed(outcome.value as Signature<M>['result']) : Effect.fail(failure(outcome.failure))),
+  )
 
 const config = Effect.gen(function* () {
   const value = (yield* RobotState).config()
@@ -48,7 +94,7 @@ export const list = Effect.gen(function* () {
   if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot is a deputy')
   const reachable = (yield* promise(() => platform.env.HOME.getByName(HOME_ID).reachable(current.ownerId))).filter((robot) => robot.kind === 'robot')
   return yield* Effect.forEach(reachable, (robot) => Effect.map(
-    promise(() => platform.env.ROBOT.getByName(robot.id).settings().then((settings) => settings.model, () => null)),
+    ask(platform.env.ROBOT.getByName(robot.id), 'settings').pipe(Effect.map((settings) => settings.model), Effect.catch(() => Effect.succeed(null))),
     (model): RobotListing => ({
       id: robot.id, name: robot.identity.name, title: robot.identity.title, description: robot.identity.description, kind: robot.kind,
       status: robot.status, fleetState: robot.fleetState, model, lastActiveAt: robot.lastAt, lastLine: robot.lastLine,
@@ -59,19 +105,19 @@ export const list = Effect.gen(function* () {
 
 export const conversation = (robotId: string, page: number) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
-  return yield* promise((): Promise<ConversationPage> => robot.conversationPage(page))
+  return yield* ask(robot, 'conversationPage', page)
 })
 export const searchConversation = (robotId: string, query: string, page: number) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
-  return yield* promise(() => robot.searchConversation(query, page))
+  return yield* ask(robot, 'searchConversation', query, page)
 })
 export const trajectory = (robotId: string, itemId: string, before: number, after: number) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
-  return yield* promise(() => robot.trajectoryAround(itemId, before, after))
+  return yield* ask(robot, 'trajectoryAround', itemId, before, after)
 })
 export const files = (robotId: string) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
-  return yield* promise(() => robot.files())
+  return yield* ask(robot, 'files')
 })
 
 const workspacePath = (path: string) => {
@@ -82,21 +128,21 @@ const workspacePath = (path: string) => {
 export const fileRead = (robotId: string, path: string) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
   const normalized = yield* workspacePath(path)
-  return yield* promise(() => robot.fileContent(normalized))
+  return yield* ask(robot, 'fileContent', normalized)
 })
 export const grants = (robotId: string) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
-  const [settings, openProposals] = yield* promise(() => Promise.all([robot.settings(), robot.openProposals()]))
+  const [settings, openProposals] = yield* Effect.all([ask(robot, 'settings'), ask(robot, 'openProposals')])
   return { grants: settings.grants, openProposals }
 })
 export const routines = (robotId: string) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
-  return yield* promise(() => robot.routineList())
+  return yield* ask(robot, 'routineList')
 })
 export const settings = (robotId: string) => Effect.gen(function* () {
   const { current, robot } = yield* target(robotId, false)
   const platform = yield* RobotPlatform
-  const [shown, models] = yield* promise(() => Promise.all([robot.settings(), platform.env.HOME.getByName(HOME_ID).models(current.ownerId)]))
+  const [shown, models] = yield* Effect.all([ask(robot, 'settings'), promise(() => platform.env.HOME.getByName(HOME_ID).models(current.ownerId))])
   return { settings: shown, models: models.map((option) => ({ provider: option.provider, model: option.model, label: option.label })) }
 })
 
@@ -106,13 +152,15 @@ export const fileWrite = (robotId: string, path: string, content: string) => Eff
   const { robot, by } = yield* target(robotId, true)
   const normalized = yield* workspacePath(path)
   if (new TextEncoder().encode(content).length > MAX_FILE_BYTES) return yield* invalid('files up to 256 KB can be written this way')
-  const saved = yield* promise(() => robot.saveFile(normalized, content, by))
+  const saved = yield* ask(robot, 'saveFile', normalized, content, by)
   return { path: normalized, size: saved.size }
 })
 export const fileDelete = (robotId: string, path: string) => Effect.gen(function* () {
   const { robot, by } = yield* target(robotId, true)
   const normalized = yield* workspacePath(path)
-  yield* promise(() => robot.deleteFile(normalized, by))
+  // A file that is not there is not reported to the Robot as deleted.
+  yield* ask(robot, 'fileContent', normalized)
+  yield* ask(robot, 'deleteFile', normalized, by)
   return { deleted: normalized }
 })
 
@@ -133,7 +181,7 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
   const patch = yield* Schema.decodeUnknownEffect(DeputySettingsPatch)(input, { onExcessProperty: 'error' }).pipe(
     Effect.mapError((error) => invalid(`these settings cannot be changed this way: ${String(error)}`)),
   )
-  const shown: RobotSettings = yield* promise(() => robot.settings())
+  const shown: RobotSettings = yield* ask(robot, 'settings')
   const model = patch.model === undefined && patch.thinking === undefined ? undefined : {
     provider: patch.model?.provider ?? shown.model.provider, model: patch.model?.model ?? shown.model.model, effort: patch.thinking ?? shown.model.effort,
   }
@@ -156,7 +204,7 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
       channels: patch.notifications.channels ?? shown.notifications.channels,
     } }),
   }
-  return yield* promise(() => robot.updateSettings(change, by))
+  return yield* ask(robot, 'updateSettings', change, by)
 })
 
 /** robot_configure: the whole identity (cd-28og). */
@@ -164,30 +212,30 @@ export const configure = (robotId: string, change: { name?: string; title?: stri
   const { entry, robot, by } = yield* target(robotId, true)
   const given = Object.fromEntries(Object.entries(change).filter(([, value]) => typeof value === 'string' && value.trim() !== ''))
   if (typeof given['avatarColor'] === 'string' && !/^#[0-9a-fA-F]{6}$/.test(given['avatarColor'])) return yield* invalid('avatarColor is #rrggbb')
-  const settings = yield* promise(() => robot.updateSettings({ identity: { ...entry.identity, ...given } }, by))
+  const settings = yield* ask(robot, 'updateSettings', { identity: { ...entry.identity, ...given } }, by)
   return { id: robotId, identity: settings.identity as unknown }
 })
 
 export const routineSet = (robotId: string, change: RoutineChange) => Effect.gen(function* () {
   const { robot, by } = yield* target(robotId, true)
-  return yield* promise(() => robot.setRoutine(change, by))
+  return yield* ask(robot, 'setRoutine', change, by)
 })
 export const routinePause = (robotId: string, id: string, paused: boolean) => Effect.gen(function* () {
   const { robot, by } = yield* target(robotId, true)
-  return yield* promise(() => robot.pauseRoutine(id, paused, by))
+  return yield* ask(robot, 'pauseRoutine', id, paused, by)
 })
 export const routineDelete = (robotId: string, id: string) => Effect.gen(function* () {
   const { robot, by } = yield* target(robotId, true)
-  yield* promise(() => robot.removeRoutine(id, by))
+  yield* ask(robot, 'removeRoutine', id, by)
   return { deleted: id }
 })
 
 type Run = <A>(program: Effect.Effect<A, { readonly _tag: string; readonly message: string }, RobotState | RobotPlatform>) => Promise<A>
 
-/** The host the deputy tools call, each method one of the programs above run in the Robot Durable Object. */
 /** Results that crossed Workers RPC carry stubs' bookkeeping; the model's tools get plain JSON. */
 const plain = async <A>(result: Promise<A>): Promise<A> => JSON.parse(JSON.stringify(await result)) as A
 
+/** The host the deputy tools call, each method one of the programs above run in the Robot Durable Object. */
 export function deputyHost(run: Run): DeputyHost {
   return {
     list: () => plain(run(list)),

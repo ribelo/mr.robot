@@ -26,13 +26,8 @@ const TOO_FREQUENT = `A Routine must wait at least 5 minutes (${MIN_ROUTINE_INTE
 /** The refusal for a record that would run more often than every 5 minutes, or undefined. */
 function tooFrequent(record: ScheduleRecord): string | undefined {
   if (record.kind === 'every') return record.everySeconds < MIN_ROUTINE_INTERVAL_SECONDS ? TOO_FREQUENT : undefined
-  if (record.kind === 'cron') {
-    try {
-      return cronMinGapMinutes(record.expression) < MIN_ROUTINE_INTERVAL_SECONDS / 60 ? `${TOO_FREQUENT} This cron expression runs more often.` : undefined
-    } catch {
-      return undefined
-    }
-  }
+  // DSH stored the expression in its canonical numeric form, which parseCron reads; a parse error refuses the Routine.
+  if (record.kind === 'cron') return cronMinGapMinutes(record.expression) < MIN_ROUTINE_INTERVAL_SECONDS / 60 ? `${TOO_FREQUENT} This cron expression runs more often.` : undefined
   return undefined
 }
 

@@ -14,12 +14,17 @@ beforeEach(async () => {
   await api(ANNA, '/api/me')
 })
 
-async function activeRobot(): Promise<string> {
+/** FTS5, which workerd offers, and the LIKE fallback behind the same interface: the same searches give the same pages. */
+const MODES = [['FTS5', 'fts5'], ['the LIKE fallback', 'like']] as const
+
+async function activeRobot(mode: 'fts5' | 'like'): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
   await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   await testRobot(body.id).activateForTest()
+  if (mode === 'like') expect(await testRobot(body.id).searchWithoutFullTextForTest()).toBe('like')
+  else expect(await testRobot(body.id).searchModeForTest()).toBe('fts5')
   return body.id
 }
 
@@ -35,9 +40,9 @@ async function longConversation(id: string): Promise<void> {
 
 const lastToolResult = (id: string) => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').at(-1)!.content.map((block) => ('text' in block ? block.text : '')).join('')
 
-describe('searching the own Conversation (cd-ggem)', () => {
+describe.each(MODES)('searching the own Conversation with %s (cd-ggem)', (_, mode) => {
   it('finds an early and a late phrase, newest first, with who said it and a snippet', async () => {
-    const id = await activeRobot()
+    const id = await activeRobot(mode)
     await longConversation(id)
     const robot = env.ROBOT.getByName(id)
 
@@ -53,7 +58,7 @@ describe('searching the own Conversation (cd-ggem)', () => {
   })
 
   it('pages through a word found in most of the Conversation', async () => {
-    const id = await activeRobot()
+    const id = await activeRobot(mode)
     await longConversation(id)
     const robot = env.ROBOT.getByName(id)
 
@@ -74,8 +79,27 @@ describe('searching the own Conversation (cd-ggem)', () => {
     expect(seen.at(-1)!.snippet).toBe('Invoice number 1 needs a check')
   })
 
+  it('follows the live Conversation through a rewind, its undo and a clear', async () => {
+    const id = await activeRobot(mode)
+    await longConversation(id)
+    const robot = env.ROBOT.getByName(id)
+    const point = (await robot.conversationView()).items.find((item) => item.kind === 'reply' && item.text === 'Checked invoice 28.')!
+    const { body: rewound } = await api<{ id: string }>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: point.seq } })
+    expect((await robot.searchConversation('quokka')).items).toEqual([])
+    expect((await robot.searchConversation('zeppelin')).items).toHaveLength(1)
+
+    expect((await api(ANNA, `/api/robots/${id}/rewinds/${rewound.id}/undo`, { body: {} })).status).toBe(200)
+    expect((await robot.searchConversation('quokka')).items).toHaveLength(2)
+
+    expect((await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'New robot' } })).status).toBe(200)
+    expect((await robot.searchConversation('zeppelin')).items).toEqual([])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'The zeppelin is back' } })
+    await settle(id)
+    expect((await robot.searchConversation('zeppelin')).items.map((item) => item.snippet)).toContain('The zeppelin is back')
+  })
+
   it('is a tool every Robot has; a Turn calls it and gets the page', async () => {
-    const id = await activeRobot()
+    const id = await activeRobot(mode)
     await longConversation(id)
     scripts.set(id, [{ calls: [{ name: 'conversation_search', args: { query: 'zeppelin overdue' } }] }, { text: 'Found it.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'what did I say about the zeppelin?' } })
