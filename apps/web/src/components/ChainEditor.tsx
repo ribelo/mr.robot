@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ChainEntry, ModelOption, ProviderView, ThinkingEffort } from '@mr-robot/protocol'
 import { ModelSelect } from './ModelSelect.tsx'
 
-const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max']
+const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /**
  * A Robot's model chain (v1.10, pa-mho0): ordered account + model rows, reordered by dragging. The
@@ -64,8 +64,8 @@ export function ChainEditor({ chain, models, unavailable, accounts, onChange }: 
           </li>
         ))}
       </ol>
-      <button type="button" className="link" onClick={() => { const last = chain.at(-1)!; onChange([...chain, { ...last }]) }}>+ Add a fallback</button>
-      <small className="muted">The Robot runs on the first entry. It moves to the next only when that account hits its limit or stops working, says so in the conversation, and comes back once the account works again.</small>
+      <div><button type="button" className="button" onClick={() => { const last = chain.at(-1)!; onChange([...chain, { ...last }]) }}>+ Add a fallback</button></div>
+      <small className="muted chain-note">The Robot runs on the first entry. It moves to the next only when that account hits its limit or stops working, says so in the conversation, and comes back once the account works again.</small>
     </div>
   )
 }

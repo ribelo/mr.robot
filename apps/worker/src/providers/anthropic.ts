@@ -12,7 +12,23 @@ import { httpFailure, imagesOf, loadImages, replayBlocks, sse, StreamWriter, sys
 
 const URL_ = 'https://api.anthropic.com/v1/messages?beta=true'
 const IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
-const BUDGETS: Record<string, number> = { low: 2_048, medium: 6_000, high: 12_000, max: 24_000 }
+const BUDGETS: Record<string, number> = { low: 2_048, medium: 6_000, high: 12_000, xhigh: 18_000, max: 24_000 }
+
+/**
+ * Claude models that think adaptively with an effort instead of a token budget (Opus 4.6+, Sonnet 4.6+,
+ * every 5.x model). "xhigh" exists natively on Opus 4.7+, Sonnet 5 and the 5.x line; others get "high".
+ */
+export function adaptiveEffort(model: string, effort: string): { adaptive: false } | { adaptive: true; effort: string | null } {
+  const version = /claude-(?:opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d+))?/.exec(model)
+  if (version === null) return { adaptive: false }
+  const major = Number(version[1])
+  const minor = Number(version[2] ?? 0)
+  const adaptive = major >= 5 || (major === 4 && minor >= 6 && !model.includes('haiku'))
+  if (!adaptive) return { adaptive: false }
+  if (effort === 'off') return { adaptive: true, effort: null }
+  const xhigh = major >= 5 || (model.includes('opus') && minor >= 7)
+  return { adaptive: true, effort: effort === 'xhigh' && !xhigh ? 'high' : effort }
+}
 
 /** Prompt-cache lifetime: '1h' (long retention, the default) or '5m' (Anthropic's short default). */
 export type CacheTtl = '1h' | '5m'
@@ -109,14 +125,19 @@ export class AnthropicAdapter extends LlmAdapter {
       context: { contextWindow: this.contextWindow },
       defaultMaxTokens: 32_000,
       ...(this.images === undefined ? {} : { inputModalities: ['text', 'image'] }),
-      reasoning: { efforts: ['off', 'low', 'medium', 'high', 'max'].map((id) => ({ id, name: id })) },
+      reasoning: { efforts: ['off', 'low', 'medium', 'high', 'xhigh', 'max'].map((id) => ({ id, name: id })) },
     } as never)
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const effort = options.reasoningEffort === undefined ? 'off' : String(options.reasoningEffort)
-    const budget = BUDGETS[effort]
-    const maxTokens = Math.max(options.maxTokens ?? 16_000, (budget ?? 0) + 4_000)
+    const adaptive = adaptiveEffort(options.model, effort)
+    const budget = adaptive.adaptive ? undefined : BUDGETS[effort]
+    const maxTokens = Math.max(options.maxTokens ?? 16_000, adaptive.adaptive && adaptive.effort !== null ? 32_000 : (budget ?? 0) + 4_000)
+    // Newer models omit thinking text unless asked; the summary is what the chat shows (pl-jzr7).
+    const thinking = adaptive.adaptive
+      ? (adaptive.effort === null ? {} : { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: adaptive.effort } })
+      : (budget === undefined ? {} : { thinking: { type: 'enabled', budget_tokens: budget, display: 'summarized' } })
     const system = systemText(options)
     const ttl = this.cacheTtl
     const messages = anthropicMessages(options, options.provider, await loadImages(options, this.images))
@@ -141,7 +162,7 @@ export class AnthropicAdapter extends LlmAdapter {
         messages,
         ...(options.tools === undefined || options.tools.length === 0 ? {} : { tools: breakpoint(options.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })), ttl) }),
         // Newer models omit thinking text unless asked; the summary is what the chat shows (pl-jzr7).
-        ...(budget === undefined ? {} : { thinking: { type: 'enabled', budget_tokens: budget, display: 'summarized' } }),
+        ...thinking,
       }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     })

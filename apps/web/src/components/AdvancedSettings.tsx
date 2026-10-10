@@ -7,6 +7,7 @@ import type * as Exit from 'effect/Exit'
 import { keys, promptAtom, useCommand, webhookAtom } from '../client/api-atoms.ts'
 import type { ApiFailure } from '../client/api-failure.ts'
 import { renderResult } from './AtomView.tsx'
+import { go } from '../route.ts'
 import { useAtomValue } from '@effect/atom-react'
 
 export interface AdvancedSettingsProps {
@@ -229,7 +230,13 @@ function PromptPreview({ id }: { id: string }) {
   return (
     <>
       <h2>Prompt</h2>
-      <div className="muted">What the model is given at the start of each Turn, as saved. Secret values are masked.</div>
+      <div className="muted">What the model is given at the start of each Turn, as saved. Secret values are masked. The Platform part is written by Mr. Robot itself and cannot be edited; to change how this Robot behaves and what it remembers, edit its files:</div>
+      <div className="prompt-files">
+        {['AGENTS.md', 'SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'MEMORY.md'].map((file) => (
+          <button key={file} type="button" className="button" onClick={() => go({ page: 'files', id, path: file })}>Edit {file}</button>
+        ))}
+        <button type="button" className="link" onClick={() => go({ page: 'profile' })}>Your USER.md and preferences</button>
+      </div>
       {renderResult(result, { what: 'the prompt' }, (preview) => (
         <>
           {preview.sections.map((section) => (

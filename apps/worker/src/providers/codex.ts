@@ -74,7 +74,7 @@ export class CodexAdapter extends LlmAdapter {
       context: { contextWindow: this.contextWindow },
       defaultMaxTokens: 32_000,
       ...(this.images === undefined ? {} : { inputModalities: ['text', 'image'] }),
-      reasoning: { efforts: ['low', 'medium', 'high'].map((id) => ({ id, name: id })) },
+      reasoning: { efforts: ['low', 'medium', 'high', 'xhigh'].map((id) => ({ id, name: id })) },
     } as never)
   }
 
@@ -92,7 +92,7 @@ export class CodexAdapter extends LlmAdapter {
         tools: (options.tools ?? []).map((tool) => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters, strict: false })),
         tool_choice: 'auto',
         parallel_tool_calls: true,
-        reasoning: { effort: effort === 'off' ? 'low' : effort === 'max' ? 'high' : effort, summary: 'auto' },
+        reasoning: { effort: effort === 'off' ? 'low' : effort === 'max' ? 'xhigh' : effort, summary: 'auto' },
         include: ['reasoning.encrypted_content'],
         ...(options.sessionId === undefined ? {} : { prompt_cache_key: String(options.sessionId) }),
       }),

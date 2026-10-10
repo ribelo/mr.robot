@@ -68,7 +68,7 @@ export const FleetState = Schema.Literals(['sleeping', 'working', 'waiting for y
 export type FleetState = typeof FleetState.Type
 export const Sharing = Schema.Literals(['private', 'home'])
 export type Sharing = typeof Sharing.Type
-export const ThinkingEffort = Schema.Literals(['off', 'low', 'medium', 'high', 'max'])
+export const ThinkingEffort = Schema.Literals(['off', 'low', 'medium', 'high', 'xhigh', 'max'])
 export type ThinkingEffort = typeof ThinkingEffort.Type
 
 export const Identity = Schema.Struct({
@@ -98,7 +98,7 @@ export const emptyGrants: GrantSet = { tools: [], skills: [], recipients: [], se
 export const ModelChoice = Schema.Struct({
   provider: Schema.String,
   model: Schema.String,
-  effort: Schema.Literals(['off', 'low', 'medium', 'high', 'max']),
+  effort: Schema.Literals(['off', 'low', 'medium', 'high', 'xhigh', 'max']),
 })
 export type ModelChoice = typeof ModelChoice.Type
 
@@ -111,7 +111,7 @@ export const ChainEntry = Schema.Struct({
   owner: Schema.String,
   provider: Schema.String,
   model: Schema.String,
-  effort: Schema.Literals(['off', 'low', 'medium', 'high', 'max']),
+  effort: Schema.Literals(['off', 'low', 'medium', 'high', 'xhigh', 'max']),
 })
 export type ChainEntry = typeof ChainEntry.Type
 

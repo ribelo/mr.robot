@@ -525,3 +525,6 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .usage-fill { display: block; height: 100%; background: var(--success); }
 .usage-fill.high { background: var(--danger); }
 .usage-percent { color: var(--muted); white-space: nowrap; }
+.page > h1:first-child { position: sticky; top: calc(-16px - env(safe-area-inset-top)); z-index: 5; background: var(--surface); margin-top: calc(-16px - env(safe-area-inset-top)); padding: calc(16px + env(safe-area-inset-top)) 0 10px; border-bottom: 1px solid transparent; }
+.chain-note { display: block; margin-top: 6px; }
+.prompt-files { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 4px 0 10px; }

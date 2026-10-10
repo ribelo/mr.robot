@@ -76,6 +76,15 @@ describe('Provider adapters', () => {
     expect(request.body.system[0].text).toBe("You are Claude Code, Anthropic's official CLI for Claude.")
     expect(request.body.system[1].text).toBe('Be a Robot.')
     expect(request.body.thinking).toEqual({ type: 'enabled', budget_tokens: 12_000, display: 'summarized' })
+
+    // Current Claude models think adaptively with an effort; xhigh goes through on the 5.x line.
+    const adaptive = serve([sse({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } })])
+    await collect(adapter.stream({ ...base('anthropic'), model: 'claude-opus-5-5', reasoningEffort: 'xhigh' as never }))
+    expect(adaptive.requests[0]!.body.thinking).toEqual({ type: 'adaptive', display: 'summarized' })
+    expect(adaptive.requests[0]!.body.output_config).toEqual({ effort: 'xhigh' })
+    const older = serve([sse({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } })])
+    await collect(adapter.stream({ ...base('anthropic'), model: 'claude-opus-4-6', reasoningEffort: 'xhigh' as never }))
+    expect(older.requests[0]!.body.output_config).toEqual({ effort: 'high' })
     const finish = chunks.at(-1) as unknown as { replayState: { response: null; blocks: readonly unknown[] } }
     expect(finish.replayState.blocks).toEqual([{ signature: 'sig-1' }, null])
 

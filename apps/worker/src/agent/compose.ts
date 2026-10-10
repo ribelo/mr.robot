@@ -121,7 +121,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
 /** The supported effort closest to the chosen one; none when the model has no reasoning levels. */
 function reasoning(effort: ThinkingEffort, supported: readonly string[]): { reasoningEffort?: ReasoningEffortId } {
   if (supported.length === 0) return {}
-  const ladder: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max']
+  const ladder: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
   const wanted = ladder.indexOf(effort)
   const best = [...supported]
     .filter((id) => ladder.includes(id as ThinkingEffort))
