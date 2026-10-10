@@ -39,16 +39,18 @@ export interface WakeInput {
 }
 
 /** A message between Robots, as the platform carries it (robot-mv15). */
-export interface RobotMessage {
+interface MessageCommon {
   readonly id: string
-  readonly kind: 'request' | 'reply' | 'thread'
-  /** A Thread message: which Thread (v1.9). The chain limit does not apply to it. */
-  readonly threadId?: string
   readonly from: { readonly robotId: string; readonly ownerId: string; readonly name: string; readonly avatarColor: string }
   readonly text: string
   readonly requestId: string
   readonly chain: { readonly id: string; readonly hops: number }
 }
+
+export type RobotMessage =
+  | MessageCommon & { readonly kind: 'request' | 'reply' }
+  /** A message in a Thread between two chiefs (v1.9): the chain limit does not apply to it, the pause at 20 does. */
+  | MessageCommon & { readonly kind: 'thread'; readonly threadId: string }
 
 export type ReceiveResult = { readonly accepted: true } | { readonly accepted: false; readonly reason: 'unavailable' | 'queue-full' | 'chain-limit' | 'thread-closed' }
 
@@ -382,9 +384,14 @@ export const receive = (message: RobotMessage) => Effect.gen(function* () {
   if (current === undefined || current.status === 'deleted' || current.status === 'setup') return { accepted: false, reason: 'unavailable' } as ReceiveResult
   if (store.sql.exec('SELECT 1 FROM intake WHERE key = ?', message.id).toArray().length > 0) return { accepted: true } as ReceiveResult
   if (message.kind === 'thread') {
-    // A Thread message (v1.9): the Home already checked that the Thread is open; the chain limit does not apply, the pause at 20 does.
-    const copy = message.threadId === undefined ? undefined : store.thread(message.threadId)
-    if (copy === undefined || (copy.view.state !== 'open' && copy.view.state !== 'invited') || copy.view.other.robotId !== message.from.robotId) return { accepted: false, reason: 'thread-closed' } as ReceiveResult
+    // A Thread message (v1.9): the chain limit does not apply, the pause at 20 does.
+    const known = store.thread(message.threadId)
+    if (known === undefined || known.view.other.robotId !== message.from.robotId) return { accepted: false, reason: 'thread-closed' } as ReceiveResult
+    // The "opened" note may come after the first message: a copy still invited asks the Home, which opens a Thread only when both owners accepted.
+    const copy = known.view.state === 'invited'
+      ? yield* Effect.promise(() => platform.env.HOME.getByName(HOME_ID).threadView(message.threadId, current.id)).pipe(Effect.map((view) => (view === undefined ? known : store.saveThread({ ...view, messageCount: known.view.messageCount }, Date.now()))))
+      : known
+    if (copy.view.state !== 'open') return { accepted: false, reason: 'thread-closed' } as ReceiveResult
     if (store.pendingWakeups() >= MAX_QUEUED_WAKEUPS) return { accepted: false, reason: 'queue-full' } as ReceiveResult
     store.transaction(() => {
       store.sql.exec('INSERT INTO intake (key, sender, received_at) VALUES (?, ?, ?)', message.id, message.from.robotId, Date.now())

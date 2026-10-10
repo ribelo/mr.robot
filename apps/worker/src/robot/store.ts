@@ -20,6 +20,7 @@ import type {
   RewindView,
   RobotStatus,
   RoutineSchedule,
+  ThreadEvent,
   ThreadView,
   BrowserBackend,
   Sender,
@@ -104,7 +105,7 @@ export interface RoutineCard {
 export interface ThreadCard {
   readonly kind: 'thread'
   readonly threadId: string
-  readonly event: 'opened' | 'declined' | 'closed' | 'idle'
+  readonly event: ThreadEvent
 }
 
 export type NoticeCard = RoutineCard | ThreadCard
@@ -390,11 +391,11 @@ export class RobotStore {
     return this.thread(view.id)!
   }
 
-  /** A message went out or came in: both count towards the pause, and the Thread is open whatever the Home's note said first. */
+  /** A message went out or came in: both count towards the pause. */
   threadMessage(id: string, now: number): ThreadCopy | undefined {
     const known = this.thread(id)
     if (known === undefined) return undefined
-    const view: ThreadView = { ...known.view, state: 'open', messageCount: known.view.messageCount + 1, lastActivityAt: now }
+    const view: ThreadView = { ...known.view, messageCount: known.view.messageCount + 1, lastActivityAt: now }
     this.sql.exec('UPDATE thread SET view = ?, window_count = window_count + 1 WHERE id = ?', JSON.stringify(view), id)
     return this.thread(id)
   }

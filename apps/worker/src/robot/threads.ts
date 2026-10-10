@@ -4,9 +4,10 @@
  * own store, and the messages live in its Conversation like any other (ch-jnet).
  */
 import * as Effect from 'effect/Effect'
-import type { ThreadView } from '@mr-robot/protocol'
+import type { ThreadEvent, ThreadView } from '@mr-robot/protocol'
 import { HOME_ID } from '../env.ts'
 import { storedLength } from '../agent/session-log.ts'
+import { oneLine } from '../agent/sources.ts'
 import { invalid, notFound } from '../platform/durable.ts'
 import { deliverOutbox, digest, enqueueOutbox, RobotPlatform, RobotState, THREAD_PAUSE_AT, wake } from './programs.ts'
 import type { ThreadCopy } from './store.ts'
@@ -25,9 +26,6 @@ const onlyChief = Effect.gen(function* () {
   if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot talks in Threads')
   return current
 })
-
-/** A scope on one line, for the label the model reads before a Thread message. */
-export const oneLine = (text: string): string => text.replace(/\s*\n\s*/g, ' ⏎ ').trim()
 
 const listed = (copy: ThreadCopy) => ({
   threadId: copy.view.id,
@@ -128,16 +126,18 @@ export const invitation = (view: ThreadView, phase: 'invitation-out' | 'invitati
   yield* platform.notifyMembers('needs you', `${purpose}: waiting for your answer.`)
 })
 
-const noteOf = (view: ThreadView, event: 'opened' | 'declined' | 'closed' | 'idle'): string => {
+const noteOf = (view: ThreadView, event: ThreadEvent): string => {
   switch (event) {
     case 'opened': return `Thread opened with ${view.other.label}: "${view.topic}"`
     case 'declined': return `Thread declined: "${view.topic}" with ${view.other.label}`
     case 'closed': return `Thread closed: "${view.topic}" with ${view.other.label}`
     case 'idle': return `Thread closed after 7 days without a message: "${view.topic}" with ${view.other.label}`
+    case 'expired': return `Thread invitation expired after 7 days without both answers: "${view.topic}" with ${view.other.label}`
+    case 'gone': return `Thread ended: ${view.other.label} is no longer in the Home ("${view.topic}")`
   }
 }
 
-const wakeText = (view: ThreadView, event: 'opened' | 'declined' | 'closed' | 'idle'): string => {
+const wakeText = (view: ThreadView, event: ThreadEvent): string => {
   switch (event) {
     case 'opened': return [
       `Thread opened with ${view.other.label} about "${view.topic}". Both owners accepted.`,
@@ -146,12 +146,15 @@ const wakeText = (view: ThreadView, event: 'opened' | 'declined' | 'closed' | 'i
     ].join('\n')
     case 'declined': return `${view.other.label} declined the Thread about "${view.topic}". No reason is given. The Thread is over.`
     case 'closed': return `${view.other.label} closed the Thread about "${view.topic}". Their summary:\n${view.summary ?? ''}`
-    case 'idle': return ''
+    case 'idle': case 'expired': case 'gone': return `${noteOf(view, event)}. The Thread is over.`
   }
 }
 
-/** The Thread opened, ended or went idle (ch-fri7, ch-0cn1, ch-rlnd, ch-gckb): this chief's copy follows, the Conversation gets a card, and the chief is woken when it has to act. */
-export const changed = (view: ThreadView, event: 'opened' | 'declined' | 'closed' | 'idle', notify: 'wake' | 'note') => Effect.gen(function* () {
+/**
+ * The Thread opened, ended, lapsed or lost its other chief (ch-fri7, ch-0cn1, ch-rlnd, ch-gckb): this chief's copy follows,
+ * the Conversation gets a card, and the chief is woken when it has to act.
+ */
+export const changed = (view: ThreadView, event: ThreadEvent, wakeChief: boolean) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
@@ -164,5 +167,6 @@ export const changed = (view: ThreadView, event: 'opened' | 'declined' | 'closed
   store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), noteOf(view, event), now, { kind: 'thread', threadId: view.id, event })
   yield* platform.changed()
   if (event === 'opened') yield* platform.notifyMembers('finished', noteOf(view, event))
-  if (notify === 'wake') yield* wake({ kind: 'platform', sender: { kind: 'platform' }, text: wakeText(view, event), payload: { summary: '', thread: { id: view.id } } })
+  if (wakeChief) yield* wake({ kind: 'platform', sender: { kind: 'platform' }, text: wakeText(view, event), payload: { summary: '', thread: { id: view.id } } })
 })
+

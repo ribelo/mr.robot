@@ -43,7 +43,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
     while (notices.length > 0 && notices[0]!.afterSeq < seq) {
       const notice = notices.shift()!
       const thread = notice.card?.kind === 'thread' ? input.thread?.(notice.card.threadId) : undefined
-      items.push(notice.card === undefined || (notice.card.kind === 'thread' && notice.card !== undefined && thread === undefined)
+      items.push(notice.card === undefined || (notice.card.kind === 'thread' && thread === undefined)
         ? { kind: 'notice', id: notice.id, seq: notice.afterSeq, at: notice.at, text: notice.text }
         : notice.card.kind === 'thread'
           ? { kind: 'thread', id: notice.id, seq: notice.afterSeq, at: notice.at, event: notice.card.event, thread: thread! }

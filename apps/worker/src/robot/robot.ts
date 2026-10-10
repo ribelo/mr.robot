@@ -43,6 +43,7 @@ import type {
   UsageView,
   SettingsPatch,
   Sharing,
+  ThreadEvent,
   ThreadView,
   Trajectory,
   TrajectoryEvent,
@@ -1720,8 +1721,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The Home tells this chief that a Thread opened, was declined, closed or went idle. */
-  threadChanged(view: ThreadView, event: 'opened' | 'declined' | 'closed' | 'idle', notify: 'wake' | 'note'): Promise<void> {
-    return this.program(Threads.changed(view, event, notify))
+  threadChanged(view: ThreadView, event: ThreadEvent, wake: boolean): Promise<void> {
+    return this.program(Threads.changed(view, event, wake))
   }
 
   configureRobot(id: string, change: { name?: string; title?: string; description?: string; avatarColor?: string }): Promise<{ id: string; identity: unknown }> {

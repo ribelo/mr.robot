@@ -407,6 +407,13 @@ export const ProposalAnswer = Schema.Struct({
 export const ThreadState = Schema.Literals(['invited', 'open', 'closed', 'declined'])
 export type ThreadState = typeof ThreadState.Type
 
+/**
+ * What happened to a Thread, as its card in the Conversation says: it opened, an owner declined it, a chief closed it,
+ * it closed after 7 days without a message, the invitation expired after 7 days unanswered, or the other chief is gone.
+ */
+export const ThreadEvent = Schema.Literals(['opened', 'declined', 'closed', 'idle', 'expired', 'gone'])
+export type ThreadEvent = typeof ThreadEvent.Type
+
 /** One Thread as a chief and its owner see it: the chief's own scope, the other chief, the state and the count. */
 export const ThreadView = Schema.Struct({
   id: Schema.String,
@@ -425,7 +432,7 @@ export const ThreadView = Schema.Struct({
   closedAt: Schema.NullOr(Schema.Number),
   lastActivityAt: Schema.Number,
   /** How a closed Thread ended. */
-  closedBy: Schema.NullOr(Schema.Literals(['self', 'other', 'idle', 'declined'])),
+  closedBy: Schema.NullOr(Schema.Literals(['self', 'other', 'idle', 'expired', 'gone', 'declined'])),
   summary: Schema.NullOr(Schema.String),
 })
 export type ThreadView = typeof ThreadView.Type
@@ -488,7 +495,7 @@ export const ChatItem = Schema.Union([
     thread: Schema.optional(Schema.Struct({ id: Schema.String, topic: Schema.String })),
   }),
   /** A Thread card (ch-iy16): what happened to the Thread, with its state now. */
-  Schema.Struct({ kind: Schema.Literal('thread'), ...itemFields, event: Schema.Literals(['opened', 'declined', 'closed', 'idle']), thread: ThreadView }),
+  Schema.Struct({ kind: Schema.Literal('thread'), ...itemFields, event: ThreadEvent, thread: ThreadView }),
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
   /** A Routine card; `by` names who changed it when it was not the Robot itself (Mr. Robot, cd-n9pi). */
   Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran', 'paused', 'resumed']), name: Schema.String, by: Schema.optional(Schema.String) }),

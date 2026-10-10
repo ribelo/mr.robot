@@ -15,6 +15,9 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
+/** A scope on one line, for the label the model reads before a Thread message. */
+export const oneLine = (text: string): string => text.replace(/\s*\n\s*/g, ' ⏎ ').trim()
+
 /** A chief reports to its owner after this many messages in a Thread (ch-408z). */
 export const THREAD_PAUSE_AT = 20
 
@@ -61,7 +64,7 @@ export function wakeupMessage(input: WakeupMessageInput): UserMessage {
       // One line, so the chat can drop it; the scope stays on a single line for the model.
       const threadHead = thread === undefined ? '' : [
         `[Thread message from "${sender.name}" (${sender.robotId}) in Thread ${thread.id}, topic: "${thread.topic.replace(/\s+/g, ' ')}".`,
-        `Your owner's scope for this Thread, the only thing you may use or disclose: ${thread.scope.trim() === '' ? '(nothing)' : '"' + thread.scope.replace(/\s*\n\s*/g, ' ⏎ ').trim() + '"'}.`,
+        `Your owner's scope for this Thread, the only thing you may use or disclose: ${thread.scope.trim() === '' ? '(nothing)' : '"' + oneLine(thread.scope) + '"'}.`,
         `Message ${thread.count}; reply with thread_send.${thread.windowCount >= THREAD_PAUSE_AT ? ` ${THREAD_PAUSE_AT} messages are used: report to your owner before you send more.` : ''}]`,
       ].join(' ')
       const head = thread !== undefined ? threadHead : input.replyTo === undefined

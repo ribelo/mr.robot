@@ -120,6 +120,34 @@ describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', (
     expect(toolResults(anna).at(-1)).toContain('declined')
   })
 
+  it('refuses a Thread with a chief of the same Member or with an ordinary Robot (ch-rqnf)', async () => {
+    scripts.set('*', [{ text: 'Hello.' }])
+    const plain = (await api<{ id: string }>(ANNA, '/api/robots', { body: {} })).body.id
+    await settle(plain)
+    await say(ANNA, anna, [
+      { calls: [{ name: 'thread_open', args: { chief_id: anna, topic: 'Myself', scope: '' } }] },
+      { calls: [{ name: 'thread_open', args: { chief_id: plain, topic: 'Mine', scope: '' } }] },
+      { text: 'ok' },
+    ])
+    const [self, ordinary] = toolResults(anna).slice(-2)
+    expect(self).toContain('two different Members')
+    expect(ordinary).toContain('use thread_chiefs')
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${anna}/panel`)).body.threads).toEqual([])
+  })
+
+  it('a Thread message reaches no chief before both owners accepted, checked at the Home (ch-fri7)', async () => {
+    const id = await invite()
+    await settle(ben)
+    const message = (key: string) => ({ id: key, kind: 'thread' as const, threadId: id, text: 'psst', requestId: key, chain: { id, hops: 0 }, from: { robotId: anna, ownerId: '', name: "Anna's Mr. Robot", avatarColor: '#5ec4b6' } })
+    expect(await testRobot(ben).receive(message('early-1'))).toEqual({ accepted: false, reason: 'thread-closed' })
+    scripts.set(anna, [{ text: 'ok' }])
+    await answer(ANNA, anna, await openAsk(ANNA, anna), true)
+    await settle(anna)
+    // Anna's owner accepted, Ben's has not: Ben's chief still takes nothing.
+    expect(await testRobot(ben).receive(message('early-2'))).toEqual({ accepted: false, reason: 'thread-closed' })
+    expect((await chat(BEN, ben)).some((item) => item.kind === 'message' && item.text === 'psst')).toBe(false)
+  })
+
   it('only Mr. Robot has the thread tools (ch-rqnf)', async () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const created = (await api<{ id: string }>(ANNA, '/api/robots', { body: {} })).body.id
@@ -236,11 +264,40 @@ describe('closing and the lists (ch-6g7j, ch-rlnd, ch-gckb, ch-6fcp, ch-5ngu)', 
     }
   })
 
-  it('lists the Threads in the admin view and in the panel (ch-5ngu, ch-6fcp)', async () => {
+  it('ends an invitation that has not both answers after 7 days, by the Home alarm (ch-gckb)', async () => {
+    const id = await invite()
+    await settle(ben)
+    const home = env.HOME.getByName('home') as unknown as DurableObjectStub<import('./worker.ts').Home>
+    expect(await home.alarmForTest()).toBeGreaterThan(Date.now() + 6.9 * 24 * 3600 * 1000)
+    await home.backdateThreadsForTest(8 * 24 * 3600 * 1000)
+    await runDurableObjectAlarm(home)
+    for (const [as, robot] of [[ANNA, anna], [BEN, ben]] as const) {
+      expect((await api<RobotPanel>(as, `/api/robots/${robot}/panel`)).body.threads![0]).toMatchObject({ id, state: 'closed', closedBy: 'expired' })
+      const items = await chat(as, robot)
+      expect(items.some((item) => item.kind === 'thread' && item.event === 'expired')).toBe(true)
+      expect(items.some((item) => item.kind === 'question' && item.proposal.status === 'open')).toBe(false)
+    }
+  })
+
+  it('ends the Threads of a chief that is deleted, with a note to the other chief', async () => {
     const id = await openThread()
+    expect((await api(BEN, '/api/me/reset', { body: { confirm: 'Ben' } })).status).toBe(200)
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${anna}/panel`)).body.threads![0]).toMatchObject({ id, state: 'closed', closedBy: 'gone' })
+    expect((await chat(ANNA, anna)).some((item) => item.kind === 'thread' && item.event === 'gone')).toBe(true)
+    await say(ANNA, anna, [{ calls: [{ name: 'thread_send', args: { thread_id: id, text: 'hello?', idempotency_key: 'g' } }] }, { text: 'ok' }])
+    expect(toolResults(anna).at(-1)).toContain('closed')
+  })
+
+  it('lists the Threads in the admin view and in the panel, without scopes or messages for the admin (ch-5ngu, ch-6fcp)', async () => {
+    const id = await openThread()
+    scripts.set(ben, [{ text: 'noted' }])
+    await say(ANNA, anna, [{ calls: [{ name: 'thread_send', args: { thread_id: id, text: 'Are you free on Friday?', idempotency_key: 'a1' } }] }, { text: 'ok' }])
+    await settle(ben)
     const view = (await api<AdminView>(ANNA, '/api/admin')).body
-    expect(view.threads).toEqual([expect.objectContaining({ id, topic: 'Dinner on Friday', state: 'open', participants: [expect.objectContaining({ ownerName: 'Anna' }), expect.objectContaining({ ownerName: 'Ben' })] })])
+    expect(view.threads).toEqual([expect.objectContaining({ id, topic: 'Dinner on Friday', state: 'open', messageCount: 1, participants: [expect.objectContaining({ ownerName: 'Anna' }), expect.objectContaining({ ownerName: 'Ben' })] })])
+    const shown = JSON.stringify(view.threads)
+    for (const secret of ['my calendar for Friday', 'my food preferences', 'Are you free on Friday?']) expect(shown).not.toContain(secret)
     await say(ANNA, anna, [{ calls: [{ name: 'thread_list', args: {} }] }, { text: 'ok' }])
-    expect(JSON.parse(toolResults(anna).at(-1)!)).toEqual({ threads: [expect.objectContaining({ threadId: id, state: 'open', yourScope: 'my calendar for Friday', messagesBeforePause: 20 })] })
+    expect(JSON.parse(toolResults(anna).at(-1)!)).toEqual({ threads: [expect.objectContaining({ threadId: id, state: 'open', yourScope: 'my calendar for Friday', messagesBeforePause: 19 })] })
   })
 })

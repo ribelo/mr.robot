@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react'
 import { useMeasuredRows, useRowWindow } from './row-window.ts'
-import type { ChatItem, ProposalView, ThreadView, WorkDetails } from '@mr-robot/protocol'
+import type { ChatItem, ProposalView, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
 import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
@@ -271,13 +271,14 @@ function ThreadAnswer({ proposal, canAnswer, onAnswer }: { proposal: ProposalVie
   )
 }
 
-const THREAD_EVENT: Record<'opened' | 'declined' | 'closed' | 'idle', string> = {
+const THREAD_EVENT: Record<ThreadEvent, string> = {
   opened: 'Thread opened', declined: 'Thread declined', closed: 'Thread closed', idle: 'Thread closed after 7 days without a message',
+  expired: 'Invitation expired after 7 days without both answers', gone: 'Thread ended: the other chief is no longer in the Home',
 }
 const THREAD_STATE: Record<ThreadView['state'], string> = { invited: 'Invited', open: 'Open', closed: 'Closed', declined: 'Declined' }
 
 /** The Thread card (ch-iy16, ch-6fcp): topic, the other chief, state and message count. */
-export function ThreadCard({ thread, event }: { thread: ThreadView; event?: 'opened' | 'declined' | 'closed' | 'idle' }) {
+export function ThreadCard({ thread, event }: { thread: ThreadView; event?: ThreadEvent }) {
   return (
     <div className="thread-card" data-state={thread.state}>
       {event === undefined ? null : <div className="thread-event muted">{THREAD_EVENT[event]}</div>}
