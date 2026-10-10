@@ -172,6 +172,8 @@ export class DiscordAtHome {
     if (verdict === 'fatal') {
       // The same token can never connect: stop until the Discord connection gets a new token.
       this.sql.exec('INSERT INTO discord_stopped (token_hash, code, at) VALUES (?, ?, ?) ON CONFLICT (token_hash) DO UPDATE SET code = excluded.code, at = excluded.at', live.tokenHash, code, Date.now())
+      // Another bot may still work; connect() skips the refused token and does nothing when none is left.
+      await this.setAlarm(Date.now() + 1_000)
       return
     }
     this.resume = verdict === 'resume'

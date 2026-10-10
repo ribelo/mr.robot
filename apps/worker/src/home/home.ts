@@ -1202,6 +1202,8 @@ export class Home extends DurableObject<Env> {
     })
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
     ctx.waitUntil(this.destroyOrphans().catch((error: unknown) => console.warn('orphans not destroyed', error)))
+    // A restart (a deploy, an eviction) loses the gateway socket: listen again at once, within the gateway's limits.
+    ctx.waitUntil(this.ensureDiscordGateway())
   }
 
   private run<A, E>(program: Effect.Effect<A, E, R>): Promise<A> {

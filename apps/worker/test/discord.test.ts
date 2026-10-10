@@ -93,7 +93,8 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
         servers.push(server)
         return new Response(null, { status: 101, webSocket: pair[0] })
       }) as typeof fetch
-      const gateway = new DiscordAtHome(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async () => {})
+      const alarms: number[] = []
+      const gateway = new DiscordAtHome(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async (at) => { alarms.push(at) })
       const until = async (done: () => boolean) => { for (let index = 0; index < 100 && !done(); index++) await new Promise((resolve) => setTimeout(resolve, 10)) }
       const ops = (server: { received: string[] }) => server.received.map((frame) => (JSON.parse(frame) as { op: number }).op)
       const lastHourAgo = () => sql.exec('UPDATE discord_connect SET at = at - ?', 2 * 60 * MIN)
@@ -123,6 +124,7 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
       // A bad token: no more connections with it, however often the alarm comes.
       second.socket.close(4004, 'Authentication failed.')
       await until(() => sql.exec('SELECT 1 FROM discord_stopped').toArray().length > 0)
+      expect(alarms.at(-1)).toBeGreaterThan(Date.now() - 5_000)
       lastHourAgo()
       await gateway.ensure()
       await gateway.ensure()
