@@ -67,7 +67,7 @@ describe('Connect Google (v1.5 ticket 02)', () => {
     expect(params.get('client_id')).toBe('client-1.apps.googleusercontent.com')
     expect(params.get('redirect_uri')).toBe(`${ORIGIN}/api/connections/google/oauth/callback`)
     expect(params.get('access_type')).toBe('offline')
-    expect(params.get('prompt')).toBe('consent')
+    expect(params.get('prompt')).toBe('select_account consent')
     expect(params.get('scope')!.split(' ')).toEqual(['openid', 'email', 'https://www.googleapis.com/auth/gmail.modify', 'https://www.googleapis.com/auth/calendar'])
     expect(params.get('state')).toMatch(/^[0-9a-f-]{36}$/)
   })

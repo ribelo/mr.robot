@@ -42,7 +42,11 @@ export function callbackUrl(origin: string): string {
   return `${origin}/api/connections/google/oauth/callback`
 }
 
-/** Google's consent screen: offline access for a refresh token, consent every time so one is always issued. */
+/**
+ * Google's consent screen: offline access for a refresh token, consent every time so one is always issued.
+ * A new connection also shows the account chooser, so a person signed in to several Google accounts
+ * picks which one to add instead of Google silently taking the current one.
+ */
 export function consentUrl(client: GoogleClient, origin: string, services: readonly GoogleService[], state: string, loginHint?: string): string {
   const params = new URLSearchParams({
     client_id: client.clientId,
@@ -50,7 +54,7 @@ export function consentUrl(client: GoogleClient, origin: string, services: reado
     response_type: 'code',
     scope: scopesFor(services).join(' '),
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: loginHint === undefined ? 'select_account consent' : 'consent',
     include_granted_scopes: 'true',
     state,
   })

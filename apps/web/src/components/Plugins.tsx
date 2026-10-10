@@ -13,6 +13,8 @@ import { go } from '../route.ts'
 import { AtomView, renderResult } from './AtomView.tsx'
 import { Empty } from './States.tsx'
 import { Markdown } from './Markdown.tsx'
+import { ConnectorPanel } from './Connections.tsx'
+import { connectionsAtom } from '../client/api-atoms.ts'
 
 function Brand({ path, color }: { path: string; color: string }) {
   return <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d={path} fill={color} /></svg>
@@ -117,7 +119,10 @@ function PluginSettings({ plugin, isAdmin }: { plugin: PluginView; isAdmin: bool
         <div className="muted">{plugin.description}</div>
       </div>
       {plugin.setupNeeded === null ? null : <div className="note">{plugin.setupNeeded}</div>}
-      {plugin.guide === null ? null : <div className="plugin-guide"><h3>Setup</h3><Markdown text={plugin.guide} /></div>}
+      {plugin.connector !== null && plugin.enabled ? <YourAccounts plugin={plugin} /> : null}
+      {plugin.guide === null ? null : plugin.setupNeeded === null && plugin.connector !== null
+        ? <details className="plugin-guide"><summary><h3>Home setup <span className="muted">(done once by the admin)</span></h3></summary><Markdown text={plugin.guide} /></details>
+        : <div className="plugin-guide"><h3>Setup</h3><Markdown text={plugin.guide} /></div>}
       {!isAdmin ? <div className="muted">Only the Home admin changes this plugin's settings.</div> : plugin.fields.length === 0 ? <div className="muted">This plugin has no settings.</div> : (
         <div className="form">
           <h3>Settings</h3>
@@ -129,6 +134,19 @@ function PluginSettings({ plugin, isAdmin }: { plugin: PluginView; isAdmin: bool
         </div>
       )}
     </>
+  )
+}
+
+/** A connector's accounts for the person looking: theirs and shared ones, and a form to add another. */
+function YourAccounts({ plugin }: { plugin: PluginView }) {
+  const connections = useAtomValue(connectionsAtom)
+  return (
+    <section className="form">
+      <h3>Your {plugin.title} accounts</h3>
+      {renderResult(connections, { what: 'your accounts' }, (list) => (
+        <ConnectorPanel plugin={plugin} connections={list.filter((connection) => connection.kind === plugin.connector!.kind)} />
+      ))}
+    </section>
   )
 }
 

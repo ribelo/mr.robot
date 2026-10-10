@@ -65,7 +65,7 @@ function ConnectorRow({ plugin, connections }: { plugin: PluginView; connections
   )
 }
 
-function ConnectorPanel({ plugin, connections }: { plugin: PluginView; connections: readonly ConnectionView[] }) {
+export function ConnectorPanel({ plugin, connections }: { plugin: PluginView; connections: readonly ConnectionView[] }) {
   const command = useCommand()
   const [message, setMessage] = useState<string>()
   const change = async (run: Parameters<typeof command>[0]) => setMessage(exitFailure(await command(run, [keys.connections])))
@@ -95,6 +95,7 @@ function ConnectorPanel({ plugin, connections }: { plugin: PluginView; connectio
         </ul>
       )}
       {message === undefined ? null : <div className="muted">{message}</div>}
+      {plugin.setupNeeded === null && connections.some((connection) => connection.mine) ? <h4>Add another account</h4> : null}
       {plugin.setupNeeded !== null ? <div className="note">{plugin.setupNeeded}</div>
         : connector.connect.method === 'paste' ? <PasteConnect plugin={plugin} fields={connector.connect.fields} instructions={connector.connect.instructions} />
           : <OAuthConnect plugin={plugin} services={connector.connect.services} />}
@@ -133,7 +134,7 @@ function OAuthConnect({ plugin, services }: { plugin: PluginView; services: Read
   const start = `/api/connections/${plugin.connector!.kind}/oauth/start?services=${encodeURIComponent(chosen.join(','))}&shared=${shared ? 1 : 0}`
   return (
     <div className="form connect-form">
-      <div className="muted">Choose what this account grants. Robots can never get more than you choose here; each Robot still needs its own grant.</div>
+      <div className="muted">Choose what this account grants. Robots can never get more than you choose here; each Robot still needs its own grant. {plugin.title} asks which account to add; repeat this for each of your accounts.</div>
       <div className="check-grid">{services.map((service) => (
         <label key={service.value} className="check"><input type="checkbox" checked={chosen.includes(service.value)} onChange={() => setChosen(chosen.includes(service.value) ? chosen.filter((value) => value !== service.value) : [...chosen, service.value])} /><span>{service.label}</span></label>
       ))}</div>
