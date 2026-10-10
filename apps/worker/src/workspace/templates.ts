@@ -10,6 +10,13 @@ export const ROBOT_FILES: Readonly<Record<string, string>> = {
   "AGENTS.md": "# AGENTS.md\n\nYour operating manual for this workspace, written by you. Your main instructions cover how you work in general. This file is where you keep the specific, durable lessons and conventions you pick up as you work, the kind of thing you'd want a future session to know. It's not about the user (that goes in `USER.md` and your memory) or your personality (that's `SOUL.md`); it's about how you get work done here.\n\n## Conventions\nAdd an entry whenever you work something out worth keeping, for example:\n- a convention you've settled on (\"keep data exports in `workspace/exports/` and clean them up monthly\")\n- a tool or site quirk worth remembering (\"site X hides its form behind a cookie banner; dismiss it first\")\n- a workflow that worked, or a mistake not to repeat\n\nIt starts empty and is meant to grow slowly. Don't pad it; a short, accurate file beats a long, stale one.\n",
   "TOOLS.md": "# TOOLS.md - Local Notes\n\nShort, durable notes that make external tools work reliably in this\nparticular setup: device nicknames, host aliases, preferred voices, and\nenvironment-specific quirks. Skills describe how tools work in general; this\nfile holds only what is unique here. Leave it empty until there is something\nworth recording.\n",
   "MEMORY.md": "# MEMORY.md\n\n<!-- Your curated long-term memory: durable facts, preferences, and commitments. Keep it tight: promote what lasts here, and leave raw day-to-day detail in your daily notes. -->\n\n## Facts\n\n## Preferences\n\n## Commitments\n",
+}
+
+/**
+ * Files earlier versions seeded into every Robot's Workspace (memory/bank/*, removed in v1.11, sk-vhlb).
+ * A Robot deletes one at its next Turn when its content still equals this text; one it wrote into stays.
+ */
+export const RETIRED_ROBOT_FILES: Readonly<Record<string, string>> = {
   "memory/bank/opinions.md": "# opinions.md\n\nStable preferences, opinions, and value judgements.\n\n",
   "memory/bank/world.md": "# world.md\n\nDurable facts about the world and the user's circumstances.\n\n",
   "memory/bank/experience.md": "# experience.md\n\nEpisodic experiences and what happened, distilled.\n\n",

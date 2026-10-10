@@ -9,7 +9,7 @@ import { conversationAtom, keys, meAtom, panelAtom, robotsAtom, useCommand } fro
 import { exitFailure } from './client/api-failure.ts'
 import { robotFeedAtom } from './client/robot-feed.ts'
 import { renderResult } from './components/AtomView.tsx'
-import { go, useRoute, type Route } from './route.ts'
+import { go, goBack, useRoute, type Route } from './route.ts'
 import { Avatar } from './components/Avatar.tsx'
 import { ChatView } from './components/ChatView.tsx'
 import { Composer } from './components/Composer.tsx'
@@ -144,8 +144,11 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   const [sentCount, setSentCount] = useState(0)
   const post = useCallback((message: OutgoingMessage) => command((api) => api.send(id, message), [keys.robot(id), keys.robots]), [command, id])
   const outgoing = usePendingSends(conversation.items, me.id, post)
-  const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string) => {
-    setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved, scope), [keys.robot(id), keys.robots])))
+  const answerHelp = async (proposal: ProposalView, text: string) => {
+    setFailure(exitFailure(await command((api) => api.answerHelp(id, proposal, text), [keys.robot(id), keys.robots])))
+  }
+  const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string, note?: string) => {
+    setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved, scope, note), [keys.robot(id), keys.robots])))
   }
 
   // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
@@ -161,7 +164,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   }
   const header: ReactNode = (
     <header className="conversation-head">
-      <button type="button" className="icon-button back" aria-label="Back" onClick={() => go({ page: 'home' })}>‹</button>
+      <button type="button" className="icon-button back" aria-label="Back" onClick={() => goBack({ page: 'home' })}>‹</button>
       <Avatar color={identity.avatarColor} size={22} state={robot?.fleetState ?? panel.summary.fleetState} />
       <span className="conversation-name">{identity.name}</span>
       {panel.summary.status === 'setup' ? <span className="pill">setup</span> : null}
@@ -200,7 +203,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
         <ChatScroll itemCount={conversation.items.length + outgoing.pending.length} pinSignal={sentCount} growth={(stream?.text.length ?? 0) + (stream?.thinking.length ?? 0) + (conversation.working ? 1 : 0)}>
           {(scrollRef, following) => (<>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved, scope) => void answer(proposal, approve, approved, scope)} pending={outgoing.pending} onRetry={outgoing.retry} />
+          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} pending={outgoing.pending} onRetry={outgoing.retry} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>
@@ -210,7 +213,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
           </>)}
         </ChatScroll>
         {asks.length > 0 && !replyingInstead ? (
-          <AskBar asks={asks} onAnswer={(proposal, approve, approved, scope) => void answer(proposal, approve, approved, scope)} onReplyInstead={() => setReplyingInstead(true)} />
+          <AskBar asks={asks} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} onReplyInstead={() => setReplyingInstead(true)} />
         ) : (
         <Composer
           placeholder={`Message ${identity.name}`}
@@ -236,6 +239,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
           onAdvanced={() => go({ page: 'advanced', id })}
           onTrajectory={() => go({ page: 'trajectory', id })}
           onFiles={() => go({ page: 'files', id, path: null })}
+          onOpenHelp={() => go({ page: 'robot', id, panel: false })}
         />
       ) : null}
     </div>

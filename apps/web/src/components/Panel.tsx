@@ -11,10 +11,14 @@ export interface PanelProps {
   readonly onTrajectory: () => void
   readonly onFiles: () => void
   readonly onClose: () => void
+  /** Show the card of an open request for help in the Conversation. */
+  readonly onOpenHelp?: (requestId: string) => void
+  /** The time the ages are counted from; the clock when left out. */
+  readonly now?: number
 }
 
 /** The robot panel (robot-z3ud): screen thumbnail, Routines, simple settings. */
-export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose }: PanelProps) {
+export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, now = Date.now() }: PanelProps) {
   const name = panel.summary.identity.name
   return (
     <aside className="panel">
@@ -33,6 +37,21 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
               <div className="question-purpose">{panel.takeover.reason}</div>
               <div className="question-actions"><button type="button" className="button button-primary" onClick={onOpenScreen}>Take over</button></div>
             </div>
+          )}
+          {panel.help === undefined || panel.help.length === 0 ? null : (
+            <>
+              <h3 className="panel-section">Needs help</h3>
+              <ul className="help-list">
+                {panel.help.map((request) => (
+                  <li key={request.id}>
+                    <button type="button" className="help-open" onClick={() => onOpenHelp?.(request.id)}>
+                      <span className="help-open-text">{request.text}</span>
+                      <span className="help-open-meta muted">{[ageText(now - request.created), request.urgent ? 'urgent' : null, request.escalated ? 'Mr. Robot asked' : 'Mr. Robot not asked yet'].filter((part) => part !== null).join(' · ')}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
           <button type="button" className="screen" onClick={onOpenScreen} aria-label={`${name}'s screen`}>
             {panel.screen === null ? <span className="screen-empty">Open the browser</span> : <img src={panel.screen.url} alt="" />}
@@ -58,6 +77,12 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
       </div>
     </aside>
   )
+}
+
+/** How long ago, in the largest whole unit: "just now", "12 min ago", "3 h ago", "2 d ago". */
+export function ageText(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000)
+  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 60 * 24 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / (60 * 24))} d ago`
 }
 
 const BACKEND_LABELS: Record<string, string> = { 'browser-run': 'Browser Run', container: 'Container Chrome', 'container-vpn': 'Container Chrome via VPN' }

@@ -50,14 +50,57 @@ export function href(route: Route): string {
   }
 }
 
+/**
+ * Back navigation (sk-e2kn). Every history entry this app makes carries `{ dsh: n }` in its
+ * state, where `n` counts the app's entries behind it in this tab (the entry the app loaded
+ * on is 0). `behind` is that count for the current entry, so Back uses the browser's history
+ * only when the previous entry is one the app made; otherwise it goes to a fallback.
+ */
+interface AppHistoryState { readonly dsh: number }
+
+function appHistoryState(value: unknown): number | undefined {
+  if (typeof value !== 'object' || value === null || !('dsh' in value)) return undefined
+  return typeof value.dsh === 'number' ? value.dsh : undefined
+}
+
+let behind = 0
+const initial = appHistoryState(history.state)
+if (initial === undefined) history.replaceState({ dsh: 0 } as AppHistoryState, '')
+else behind = initial
+
+/** Brings `behind` up to date with the entry the browser just landed on. */
+function settleHistory(): void {
+  const recorded = appHistoryState(history.state)
+  if (recorded !== undefined) {
+    behind = recorded
+    return
+  }
+  // An entry without state was pushed by something other than go() (a typed or linked hash).
+  behind += 1
+  history.replaceState({ dsh: behind } as AppHistoryState, '')
+}
+
 export function go(route: Route): void {
-  location.hash = href(route)
+  const target = href(route)
+  if ((location.hash || '#/') === target) return
+  location.hash = target
+  behind += 1
+  history.replaceState({ dsh: behind } as AppHistoryState, '')
+}
+
+/** One step back in the app's own history, or `fallback` when this tab has no earlier app entry. */
+export function goBack(fallback: Route): void {
+  if (behind > 0) history.back()
+  else go(fallback)
 }
 
 export function useRoute(): Route {
   const [route, setRoute] = useState(() => parse(location.hash))
   useEffect(() => {
-    const update = () => setRoute(parse(location.hash))
+    const update = () => {
+      settleHistory()
+      setRoute(parse(location.hash))
+    }
     addEventListener('hashchange', update)
     return () => removeEventListener('hashchange', update)
   }, [])

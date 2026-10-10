@@ -77,7 +77,7 @@ describe('creating a Robot', () => {
     expect(settings.grants).toEqual({ tools: { exa: 'ask', files: 'ask', routines: 'allow', web: 'allow' }, skills: {}, recipients: {}, secrets: {}, hosts: {}, connections: {} })
     // Ask items are registered; what was neither approved nor a default is not (sk-3sij).
     const registered = await env.ROBOT.getByName(id).toolNames()
-    expect(registered).toEqual(expect.arrayContaining(['delete_file', 'web_search_exa', 'schedule_create']))
+    expect(registered).toEqual(expect.arrayContaining(['delete_file', 'web_search_exa', 'routine_set']))
     expect(registered).not.toContain('browser_open')
     expect(registered).not.toContain('exa_agent_list_events')
 

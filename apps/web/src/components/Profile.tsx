@@ -454,14 +454,14 @@ function ResetEverything({ me }: { me: Me }) {
   return (
     <>
       <h2>Reset everything</h2>
-      <div className="muted">Deletes all your robots, their conversations, files and memory, your memory files and usage, and starts a fresh Mr. Robot. Your logins, providers, computers, the Home's members and its skill library stay.</div>
+      <div className="muted">Deletes all your robots, their conversations, files and memory, your memory files and usage, and starts a fresh Mr. Robot. Kept: your logins, your Provider accounts, your Hosts, the skill library and the Home settings.</div>
       <div><button type="button" className="button button-danger" onClick={() => setOpen(true)}>Reset everything…</button></div>
       {open ? (
         <ConfirmByName
           title="Reset everything"
           name={me.name}
           goes="All your robots, conversations, robot files, memory files and usage are deleted. A fresh Mr. Robot starts."
-          stays="Logins, providers, computers, members and the skill library stay."
+          stays="Kept: logins, Provider accounts, Hosts, the skill library and Home settings."
           action="Reset everything"
           onCancel={() => setOpen(false)}
           onConfirm={async () => {

@@ -42,11 +42,12 @@ describe('connector skills (v1.5 ticket 07, cn-go3s, cn-6kh9)', () => {
 
     // A skill grant alone is not enough: the mBank skill rides on the Google connection.
     const skillOnly = await robotWith({ tools: ['skills'], skills: ['mbank-notifications'], connections: [] })
-    expect(await offered(skillOnly)).not.toContain('mbank-notifications')
+    // The runtime section names the item at its level; the skill itself (its description in the skill catalog) is not offered.
+    expect(await offered(skillOnly)).not.toContain('Report mBank balance')
 
     const banker = await robotWith({ tools: [], skills: [], connections: [gmail.id] })
     const request = await offered(banker)
-    expect(request).toContain('mbank-notifications')
+    expect(request).toContain('Report mBank balance')
     expect(request).toContain('google-workspace')
     expect(request).not.toContain('slack-workspace')
   })

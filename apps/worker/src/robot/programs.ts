@@ -84,7 +84,7 @@ export interface RobotPlatformShape {
   setAlarm(at: number | null): Effect.Effect<void>
   /** Write the Muse persona files into a new Workspace (robot-om9f). */
   seedWorkspace(): Effect.Effect<void>
-  /** ctx.schedule over the Routine table: DSH's records, stored here, fired by the alarm. */
+  /** The Routine rules over the Routine table: records stored here, fired by the alarm. */
   schedule(): Effect.Effect<AlarmSchedule>
   /** A Turn is running or about to run. */
   working(): Effect.Effect<boolean>
@@ -215,8 +215,8 @@ export interface RoutineInput {
 const inZone = <T extends object | undefined>(value: T, timeZone: string): T =>
   (value !== undefined && typeof value === 'object' && !('time_zone' in value) ? { ...value, time_zone: timeZone } : value)
 
-/** Create or edit a Routine of this Robot for another Robot (cd-n9pi): DSH's own rules and this Robot's limits apply. */
-export const setRoutine = (input: RoutineInput, by: string) => Effect.gen(function* () {
+/** Create or edit a Routine of this Robot, by this Robot itself or (with `by`) for another Robot (cd-n9pi); one set of rules and limits applies. */
+export const setRoutine = (input: RoutineInput, by?: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
@@ -236,7 +236,7 @@ export const setRoutine = (input: RoutineInput, by: string) => Effect.gen(functi
   if (input.id === undefined) {
     if (input.title === undefined || input.prompt === undefined || given.length === 0) return yield* invalid('a new Routine needs title, prompt and one timing (at, after_seconds, every_seconds, daily, weekly or cron)')
     const record = yield* Effect.tryPromise({ try: () => schedule.create(current.liveSessionId, { title: input.title!, prompt: input.prompt!, ...timing } as ScheduleCreateRequest), catch: failed })
-    routineCard(store, current.liveSessionId, { kind: 'routine', action: 'created', name: record.title, by })
+    if (by !== undefined) routineCard(store, current.liveSessionId, { kind: 'routine', action: 'created', name: record.title, by })
     yield* platform.changed()
     return routineView(current.id, store.routine(record.id)!, store.routineRuns(record.id))
   }
@@ -258,7 +258,7 @@ export const setRoutine = (input: RoutineInput, by: string) => Effect.gen(functi
     return yield* (code === 'schedule_not_found' ? notFound(`no Routine ${input.id}`) : invalid('message' in result ? String(result.message) : `the Routine could not be changed (${code}); it may have ended`))
   }
   const saved = store.routine(row.id)!
-  if (result.updated) routineCard(store, current.liveSessionId, { kind: 'routine', action: 'updated', name: result.record.title, by })
+  if (result.updated && by !== undefined) routineCard(store, current.liveSessionId, { kind: 'routine', action: 'updated', name: result.record.title, by })
   yield* platform.changed()
   return routineView(current.id, saved, store.routineRuns(saved.id))
 })
@@ -580,7 +580,31 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
 // ------------------------------------------------------------------ proposals and the owner's answers (robot-cobv, robot-vy9z)
 
 export function proposalView(row: ProposalRow): ProposalView {
-  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill, ...(row.review === undefined ? {} : { review: row.review }), ...(row.thread === undefined ? {} : { thread: row.thread }) }
+  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill, ...(row.review === undefined ? {} : { review: row.review }), ...(row.thread === undefined ? {} : { thread: row.thread }), ...(row.help === undefined ? {} : { help: row.help }), ...(row.toolCall === undefined ? {} : { toolCall: row.toolCall }) }
+}
+
+/** Who answers an Ask. */
+export type Answerer = 'owner' | 'mr-robot'
+
+/**
+ * The only Asks Mr. Robot answers: requests for help (sk-gag7). Every other Ask is the owner's alone; consent to
+ * a tool call above all (sk-iis1). A list of what he may answer, not of what he may not: a new kind of Ask is the owner's
+ * until someone decides otherwise.
+ */
+const MR_ROBOT_ASKS: ReadonlySet<ProposalView['kind']> = new Set(['help'])
+
+/** Whether this answerer may answer an Ask of this kind. */
+export function mayAnswer(kind: ProposalView['kind'], by: Answerer): boolean {
+  return by === 'owner' || MR_ROBOT_ASKS.has(kind)
+}
+
+/** What wakes the Robot after its owner answered a tool-call Ask; the Turn runs an approved call first (robot.ts). */
+export interface ToolCallAnswerWake {
+  readonly askId: string
+  readonly tool: string
+  readonly approved: boolean
+  /** The owner's optional text. */
+  readonly note: string | null
 }
 
 function approvedNote(proposal: ProposalRow): string {
@@ -637,6 +661,9 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
     case 'thread':
     case 'takeover':
     case 'review':
+    case 'help':
+    // An approved tool call runs in the Turn its answer starts, inside the Robot's composition (robot.ts).
+    case 'tool-call':
       return
     case 'member-file': {
       if (proposal.file === null) return
@@ -650,7 +677,7 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
 
 export type AnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
-  | { readonly ok: false; readonly reason: 'stale' | 'not-found' }
+  | { readonly ok: false; readonly reason: 'stale' | 'not-found' | 'not-yours' }
 
 /**
  * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
@@ -674,11 +701,13 @@ const threadAnswered = (proposal: ProposalRow, approved: boolean) => Effect.gen(
   if (told._tag === 'Failure') store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), `Thread "${ask.topic}": ${String(told.failure)}`, Date.now())
 })
 
-export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[], scope?: string) => Effect.gen(function* () {
+export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[], scope?: string, extra: { readonly note?: string; readonly by?: Answerer } = {}) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const pending = store.proposal(proposalId)
   if (pending === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
+  if (!mayAnswer(pending.kind, extra.by ?? 'owner')) return { ok: false, reason: 'not-yours' } as AnswerResult
+  if (pending.kind === 'tool-call') return yield* answerToolCall(pending, revision, approve, extra.note)
   // A review is one answer: the listed ids are approved, every other item is rejected (cd-ueft).
   const review = pending.kind === 'review' ? pending.review : undefined
   const ids = review?.items.map((item) => item.id) ?? []
@@ -702,6 +731,118 @@ export const answer = (proposalId: string, revision: number, approve: boolean, a
     },
   })
   return { ok: true, proposal: proposalView(answered) } as AnswerResult
+})
+
+/**
+ * The owner's answer to a tool-call Ask (sk-ed7r, sk-fx6q): one answer per Ask, compare-and-swap like every
+ * other. Approval wakes the Robot, whose Turn runs the stored call once and gets its result; rejection wakes it
+ * with the owner's reason. Nothing is remembered: the next call of the tool asks again.
+ */
+const answerToolCall = (pending: ProposalRow, revision: number, approve: boolean, note: string | undefined) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const text = note?.trim() ?? ''
+  const answered = store.answerProposal(pending.id, revision, approve, Date.now(), undefined, undefined, text === '' ? undefined : text)
+  if (answered === undefined) return { ok: false, reason: 'stale' } as AnswerResult
+  const tool = answered.toolCall?.tool ?? 'the tool'
+  yield* platform.changed()
+  const wakeup: ToolCallAnswerWake = { askId: answered.id, tool, approved: approve, note: text === '' ? null : text }
+  yield* wake({
+    kind: 'platform',
+    sender: { kind: 'platform' },
+    text: approve
+      ? (text === '' ? '' : `Your owner's note: ${text}`)
+      : `The call did not run.${text === '' ? ' Your owner gave no reason.' : ''} Do not repeat it unless your owner asks; tell them in one line what you do instead.`,
+    payload: { summary: `${approve ? 'Approved' : 'Rejected'}: ${tool}`, toolCallAnswer: wakeup },
+  })
+  return { ok: true, proposal: proposalView(answered) } as AnswerResult
+})
+
+/** Who answers a help Ask: the owner (by name) or Mr. Robot (by his configured name). */
+export type HelpAnswerer = { readonly by: 'owner' | 'mr-robot'; readonly name: string }
+
+export type HelpAnswerResult =
+  | { readonly ok: true; readonly proposal: ProposalView }
+  | { readonly ok: false; readonly reason: 'not-found' | 'empty' }
+  /** The Ask is of another kind: help_answer and the help route answer requests for help only (sk-iis1). */
+  | { readonly ok: false; readonly reason: 'not-help'; readonly kind: ProposalView['kind'] }
+  /** A closed request takes no second answer; the owner alone may answer once more after Mr. Robot (sk-q86i). */
+  | { readonly ok: false; readonly reason: 'closed'; readonly answeredBy: 'owner' | 'mr-robot' | 'none' }
+
+/**
+ * Answer a help Ask (sk-fcr1, sk-gag7): the first answer closes the request and wakes the Robot with a labelled reply.
+ * After Mr. Robot answered, the owner may answer once more: that is delivered as a new labelled Wake-up and kept
+ * beside his answer (sk-q86i). Any other later answer is refused. Mr. Robot's answerer is checked against the Ask's kind.
+ */
+export const answerHelp = (requestId: string, text: string, answerer: HelpAnswerer) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const pending = store.proposal(requestId)
+  if (pending === undefined) return { ok: false, reason: 'not-found' } as HelpAnswerResult
+  if (pending.kind !== 'help' || pending.help === undefined || !mayAnswer(pending.kind, answerer.by)) return { ok: false, reason: 'not-help', kind: pending.kind } as HelpAnswerResult
+  if (text.trim() === '') return { ok: false, reason: 'empty' } as HelpAnswerResult
+  const override = pending.status !== 'open' && answerer.by === 'owner' && pending.help.answeredBy === 'mr-robot'
+  const answered = pending.status === 'open'
+    ? store.answerHelp(requestId, answerer.by, text, Date.now())
+    : override ? store.overrideHelp(requestId, text, Date.now()) : undefined
+  if (answered === undefined) return { ok: false, reason: 'closed', answeredBy: pending.help.answeredBy } as HelpAnswerResult
+  yield* platform.rearm()
+  yield* platform.changed()
+  yield* wake({
+    kind: 'platform',
+    sender: { kind: 'platform' },
+    text: override ? `This replaces Mr. Robot's answer where the two differ.\n${text}` : text,
+    payload: {
+      summary: override ? `${answerer.name} answered the request for help, after Mr. Robot` : `${answerer.name} answered the request for help`,
+      helpAnswer: { requestId, from: answerer.name, ...(override ? { afterMrRobot: true } : {}) },
+    },
+  })
+  return { ok: true, proposal: proposalView(answered) } as HelpAnswerResult
+})
+
+/** What wakes Mr. Robot when a request for help stays open: the Robot, the request and how to answer it (sk-35i9, sk-myhb). */
+export function escalationText(robot: { readonly id: string; readonly name: string }, request: { readonly id: string; readonly urgent: boolean; readonly doing: string; readonly tried: string; readonly need: string }): string {
+  return [
+    request.urgent
+      ? `The Robot "${robot.name}" (${robot.id}) asks for help and marked it urgent. Request ${request.id}.`
+      : `The Robot "${robot.name}" (${robot.id}) asked for help and its owner has not answered for 30 minutes. Request ${request.id}.`,
+    `Doing: ${request.doing}`,
+    `Tried: ${request.tried}`,
+    `Needs: ${request.need}`,
+    'Read what you need to answer with robot_conversation, robot_files, robot_file_read and robot_settings. Then answer with help_answer (robot_id, request_id, text), in your owner\'s language. If you cannot answer, tell your owner in one line.',
+  ].join('\n')
+}
+
+/**
+ * The alarm's escalation (sk-35i9, sk-myhb): a request for help still open after 30 minutes, or urgent, wakes the
+ * owner's Mr. Robot with the request. It happens once per request: the request is marked before Mr. Robot is told.
+ */
+export const escalateHelp = (now: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  if (current.status === 'deleted' || current.kind === 'mr-robot') return
+  for (const row of store.helpDue(now)) {
+    const help = row.help
+    if (help === undefined) continue
+    store.markHelpEscalated(row.id, now)
+    const told = yield* Effect.tryPromise({
+      try: async () => {
+        const chief = await platform.env.HOME.getByName(HOME_ID).mrRobotOf(current.ownerId)
+        if (chief === null) return false
+        await platform.env.ROBOT.getByName(chief).wake({
+          kind: 'platform',
+          sender: { kind: 'platform' },
+          text: escalationText({ id: current.id, name: current.identity.name }, { id: row.id, urgent: help.urgent, doing: help.doing, tried: help.tried, need: help.need }),
+          payload: { summary: `${current.identity.name} asks for help: ${help.need.slice(0, 100)}` },
+        })
+        return true
+      },
+      catch: (error) => error instanceof Error ? error.message : String(error),
+    }).pipe(Effect.result)
+    if (told._tag === 'Failure') console.warn('help request not escalated', { robot: current.id, request: row.id, reason: told.failure })
+  }
+  yield* platform.changed()
 })
 
 // ------------------------------------------------------------------ secrets (robot-0bde)
@@ -853,7 +994,7 @@ export const fireRoutines = (now: number) => Effect.gen(function* () {
   }
 })
 
-/** The next alarm: a heartbeat while work runs, the earliest Routine, outbox retry or screen check. */
+/** The next alarm: a heartbeat while work runs, the earliest Routine, outbox retry, screen check or screenshot sweep. */
 export const rearm = Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
@@ -862,13 +1003,17 @@ export const rearm = Effect.gen(function* () {
   const runnable = config.status === 'active' || config.status === 'setup'
   const outbox = store.sql.exec<{ at: number | null }>("SELECT MIN(next_attempt) AS at FROM outbox WHERE status = 'pending'").one().at
   const watch = store.get<number>('watch-next')
+  const sweep = store.get<number>('screens-sweep-next')
   const resume = store.get<number>('chain-resume-at')
+  const escalation = store.nextHelpEscalation()
   const candidates = [
+    ...(escalation === undefined ? [] : [escalation]),
     ...(resume === undefined ? [] : [resume]),
     ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) ? [Date.now() + HEARTBEAT_MS] : []),
     ...store.routines().flatMap((routine) => (routine.nextRun === null ? [] : [routine.nextRun])),
     ...(outbox === null ? [] : [outbox]),
     ...(watch === undefined ? [] : [watch]),
+    ...(sweep === undefined ? [] : [sweep]),
   ]
   yield* platform.setAlarm(candidates.length === 0 ? null : Math.min(...candidates))
 })

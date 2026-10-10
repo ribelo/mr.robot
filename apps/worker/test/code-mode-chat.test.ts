@@ -22,7 +22,7 @@ describe('the chat in code mode (the default)', () => {
     await testRobot(body.id).activateForTest()
     const program = [
       "await tools.react({ emoji: '👍' })",
-      "await tools.schedule_create({ title: 'Invoice check', prompt: 'Check invoices.', daily: { time: '09:00:00', time_zone: 'Europe/Warsaw' } })",
+      "await tools.routine_set({ title: 'Invoice check', prompt: 'Check invoices.', daily: { time: '09:00:00', time_zone: 'Europe/Warsaw' } })",
       "return await tools.propose_grants({ purpose: 'Read the web for prices', tools: ['web'] })",
     ].join('\n')
     scripts.set(body.id, [{ calls: [{ name: 'run_code', args: { code: program, description: 'Set things up' } }] }, { text: 'Done.' }])
@@ -33,7 +33,7 @@ describe('the chat in code mode (the default)', () => {
     expect(items.find((item) => item.kind === 'routine')).toMatchObject({ action: 'created', name: 'Invoice check' })
     expect(items.find((item) => item.kind === 'question')).toMatchObject({ proposal: { kind: 'grants', purpose: 'Read the web for prices' } })
     // One collapsed line for the program and the tools it called (react is shown as the 👍 instead).
-    expect(items.find((item) => item.kind === 'activity')).toMatchObject({ tools: ['code', 'schedule_create', 'propose_grants'] })
+    expect(items.find((item) => item.kind === 'activity')).toMatchObject({ tools: ['code', 'routine_set', 'propose_grants'] })
   })
 
   it('runs a program sent as one function expression (gpt-oss writes "async()=>{...}")', async () => {

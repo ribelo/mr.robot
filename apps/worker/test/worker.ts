@@ -144,6 +144,12 @@ export class Robot extends ProductionRobot {
     await this.ctx.storage.setAlarm(Date.now() - ms)
   }
 
+  /** Pretend `ms` passed since the Robot asked for help: open requests move into the past and the alarm comes due (v1.11 ticket 07). */
+  async backdateHelpForTest(ms: number): Promise<void> {
+    this.ctx.storage.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.help.created', json_extract(payload, '$.help.created') - ?) WHERE kind = 'help' AND status = 'open'", ms)
+    await this.ctx.storage.setAlarm(Date.now() - 1)
+  }
+
   /** Put a message in the outbox without delivering it (as if the DO died right after writing). */
   async outboxOnlyForTest(to: string, text: string, key: string): Promise<string> {
     const config = this.store.requireConfig()
@@ -156,7 +162,23 @@ export class Robot extends ProductionRobot {
     return id
   }
 
-  /** A PNG screenshot in the Workspace, as a Turn with the browser leaves one. */
+  /** As before the migration ran: the memory/bank clean-up has not been done. */
+  async forgetBankMigrationForTest(): Promise<void> {
+    this.store.delete('bank-retired')
+  }
+
+  /** The screenshot sweep is due now (and the alarm with it). */
+  async sweepDueForTest(): Promise<void> {
+    this.store.set('screens-sweep-next', 1)
+    await this.ctx.storage.setAlarm(Date.now() + 1)
+  }
+
+  /** When the next screenshot sweep is due; null when none is planned. */
+  async sweepNextForTest(): Promise<number | null> {
+    return this.store.get<number>('screens-sweep-next') ?? null
+  }
+
+  /** A PNG screenshot (stored outside the Workspace), as a Turn with the browser leaves one. */
   async saveScreenForTest(): Promise<void> {
     await this.saveScreen(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 5, 0, 0, 0, 3, 32, 0, 255]))
   }

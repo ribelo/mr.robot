@@ -4,6 +4,7 @@ import type { RobotSummary } from '@mr-robot/protocol'
 import { listTime } from '../time.ts'
 import { Avatar } from './Avatar.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
+import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS, type DangerAction } from './danger-words.ts'
 import { keys, useCommand } from '../client/api-atoms.ts'
 
 export interface RobotListProps {
@@ -29,7 +30,7 @@ export interface RobotListProps {
 export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreate, onAdmin, onProfile, onListPref, onEditProfile, onAdvanced, onFiles, meId, onRemoved }: RobotListProps) {
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<string>()
-  const [danger, setDanger] = useState<{ robot: RobotSummary; action: 'delete' | 'clear' }>()
+  const [danger, setDanger] = useState<{ robot: RobotSummary; action: DangerAction }>()
   const command = useCommand()
   const [showHidden, setShowHidden] = useState(false)
   const matching = robots.filter((robot) => robot.identity.name.toLowerCase().includes(query.toLowerCase()))
@@ -56,7 +57,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
           onEditProfile={() => { setMenu(undefined); onEditProfile(robot.id) }}
           onAdvanced={() => { setMenu(undefined); onAdvanced(robot.id) }}
           onFiles={() => { setMenu(undefined); onFiles(robot.id) }}
-          {...(meId !== undefined && robot.ownerId === meId ? { onDanger: (action: 'delete' | 'clear') => { setMenu(undefined); setDanger({ robot, action }) } } : {})}
+          {...(meId !== undefined && robot.ownerId === meId ? { onDanger: (action: DangerAction) => { setMenu(undefined); setDanger({ robot, action }) } } : {})}
         />
       ) : null}
     </li>
@@ -76,17 +77,30 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
             return exit
           }}
         />
+      ) : danger.action === 'start-over' ? (
+        <ConfirmByName
+          title={`Start ${danger.robot.identity.name} over`}
+          name={danger.robot.identity.name}
+          goes={START_OVER_GOES}
+          stays={START_OVER_STAYS}
+          action="Start over"
+          onCancel={() => setDanger(undefined)}
+          onConfirm={async () => {
+            const exit = await command((api) => api.startOver(danger.robot.id, danger.robot.identity.name), [keys.robots, keys.robot(danger.robot.id), keys.files(danger.robot.id)])
+            if (exit._tag === 'Success') { setDanger(undefined); onRemoved?.(danger.robot.id, false) }
+            return exit
+          }}
+        />
       ) : (
         <ConfirmByName
           title={`Clear ${danger.robot.identity.name}'s history`}
           name={danger.robot.identity.name}
-          goes="The conversation and its history are deleted; the robot starts a fresh conversation."
-          stays="Its settings, grants, routines and files stay."
+          goes={CLEAR_GOES}
+          stays={CLEAR_STAYS}
           action="Clear history"
-          option={{ label: 'Also clear its memory', note: 'MEMORY.md, the memory bank and daily notes go back to empty.' }}
           onCancel={() => setDanger(undefined)}
-          onConfirm={async (memory) => {
-            const exit = await command((api) => api.clearHistory(danger.robot.id, danger.robot.identity.name, memory), [keys.robots, keys.robot(danger.robot.id), keys.files(danger.robot.id)])
+          onConfirm={async () => {
+            const exit = await command((api) => api.clearHistory(danger.robot.id, danger.robot.identity.name), [keys.robots, keys.robot(danger.robot.id), keys.files(danger.robot.id)])
             if (exit._tag === 'Success') { setDanger(undefined); onRemoved?.(danger.robot.id, false) }
             return exit
           }}
@@ -128,7 +142,7 @@ function RowMenu({ robot, onClose, onListPref, onEditProfile, onAdvanced, onFile
   onEditProfile: () => void
   onAdvanced: () => void
   onFiles: () => void
-  onDanger?: (action: 'delete' | 'clear') => void
+  onDanger?: (action: DangerAction) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -152,6 +166,7 @@ function RowMenu({ robot, onClose, onListPref, onEditProfile, onAdvanced, onFile
         <>
           <hr />
           <button type="button" role="menuitem" className="danger" onClick={() => onDanger('clear')}>Clear history…</button>
+          <button type="button" role="menuitem" className="danger" onClick={() => onDanger('start-over')}>Start over…</button>
           {robot.kind === 'mr-robot' ? null : <button type="button" role="menuitem" className="danger" onClick={() => onDanger('delete')}>Delete robot…</button>}
         </>
       )}

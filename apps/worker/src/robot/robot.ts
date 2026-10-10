@@ -7,11 +7,12 @@
  * armed while it runs; if the DO dies mid-Turn, the alarm brings it back and the
  * interrupted Turn resumes from the last persisted event.
  */
-import { workspacePrefix } from '../workspace/workspace.ts'
+import { clearWorkspace } from '../workspace/workspace.ts'
+import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCREEN_SWEEP_EVERY_MS, sweepScreenshots } from '../workspace/screens.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
-import { LlmError, type LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { LlmError, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {
@@ -50,6 +51,7 @@ import type {
 } from '@mr-robot/protocol'
 import { isToolGroup } from '../agent/catalog.ts'
 import { composeScoped, type Composition } from '../agent/compose.ts'
+import { askGate, bothItems, fixedItems, NO_ITEMS, type AskGateHost, type GrantItem, type ItemsOf, type ToolCallRequest, type ToolItems } from '../agent/ask-gate.ts'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
@@ -61,9 +63,9 @@ import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platfor
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf } from './chain.ts'
 import type { ChainEntry, ProviderView } from '@mr-robot/protocol'
-import { usableLevel, usableNames } from '@mr-robot/protocol'
+import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
-import { wakeupMessage, type ThreadWake } from '../agent/sources.ts'
+import { wakeupMessage, type HelpAnswerWake, type ThreadWake } from '../agent/sources.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
@@ -72,7 +74,7 @@ import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent, typ
 import { PwaChannel } from '../channels/pwa.ts'
 import { rememberIdempotencyKey, WebhookChannel, webhookText } from '../channels/webhook.ts'
 import { DiscordChannel } from '../channels/discord.ts'
-import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
+import { backendLabel, browserCost, driverFor, hostIdOf, isHostBackend } from '../browser/backends.ts'
 import { containerOpenStages } from '../browser/driver.ts'
 import { mount, type Mount } from '../plugins/define.ts'
 import { Memory, sharedFileEdit, type MemoryHost, type SharedFile } from '../plugins/memory.ts'
@@ -83,6 +85,7 @@ import { Credentials } from '../plugins/credentials.ts'
 import { Exa } from '../plugins/exa.ts'
 import { Files } from '../plugins/files.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
+import { Help } from '../plugins/help.ts'
 import { Host } from '../plugins/host.ts'
 import { connectorCapability } from '../plugins/connector.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
@@ -97,6 +100,7 @@ import { Robots } from '../plugins/robots.ts'
 import { Deputy } from '../plugins/deputy.ts'
 import * as DeputyPrograms from './deputy.ts'
 import { Routines } from '../plugins/routines.ts'
+import { routinesHost } from './routines-host.ts'
 import { Setup } from '../plugins/setup.ts'
 import { Skills } from '../plugins/skills.ts'
 import { Web } from '../plugins/web.ts'
@@ -105,7 +109,7 @@ import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
-import { ROBOT_FILES } from '../workspace/templates.ts'
+import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, type WorkspaceShape } from '../workspace/workspace.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
@@ -119,9 +123,9 @@ import * as Views from './views.ts'
 import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
-import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
-export type { AnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
-import { RobotStore, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
+import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
+export type { AnswerResult, HelpAnswerer, HelpAnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
+import { RobotStore, storedToolCall, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
 export { DEFAULT_CONTEXT_BUDGET } from './programs.ts'
 
@@ -142,6 +146,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private knownHosts: HostView[] = []
   /** The owner's usable connections and the Home's plugin switches, refreshed with the reach (v1.5). */
   private knownConnections: ConnectionView[] = []
+  /** What this Robot's owner can grant it, read at the start of each Turn: the items its levels are listed over. */
+  private knownCatalog: SettingsCatalog | undefined
   private pluginsOn: Record<string, boolean> = {}
   /** The kind of the wake-up the running Turn serves. */
   private currentWakeup: string | undefined
@@ -151,6 +157,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private secretValues: Array<readonly [string, string]> = []
   /** Secret values fetched during the running Turn; redacted from everything stored. */
   private turnSecrets: Array<readonly [string, string]> = []
+  /** Calls the platform runs because their owner approved them (sk-ed7r): they pass the ask gate once. */
+  private readonly approvedCalls = new Set<string>()
   /** backend|host pairs that showed a block page in the running Turn. */
   private readonly blockedThisTurn = new Set<string>()
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
@@ -232,22 +240,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- deletion (v1.3 ticket 06)
 
-  /** Delete this Robot for good (pl-3uoy): its storage, alarm, browser and Workspace files. No undo. */
-  async destroy(): Promise<void> {
-    const id = this.store.config()?.id
+  /**
+   * Delete this Robot for good (pl-3uoy): its storage, alarm, browser, Workspace files and screenshots. No undo.
+   * The files go by the id the Home passes, not by this Robot's own config: a Robot whose storage is already
+   * gone (deleted before v1.3) still loses its files (sk-44d5).
+   */
+  async destroy(robotId: string): Promise<void> {
     await this.releaseComposition().catch(() => undefined)
     await this.closeBrowser().catch(() => undefined)
     for (const socket of this.ctx.getWebSockets()) {
       try { socket.close(1000, 'robot deleted') } catch { /* closing */ }
     }
-    if (id !== undefined) {
-      let cursor: string | undefined
-      do {
-        const page = await this.env.FILES.list({ prefix: workspacePrefix(id), ...(cursor === undefined ? {} : { cursor }) })
-        if (page.objects.length > 0) await this.env.FILES.delete(page.objects.map((object) => object.key))
-        cursor = page.truncated ? page.cursor : undefined
-      } while (cursor !== undefined)
-    }
+    await clearWorkspace(this.env.FILES, robotId)
+    await deleteScreenshots(this.env.FILES, robotId)
     await this.ctx.storage.deleteAlarm()
     await this.ctx.storage.deleteAll()
     this.store.prepare()
@@ -264,9 +269,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * Start the Conversation over (pl-05eu, pl-y228): a new session, without the old log, notices,
-   * rewinds or queued wake-ups. Configuration, routines and grants stay; memory too unless asked.
+   * rewinds or queued wake-ups. Configuration, routines, grants and every Workspace file stay (v1.11, sk-8won).
    */
-  async clearHistory(memory: boolean): Promise<void> {
+  async clearHistory(): Promise<void> {
     if (this.store.activeTurn() !== undefined) throw new Error('the Robot is working; wait for it to finish, then clear')
     await this.releaseComposition()
     const sql = this.ctx.storage.sql
@@ -277,12 +282,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.abandonRoutineRuns(Date.now())
     for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen']) this.store.delete(key)
     this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
-    if (memory) {
-      const ws = this.workspace
-      const notes = await this.run(ws.list('memory')).catch(() => [])
-      for (const note of notes) if (/^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(note.path)) await this.run(ws.remove(note.path)).catch(() => undefined)
-      for (const [path, content] of Object.entries(ROBOT_FILES)) if (path === 'MEMORY.md' || path.startsWith('memory/')) await this.run(ws.write(path, content))
-    }
+    await this.changed()
+  }
+
+  /**
+   * Start over (sk-8won): clear the history, then reset the whole Workspace to the templates. Grants, Routines,
+   * Connections and settings stay. The product docs are not Workspace objects, so they stay too. The
+   * screenshots go with the Conversation that showed them.
+   */
+  async startOver(): Promise<void> {
+    await this.clearHistory()
+    await clearWorkspace(this.env.FILES, this.store.requireConfig().id)
+    await deleteScreenshots(this.env.FILES, this.store.requireConfig().id)
+    this.store.delete('screens-sweep-next')
+    await this.seedWorkspace()
+    await this.rearm()
     await this.changed()
   }
 
@@ -324,7 +338,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const identity = this.providerIdentity(config)
     const sections = [
       ...(identity === null ? [] : [{ name: 'Provider identity', text: identity }]),
-      { name: 'Platform', text: platformPrompt({ config, ownerName: owner.name, afterProviderIdentity: identity !== null }) },
+      { name: 'Platform', text: platformPrompt({ config, ownerName: owner.name, afterProviderIdentity: identity !== null, ...this.capabilityInput() }) },
+      // The rules each mounted capability adds, which reach the model as their own sections (sk-xsat).
+      ...this.mounts(config).flatMap(({ plugin, config: options }) => {
+        const text = plugin.rules(options as never)
+        return text === '' ? [] : [{ name: plugin.name.replace(/^mr-robot-/, 'mr-robot:'), text }]
+      }),
     ]
     if (config.status === 'setup') sections.push({ name: 'Setup interview', text: setupPrompt(owner.name, this.store.get<string>('brief') ?? null) })
     // The shared-memory tools are off during setup (mounts()).
@@ -338,15 +357,35 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Resolves once no Turn is running and nothing runnable is queued. */
   async settled(): Promise<void> {
-    while (this.pumping !== undefined) await this.pumping
+    while (this.alarming !== undefined || this.pumping !== undefined) {
+      if (this.alarming !== undefined) await this.alarming
+      if (this.pumping !== undefined) await this.pumping
+    }
   }
 
+  /** The alarm handler in flight, so settled() also waits for Wake-ups it is about to queue. */
+  private alarming: Promise<void> | undefined
+
   override async alarm(): Promise<void> {
+    const run = this.runAlarm()
+    this.alarming = run
+    try {
+      await run
+    } finally {
+      if (this.alarming === run) this.alarming = undefined
+    }
+  }
+
+  private async runAlarm(): Promise<void> {
     const config = this.store.config()
     if (config !== undefined && config.status !== 'deleted') await this.fireRoutines(Date.now())
+    // Due Routines start at once; housekeeping below must not delay their Turns.
+    if (this.store.pendingWakeups() > 0) this.drain()
     if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
+    if (config !== undefined && config.status !== 'deleted') await this.sweepScreens(Date.now()).catch((error: unknown) => console.warn('screenshots not swept', error))
     if (config !== undefined) await this.deliverOutbox()
     if (config !== undefined && config.status !== 'deleted') this.resumeChain(Date.now())
+    if (config !== undefined && config.status !== 'deleted') await this.escalateHelp(Date.now()).catch((error: unknown) => console.warn('help not escalated', error))
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
   }
@@ -364,7 +403,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  /** ctx.schedule over the routine table: DSH's records, stored here, fired by the alarm. */
+  /** The Routine rules (creation, limits, edits) over the routine table; the alarm fires what it stores. */
   private schedule(): AlarmSchedule {
     const store = this.store
     return new AlarmSchedule({
@@ -420,24 +459,31 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async runTurn(wakeup: Wakeup, resuming: boolean): Promise<void> {
     this.currentWakeup = wakeup.kind
+    await this.tidyWorkspace().catch((error: unknown) => console.warn('workspace not tidied', error))
     // Hosts and Mr. Robot's reach decide which tools exist, so they are known before the composition.
     await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
     const { agent, ctx } = await this.agent()
     await this.refreshPersona()
     if (!resuming) {
+      // An approved tool call runs first, exactly as stored, and its result is what the Wake-up says (sk-ed7r).
+      const toolCallAnswer = wakeup.kind === 'platform' ? wakeup.payload['toolCallAnswer'] as ToolCallAnswerWake | undefined : undefined
+      const text = toolCallAnswer?.approved === true ? joinText(await this.runApprovedCall(ctx, toolCallAnswer.askId), wakeup.text) : wakeup.text
       const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
       this.store.beginTurn(wakeup.id, agent.session.id, startSeq, Date.now())
       this.store.set(`turn-start:${wakeup.id}`, startSeq)
       agent.followup(wakeupMessage({
         sender: wakeup.sender,
-        text: wakeup.text,
+        text,
+        ...(toolCallAnswer === undefined ? {} : { toolCallAnswer }),
         attachments: (wakeup.payload['attachments'] as Attachment[] | undefined) ?? [],
         ...optionalString(wakeup.payload, 'requestId'),
         ...optionalString(wakeup.payload, 'replyTo'),
         ...optionalString(wakeup.payload, 'replyHandle'),
         ...optionalString(wakeup.payload, 'summary'),
         ...(wakeup.payload['thread'] !== undefined && wakeup.kind === 'robot' ? { thread: wakeup.payload['thread'] as ThreadWake } : {}),
+        ...(wakeup.payload['helpAnswer'] !== undefined && wakeup.kind === 'platform' ? { helpAnswer: wakeup.payload['helpAnswer'] as HelpAnswerWake } : {}),
         ...optionalString(wakeup.payload, 'clientId'),
+        woke: { at: Date.now(), timeZone: this.store.requireConfig().timeZone },
       }))
     } else {
       agent.followup(wakeupMessage({
@@ -461,6 +507,47 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.afterTurn(wakeup)
     await this.rearm()
     await this.changed()
+  }
+
+  /**
+   * Run a tool call its owner approved (sk-ed7r, sk-fx6q): the stored tool and arguments, never
+   * regenerated, inside this composition, at most once. A restart during the call leaves its outcome
+   * unknown, and the Robot is told so instead of running it again.
+   */
+  private async runApprovedCall(ctx: Composition['ctx'], askId: string): Promise<string> {
+    const ask = this.store.proposal(askId)
+    const call = ask === undefined || ask.kind !== 'tool-call' || ask.status !== 'approved' ? undefined : storedToolCall(ask.payload)
+    if (call === undefined) return 'The approved call is no longer stored, so it did not run.'
+    const started = `tool-call-started:${askId}`
+    if (this.store.get(started) !== undefined) return 'The call was started before a platform restart; whether it finished is unknown. Check its effect before you do it again.'
+    this.store.set(started, Date.now())
+    const callId = `approved-${askId}`
+    this.approvedCalls.add(callId)
+    try {
+      const result = await ctx.tools.execute({ callId: ToolCallId(callId), name: call.tool, arguments: call.arguments, signal: new AbortController().signal })
+      if (result.isError) return `The call failed: ${result.error.message}`
+      return result.content.map((block) => (block.type === 'text' ? block.text : `[${block.type}]`)).join('\n')
+    } finally {
+      this.approvedCalls.delete(callId)
+    }
+  }
+
+  /** The ask gate of this Robot's tools (sk-hx8j): levels read live, Asks stored in its Conversation. */
+  private askGateHost(): AskGateHost {
+    return {
+      level: (item) => this.store.levelOf(item.kind, item.name),
+      askToolCall: (request) => this.askToolCall(request),
+      approved: (callId) => this.approvedCalls.has(callId),
+    }
+  }
+
+  /** Store one call of a tool under an item at ask as an Ask; the Robot is told to end its Turn. */
+  private askToolCall(request: ToolCallRequest): { askId: string } {
+    const config = this.store.requireConfig()
+    const proposal = this.propose('tool-call', `${request.tool}: ${request.reason}`, {
+      toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason: request.reason, items: request.items },
+    })
+    return { askId: proposal.id }
   }
 
   /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
@@ -834,7 +921,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // The bridge follows the adapter that runs this composition (sk-74ym); every text is read at each request.
     const afterProviderIdentity = prependedIdentity(adapter) !== null
     const prompt = [
-      ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), ownerName: owner.name, afterProviderIdentity }) })),
+      ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), ownerName: owner.name, afterProviderIdentity, ...this.capabilityInput() }) })),
       ...(config.status === 'setup' ? [{ name: 'setup', text: () => setupPrompt(owner.name, brief) }] : []),
     ]
     const scope = await Effect.runPromise(Scope.make())
@@ -925,22 +1012,25 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config.status === 'setup') {
       return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
-    mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
-    // Items at allow or ask are registered, deny items are not (sk-746n); ask behaves as allow until the ask-per-call wrapper.
+    mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }), ...(config.kind === 'mr-robot' ? [] : [mount(Help, { host: this })]), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
+    // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
     const grants = this.store.effectiveGrants()
     // Plugins the Home switched off are not mounted for anyone (cn-dbm9).
     const off = disabledToolGroups(this.pluginsOn)
     const granted = new Set(usableNames(grants.tools).filter(isToolGroup).filter((group) => !off.has(group)))
-    if (granted.has('files')) mounts.push(mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }))
-    if (granted.has('notify')) mounts.push(mount(Notify, { host: this }))
-    if (granted.has('secrets')) mounts.push(mount(Logins, { host: this, granted: usableNames(grants.secrets) }))
-    if (granted.has('messaging')) mounts.push(mount(Messaging, { host: this }))
-    if (granted.has('browser')) mounts.push(mount(Browser, { host: this }))
-    if (granted.has('robots') && config.kind === 'mr-robot') mounts.push(mount(Robots, { host: this }))
-    if (granted.has('deputy') && config.kind === 'mr-robot') mounts.push(mount(Deputy, { host: DeputyPrograms.deputyHost((program) => this.program(program)) }))
-    if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }))
-    if (granted.has('web')) mounts.push(mount(Web, {}))
-    if (granted.has('routines')) mounts.push(mount(Routines, { schedule: this.schedule() }))
+    const items = this.mountItems(grants)
+    const gate = (itemsOf: ItemsOf) => askGate(this.askGateHost(), itemsOf)
+    const group = (name: string): ItemsOf => () => fixedItems({ kind: 'tool', name })
+    if (granted.has('files')) mounts.push(mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }, gate(group('files'))))
+    if (granted.has('notify')) mounts.push(mount(Notify, { host: this }, gate(group('notify'))))
+    if (granted.has('secrets')) mounts.push(mount(Logins, { host: this, granted: usableNames(grants.secrets) }, gate(items.logins)))
+    if (granted.has('messaging')) mounts.push(mount(Messaging, { host: this }, gate(items.messaging)))
+    if (granted.has('browser')) mounts.push(mount(Browser, { host: this }, gate(items.browser)))
+    if (granted.has('robots') && config.kind === 'mr-robot') mounts.push(mount(Robots, { host: this }, gate(group('robots'))))
+    if (granted.has('deputy') && config.kind === 'mr-robot') mounts.push(mount(Deputy, { host: DeputyPrograms.deputyHost((program) => this.program(program)) }, gate(group('deputy'))))
+    if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }, gate((tool) => fixedItems({ kind: 'tool', name: tool.startsWith('exa_agent_') ? 'exa-agent' : 'exa' }))))
+    if (granted.has('web')) mounts.push(mount(Web, {}, gate(group('web'))))
+    if (granted.has('routines')) mounts.push(mount(Routines, { host: routinesHost((program) => this.program(program)) }, gate(group('routines'))))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
     const skillNames = () => this.heldSkills()
@@ -953,18 +1043,64 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
           local: () => this.localSkills(),
           localContent: (name) => this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null),
         },
-      }))
+      }, gate(items.skills(granted.has('skills')))))
     }
     // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
     const hostGrants = usableNames(grants.hosts)
     const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
-    if (names('files').length > 0 || names('shell').length > 0) mounts.push(mount(Host, { host: this, files: names('files'), shell: names('shell') }))
+    if (names('files').length > 0 || names('shell').length > 0) mounts.push(mount(Host, { host: this, files: names('files'), shell: names('shell') }, gate(items.hosts)))
     for (const [kind, plugin] of Object.entries(this.connectorPlugins()) as Array<[ConnectorKind, ConnectorPlugin]>) {
       if (this.pluginsOn[kind] === false) continue
       const accounts = this.grantedConnections(kind)
-      if (accounts.length > 0) mounts.push(mount(connectorCapability(kind), { plugin, host: this.connectorHost(kind, accounts) }))
+      // Each connector tool names the Connection a call acts on (connectors/connector.ts).
+      if (accounts.length > 0) mounts.push(mount(connectorCapability(kind), { plugin, host: this.connectorHost(kind, accounts) }, gate(() => NO_ITEMS)))
     }
     return mounts
+  }
+
+  /**
+   * The grant items the calls of each capability use beyond its tool group (sk-hx8j): a login by name,
+   * a recipient, the Host facet of a call or of the Host browser, a Home skill loaded by name.
+   */
+  private mountItems(grants: GrantSet): {
+    readonly logins: ItemsOf
+    readonly messaging: ItemsOf
+    readonly browser: ItemsOf
+    readonly skills: (group: boolean) => ItemsOf
+    readonly hosts: ItemsOf
+  } {
+    const tool = (name: string): GrantItem => ({ kind: 'tool', name })
+    const named = (kind: GrantItem['kind'], names: readonly string[], parameter: string): ToolItems => ({
+      possible: names.map((name) => ({ kind, name })),
+      used: async (args) => (typeof args[parameter] === 'string' ? [{ kind, name: args[parameter] }] : []),
+    })
+    const hostFacets = (facet: string) => usableNames(grants.hosts).filter((name) => name.endsWith(`:${facet}`)).map((name): GrantItem => ({ kind: 'host', name }))
+    const hostFacet = (facet: 'files' | 'shell'): ToolItems => ({
+      possible: hostFacets(facet),
+      used: async (args) => {
+        if (typeof args['host'] !== 'string') return []
+        // An unknown host is the tool's own error; the gate then has nothing to ask about.
+        const host = await this.resolveHost(args['host']).catch(() => undefined)
+        return host === undefined ? [] : [{ kind: 'host', name: `${host.id}:${facet}` }]
+      },
+    })
+    return {
+      logins: (name) => bothItems(fixedItems(tool('secrets')), name === 'login_fill' || name === 'secret_get' ? named('secret', usableNames(grants.secrets), 'name') : NO_ITEMS),
+      messaging: (name) => bothItems(fixedItems(tool('messaging')), name === 'robot_send' ? named('recipient', usableNames(grants.recipients), 'to') : NO_ITEMS),
+      browser: () => bothItems(fixedItems(tool('browser')), {
+        possible: hostFacets('browser'),
+        used: async () => {
+          const backend = await this.chosenBackend()
+          return isHostBackend(backend) ? [{ kind: 'host', name: `${hostIdOf(backend)}:browser` }] : []
+        },
+      }),
+      // The skills group covers every skill tool; loading a Home skill also uses that skill's item. Local skills are the Robot's own.
+      skills: (group) => (name) => bothItems(group ? fixedItems(tool('skills')) : NO_ITEMS, name === 'skill' ? {
+        possible: usableNames(grants.skills).map((skill): GrantItem => ({ kind: 'skill', name: skill })),
+        used: async (args) => (typeof args['name'] === 'string' && Object.hasOwn(grants.skills, args['name']) ? [{ kind: 'skill', name: args['name'] }] : []),
+      } : NO_ITEMS),
+      hosts: (name) => (name === 'host_run' ? hostFacet('shell') : name === 'host_read' || name === 'host_write' ? hostFacet('files') : NO_ITEMS),
+    }
   }
 
   // ---------------------------------------------------------------- connectors (v1.5)
@@ -1287,7 +1423,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  browserScreenshot(): Promise<{ path: string; image: ScreenshotImage }> {
+  browserScreenshot(): Promise<{ image: ScreenshotImage }> {
     return this.browsing(Browse.screenshot)
   }
 
@@ -1305,7 +1441,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Image bytes for a screenshot attachment id, for the model and the trajectory inspector. */
   async screenshotImage(attachmentId: string): Promise<{ mediaType: string; base64: string; body: ArrayBuffer } | undefined> {
     if (!attachmentId.startsWith('screen:') || attachmentId.includes('/')) return undefined
-    const file = await this.run(this.workspace.read(`screens/${attachmentId.slice('screen:'.length)}`))
+    const file = await readScreenshot(this.env.FILES, this.store.requireConfig().id, attachmentId.slice('screen:'.length))
     if (file === undefined) return undefined
     const bytes = new Uint8Array(file.body)
     let binary = ''
@@ -1322,14 +1458,33 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { ...observation, text: this.mask(observation.text), backend: backendLabel(this.sessionBackend(), this.knownHosts) }
   }
 
-  /** A screenshot becomes the panel's screen thumbnail (robot-ksvy). */
-  protected async saveScreen(png: Uint8Array): Promise<{ path: string }> {
+  /**
+   * A screenshot becomes the panel's screen thumbnail (robot-ksvy). It is stored apart from the Workspace
+   * (sk-m7t1) and swept after 7 days; the first one arms the daily sweep.
+   */
+  protected async saveScreen(png: Uint8Array): Promise<{ name: string }> {
     const at = Date.now()
-    const path = `screens/${new Date(at).toISOString().replace(/[:.]/g, '-')}.png`
-    await this.run(this.workspace.write(path, png, 'image/png'))
-    this.store.set('screen', { path, at })
+    const name = await saveScreenshot(this.env.FILES, this.store.requireConfig().id, png, at)
+    this.store.set('screen', { path: name, at })
+    if (this.store.get<number>('screens-sweep-next') === undefined) this.store.set('screens-sweep-next', at + SCREEN_SWEEP_EVERY_MS)
     this.broadcast({ type: 'screen' })
-    return { path }
+    return { name }
+  }
+
+  /** The alarm's daily sweep of screenshots older than 7 days; it rearms itself while any are left. */
+  private async sweepScreens(now: number): Promise<void> {
+    const due = this.store.get<number>('screens-sweep-next')
+    if (due === undefined || due > now) return
+    const left = await sweepScreenshots(this.env.FILES, this.store.requireConfig().id, now)
+    if (left > 0) this.store.set('screens-sweep-next', now + SCREEN_SWEEP_EVERY_MS)
+    else this.store.delete('screens-sweep-next')
+  }
+
+  /** The thumbnail's bytes, or undefined when there is no screen (or it was swept). */
+  async screenImage(): Promise<ArrayBuffer | undefined> {
+    const saved = this.store.get<{ path: string }>('screen')
+    if (saved === undefined) return undefined
+    return (await readScreenshot(this.env.FILES, this.store.requireConfig().id, bareScreenName(saved.path)))?.body
   }
 
   /** End of the Turn: save the login state and the last picture, then free the browser. */
@@ -1373,13 +1528,33 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       ws.stat(path).pipe(Effect.flatMap((existing): Effect.Effect<unknown, unknown> => existing === undefined ? ws.write(path, content) : Effect.void)), { concurrency: 4, discard: true }))
   }
 
+  /**
+   * Once per Robot, at the start of a Turn (sk-vhlb): the memory/bank files earlier versions seeded are removed
+   * when they still hold the template text; a file the Robot wrote into stays. A Robot that took screenshots
+   * before v1.11 gets its sweep armed, so the ones in its Workspace age out.
+   */
+  private async tidyWorkspace(): Promise<void> {
+    if (this.store.get('bank-retired') === undefined) {
+      const ws = this.workspace
+      for (const [path, template] of Object.entries(RETIRED_ROBOT_FILES)) {
+        if ((await this.run(ws.readText(path))) === template) await this.run(ws.remove(path))
+      }
+      this.store.set('bank-retired', true)
+    }
+    if (this.store.get('screen') !== undefined && this.store.get('screens-sweep-next') === undefined) {
+      this.store.set('screens-sweep-next', Date.now() + SCREEN_SWEEP_EVERY_MS)
+      await this.rearm()
+    }
+  }
+
   /** Mr. Robot's reach: every login and skill its owner can grant (rb-b0rs). */
   private async refreshReach(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
     ;[this.knownHosts, this.knownConnections, this.pluginsOn] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled()])
+    const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), config.kind === 'mr-robot' ? this.home().skills(config.ownerId) : Promise.resolve([])])
+    this.knownCatalog = catalog
     if (config.kind !== 'mr-robot') return
-    const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), this.home().skills(config.ownerId)])
     this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name), hosts: this.knownHosts.map((host) => host.id), connections: this.knownConnections.map((connection) => connection.id) })
   }
 
@@ -1411,9 +1586,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView {
-    const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind === 'review' ? false : kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
+    // Reviews, help requests and tool calls are each their own Ask: a new one never replaces an open one.
+    const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind === 'review' || kind === 'help' || kind === 'tool-call' ? false : kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
     this.ctx.waitUntil(this.changed())
-    this.ctx.waitUntil(this.notifyMembers('needs you', `${purpose}: waiting for your answer.`).catch(() => 0))
+    // A request for help falls due 30 minutes on, or at once when urgent: the alarm must know.
+    if (kind === 'help') this.ctx.waitUntil(this.rearm())
+    const body = kind === 'help' ? `asks for help: ${purpose}` : kind === 'tool-call' ? `wants to use ${purpose}` : `${purpose}: waiting for your answer.`
+    this.ctx.waitUntil(this.notifyMembers('needs you', body).catch(() => 0))
     return proposalView(row)
   }
 
@@ -1430,12 +1609,20 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
    * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
    */
-  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string): Promise<AnswerResult> {
-    return this.program(Programs.answer(proposalId, revision, approve, approved, scope))
+  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string): Promise<AnswerResult> {
+    return this.program(Programs.answer(proposalId, revision, approve, approved, scope, note === undefined ? {} : { note }))
   }
 
 
 
+
+  /**
+   * Answer a help Ask (need_help): the first answer closes it and wakes the Robot with a labelled reply.
+   * The owner's side calls this with their name; Mr. Robot's answer path calls it with 'mr-robot'.
+   */
+  answerHelp(requestId: string, text: string, answerer: HelpAnswerer): Promise<HelpAnswerResult> {
+    return this.program(Programs.answerHelp(requestId, text, answerer))
+  }
 
   /** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
   setRecipients(robotIds: readonly string[]): Promise<void> {
@@ -1700,7 +1887,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async completeHandBack(memberId: string): Promise<void> {
     const page = await this.page()
     this.store.set('browser-state', await page.exportState())
-    const { path } = await this.saveScreen(await page.screenshot())
+    await this.saveScreen(await page.screenshot())
     const takeover = this.store.get<TakeoverState>('takeover')
     this.store.delete('takeover')
     const running = this.screencast
@@ -1720,7 +1907,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       kind: 'takeover',
       sender: { kind: 'platform' },
       payload: { summary: `${member?.name ?? 'Your owner'} handed the browser back` },
-      text: `${member?.name ?? 'Your owner'} handed the browser back after "${takeover?.reason ?? 'the takeover'}". The page is now ${page.url()}; a screenshot of it is at ${path}. Observe the page before you continue.`,
+      text: `${member?.name ?? 'Your owner'} handed the browser back after "${takeover?.reason ?? 'the takeover'}". The page is now ${page.url()}. Observe the page before you continue.`,
     })
     await this.changed()
   }
@@ -1801,6 +1988,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
+
+  /** Requests for help that stayed open 30 minutes, or are urgent, go to the owner's Mr. Robot (sk-35i9, sk-myhb). */
+  private escalateHelp(now: number): Promise<void> {
+    return this.program(Programs.escalateHelp(now))
+  }
 
   /** Deliver pending outbox rows; a lost RPC is retried on the alarm, the recipient dedupes. */
   private deliverOutbox(): Promise<void> {
@@ -2045,7 +2237,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   async skillLibrary(): Promise<SkillLibraryRow[]> {
     const config = this.store.requireConfig()
-    return this.home().skillLibrary(config.ownerId, this.heldSkills(), config.kind === 'mr-robot')
+    return this.home().skillLibrary(config.ownerId, { id: config.id, held: this.heldSkills() }, config.kind === 'mr-robot')
   }
 
   async promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }> {
@@ -2092,7 +2284,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Every memory file in scope: the Home, the owner, and this Robot's own (pl-o3ck, pl-fkg7, pl-yqno). */
   async memoryFiles(): Promise<MemoryFile[]> {
     const config = this.store.requireConfig()
-    const own = [...PERSONA_FILES, 'memory/bank/experience.md', 'memory/bank/opinions.md', ...dailyNotePaths(Date.now(), config.timeZone)]
+    const own = [...PERSONA_FILES, ...dailyNotePaths(Date.now(), config.timeZone)]
     const [robotFiles, member, home] = await Promise.all([
       this.run(Effect.forEach(own, (path) => this.workspace.readText(path).pipe(Effect.map((content) => ({ scope: 'robot' as const, path, content: content ?? '' }))), { concurrency: 8 })),
       this.env.MEMBER.getByName(config.ownerId).files().catch(() => ({}) as Record<string, string>),
@@ -2257,6 +2449,22 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
+  /** Every grantable item with the level this Robot holds on it (sk-e1hh, sk-ixvp): the one list settings, my_capabilities and the prompt share. */
+  private capabilityItems(): CapabilityItem[] | undefined {
+    return this.knownCatalog === undefined ? undefined : capabilityItems(this.knownCatalog, this.store.effectiveGrants())
+  }
+
+  private capabilityInput(): { capabilities?: CapabilityItem[] } {
+    const items = this.capabilityItems()
+    return items === undefined ? {} : { capabilities: items }
+  }
+
+  /** The my_capabilities tool: the list as it is now, read fresh. */
+  async capabilities(): Promise<CapabilitiesView> {
+    await this.refreshReach()
+    return capabilitiesView(this.capabilityItems() ?? [])
+  }
+
   async settings(): Promise<RobotSettings> {
     await this.reachForView()
     return this.program(Programs.settings)
@@ -2284,10 +2492,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Filled by the browser and usage tickets. */
 
 
-  /** The latest screenshot's Workspace path (the thumbnail). */
-  screenPath(): string | null {
-    return this.store.get<{ path: string }>('screen')?.path ?? null
-  }
 
 
   /** Names of the tools the current composition registers (what the model may call). */
@@ -2407,6 +2611,11 @@ function formatBytes(bytes: number): string {
 function optionalString(payload: Record<string, unknown>, key: string): Record<string, string> {
   const value = payload[key]
   return typeof value === 'string' ? { [key]: value } : {}
+}
+
+/** Two texts as paragraphs; an empty one is left out. */
+function joinText(first: string, second: string): string {
+  return [first, second].filter((text) => text !== '').join('\n\n')
 }
 
 const MEDIA_TYPES: Record<string, string> = {

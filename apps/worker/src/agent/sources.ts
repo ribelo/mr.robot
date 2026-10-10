@@ -45,9 +45,72 @@ export interface WakeupMessageInput {
   readonly summary?: string
   /** A Member's message: the id the app sent it with, so the app can match its pending copy. */
   readonly clientId?: string
+  /** When the Robot woke and in which zone, for the time label every Wake-up carries; none leaves the label as it is. */
+  readonly woke?: { readonly at: number; readonly timeZone: string }
+  /** The platform message is the answer to a need_help request. */
+  readonly helpAnswer?: HelpAnswerWake
+  /** The platform message is the owner's answer to a tool-call Ask (sk-ed7r). */
+  readonly toolCallAnswer?: ToolCallAnswerLabel
 }
 
+/** The owner's answer to a tool-call Ask, as its label names it. */
+export interface ToolCallAnswerLabel {
+  readonly askId: string
+  readonly tool: string
+  readonly approved: boolean
+  readonly note: string | null
+}
+
+/** "[Your owner approved gmail_send (p-…)]" or "[Your owner rejected gmail_send (p-…): not now]". */
+export function toolCallAnswerLabel(answer: ToolCallAnswerLabel): string {
+  return answer.approved
+    ? `[Your owner approved ${answer.tool} (${answer.askId})]`
+    : `[Your owner rejected ${answer.tool} (${answer.askId})${answer.note === null ? '' : `: ${oneLine(answer.note)}`}]`
+}
+
+function platformLabel(input: WakeupMessageInput): string {
+  if (input.toolCallAnswer !== undefined) return toolCallAnswerLabel(input.toolCallAnswer)
+  if (input.helpAnswer === undefined) return '[Mr. Robot platform]'
+  // The owner answered once more after Mr. Robot did (sk-q86i).
+  return input.helpAnswer.afterMrRobot === true
+    ? `[Your owner answered your request ${input.helpAnswer.requestId} (after Mr. Robot)]`
+    : `[Answer to your request ${input.helpAnswer.requestId} from ${input.helpAnswer.from}]`
+}
+
+/** The answer to a Robot's need_help request: the request id and who answered ("Anna", "Mr. Robot"). */
+export interface HelpAnswerWake {
+  readonly requestId: string
+  readonly from: string
+  /** The owner's answer after Mr. Robot had answered: it overrides his. */
+  readonly afterMrRobot?: true
+}
+
+/** The local time of a Wake-up as the model reads it: "[Sat 2026-10-10 11:46 Europe/Warsaw]". */
+export function timeLabel(at: number, timeZone: string): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    .formatToParts(at).map((part) => [part.type, part.value]))
+  return `[${parts['weekday']} ${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']} ${timeZone}]`
+}
+
+/** The time label alone on the first line of a Member's message: the pattern the chat view drops. */
+export const MEMBER_TIME_LABEL = /^\[[A-Z][a-z]{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2} [^\]\n]+\]\n/
+
+/**
+ * A Wake-up as the model reads it: the label of its source (sourceMessage) with the local time in front.
+ * A Member's message has no label of its own, so its time is a line of its own; every other label gets
+ * the time on the same line, which keeps it one label line.
+ */
 export function wakeupMessage(input: WakeupMessageInput): UserMessage {
+  const message = sourceMessage(input)
+  if (input.woke === undefined) return message
+  const time = timeLabel(input.woke.at, input.woke.timeZone)
+  const [first, ...rest] = message.content
+  if (first?.type !== 'text') return message
+  const text = input.sender.kind === 'member' ? `${time}\n${first.text}` : `${time} ${first.text}`
+  return { ...message, content: [{ ...first, text }, ...rest] }
+}
+
+function sourceMessage(input: WakeupMessageInput): UserMessage {
   const { sender } = input
   const attachments = input.attachments ?? []
   const files = attachments.length === 0
@@ -92,7 +155,7 @@ export function wakeupMessage(input: WakeupMessageInput): UserMessage {
       })
     case 'platform':
       return createUserMessage({
-        content: [{ type: 'text', text: `[Mr. Robot platform]\n${input.text}` }],
+        content: [{ type: 'text', text: `${platformLabel(input)}\n${input.text}` }],
         source: { kind: 'platform', summary: input.summary ?? input.text.split('\n')[0]?.slice(0, 120) ?? '', form: 'notice' },
       })
   }

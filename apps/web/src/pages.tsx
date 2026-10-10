@@ -12,7 +12,7 @@ import { exitFailure } from './client/api-failure.ts'
 import { robotFeedAtom } from './client/robot-feed.ts'
 import { AtomView, renderResult } from './components/AtomView.tsx'
 import { Loading } from './components/States.tsx'
-import { go, type Route } from './route.ts'
+import { go, goBack, type Route } from './route.ts'
 import { AdvancedSettings } from './components/AdvancedSettings.tsx'
 import { Profile } from './components/Profile.tsx'
 import { Admin } from './components/Admin.tsx'
@@ -71,7 +71,7 @@ export function Pages({ route, me, robots }: { route: Route; me: Me; robots: rea
 function PageHead({ title, back }: { title: string; back: Route }) {
   return (
     <h1>
-      <button type="button" className="icon-button" aria-label="Back" onClick={() => go(back)}>‹</button>
+      <button type="button" className="icon-button" aria-label="Back" onClick={() => goBack(back)}>‹</button>
       {title}
     </h1>
   )
@@ -173,9 +173,14 @@ function AdvancedPage({ id }: { id: string }) {
             if (exitFailure(exit) === undefined) go({ page: 'home' })
             return exit
           }}
-          onClear={async (confirm, memory) => {
-            const exit = await command((api) => api.clearHistory(id, confirm, memory), [keys.robot(id), keys.robots, keys.files(id)])
+          onClear={async (confirm) => {
+            const exit = await command((api) => api.clearHistory(id, confirm), [keys.robot(id), keys.robots, keys.files(id)])
             if (exitFailure(exit) === undefined) setMessage('History cleared.')
+            return exit
+          }}
+          onStartOver={async (confirm) => {
+            const exit = await command((api) => api.startOver(id, confirm), [keys.robot(id), keys.robots, keys.files(id)])
+            if (exitFailure(exit) === undefined) setMessage('Started over.')
             return exit
           }}
         />

@@ -18,6 +18,7 @@ import {
   ApiKeyInput,
   HomeSettingsPatch,
   OAuthFinish,
+  HelpAnswer,
   ProposalAnswer,
   PushSubscriptionInput,
   ShareInput,
@@ -34,7 +35,7 @@ import { HOME_ID, type Env } from '../env.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import { modelRefusal } from '../robot/model-choice.ts'
-import type { AnswerResult } from '../robot/robot.ts'
+import type { AnswerResult, HelpAnswerResult } from '../robot/robot.ts'
 import { parseTimeZone } from '../robot/time-zone.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
 import { PLUGINS, pluginByName } from '../plugins/catalog.ts'
@@ -356,11 +357,9 @@ export const api = new Router<ApiContext>()
   }))
   .on('GET', '/api/robots/:id/screen', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
-    const path = yield* call(() => robot(c, id).screenPath())
-    if (path === null) return yield* Effect.fail(notFound('no screen yet'))
-    const file = yield* makeWorkspace(c.env.FILES, id).read(path).pipe(Effect.mapError(() => notFound('no screen yet')))
-    if (file === undefined) return yield* Effect.fail(notFound('no screen yet'))
-    return new Response(file.body, { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=31536000, immutable' } })
+    const body = yield* call(() => robot(c, id).screenImage())
+    if (body === undefined) return yield* Effect.fail(notFound('no screen yet'))
+    return new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=31536000, immutable' } })
   }))
   // ------------------------------------------------------------ Files view (v1.1 ticket 08)
   .on('GET', '/api/robots/:id/files', (c, { id }) => Effect.gen(function* () {
@@ -451,9 +450,16 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/robots/:id/proposals/:proposal', (c, { id, proposal }) => Effect.gen(function* () {
     yield* owner(c, id)
     const answer = yield* decodeBody(c.request, ProposalAnswer)
-    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved, answer.scope))
-    if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : notFound('no such proposal'))
+    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved, answer.scope, answer.note))
+    if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : result.reason === 'not-yours' ? forbidden('only the owner answers this Ask') : notFound('no such proposal'))
     return result.proposal
+  }))
+  .on('POST', '/api/robots/:id/help/:request', (c, { id, request }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const answer = yield* decodeBody(c.request, HelpAnswer)
+    const result = yield* call((): Promise<HelpAnswerResult> => robot(c, id).answerHelp(request, answer.text, { by: 'owner', name: c.member.name }))
+    if (result.ok) return result.proposal
+    return yield* Effect.fail(result.reason === 'not-found' || result.reason === 'not-help' ? notFound('no such request for help') : result.reason === 'closed' ? conflict('this request is already answered') : badRequest('the answer needs text'))
   }))
   .on('DELETE', '/api/robots/:id/routines/:routine', (c, { id, routine }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).removeRoutine(routine)))))
   .on('POST', '/api/robots/:id/pause', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).pause()))))
@@ -464,8 +470,14 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('POST', '/api/robots/:id/clear', (c, { id }) => Effect.gen(function* () {
-    const { confirm, memory } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String, memory: Schema.optional(Schema.Boolean) }))
-    yield* call(() => home(c.env).clearRobot(c.member.id, id, confirm, memory === true)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    // The old body had a `memory` flag; it is ignored now: Clear history keeps every file (sk-8won).
+    const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
+    yield* call(() => home(c.env).clearRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return { ok: true }
+  }))
+  .on('POST', '/api/robots/:id/start-over', (c, { id }) => Effect.gen(function* () {
+    const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
+    yield* call(() => home(c.env).startOverRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
   .on('POST', '/api/me/reset', (c) => Effect.gen(function* () {

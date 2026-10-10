@@ -446,7 +446,7 @@ export type RoutineView = typeof RoutineView.Type
 
 // ---------------------------------------------------------------- Grant proposals and questions
 
-export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover', 'review', 'thread'])
+export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover', 'review', 'thread', 'help', 'tool-call'])
 export type ProposalKind = typeof ProposalKind.Type
 
 /** A review Ask (cd-dt2x): a titled list of items the owner approves one by one or all at once. */
@@ -481,6 +481,49 @@ export const ThreadAsk = Schema.Struct({
 })
 export type ThreadAsk = typeof ThreadAsk.Type
 
+/**
+ * A help Ask (need_help): what the Robot is doing, what it tried, what it needs and whether it is urgent,
+ * when it asked, and who answered with what. `answeredBy` is none while the request is open. `escalated` says that
+ * Mr. Robot was woken with it; `override` is the owner's later answer on a request Mr. Robot had answered (sk-q86i).
+ */
+export const HelpAsk = Schema.Struct({
+  doing: Schema.String,
+  tried: Schema.String,
+  need: Schema.String,
+  urgent: Schema.Boolean,
+  created: Schema.Number,
+  answeredBy: Schema.Literals(['owner', 'mr-robot', 'none']),
+  answer: Schema.NullOr(Schema.String),
+  escalated: Schema.Boolean,
+  override: Schema.NullOr(Schema.String),
+})
+export type HelpAsk = typeof HelpAsk.Type
+
+/** One open request for help, as the Robot panel lists it (sk-fmvh); the id links to the card in the Conversation. */
+export const HelpRequestView = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  urgent: Schema.Boolean,
+  created: Schema.Number,
+  escalated: Schema.Boolean,
+})
+export type HelpRequestView = typeof HelpRequestView.Type
+
+/**
+ * A tool-call Ask (sk-hx8j): one call of a tool under an item at ask, stored exactly. The owner reads the
+ * Robot's name, the tool, its arguments and the Robot's reason; approval runs this stored call once.
+ * Argument values are JSON text (a string argument as itself), secrets masked in views.
+ */
+export const ToolCallAsk = Schema.Struct({
+  robot: Schema.String,
+  tool: Schema.String,
+  arguments: Schema.Array(Schema.Struct({ name: Schema.String, value: Schema.String })),
+  reason: Schema.String,
+  /** The owner's optional text with the answer (the reason of a rejection); null while open or when none was given. */
+  note: Schema.NullOr(Schema.String),
+})
+export type ToolCallAsk = typeof ToolCallAsk.Type
+
 export const ProposalView = Schema.Struct({
   id: Schema.String,
   kind: ProposalKind,
@@ -497,6 +540,10 @@ export const ProposalView = Schema.Struct({
   review: Schema.optional(ReviewView),
   /** Thread Ask: the Thread, its topic, and the scope the owner edits before approving. */
   thread: Schema.optional(ThreadAsk),
+  /** Help Ask: the Robot's request and, once answered, the answer. */
+  help: Schema.optional(HelpAsk),
+  /** Tool-call Ask: the stored call and, once answered, the owner's note. */
+  toolCall: Schema.optional(ToolCallAsk),
 })
 export type ProposalView = typeof ProposalView.Type
 
@@ -507,7 +554,13 @@ export const ProposalAnswer = Schema.Struct({
   approved: Schema.optional(Schema.Array(Schema.String)),
   /** Thread invitation only: the scope the owner approved ("in this Thread you may use: …"), stored with the answer. */
   scope: Schema.optional(Schema.String),
+  /** Tool-call Ask only: the owner's optional text, given to the Robot with the answer (why a call was rejected). */
+  note: Schema.optional(Schema.String),
 })
+
+/** The owner's text answer to a help Ask. */
+export const HelpAnswer = Schema.Struct({ text: Schema.String.check(Schema.isMinLength(1)) })
+export type HelpAnswer = typeof HelpAnswer.Type
 
 // ---------------------------------------------------------------- Threads (v1.9)
 
@@ -755,6 +808,8 @@ export const RobotPanel = Schema.Struct({
   takeover: Schema.NullOr(Schema.Struct({ reason: Schema.String, claimedBy: Schema.NullOr(Schema.String) })),
   /** Mr. Robot's open and closed Threads, newest first (ch-6fcp). */
   threads: Schema.optional(Schema.Array(ThreadView)),
+  /** Open requests for help, oldest first (sk-fmvh). */
+  help: Schema.optional(Schema.Array(HelpRequestView)),
 })
 export type RobotPanel = typeof RobotPanel.Type
 
@@ -1049,3 +1104,5 @@ export type SendMessage = typeof SendMessage.Type
 
 /** Rewind to an event, or to before a Turn (its message included). */
 export const RewindRequest = Schema.Struct({ atSeq: Schema.optional(Schema.Number), beforeTurn: Schema.optional(Schema.Number) })
+
+export * from './capabilities.ts'

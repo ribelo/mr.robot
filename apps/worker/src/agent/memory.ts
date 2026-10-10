@@ -22,7 +22,7 @@ export interface MemoryChange {
 }
 
 /** Broadest first: the Home, the owner, then the Robot's own files, daily notes last. */
-const ROBOT_ORDER = ['TOOLS.md', 'AGENTS.md', 'memory/bank/opinions.md', 'memory/bank/experience.md', 'MEMORY.md', 'IDENTITY.md', 'SOUL.md']
+const ROBOT_ORDER = ['TOOLS.md', 'AGENTS.md', 'MEMORY.md', 'IDENTITY.md', 'SOUL.md']
 const MEMBER_ORDER = ['memory/world.md', 'PROACTIVE_PREFERENCES.md', 'USER.md']
 
 function rank(file: MemoryFile): number {

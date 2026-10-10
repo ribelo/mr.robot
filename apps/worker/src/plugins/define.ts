@@ -14,6 +14,8 @@ export interface CapabilityPlugin<C> {
   readonly Config: z<C>
   /** The model-facing tools this plugin registers (for previews and the admin view). */
   readonly toolNames: (config: C) => readonly string[]
+  /** The standing rules it adds to the prompt (the "mr-robot:<name>" section); empty when it has none. */
+  readonly rules: (config: C) => string
   /**
    * DSH seam plugins this capability needs (fs, web, browser-use, skills, schedule), mounted at the
    * composition root: they provide services the capability's own context could not inject.
@@ -26,10 +28,15 @@ export interface CapabilityPlugin<C> {
 export interface Mount {
   readonly plugin: CapabilityPlugin<never>
   readonly config: unknown
+  /**
+   * Applied to every tool the plugin registers, its seams' DSH tools included (agent/compose.ts):
+   * the ask-per-call gate of the grant items the tools use (agent/ask-gate.ts, sk-hx8j).
+   */
+  readonly gate?: (tool: ToolDefinition) => ToolDefinition
 }
 
-export function mount<C>(plugin: CapabilityPlugin<C>, config: C): Mount {
-  return { plugin: plugin as unknown as CapabilityPlugin<never>, config }
+export function mount<C>(plugin: CapabilityPlugin<C>, config: C, gate?: (tool: ToolDefinition) => ToolDefinition): Mount {
+  return { plugin: plugin as unknown as CapabilityPlugin<never>, config, ...(gate === undefined ? {} : { gate }) }
 }
 
 export interface CapabilitySpec<C> {
@@ -51,6 +58,7 @@ export function capability<C>(spec: CapabilitySpec<C>): CapabilityPlugin<C> {
     inject: ['tools', 'systemPrompt'],
     Config: spec.Config,
     toolNames: (config) => [...(spec.tools?.(config) ?? []).map((tool) => tool.name), ...(spec.extraToolNames ?? [])],
+    rules: (config) => spec.prompt?.(config) ?? '',
     ...(spec.seams === undefined ? {} : { seams: spec.seams }),
     async apply(ctx, config) {
       for (const tool of spec.tools?.(config) ?? []) ctx.tools.register(tool)

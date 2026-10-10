@@ -17,6 +17,7 @@ import * as FetchHttpClient from 'effect/http/FetchHttpClient'
 import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import { tool } from '../agent/tools/define.ts'
+import { withCallItems, type GrantItem } from '../agent/ask-gate.ts'
 import type { ConnectionMeta } from '../member/connections.ts'
 
 /** A connection granted to this Robot, as its tools see it; no secrets. */
@@ -69,6 +70,8 @@ export interface ConnectorPlugin {
   tools(host: ConnectorHost): ToolDefinition[]
   /** The services a connection of this kind grants when it names none (a Discord bot: channels, messages, dms). */
   readonly defaultServices?: readonly string[]
+  /** The services a connection's stored list offers, as the accounts tool lists them: a service that covers others names them (Google's Drive covers Docs and Sheets). */
+  readonly listedServices?: (services: readonly string[]) => readonly string[]
   /** Standing rules for the model when the connector is mounted. */
   prompt?(host: ConnectorHost): string
 }
@@ -233,7 +236,9 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
     ? { account: { type: 'string', enum: accounts.map((account) => account.label), description: `Which account to act on: ${accounts.map((account) => `${account.label} = ${account.account}${account.isDefault ? ' (default)' : ''}`).join('; ')}.` }, ...spec.parameters.properties }
     : spec.parameters.properties
   const only = accounts[0]!
-  return tool<A & { account?: string }>({
+  // The grant items a call uses (sk-hx8j): the Connection it acts on, and its write grant for a write tool.
+  const itemsOf = (account: GrantedConnection): GrantItem[] => [{ kind: 'connection', name: account.id }, ...(spec.write === true ? [{ kind: 'connection' as const, name: `${account.id}:write` }] : [])]
+  return withCallItems(tool<A & { account?: string }>({
     name: spec.name,
     description: `${spec.description}${several ? '' : ` Acts on ${only.label === only.account ? only.label : `${only.label} (${only.account})`}.`}`,
     parameters: { properties, ...(spec.parameters.required === undefined ? {} : { required: [...spec.parameters.required] }) } as never,
@@ -251,6 +256,12 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
       if (failure._tag === 'ConnectorUnauthorized') await host.markStatus(picked.id, host.kind === 'google' ? 'needs-reconsent' : 'rejected', failure.message).catch(() => undefined)
       // A failure rejects (ts-jbep): the header keeps account and action in the Trajectory, the wording stays "Failed: …".
       throw new Error(`${header}\nFailed: ${describeConnectorFailure(failure)}${failure._tag === 'ConnectorUnauthorized' ? ' The owner sees this on the connection\'s row and can reconnect it there.' : ''}`)
+    },
+  }), {
+    possible: accounts.flatMap(itemsOf),
+    used: async (args) => {
+      const picked = pickAccount(accounts, typeof args['account'] === 'string' ? args['account'] : undefined, false)
+      return picked instanceof ConnectorRefused ? [] : itemsOf(picked)
     },
   })
 }
@@ -272,11 +283,11 @@ export function connectorTools(host: ConnectorHost, specs: ReadonlyArray<Connect
 }
 
 /** A tool listing the granted accounts of a connector, so the model knows what it can act on. */
-export function accountsTool(host: ConnectorHost, defaultServices: readonly string[] = []): ToolDefinition {
+export function accountsTool(host: ConnectorHost, defaultServices: readonly string[] = [], listedServices: (services: readonly string[]) => readonly string[] = (services) => [...services]): ToolDefinition {
   return tool<Record<string, never>>({
     name: `${host.kind}_accounts`,
     description: `List the ${host.kind} accounts granted to you: label, account, services, whether writing is granted, and the default.`,
     parameters: { properties: {} },
-    execute: async () => host.accounts.map(({ label, account, services, write, isDefault }) => ({ label, account, services: services.length === 0 ? [...defaultServices] : services, write, isDefault })),
+    execute: async () => host.accounts.map(({ label, account, services, write, isDefault }) => ({ label, account, services: listedServices(services.length === 0 ? defaultServices : services), write, isDefault })),
   })
 }

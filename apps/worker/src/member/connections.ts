@@ -40,6 +40,13 @@ type Row = {
   services: string; status: ConnectionStatus; status_note: string | null; meta: string; created_at: number
 }
 
+/** A Discord bot's label shows its id next to the name (sk-7dg7); the id is the bot's application id, kept in meta. */
+function shownLabel(row: Row): string {
+  if (row.kind !== 'discord') return row.label
+  const id = (JSON.parse(row.meta) as Record<string, unknown>)['applicationId']
+  return typeof id === 'string' && id !== '' ? `${row.label} (${id})` : row.label
+}
+
 export class ConnectionStore {
   constructor(
     private readonly sql: SqlStorage,
@@ -59,7 +66,7 @@ export class ConnectionStore {
 
   private view(row: Row): OwnConnection {
     return {
-      id: row.id, kind: row.kind, label: row.label, account: row.account, shared: row.shared === 1, isDefault: row.is_default === 1,
+      id: row.id, kind: row.kind, label: shownLabel(row), account: row.account, shared: row.shared === 1, isDefault: row.is_default === 1,
       services: JSON.parse(row.services) as string[], status: row.status, statusNote: row.status_note, createdAt: row.created_at,
       setupLink: typeof (JSON.parse(row.meta) as Record<string, unknown>)['setupLink'] === 'string' ? (JSON.parse(row.meta) as Record<string, string>)['setupLink']! : null,
       setupLabel: typeof (JSON.parse(row.meta) as Record<string, unknown>)['setupLabel'] === 'string' ? (JSON.parse(row.meta) as Record<string, string>)['setupLabel']! : null,

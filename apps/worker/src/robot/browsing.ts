@@ -14,8 +14,8 @@ export interface BrowsingShape {
   page(): Effect.Effect<BrowserPage>
   /** An observation with granted secrets masked. */
   observed(page: BrowserPage): Effect.Effect<Observation>
-  /** Save a screenshot in the Workspace as the Robot's screen. */
-  saveScreen(png: Uint8Array): Effect.Effect<{ path: string }>
+  /** Save a screenshot outside the Workspace as the Robot's screen; the name identifies it. */
+  saveScreen(png: Uint8Array): Effect.Effect<{ name: string }>
   /** Sites that blocked this browser backend during the current Turn (rb-kank). */
   readonly blockedThisTurn: Set<string>
 }
@@ -80,10 +80,9 @@ export const screenshot = Effect.gen(function* () {
   const browsing = yield* Browsing
   const page = yield* browsing.page()
   const png = yield* attempt(() => page.screenshot())
-  const { path } = yield* browsing.saveScreen(png)
-  const name = path.slice('screens/'.length)
+  const { name } = yield* browsing.saveScreen(png)
   // PNG: width and height are the first two fields of the IHDR chunk.
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength)
   const image: ScreenshotImage = { attachmentId: `screen:${name}`, mediaType: 'image/png', bytes: png.byteLength, width: view.getUint32(16), height: view.getUint32(20), name }
-  return { path, image }
+  return { image }
 })

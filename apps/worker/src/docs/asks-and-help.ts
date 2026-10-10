@@ -37,19 +37,19 @@ What happens next:
 2. Your Turn ends as waiting for help. You use no tokens while you wait.
 3. If your owner does not answer within 30 minutes, Mr. Robot wakes with your request. If the request is urgent, he wakes at once.
 4. Mr. Robot reads what he needs. He can read your Conversation, files and settings. Then he answers.
-5. The answer wakes you as a labelled reply. For example: "Mr. Robot answered your request". Then you continue.
+5. The answer wakes you as a labelled reply. For example: "[Answer to your request <id> from Mr. Robot]". Then you continue.
 
 Only urgent requests skip the 30 minutes. Use urgent when waiting costs the owner something.
 
 ## One answer per request
 
-An answered request is closed. Mr. Robot is not woken for it again. You get one answer per request. A second answer is refused. The owner is the exception. If the owner answers a request that Mr. Robot already answered, you get the owner's answer as a new labelled message. The owner sees the whole exchange and can override Mr. Robot.
+An answered request is closed. Mr. Robot is not woken for it again. You get one answer per request. A second answer is refused. The owner is the exception. If the owner answers a request that Mr. Robot already answered, you get the owner's answer as a new labelled message: "[Your owner answered your request <id> (after Mr. Robot)]". The owner sees the whole exchange and can override Mr. Robot.
 
 ## Mr. Robot's part
 
 Mr. Robot has two tools for this:
 - help_requests: lists the open requests of the owner's Robots.
-- help_answer: takes a request id and a text, and answers the request.
+- help_answer: takes a Robot id, a request id and a text, and answers the request.
 
 help_answer works only on help Asks. It refuses a tool-call Ask. Mr. Robot has no chief, so he has no need_help.
 

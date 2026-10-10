@@ -136,8 +136,23 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   it('connects the bot from a pasted token and offers the invite link on its row', async () => {
     const connected = await connectBot()
     expect(connected.status).toBe(200)
-    expect(connected.body).toMatchObject({ kind: 'discord', label: 'Bot Mr. Robot', account: 'mr-robot', setupLink: inviteUrl('B1'), setupLabel: 'Invite the bot to a server' })
+    expect(connected.body).toMatchObject({ kind: 'discord', label: 'Bot Mr. Robot (B1)', account: 'mr-robot', setupLink: inviteUrl('B1'), setupLabel: 'Invite the bot to a server' })
     expect(connectorFixtures.calls.find((call) => call.url === `${API}/users/@me`)!.headers['authorization']).toBe('Bot ' + TOKEN)
+  })
+
+  it('a Robot listing its Discord bot sees the id next to the name, and so does the settings list (sk-7dg7)', async () => {
+    const bot = await connectBot()
+    scripts.set('*', [{ text: 'Hello.' }])
+    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+    await settle(body.id)
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: [], skills: [], recipients: [], secrets: [], connections: [bot.body.id] } } })
+    await testRobot(body.id).activateForTest()
+    scripts.set(body.id, [{ calls: [{ name: 'discord_accounts', args: {} }] }, { text: 'Listed.' }])
+    await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'which bot do you use?' } })
+    await settle(body.id)
+    const listed = requests.get(body.id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join('')).at(-1)!
+    expect(JSON.parse(listed)).toEqual([{ label: 'Bot Mr. Robot (B1)', account: 'mr-robot', services: ['channels', 'messages', 'dms'], write: false, isDefault: true }])
+    expect((await api<ConnectionView[]>(ANNA, '/api/connections')).body).toEqual([expect.objectContaining({ id: bot.body.id, label: 'Bot Mr. Robot (B1)', account: 'mr-robot' })])
   })
 
   const echo = (channel: string) => (call: RecordedCall) => ({ id: 'M-out', channel_id: channel, content: json(call)['content'], timestamp: '2026-10-08T12:00:00Z', author: { id: 'B1', username: 'mr-robot', bot: true } })
@@ -203,7 +218,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   async function routineRobot(settings: Record<string, unknown>): Promise<string> {
     const id = await discordRobot(settings)
     scripts.set(id, [
-      { calls: [{ name: 'schedule_create', args: { title: 'Flat check', prompt: 'Look at the listings.', weekly: { time: '02:00:00', time_zone: 'Europe/Warsaw', weekdays: [7] } } }] },
+      { calls: [{ name: 'routine_set', args: { title: 'Flat check', prompt: 'Look at the listings.', weekly: { time: '02:00:00', time_zone: 'Europe/Warsaw', weekdays: [7] } } }] },
       { text: 'Scheduled.' },
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'Check every week.' } })

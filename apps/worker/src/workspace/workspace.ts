@@ -39,6 +39,27 @@ export function workspacePrefix(robotId: string): string {
 }
 
 /**
+ * Delete every object under a Robot's Workspace prefix (Start over, destroy). The product docs are
+ * not objects: they are served from the Worker bundle and cannot be lost here.
+ */
+export async function clearWorkspace(bucket: R2Bucket, robotId: string): Promise<void> {
+  let cursor: string | undefined
+  do {
+    const page = await bucket.list({ prefix: workspacePrefix(robotId), ...(cursor === undefined ? {} : { cursor }) })
+    if (page.objects.length > 0) await bucket.delete(page.objects.map((object) => object.key))
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor !== undefined)
+}
+
+/**
+ * The R2 prefix of a Robot's screenshots: the platform's, not the Robot's. It is not under the
+ * Workspace prefix, so Files, glob and grep never see what is stored there (v1.11, sk-m7t1).
+ */
+export function screenPrefix(robotId: string): string {
+  return `screens/${robotId}/`
+}
+
+/**
  * Normalize a Workspace path: forward slashes, no leading slash, no '.' or '..' segments
  * that escape. Returns undefined for a path outside the Workspace.
  */

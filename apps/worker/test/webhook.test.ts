@@ -98,7 +98,8 @@ describe('webhook Channel (v1.6 ticket 07)', () => {
     await hook(path, { body: 'tick', type: 'text/plain', idempotencyKey: 'evt-0' })
     await settle(id)
     expect(await webhookMessages(id)).toHaveLength(102)
-  })
+    // 102 Turns in a row: slow when the whole suite shares the machine.
+  }, 90_000)
 
   it('refuses an Idempotency-Key longer than 200 characters with 400 and wakes nobody', async () => {
     const id = await activeRobot()

@@ -77,7 +77,8 @@ describe.each(MODES)('searching the own Conversation with %s (cd-ggem)', (_, mod
     expect(seen.map((item) => item.at)).toEqual([...seen.map((item) => item.at)].sort((a, b) => b - a))
     expect(seen[0]!.snippet).toBe('Checked invoice 30.')
     expect(seen.at(-1)!.snippet).toBe('Invoice number 1 needs a check')
-  })
+    // 60 Turns before the search: slow when the whole suite shares the machine.
+  }, 90_000)
 
   it('follows the live Conversation through a rewind, its undo and a clear', async () => {
     const id = await activeRobot(mode)

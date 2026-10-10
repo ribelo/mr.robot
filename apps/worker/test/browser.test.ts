@@ -52,7 +52,7 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
     expect(typed).toContain('value="••••"')
     expect(clicked).toContain('Hello, signed-in customer')
     expect(stale).toContain('call browser_observe')
-    expect(shot).toMatch(/screens\/.+\.png/)
+    expect(shot).toContain('Screenshot taken')
   })
 
   it('keeps the login across a crash and a new browser session, and closes the browser after each Turn', async () => {

@@ -118,7 +118,6 @@ describe('live view and takeover', () => {
     }, { timeout: 15_000 })
     const last = JSON.stringify(requests.get(id)!.at(-1)!.messages.at(-1))
     expect(last).toContain('https://shop.test/login')
-    expect(last).toMatch(/screens\/.+\.png/)
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
     expect(panel.takeover).toBeNull()
     // The browser stays open while the owner still watches, and closes when they leave (rb-keaw).

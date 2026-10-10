@@ -4,6 +4,7 @@
  */
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender, ThreadView } from '@mr-robot/protocol'
+import { MEMBER_TIME_LABEL } from '../agent/sources.ts'
 import type { NoticeRow } from './store.ts'
 
 interface ContentBlock { readonly type: string; readonly text?: string }
@@ -12,15 +13,29 @@ interface MessageLike { readonly id: string; readonly content: readonly ContentB
 /** Tools whose use the chat already shows in their own way (a 👍 on the message). */
 const HIDDEN_TOOLS = new Set(['react'])
 
-const ROUTINE_TOOLS: Record<string, 'created' | 'updated' | 'deleted'> = {
+/** Tool names Conversations stored before the product's own Routine tools; read-only, so old cards still render. */
+const LEGACY_ROUTINE_TOOLS: Record<string, 'created' | 'updated' | 'deleted'> = {
   routine_create: 'created',
+  routine_update: 'updated',
+  routine_delete: 'deleted',
   schedule_create: 'created',
   schedule_update: 'updated',
   schedule_delete: 'deleted',
-  routine_update: 'updated',
-  routine_delete: 'deleted',
 }
-const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'propose_review', 'request_takeover', 'setup_complete'])
+
+/**
+ * The card a Routine tool call shows in the Conversation of the Robot that made it. A call with robot_id changes
+ * another Robot's Routine; that Robot's Conversation shows the card ("Routine created by <name>"), not this one.
+ */
+function routineAction(name: string, args: Record<string, unknown>): 'created' | 'updated' | 'deleted' | undefined {
+  if (args['robot_id'] !== undefined) return undefined
+  switch (name) {
+    case 'routine_set': return args['id'] === undefined ? 'created' : 'updated'
+    case 'routine_delete': return 'deleted'
+    default: return LEGACY_ROUTINE_TOOLS[name]
+  }
+}
+const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'propose_review', 'request_takeover', 'setup_complete', 'need_help'])
 
 export interface ProjectionInput {
   /** Tool arguments, results and thinking for Standard, Detailed and Verbose (pl-6eir). */
@@ -168,7 +183,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         }
         inners.forEach((inner, index) => {
           if (inner.name === 'thread_send') sentMessage(inner.args, message.id + '-' + String(index), event, undefined)
-          const innerAction = ROUTINE_TOOLS[inner.name]
+          const innerAction = routineAction(inner.name, inner.args)
           if (innerAction !== undefined) {
             items.push({ kind: 'routine', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, name: String(inner.args['title'] ?? inner.args['name'] ?? 'Routine') })
           } else if (inner.name === 'react' && lastMemberMessage >= 0) {
@@ -178,12 +193,12 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         })
         const result = parseResult(message)
         if (call.name === 'thread_send') sentMessage(call.args, message.id, event, result)
-        const action = ROUTINE_TOOLS[call.name]
+        const action = routineAction(call.name, call.args)
         if (action !== undefined) {
           const name = String(result['title'] ?? result['name'] ?? call.args['title'] ?? call.args['name'] ?? 'Routine')
           items.push({ kind: 'routine', id: message.id, seq: event.seq, at: event.time, action, name })
-        } else if (QUESTION_TOOLS.has(call.name) && typeof result['proposalId'] === 'string') {
-          const proposal = input.proposal(result['proposalId'])
+        } else if (QUESTION_TOOLS.has(call.name) && typeof (result['proposalId'] ?? result['requestId']) === 'string') {
+          const proposal = input.proposal(String(result['proposalId'] ?? result['requestId']))
           if (proposal !== undefined) items.push({ kind: 'question', id: message.id, seq: event.seq, at: event.time, proposal })
         }
         break
@@ -249,7 +264,8 @@ function senderOf(source: Record<string, unknown> | undefined): Sender {
 /** The text a person wrote, without the label line the model sees. */
 function visibleText(message: MessageLike, sender: Sender): string {
   const text = message.content.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('')
-  const body = sender.kind === 'member' ? text : text.replace(/^\[[^\n]*\]\n/, '')
+  // A Member's message carries only the time label the model reads; every other source has its label line.
+  const body = sender.kind === 'member' ? text.replace(MEMBER_TIME_LABEL, '') : text.replace(/^\[[^\n]*\]\n/, '')
   return body.replace(/\n\nAttached files \(in your workspace\): .*$/s, '')
 }
 

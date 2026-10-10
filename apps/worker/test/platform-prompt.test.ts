@@ -82,7 +82,7 @@ describe("Mr. Robot's role block (sk-78g5)", () => {
     expect(text).toContain("You hold every capability Anna can grant unless Anna lowered one. You speak for Anna to other Members' chiefs only within the scope Anna gives you.")
     expect(text).toContain('no file changes it')
     expect(text).not.toContain('You never create Robots')
-    expect(await platform(await newRobot())).not.toContain('Chief of Staff')
+    expect(await platform(await newRobot())).not.toContain(ROLE_BLOCK)
   })
 })
 

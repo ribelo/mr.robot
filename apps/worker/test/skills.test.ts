@@ -186,16 +186,19 @@ describe('skill_library', () => {
     const reader = await robotWithSkills(['tdd'])
     await api(ANNA, `/api/robots/${reader}/settings`, { method: 'PATCH', body: { grants: { tools: ['skills'], skills: ['tdd'], recipients: [], secrets: [], connections: [gmail.id] } } })
     const readerName = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.id === reader)!.identity.name
-    const chief = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    const chiefRow = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!
+    const chief = chiefRow.id
+    const chiefName = chiefRow.identity.name
     await settle(chief)
     await api(ANNA, `/api/robots/${chief}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(chief, [{ calls: [{ name: 'skill_library', args: {} }] }, { text: 'Listed.' }])
     await api(ANNA, `/api/robots/${chief}/messages`, { body: { text: 'who knows what?' } })
     await settle(chief)
     const rows = lastResult(chief)
-    expect(rows.find((row) => row.name === 'tdd')).toMatchObject({ source: 'git', holders: [readerName] })
-    expect(rows.find((row) => row.name === 'sage')).toMatchObject({ holders: [] })
-    expect(rows.find((row) => row.name === 'google-workspace')).toMatchObject({ source: 'connector:google', holders: [readerName] })
+    // Mr. Robot holds what his owner reaches (by reach, not by a stored row), so he is a holder of every skill (sk-opc9).
+    expect(rows.find((row) => row.name === 'tdd')).toMatchObject({ source: 'git', holders: expect.arrayContaining([readerName, chiefName]) })
+    expect(rows.find((row) => row.name === 'sage')).toMatchObject({ holders: [chiefName] })
+    expect(rows.find((row) => row.name === 'google-workspace')).toMatchObject({ source: 'connector:google', holders: expect.arrayContaining([readerName, chiefName]) })
   })
 })
 

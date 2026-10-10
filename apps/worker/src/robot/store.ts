@@ -13,12 +13,14 @@ import type {
   GrantLevel,
   GrantLevels,
   GrantSet,
+  HelpAsk,
   Identity,
   ChainEntry, ModelChoice,
   NotificationSettings,
   ProposalKind,
   ProposalView,
   ThreadAsk,
+  ToolCallAsk,
   ReviewView,
   RewindView,
   RobotStatus,
@@ -371,7 +373,7 @@ export class RobotStore {
    * Compare-and-swap answer: succeeds only for an open proposal at exactly this revision.
    * @returns the answered proposal, or undefined when the revision is stale or it is closed.
    */
-  answerProposal(id: string, revision: number, approve: boolean, now: number, decision?: { approved: readonly string[]; rejected: readonly string[] }, scope?: string): ProposalRow | undefined {
+  answerProposal(id: string, revision: number, approve: boolean, now: number, decision?: { approved: readonly string[]; rejected: readonly string[] }, scope?: string, note?: string): ProposalRow | undefined {
     const status = approve ? 'approved' : 'rejected'
     // A review's decision is kept beside the stored payload, which itself stays as proposed.
     const cursor = decision === undefined
@@ -380,7 +382,53 @@ export class RobotStore {
     if (cursor.rowsWritten !== 1) return undefined
     // A Thread invitation's scope is stored with the answer, as the owner edited it (ch-vrl7).
     if (scope !== undefined) this.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.scope', ?) WHERE id = ?", scope, id)
+    // A tool-call Ask keeps the owner's text with the answer (sk-ed7r).
+    if (note !== undefined) this.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.note', ?) WHERE id = ?", note, id)
     return this.proposal(id)
+  }
+
+  /**
+   * Close a help Ask with an answer. The first answer wins: it succeeds only for an open help Ask.
+   * @returns the closed Ask, or undefined when there is none or it is already closed.
+   */
+  answerHelp(id: string, by: 'owner' | 'mr-robot', text: string, now: number): ProposalRow | undefined {
+    const open = this.proposal(id)
+    if (open === undefined || open.kind !== 'help' || open.status !== 'open') return undefined
+    this.sql.exec("UPDATE proposal SET status = 'done', answered_at = ?, payload = json_set(payload, '$.answer', json(?)) WHERE id = ?", now, JSON.stringify({ by, text }), id)
+    return this.proposal(id)
+  }
+
+  /**
+   * The owner's later answer on a help Ask Mr. Robot closed (sk-q86i): kept beside his answer, once.
+   * @returns the Ask, or undefined when it is not a help Ask answered by Mr. Robot without an override yet.
+   */
+  overrideHelp(id: string, text: string, now: number): ProposalRow | undefined {
+    const closed = this.proposal(id)
+    if (closed === undefined || closed.kind !== 'help' || closed.help?.answeredBy !== 'mr-robot' || closed.help.override !== null) return undefined
+    this.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.override', json(?)) WHERE id = ?", JSON.stringify({ text, at: now }), id)
+    return this.proposal(id)
+  }
+
+  /** When an open, not yet escalated help Ask falls due: at once when urgent, else HELP_ESCALATION_MS after it was made. */
+  helpEscalationDue(row: ProposalRow): number | undefined {
+    if (row.kind !== 'help' || row.status !== 'open' || row.help === undefined || row.help.escalated) return undefined
+    return row.help.urgent ? row.help.created : row.help.created + HELP_ESCALATION_MS
+  }
+
+  /** The open help Asks whose escalation is due by now. */
+  helpDue(now: number): ProposalRow[] {
+    return this.proposals('open').filter((row) => (this.helpEscalationDue(row) ?? Infinity) <= now)
+  }
+
+  /** The earliest escalation still to come, for the alarm. */
+  nextHelpEscalation(): number | undefined {
+    const dues = this.proposals('open').flatMap((row) => this.helpEscalationDue(row) ?? [])
+    return dues.length === 0 ? undefined : Math.min(...dues)
+  }
+
+  /** Remember that Mr. Robot was told about this help Ask: it is escalated once. */
+  markHelpEscalated(id: string, now: number): void {
+    this.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.escalatedAt', ?) WHERE id = ?", now, id)
   }
 
   closeProposal(id: string, now: number): void {
@@ -663,6 +711,45 @@ function threadOf(payload: Record<string, unknown>): { thread: ThreadAsk } | Rec
   return { thread: { ...thread, scope: typeof payload['scope'] === 'string' ? payload['scope'] : thread.scope } }
 }
 
+/** A help Ask goes to Mr. Robot this long after it was made if nobody answered; an urgent one goes at once (sk-35i9, sk-myhb). */
+export const HELP_ESCALATION_MS = 30 * 60_000
+
+function helpOf(payload: Record<string, unknown>): { help: HelpAsk } | Record<string, never> {
+  const help = payload['help'] as Omit<HelpAsk, 'answeredBy' | 'answer' | 'escalated' | 'override'> | undefined
+  if (help === undefined) return {}
+  const answer = payload['answer'] as { by: 'owner' | 'mr-robot'; text: string } | undefined
+  const override = payload['override'] as { text: string } | undefined
+  return { help: { ...help, answeredBy: answer?.by ?? 'none', answer: answer?.text ?? null, escalated: typeof payload['escalatedAt'] === 'number', override: override?.text ?? null } }
+}
+
+/** A stored tool call (the exact arguments) as the owner reads it: one line per argument. */
+export interface StoredToolCall {
+  readonly robot: string
+  readonly tool: string
+  readonly arguments: Readonly<Record<string, unknown>>
+  readonly reason: string
+}
+
+export function storedToolCall(payload: Record<string, unknown>): StoredToolCall | undefined {
+  const call = payload['toolCall'] as StoredToolCall | undefined
+  return call === undefined || typeof call.tool !== 'string' ? undefined : call
+}
+
+function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk } | Record<string, never> {
+  const call = storedToolCall(payload)
+  if (call === undefined) return {}
+  const note = payload['note']
+  return {
+    toolCall: {
+      robot: call.robot,
+      tool: call.tool,
+      arguments: Object.entries(call.arguments).map(([name, value]) => ({ name, value: typeof value === 'string' ? value : JSON.stringify(value) ?? 'null' })),
+      reason: call.reason,
+      note: typeof note === 'string' && note.trim() !== '' ? note : null,
+    },
+  }
+}
+
 function proposalFromSql(row: ProposalSql): ProposalRow {
   const payload = JSON.parse(row.payload) as Record<string, unknown>
   return {
@@ -677,6 +764,8 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
     skill: (payload['skill'] as ProposalView['skill'] | undefined) ?? null,
     ...reviewOf(payload),
     ...threadOf(payload),
+    ...helpOf(payload),
+    ...toolCallOf(payload),
     createdAt: row.created_at,
     answeredAt: row.answered_at,
   }

@@ -6,8 +6,8 @@
 
 **Blocked by:** 01, 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Runtime section in the prompt preview with the summary of levels
-- [ ] my_capabilities output equals the settings catalog for the same Robot in a workerd test
-- [ ] Code-mode declarations exclude deny tools (tool-surface test)
+- [x] Runtime section in the prompt preview with the summary of levels
+- [x] my_capabilities output equals the settings catalog for the same Robot in a workerd test
+- [x] Code-mode declarations exclude deny tools (tool-surface test)

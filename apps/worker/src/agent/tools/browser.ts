@@ -8,7 +8,7 @@ export interface BrowserHost {
   browserObserve(): Promise<Observation>
   browserAct(action: BrowserAction): Promise<Observation>
   browserWait(input: { text?: string; ms?: number }): Promise<Observation>
-  browserScreenshot(): Promise<{ path: string; image: ScreenshotImage }>
+  browserScreenshot(): Promise<{ image: ScreenshotImage }>
 }
 
 /** Leash's primitives over Browser Rendering (robot-l9te): open, observe, act, screenshot, wait. */
@@ -53,12 +53,12 @@ export function browserTools(host: BrowserHost): ToolDefinition[] {
     {
       // The screenshot comes back as an image the model sees (robot-cmz9), and is saved as the screen.
       name: 'browser_screenshot',
-      description: 'Take a screenshot of the page. You see the image in the result; it is also saved in your Workspace and shown to your owner as your screen. Use it to read what the text observation cannot (image puzzles, charts, layout).',
+      description: 'Take a screenshot of the page. You see the image in the result; it is also shown to your owner as your screen. It is not a Workspace file; the platform keeps it for 7 days. Use it to read what the text observation cannot (image puzzles, charts, layout).',
       parameters: { type: 'object', additionalProperties: false, properties: {} },
       output: {
         schema: {},
-        render: (_args: unknown, value: { path: string; image: ScreenshotImage }) => [
-          { type: 'text', text: `Screenshot saved to ${value.path}.` },
+        render: (_args: unknown, value: { image: ScreenshotImage }) => [
+          { type: 'text', text: 'Screenshot taken.' },
           { type: 'image', attachment: value.image },
         ],
       },
@@ -83,7 +83,7 @@ function toAction(args: { action: string; index?: number; text?: string; submit?
   }
 }
 
-/** A screenshot as DSH's image attachment reference; the id resolves to the Workspace file. */
+/** A screenshot as DSH's image attachment reference; the id resolves to the stored screenshot. */
 export interface ScreenshotImage {
   readonly attachmentId: string
   readonly mediaType: 'image/png'

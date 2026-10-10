@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
-  ConversationPage, ConversationSearchResult, GrantSet, ModelChoice, ProposalView, RobotSettings, RoutineView,
+  ConversationPage, ConversationSearchResult, GrantSet, ModelChoice, ProposalView, RobotSettings,
   TrajectoryExcerpt, WorkspaceFileContent, WorkspaceFileView,
 } from '@mr-robot/protocol'
 import { tool } from './define.ts'
@@ -22,16 +22,19 @@ export interface RobotListing {
   readonly mine: boolean
 }
 
-export interface RoutineChange {
-  readonly id?: string
-  readonly title?: string
-  readonly prompt?: string
-  readonly at?: unknown
-  readonly after_seconds?: number
-  readonly every_seconds?: number
-  readonly daily?: { time: string; time_zone?: string }
-  readonly weekly?: { time: string; time_zone?: string; weekdays: number[] }
-  readonly cron?: { expression: string; time_zone?: string }
+/** One open request for help (need_help) of one of the owner's Robots, as help_requests lists it (sk-cj9v). */
+export interface HelpListing {
+  readonly robot: string
+  readonly robotId: string
+  readonly id: string
+  /** When the Robot asked, as an ISO time. */
+  readonly created: string
+  readonly urgent: boolean
+  /** Whether Mr. Robot was already woken with it. */
+  readonly escalated: boolean
+  readonly doing: string
+  readonly tried: string
+  readonly need: string
 }
 
 /** What Mr. Robot, as his owner's deputy, can do with the Robots the owner reaches. Every call checks that reach. */
@@ -43,14 +46,12 @@ export interface DeputyHost {
   files(robotId: string): Promise<WorkspaceFileView[]>
   fileRead(robotId: string, path: string): Promise<WorkspaceFileContent>
   grants(robotId: string): Promise<{ grants: GrantSet; openProposals: ProposalView[] }>
-  routines(robotId: string): Promise<RoutineView[]>
   settings(robotId: string): Promise<{ settings: RobotSettings; models: Array<{ provider: string; model: string; label: string }>; accounts: Array<{ account: string; owner: string; provider: string; label: string; status: string }> }>
   fileWrite(robotId: string, path: string, content: string): Promise<{ path: string; size: number }>
   fileDelete(robotId: string, path: string): Promise<{ deleted: string }>
   settingsSet(robotId: string, patch: unknown): Promise<RobotSettings>
-  routineSet(robotId: string, change: RoutineChange): Promise<RoutineView>
-  routinePause(robotId: string, id: string, paused: boolean): Promise<RoutineView>
-  routineDelete(robotId: string, id: string): Promise<{ deleted: string }>
+  helpRequests(): Promise<HelpListing[]>
+  helpAnswer(robotId: string, requestId: string, text: string): Promise<{ requestId: string; status: string }>
 }
 
 /** Longest text of one chat item the deputy gets back; the Conversation view itself is whole. */
@@ -63,7 +64,6 @@ const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0
 
 const robotId = { type: 'string', description: 'Robot id from robot_list' }
 const page = { type: 'integer', description: 'Page number, from 1 (the default)' }
-const zone = 'time_zone is an IANA zone and defaults to the Robot\'s own'
 
 /** The tool group `deputy` (Mr. Robot only): the owner's eyes and non-dangerous hands on the Robots the owner reaches. */
 export function deputyTools(host: DeputyHost): ToolDefinition[] {
@@ -127,18 +127,24 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
       execute: async ({ robot_id }) => host.grants(robot_id),
     }),
     tool<{ robot_id: string }>({
-      name: 'robot_routines',
-      description: "List another Robot's Routines: schedule, instructions, paused or not, next run, and the last 20 runs of each (started, finished, outcome ok, failed or skipped, first line of its reply).",
-      parameters: { properties: { robot_id: robotId }, required: ['robot_id'] },
-      concurrencySafe: true,
-      execute: async ({ robot_id }) => host.routines(robot_id),
-    }),
-    tool<{ robot_id: string }>({
       name: 'robot_settings',
       description: "See another Robot's settings: model and thinking, code mode, context budget, compaction instruction, Discord channel, browser backend, notifications, spend limit, and the models it could be switched to.",
       parameters: { properties: { robot_id: robotId }, required: ['robot_id'] },
       concurrencySafe: true,
       execute: async ({ robot_id }) => host.settings(robot_id),
+    }),
+    tool<Record<string, never>>({
+      name: 'help_requests',
+      description: "List the open requests for help (need_help) of your owner's Robots: Robot, request id, when it asked, urgent, whether you were already woken with it (escalated), and what it is doing, tried and needs. Read what you need to answer with robot_conversation, robot_files, robot_file_read and robot_settings, then answer with help_answer.",
+      parameters: { properties: {} },
+      concurrencySafe: true,
+      execute: async () => ({ requests: await host.helpRequests() }),
+    }),
+    tool<{ robot_id: string; request_id: string; text: string }>({
+      name: 'help_answer',
+      description: "Answer one open request for help of a Robot of your owner. The text wakes that Robot as 'Answer to your request … from <your name>' and closes the request; write it in your owner's language and make it complete, because the Robot cannot ask you back. Only requests for help: a request your owner answered first, or that you answered, is closed and refused. Your owner may still answer after you and overrides you.",
+      parameters: { properties: { robot_id: robotId, request_id: { type: 'string', description: 'Request id from help_requests' }, text: { type: 'string', description: 'The answer' } }, required: ['robot_id', 'request_id', 'text'] },
+      execute: async ({ robot_id, request_id, text }) => host.helpAnswer(robot_id, request_id, text),
     }),
     tool<{ robot_id: string; path: string; content: string }>({
       name: 'robot_file_write',
@@ -173,33 +179,6 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
         required: ['robot_id'],
       },
       execute: async ({ robot_id, ...patch }) => host.settingsSet(robot_id, patch),
-    }),
-    tool<{ robot_id: string } & RoutineChange>({
-      name: 'robot_routine_set',
-      description: `Create or edit a Routine of another Robot. Without id: needs title, prompt (what that Robot is told when it runs; make it self-contained) and exactly one timing. With id: changes the title, prompt or timing you give. Timings: at (ISO 8601 with offset, one run), after_seconds (one run), every_seconds (at least 300), daily {time: "HH:MM:SS"}, weekly {time, weekdays: [1..7]}, cron {expression}; ${zone}. A Robot has at most 50 Routines and none may run more often than every 5 minutes. It shows in that Robot's Conversation as "Routine created by <you>".`,
-      parameters: {
-        properties: {
-          robot_id: robotId, id: { type: 'string', description: 'The Routine to edit; omit to create' }, title: { type: 'string', description: 'Short name of the Routine' }, prompt: { type: 'string', description: 'What that Robot is told when the Routine runs' },
-          at: { type: 'string', description: 'One run at this ISO 8601 time with offset' }, after_seconds: { type: 'integer', description: 'One run after this many seconds' }, every_seconds: { type: 'integer', description: 'Run every this many seconds, at least 300' },
-          daily: { type: 'object', properties: { time: { type: 'string' }, time_zone: { type: 'string' } }, required: ['time'], description: `Run every day at time (HH:MM:SS); ${zone}` },
-          weekly: { type: 'object', properties: { time: { type: 'string' }, time_zone: { type: 'string' }, weekdays: { type: 'array', items: { type: 'integer' } } }, required: ['time', 'weekdays'], description: `Run on weekdays (1 Monday to 7 Sunday) at time; ${zone}` },
-          cron: { type: 'object', properties: { expression: { type: 'string' }, time_zone: { type: 'string' } }, required: ['expression'], description: `Run on a five-field cron expression; ${zone}` },
-        },
-        required: ['robot_id'],
-      },
-      execute: async ({ robot_id, ...change }) => host.routineSet(robot_id, change),
-    }),
-    tool<{ robot_id: string; id: string; paused?: boolean }>({
-      name: 'robot_routine_pause',
-      description: "Pause a Routine of another Robot (paused true, the default) or resume it (paused false). A resumed recurring Routine skips what it missed.",
-      parameters: { properties: { robot_id: robotId, id: { type: 'string', description: 'Routine id from robot_routines' }, paused: { type: 'boolean', description: 'true pauses (the default), false resumes' } }, required: ['robot_id', 'id'] },
-      execute: async ({ robot_id, id, paused }) => host.routinePause(robot_id, id, paused ?? true),
-    }),
-    tool<{ robot_id: string; id: string }>({
-      name: 'robot_routine_delete',
-      description: 'Delete a Routine of another Robot, with its run history.',
-      parameters: { properties: { robot_id: robotId, id: { type: 'string', description: 'Routine id from robot_routines' } }, required: ['robot_id', 'id'] },
-      execute: async ({ robot_id, id }) => host.routineDelete(robot_id, id),
     }),
   ]
 }

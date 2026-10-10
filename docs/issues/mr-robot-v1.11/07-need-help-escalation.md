@@ -6,8 +6,8 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Alarm-based escalation with fake-time workerd tests for 30 minutes and urgent
-- [ ] help_requests and help_answer; closed request refuses a second answer except the owner's override; help_answer on a tool-call Ask refused
-- [ ] Open requests in the Robot panel
+- [x] Alarm-based escalation with fake-time workerd tests for 30 minutes and urgent
+- [x] help_requests and help_answer; closed request refuses a second answer except the owner's override; help_answer on a tool-call Ask refused
+- [x] Open requests in the Robot panel

@@ -369,10 +369,26 @@ const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
 const destroyRobot = (robotId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* endThreadsOf(robotId)
-  yield* remote((env) => env.ROBOT.getByName(robotId).destroy())
+  yield* remote((env) => env.ROBOT.getByName(robotId).destroy(robotId))
   yield* sql.run('DELETE FROM robot WHERE id = ?', robotId)
   const others = yield* sql.all<{ id: string }>('SELECT id FROM robot')
   yield* Effect.forEach(others, (other) => remote((env) => env.ROBOT.getByName(other.id).dropRecipient(robotId)).pipe(Effect.catch(() => Effect.void)), { concurrency: 8, discard: true })
+})
+
+/**
+ * One-time (v1.11, sk-44d5): a Robot soft-deleted before v1.3 left its registry row and, in R2, its Workspace.
+ * Each such row is destroyed by id (the Robot's own storage may be empty) and removed. A row that fails stays,
+ * and the whole pass is tried again at the next start.
+ */
+const destroyOrphans = Effect.gen(function* () {
+  if ((yield* setting<boolean>('orphans-destroyed-v1.11')) === true) return
+  const sql = yield* Sql
+  const orphans = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status = 'deleted'")
+  const done = yield* Effect.forEach(orphans, ({ id }) => destroyRobot(id).pipe(
+    Effect.as(true),
+    Effect.catchDefect((error) => Effect.sync(() => { console.warn('orphan not destroyed', id, error); return false })),
+  ))
+  if (done.every(Boolean)) yield* putSetting('orphans-destroyed-v1.11', true)
 })
 
 /** The typed name must match exactly (pl-kehf). */
@@ -388,12 +404,20 @@ const deleteRobot = (memberId: string, robotId: string, typed: string) => Effect
   yield* syncMrRobots
 })
 
-/** Clear a Robot's history (pl-05eu, pl-y228), memory too when asked. */
-const clearRobot = (memberId: string, robotId: string, typed: string, memory: boolean) => Effect.gen(function* () {
+/** Clear a Robot's history (pl-05eu, pl-y228): the Conversation only; every file stays. */
+const clearRobot = (memberId: string, robotId: string, typed: string) => Effect.gen(function* () {
   const found = yield* entry(robotId)
   if (found === undefined || found.ownerId !== memberId) return yield* notFound('no such robot of yours')
   yield* confirmed(typed, found.identity.name)
-  yield* remote((env) => env.ROBOT.getByName(robotId).clearHistory(memory))
+  yield* remote((env) => env.ROBOT.getByName(robotId).clearHistory())
+})
+
+/** Start a Robot over (sk-8won): the Conversation and the whole Workspace back to templates; Grants, Routines, Connections and settings stay. */
+const startOverRobot = (memberId: string, robotId: string, typed: string) => Effect.gen(function* () {
+  const found = yield* entry(robotId)
+  if (found === undefined || found.ownerId !== memberId) return yield* notFound('no such robot of yours')
+  yield* confirmed(typed, found.identity.name)
+  yield* remote((env) => env.ROBOT.getByName(robotId).startOver())
 })
 
 /**
@@ -1177,6 +1201,7 @@ export class Home extends DurableObject<Env> {
       if (current === null || current > at) await ctx.storage.setAlarm(Math.max(at, Date.now() + 1))
     })
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
+    ctx.waitUntil(this.destroyOrphans().catch((error: unknown) => console.warn('orphans not destroyed', error)))
   }
 
   private run<A, E>(program: Effect.Effect<A, E, R>): Promise<A> {
@@ -1198,8 +1223,11 @@ export class Home extends DurableObject<Env> {
   access(memberId: string, robotId: string): Promise<'owner' | 'shared' | null> { return this.run(access(memberId, robotId)) }
   robotChanged(changed: RegistryEntry): Promise<void> { return this.run(robotChanged(changed)) }
   deleteRobot(memberId: string, robotId: string, typed: string): Promise<void> { return this.run(deleteRobot(memberId, robotId, typed)) }
-  clearRobot(memberId: string, robotId: string, typed: string, memory: boolean): Promise<void> { return this.run(clearRobot(memberId, robotId, typed, memory)) }
+  clearRobot(memberId: string, robotId: string, typed: string): Promise<void> { return this.run(clearRobot(memberId, robotId, typed)) }
+  startOverRobot(memberId: string, robotId: string, typed: string): Promise<void> { return this.run(startOverRobot(memberId, robotId, typed)) }
   resetMember(memberId: string, typed: string): Promise<void> { return this.run(resetMember(memberId, typed)) }
+  /** The one-time clean-up of Robots deleted before v1.3; it runs at start and is safe to call again. */
+  destroyOrphans(): Promise<void> { return this.run(destroyOrphans) }
   startingModel(memberId: string, wanted?: ModelChoice): Promise<ModelChoice> { return this.run(startingModel(memberId, wanted)) }
   createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> { return this.run(createRobot(ownerId, brief, model)) }
   syncMrRobots(): Promise<void> { return this.run(syncMrRobots) }
@@ -1216,14 +1244,16 @@ export class Home extends DurableObject<Env> {
   loadableSkills(memberId: string, names: readonly string[]): Promise<SkillView[]> { return this.run(loadableSkills(memberId, names)) }
   /**
    * The library as one Robot of this owner sees it (cd-wfn2). With `holders` (Mr. Robot, cd-56kk) each row
-   * names the owner's other Robots that hold the skill, by grant or through a connector grant.
+   * names the Robots that hold the skill at allow or ask, by grant or through a connector grant. The caller
+   * answers for itself from its live levels (`self.held`): Mr. Robot holds what his owner reaches, which is not
+   * in his stored grant rows (sk-opc9).
    */
-  async skillLibrary(ownerId: string, held: readonly string[], holders: boolean): Promise<SkillLibraryRow[]> {
+  async skillLibrary(ownerId: string, self: { readonly id: string; readonly held: readonly string[] }, holders: boolean): Promise<SkillLibraryRow[]> {
     const library = await this.run(skills(ownerId))
     const connectorOf = new Map<string, ConnectorKind>(Object.entries(CONNECTOR_SKILLS).flatMap(([kind, entries]) => entries.map((entry) => [entry.name, kind as ConnectorKind] as const)))
     const holding = new Map<string, string[]>()
     if (holders) {
-      const robots = (await this.run(reachable(ownerId))).filter((robot) => robot.kind === 'robot')
+      const robots = await this.run(reachable(ownerId))
       const enabled = this.pluginsOf.enabled()
       const kindsOn = (Object.keys(CONNECTOR_SKILLS) as ConnectorKind[]).filter((kind) => enabled[kind] !== false)
       const connections = new Map<string, Promise<ConnectionView[]>>()
@@ -1233,11 +1263,12 @@ export class Home extends DurableObject<Env> {
         return known
       }
       const robotSkills = await Promise.all(robots.map(async (robot) => {
+        if (robot.id === self.id) return self.held
         const admin = await this.env.ROBOT.getByName(robot.id).adminRow()
         return admin === null ? [] : heldSkillNames(admin.grants, await connectionsOf(robot.ownerId), kindsOn)
       }))
       robots.forEach((robot, index) => {
-        for (const name of new Set(robotSkills[index])) holding.set(name, [...(holding.get(name) ?? []), robot.identity.name])
+        for (const skill of new Set(robotSkills[index])) holding.set(skill, [...(holding.get(skill) ?? []), robot.identity.name])
       })
     }
     return library.map((skill) => {
@@ -1245,7 +1276,7 @@ export class Home extends DurableObject<Env> {
       return {
         name: skill.name,
         description: skill.description,
-        held: held.includes(skill.name),
+        held: self.held.includes(skill.name),
         source: kind === undefined ? skill.source : `connector:${kind}`,
         ...(holders ? { holders: holding.get(skill.name) ?? [] } : {}),
       }
@@ -1425,7 +1456,7 @@ export class Home extends DurableObject<Env> {
   discordPost(memberId: string, channelId: string, text: string, replyTo?: string): Promise<boolean> { return this.discord.post(memberId, channelId, text, replyTo) }
 
   /** The owner's Mr. Robot: where a direct message to the bot goes. */
-  private async mrRobotOf(ownerId: string): Promise<string | null> {
+  async mrRobotOf(ownerId: string): Promise<string | null> {
     return this.ctx.storage.sql.exec<{ id: string }>("SELECT id FROM robot WHERE owner_id = ? AND kind = 'mr-robot' AND status <> 'deleted' LIMIT 1", ownerId).toArray()[0]?.id ?? null
   }
 

@@ -8,7 +8,8 @@
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import { DeputySettingsPatch, type RobotSettings, type SettingsPatch } from '@mr-robot/protocol'
-import type { DeputyHost, RobotListing, RoutineChange } from '../agent/tools/deputy.ts'
+import type { DeputyHost, HelpListing, RobotListing } from '../agent/tools/deputy.ts'
+import type { RoutineChange } from '../agent/tools/routines.ts'
 import { HOME_ID } from '../env.ts'
 import { conflict, invalid, notFound, type DurableError } from '../platform/durable.ts'
 import { normalizePath } from '../workspace/workspace.ts'
@@ -25,6 +26,9 @@ const promise = <A>(run: () => Promise<A>) => Effect.promise(run)
 export const DEPUTY_METHODS = [
   'conversationPage', 'searchConversation', 'trajectoryAround', 'files', 'fileContent', 'settings', 'openProposals', 'routineList',
   'saveFile', 'deleteFile', 'updateSettings', 'setRoutine', 'pauseRoutine', 'removeRoutine',
+  // Mr. Robot answers requests for help (sk-gag7): the one answer path open to him, and it refuses every other kind of Ask (sk-iis1).
+  // The Ask answer paths (answer, answerToolCall, ...) are not on this list and never will be.
+  'answerHelp',
 ] as const
 export type DeputyMethod = (typeof DEPUTY_METHODS)[number]
 
@@ -151,6 +155,37 @@ export const settings = (robotId: string) => Effect.gen(function* () {
   }
 })
 
+// ------------------------------------------------------------------ requests for help (sk-cj9v, sk-gag7)
+
+/** Open requests for help of the Robots the owner owns: the ones Mr. Robot's owner answers (a shared Robot's own owner answers, and his Mr. Robot is woken). */
+export const helpRequests = Effect.gen(function* () {
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot is a deputy')
+  const reachable = (yield* promise(() => platform.env.HOME.getByName(HOME_ID).reachable(current.ownerId))).filter((robot) => robot.kind === 'robot' && robot.ownerId === current.ownerId)
+  const found = yield* Effect.forEach(reachable, (robot) => ask(platform.env.ROBOT.getByName(robot.id), 'openProposals').pipe(
+    Effect.map((open) => open.flatMap((proposal): HelpListing[] => proposal.kind === 'help' && proposal.help !== undefined ? [{
+      robot: robot.identity.name, robotId: robot.id, id: proposal.id, created: new Date(proposal.help.created).toISOString(), urgent: proposal.help.urgent,
+      escalated: proposal.help.escalated, doing: proposal.help.doing, tried: proposal.help.tried, need: proposal.help.need,
+    }] : [])),
+    Effect.catch(() => Effect.succeed([] as HelpListing[])),
+  ), { concurrency: 5 })
+  return found.flat().sort((a, b) => a.created.localeCompare(b.created))
+})
+
+/** help_answer: the Robot's own answer path, as Mr. Robot. Its refusals (not a help Ask, already closed) come back as words. */
+export const helpAnswer = (robotId: string, requestId: string, text: string) => Effect.gen(function* () {
+  const { current, robot } = yield* target(robotId, true)
+  const result = yield* ask(robot, 'answerHelp', requestId, text, { by: 'mr-robot', name: current.identity.name })
+  if (result.ok) return { requestId, status: 'answered; the Robot is woken with your answer and the request is closed' }
+  switch (result.reason) {
+    case 'not-found': return yield* invalid(`no request ${requestId} on that Robot; list them with help_requests`)
+    case 'not-help': return yield* invalid(`${requestId} is not a request for help (it is a ${result.kind} Ask); only the owner answers that`)
+    case 'empty': return yield* invalid('the answer needs text')
+    case 'closed': return yield* conflict(result.answeredBy === 'owner' ? 'your owner already answered this request' : 'this request is already answered')
+  }
+})
+
 // ------------------------------------------------------------------ changes
 
 export const fileWrite = (robotId: string, path: string, content: string) => Effect.gen(function* () {
@@ -236,10 +271,10 @@ export const routineDelete = (robotId: string, id: string) => Effect.gen(functio
   return { deleted: id }
 })
 
-type Run = <A>(program: Effect.Effect<A, { readonly _tag: string; readonly message: string }, RobotState | RobotPlatform>) => Promise<A>
+export type Run = <A>(program: Effect.Effect<A, { readonly _tag: string; readonly message: string }, RobotState | RobotPlatform>) => Promise<A>
 
 /** Results that crossed Workers RPC carry stubs' bookkeeping; the model's tools get plain JSON. */
-const plain = async <A>(result: Promise<A>): Promise<A> => JSON.parse(JSON.stringify(await result)) as A
+export const plain = async <A>(result: Promise<A>): Promise<A> => JSON.parse(JSON.stringify(await result)) as A
 
 /** The host the deputy tools call, each method one of the programs above run in the Robot Durable Object. */
 export function deputyHost(run: Run): DeputyHost {
@@ -251,13 +286,11 @@ export function deputyHost(run: Run): DeputyHost {
     files: (id) => plain(run(files(id))),
     fileRead: (id, path) => plain(run(fileRead(id, path))),
     grants: (id) => plain(run(grants(id))),
-    routines: (id) => plain(run(routines(id))),
     settings: (id) => plain(run(settings(id))),
     fileWrite: (id, path, content) => plain(run(fileWrite(id, path, content))),
     fileDelete: (id, path) => plain(run(fileDelete(id, path))),
     settingsSet: (id, patch) => plain(run(settingsSet(id, patch))),
-    routineSet: (id, change) => plain(run(routineSet(id, change))),
-    routinePause: (id, routine, paused) => plain(run(routinePause(id, routine, paused))),
-    routineDelete: (id, routine) => plain(run(routineDelete(id, routine))),
+    helpRequests: () => plain(run(helpRequests)),
+    helpAnswer: (id, request, text) => plain(run(helpAnswer(id, request, text))),
   }
 }

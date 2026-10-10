@@ -1,9 +1,11 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { ConversationSearchResult } from '@mr-robot/protocol'
+import type { CapabilitiesView, ConversationSearchResult } from '@mr-robot/protocol'
 import { tool } from './define.ts'
 
 export interface ConversationHost {
   searchConversation(query: string, page: number): Promise<ConversationSearchResult>
+  /** Every grantable item with the Robot's level on it, as Advanced settings shows them. */
+  capabilities(): Promise<CapabilitiesView>
 }
 
 /** Tools every Robot has: they act on its own Conversation, not on the world. */
@@ -16,6 +18,13 @@ export function conversationTools(host: ConversationHost | undefined): ToolDefin
       execute: async ({ emoji }) => ({ status: 'reacted', message: `Reacted with ${emoji}. End the Turn without a reply unless one is needed.` }),
     }),
     ...(host === undefined ? [] : [
+      tool<Record<string, never>>({
+        name: 'my_capabilities',
+        description: 'List everything you may be given, with your level on each and a line about it: tool groups, skills, recipients, logins, Host facets and Connections (with write). Grouped by level: allow (use freely), ask (each call waits for your owner), deny (you do not have it). You change a level only through propose_grants. Call it before you say what you can or cannot do.',
+        parameters: { properties: {} },
+        concurrencySafe: true,
+        execute: async () => host.capabilities(),
+      }),
       tool<{ query: string; page?: number }>({
         name: 'conversation_search',
         description: 'Search the words of your own Conversation, however long ago they were said. Every word of the query must appear in the message or reply. Returns the matching items newest first, ten a page: id, sender, time and a snippet. Ask for page nextPage to read on.',

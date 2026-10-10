@@ -6,7 +6,7 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Ask card component with Approve and Reject (optional text)
-- [ ] Workerd tests with the scripted model: approve resumes with the result, reject with the reason, in both modes; one approval one call; Routine Turn waits and resumes
+- [x] Ask card component with Approve and Reject (optional text)
+- [x] Workerd tests with the scripted model: approve resumes with the result, reject with the reason, in both modes; one approval one call; Routine Turn waits and resumes

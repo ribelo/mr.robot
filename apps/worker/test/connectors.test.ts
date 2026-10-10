@@ -147,6 +147,14 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
     expect(await toolsOf(ANNA, id)).toEqual(expect.arrayContaining(['gmail_send', 'gmail_reply', 'gmail_forward']))
   })
 
+  it('google_accounts lists the services a Connection offers: Drive covers Docs and Sheets (sk-w8fb)', async () => {
+    const drive = await env.MEMBER.getByName(annaId).addConnection({ kind: 'google', label: 'Private', account: 'anna@gmail.test', services: ['gmail', 'drive'], shared: false, meta: { expiresAt: Date.now() + 3_600_000 }, secrets: { accessToken: 'a', refreshToken: 'r' } })
+    const id = await robotOf(ANNA, { connections: [drive.id] })
+    const [listed] = await say(ANNA, id, [{ name: 'google_accounts', args: {} }])
+    expect(JSON.parse(listed!)).toEqual([{ label: 'Private', account: 'anna@gmail.test', services: ['gmail', 'drive', 'docs', 'sheets'], write: false, isDefault: true }])
+    expect(await toolsOf(ANNA, id)).toEqual(expect.arrayContaining(['docs_read', 'sheets_read']))
+  })
+
   it('a robot holding two kinds of connection gets both and still answers (regression: duplicate prompt section)', async () => {
     fakeConnectors.set('google', fakeConnector('google'))
     fakeConnectors.set('slack', fakeConnector('slack', 'fakeslack'))

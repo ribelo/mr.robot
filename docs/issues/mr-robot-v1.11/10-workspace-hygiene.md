@@ -6,8 +6,8 @@
 
 **Blocked by:** 02 (Start over must spare docs/)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Template and migration for memory/bank; screenshots outside the Workspace with a 7-day sweep (fake-time test)
-- [ ] Clear history and Start over in the list menu and Advanced settings with typed-name confirmation; Reset everything dialog text
-- [ ] Orphan migration tested against a registry row with status deleted and an empty DO
+- [x] Template and migration for memory/bank; screenshots outside the Workspace with a 7-day sweep (fake-time test)
+- [x] Clear history and Start over in the list menu and Advanced settings with typed-name confirmation; Reset everything dialog text
+- [x] Orphan migration tested against a registry row with status deleted and an empty DO

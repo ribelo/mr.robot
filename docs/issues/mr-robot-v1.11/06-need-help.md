@@ -6,8 +6,8 @@
 
 **Blocked by:** 01 (labels and the language rule)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] need_help registered for every active ordinary Robot; absent for Mr. Robot
-- [ ] Help Ask card with answer box; the answer wakes the Robot with the label and closes the request
-- [ ] Workerd tests: request, owner answer, resume, no Grant needed, robot_send still gated
+- [x] need_help registered for every active ordinary Robot; absent for Mr. Robot
+- [x] Help Ask card with answer box; the answer wakes the Robot with the label and closes the request
+- [x] Workerd tests: request, owner answer, resume, no Grant needed, robot_send still gated

@@ -77,8 +77,8 @@ describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
     const id = await activeRobot(['routines'])
     await turn(id, 'set up routines', [
       { calls: [
-        { name: 'schedule_create', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: 'UTC' } } },
-        { name: 'schedule_create', args: { title: 'Tokyo close', prompt: 'Close the books.', daily: { time: '18:30:00', time_zone: TOKYO } } },
+        { name: 'routine_set', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: 'UTC' } } },
+        { name: 'routine_set', args: { title: 'Tokyo close', prompt: 'Close the books.', daily: { time: '18:30:00', time_zone: TOKYO } } },
       ] },
       { text: 'Done.' },
     ])
@@ -117,7 +117,7 @@ describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
 
   it('a pinned zone is what Robots follow, and unpinning moves them to the app\'s zone', async () => {
     const id = await activeRobot(['routines'])
-    await turn(id, 'set up', [{ calls: [{ name: 'schedule_create', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: 'UTC' } } }] }, { text: 'Done.' }])
+    await turn(id, 'set up', [{ calls: [{ name: 'routine_set', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: 'UTC' } } }] }, { text: 'Done.' }])
     await me(NEW_YORK)
     await api(ANNA, '/api/me', { method: 'PATCH', body: { timeZone: TOKYO } })
     expect((await panel(id)).routines[0]).toMatchObject({ timeZone: TOKYO })
@@ -151,7 +151,7 @@ describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
   it('a Robot created after the zone is known keeps its Routines in the profile zone through later moves', async () => {
     await me(NEW_YORK)
     const id = await activeRobot(['routines'])
-    await turn(id, 'set up', [{ calls: [{ name: 'schedule_create', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: NEW_YORK } } }] }, { text: 'Done.' }])
+    await turn(id, 'set up', [{ calls: [{ name: 'routine_set', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: NEW_YORK } } }] }, { text: 'Done.' }])
     expect((await panel(id)).routines[0]).toMatchObject({ timeZone: NEW_YORK })
     await me(TOKYO)
     expect((await panel(id)).routines[0]).toMatchObject({ timeZone: TOKYO })

@@ -177,3 +177,47 @@ describe('Thread Asks and the Thread card (ch-vrl7, ch-hikl, ch-iy16)', () => {
     expect(screen.getByText('Friday works.')).toBeTruthy()
   })
 })
+
+describe('tool-call Ask (sk-hx8j)', () => {
+  const long = 'x'.repeat(400)
+  const ask: ProposalView = {
+    id: 'p-call', kind: 'tool-call', revision: 1, status: 'open', purpose: 'gmail_send: Tell Ben the meeting moved', grants: null, file: null, skill: null,
+    toolCall: {
+      robot: 'Inbox', tool: 'gmail_send', reason: 'Tell Ben the meeting moved', note: null,
+      arguments: [{ name: 'to', value: 'ben@example.com' }, { name: 'token', value: '[secret:gmail]' }, { name: 'body', value: long }],
+    },
+  }
+
+  it('shows the Robot, the tool, the arguments line by line with long values cut, and the reason', () => {
+    const { container } = render(<AskBar asks={[ask]} onAnswer={vi.fn()} onReplyInstead={vi.fn()} />)
+    expect(screen.getByText('Inbox wants to use gmail_send')).toBeTruthy()
+    const terms = [...container.querySelectorAll('.tool-call-args dt')].map((node) => node.textContent)
+    const values = [...container.querySelectorAll('.tool-call-args dd')].map((node) => node.textContent ?? '')
+    expect(terms).toEqual(['to', 'token', 'body'])
+    expect(values[0]).toBe('ben@example.com')
+    expect(values[1]).toBe('[secret:gmail]')
+    expect(values[2]!.length).toBeLessThan(long.length)
+    expect(values[2]!.endsWith('…')).toBe(true)
+    expect(container.querySelector('.tool-call-reason')?.textContent).toBe('Why: Tell Ben the meeting moved')
+  })
+
+  it('approves without a note and rejects with the owner\'s text', () => {
+    const onAnswer = vi.fn()
+    const { rerender } = render(<AskBar asks={[ask]} onAnswer={onAnswer} onReplyInstead={vi.fn()} />)
+    fireEvent.click(screen.getByText('Approve'))
+    expect(onAnswer).toHaveBeenLastCalledWith(ask, true, undefined, undefined, undefined)
+    const other = { ...ask, id: 'p-call-2' }
+    rerender(<AskBar asks={[other]} onAnswer={onAnswer} onReplyInstead={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Note for the Robot'), { target: { value: ' Not today ' } })
+    fireEvent.click(screen.getByText('Reject'))
+    expect(onAnswer).toHaveBeenLastCalledWith(other, false, undefined, undefined, 'Not today')
+  })
+
+  it('shows the answer and the note in the Conversation once decided', () => {
+    const decided: ProposalView = { ...ask, status: 'rejected', toolCall: { ...ask.toolCall!, note: 'Not today' } }
+    render(<AskBar asks={[decided]} onAnswer={vi.fn()} onReplyInstead={vi.fn()} />)
+    expect(screen.queryByText('Approve')).toBeNull()
+    expect(screen.getByText('Your note: Not today')).toBeTruthy()
+    expect(screen.getByText('Rejected')).toBeTruthy()
+  })
+})

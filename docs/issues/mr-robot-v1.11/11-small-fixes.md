@@ -6,7 +6,7 @@
 
 **Blocked by:** 03 (holders come from levels)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Back behaviour with a component test
-- [ ] skill_library holders, google_accounts services, Discord id in workerd tests
+- [x] Back behaviour with a component test
+- [x] skill_library holders, google_accounts services, Discord id in workerd tests

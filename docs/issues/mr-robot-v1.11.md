@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.11 — what a Robot knows about itself: role, product docs, grant levels, need_help, time zone, Workspace hygiene"
-status: ready-for-agent
+status: done
 story-prefix: sk
 parent: mr-robot-v1.10.md
 ---

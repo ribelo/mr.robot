@@ -1,4 +1,6 @@
+import { levelSummary, type CapabilityItem } from '@mr-robot/protocol'
 import type { RobotConfig } from '../robot/store.ts'
+import { docsIndex } from './docs-index.ts'
 
 /**
  * The platform's standing instructions to every Robot (v1.11 ticket 01), modelled on Muse's prompt:
@@ -12,6 +14,8 @@ export interface PromptInput {
   readonly ownerName: string
   /** The chosen Provider puts its own identity line before this prompt (a Claude subscription, sk-74ym). */
   readonly afterProviderIdentity: boolean
+  /** The Robot's grantable items with their levels, for the runtime section; absent while they are not known yet. */
+  readonly capabilities?: readonly CapabilityItem[]
 }
 
 export interface PlatformSection {
@@ -89,7 +93,7 @@ const dateAndTime: PlatformSection = {
   name: 'date-and-time',
   render: ({ ownerName: owner }) => lines(
     '## Date and time',
-    'Wake-up labels tell you why you woke (a Routine, a Robot message, a channel event, a platform notice), not what time it is. Take the current date and time from a tool result; when you cannot get it, say so instead of guessing.',
+    'Every Wake-up starts with a label that gives the local time in your time zone, e.g. [Sat 2026-10-10 11:46 Europe/Warsaw]: the time you woke. A Turn can run long; for the time now, take it from a tool result, and when you cannot get it, say so instead of guessing.',
     `Write dates and times in ${owner}'s time zone. Never guess the weekday of a date: compute it with a tool, or leave it out. Do not call data current or live unless a tool returned it in this Turn; read the dates a page or message shows.`,
   ),
 }
@@ -178,8 +182,28 @@ const threads: PlatformSection = {
     : '',
 }
 
+/** The product docs with one line each (sk-xseb). */
+const docs: PlatformSection = { name: 'docs', render: () => `## ${docsIndex()}` }
+
+/**
+ * What is true of this Robot now (sk-ixvp): name, owner, model, time zone, the language rule and the
+ * levels of its grants, names only. The text holds no clock, so it stays the same between Turns and
+ * the prompt cache keeps working; the time of a Wake-up is in its label.
+ */
+const runtime: PlatformSection = {
+  name: 'runtime',
+  render: ({ config, ownerName: owner, capabilities }) => lines(
+    '## Runtime',
+    `- You are ${config.identity.name}, a Robot of ${owner}. Your model is ${config.model.model} on ${config.model.provider}, thinking ${config.model.effort}.`,
+    `- Time zone: ${config.timeZone}.`,
+    `- Language: answer in the language ${owner} writes in; write files, notes and skills in English; USER.md may override this.`,
+    capabilities !== undefined && config.status !== 'setup' && '- Your levels (call my_capabilities for what each item does):',
+    capabilities !== undefined && config.status !== 'setup' && levelSummary(capabilities),
+  ),
+}
+
 /** In order: bridge, role, core; the docs index and the runtime section follow at the end. */
-export const PLATFORM_SECTIONS: readonly PlatformSection[] = [bridge, role, workFor, howYouWork, memory, dateAndTime, context, style, language, toolRules, routines, files, threads]
+export const PLATFORM_SECTIONS: readonly PlatformSection[] = [bridge, role, workFor, howYouWork, memory, dateAndTime, context, style, language, toolRules, routines, files, threads, docs, runtime]
 
 /** The sections with text for this Robot now, in order. */
 export function platformSections(input: PromptInput): Array<{ name: string; text: string }> {

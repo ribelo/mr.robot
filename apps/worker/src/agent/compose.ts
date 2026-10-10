@@ -13,7 +13,7 @@ import SessionStore, { SessionId, SessionLogOffset, type SessionEvent } from '@d
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import ToolRuntime, { type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ThinkingEffort } from '@mr-robot/protocol'
 import { BudgetedAdapter } from './budget.ts'
 import { compactionConfig, robotCompaction } from './compaction.ts'
@@ -71,10 +71,17 @@ export async function compose(input: CompositionInput): Promise<Composition> {
       const assembly = await next()
       return { ...assembly, sections: assembly.sections.filter((section) => isProductSection(section.name)) }
     })
-    await ctx.plugin(ToolRuntime, {})
-    for (const { plugin, config } of input.mounts) {
-      await plugin.seams?.(ctx, config as never)
-      await ctx.plugin(plugin as never, config as never)
+    // A tool registers through the gate of the mount being applied, also when a DSH plugin of its seams registers it.
+    let gate: ((tool: ToolDefinition) => ToolDefinition) | undefined
+    await ctx.plugin(gatedToolRuntime(() => gate), {})
+    for (const { plugin, config, gate: mountGate } of input.mounts) {
+      gate = mountGate
+      try {
+        await plugin.seams?.(ctx, config as never)
+        await ctx.plugin(plugin as never, config as never)
+      } finally {
+        gate = undefined
+      }
     }
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
     await ctx.plugin(robotCompaction(input.compactionInstruction, input.onCompacted), compactionConfig(input.contextBudget, input.modelWindow))
@@ -120,6 +127,18 @@ export async function compose(input: CompositionInput): Promise<Composition> {
   } catch (error) {
     await ctx.fiber.dispose()
     throw error
+  }
+}
+
+/**
+ * DSH's tool registry with every registration passed through the gate current at that moment
+ * (the ask-per-call wrapper of the mount being applied, sk-hx8j). Registrations outside a mount are unchanged.
+ */
+function gatedToolRuntime(current: () => ((tool: ToolDefinition) => ToolDefinition) | undefined): typeof ToolRuntime {
+  return class GatedToolRuntime extends ToolRuntime {
+    override register(definition: ToolDefinition): () => void {
+      return super.register(current()?.(definition) ?? definition)
+    }
   }
 }
 

@@ -94,6 +94,12 @@ function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
     case 'notice': return { ...item, text: mask(item.text) }
     case 'thinking': return { ...item, text: mask(item.text) }
     case 'activity': return item.calls === undefined ? item : { ...item, calls: item.calls.map((call) => ({ ...call, args: mask(call.args), result: mask(call.result), inner: call.inner.map((inner) => ({ ...inner, args: mask(inner.args) })) })) }
+    // A tool-call Ask shows the stored arguments; a secret value among them is masked like the chat (sk-hx8j).
+    case 'question': {
+      const call = item.proposal.toolCall
+      if (call === undefined) return item
+      return { ...item, proposal: { ...item.proposal, purpose: mask(item.proposal.purpose), toolCall: { ...call, reason: mask(call.reason), arguments: call.arguments.map((argument) => ({ ...argument, value: mask(argument.value) })) } } }
+    }
     default: return item
   }
 }
@@ -255,6 +261,8 @@ export const panel = (canEdit: boolean, summary: RobotSummary) => Effect.gen(fun
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
     ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),
+    // Requests for help still waiting, oldest first (sk-fmvh).
+    help: store.proposals('open').flatMap((row) => row.kind === 'help' && row.help !== undefined ? [{ id: row.id, text: row.help.need, urgent: row.help.urgent, created: row.help.created, escalated: row.help.escalated }] : []),
   } as RobotPanel
 })
 

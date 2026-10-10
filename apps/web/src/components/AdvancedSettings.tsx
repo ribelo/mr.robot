@@ -1,7 +1,8 @@
 import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
+import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS } from './danger-words.ts'
 import { useState, useEffect } from 'react'
-import { GRANT_LEVELS, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
+import { capabilityItems, GRANT_LEVELS, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
 import type * as Exit from 'effect/Exit'
 import { keys, promptAtom, useCommand, webhookAtom } from '../client/api-atoms.ts'
@@ -17,7 +18,8 @@ export interface AdvancedSettingsProps {
   readonly onPause: () => void
   readonly onResume: () => void
   readonly onDelete: (confirm: string) => Promise<Exit.Exit<void, ApiFailure>>
-  readonly onClear: (confirm: string, memory: boolean) => Promise<Exit.Exit<void, ApiFailure>>
+  readonly onClear: (confirm: string) => Promise<Exit.Exit<void, ApiFailure>>
+  readonly onStartOver: (confirm: string) => Promise<Exit.Exit<void, ApiFailure>>
 }
 
 
@@ -25,18 +27,21 @@ export interface AdvancedSettingsProps {
  * What the Robot was given (robot-vqtw): model and effort, context budget, code mode,
  * compaction instruction, Grants, sharing, notifications and spend limit.
  */
-export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, onDelete, onClear }: AdvancedSettingsProps) {
+export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, onDelete, onClear, onStartOver }: AdvancedSettingsProps) {
   const settings = panel.settings
-  const [danger, setDanger] = useState<'delete' | 'clear'>()
+  const [danger, setDanger] = useState<'delete' | 'clear' | 'start-over'>()
   const name = panel.summary.identity.name
   const [draft, setDraft] = useState(settings)
   const [saving, setSaving] = useState(false)
   const model = catalog.models.find((option) => option.provider === draft.model.provider && option.model === draft.model.model)
   const maxBudget = model?.contextWindow ?? 1_000_000
   const setLevel = (field: GrantField, name: string, level: GrantLevel) => setDraft({ ...draft, grants: { ...draft.grants, [field]: { ...draft.grants[field], [name]: level } } })
+  // The same list my_capabilities and the prompt's runtime section are built from (sk-ixvp).
+  const capabilities = capabilityItems(catalog, draft.grants)
+  const of = (field: CapabilityField) => capabilities.filter((entry) => entry.field === field)
   /** One grant item's three-state control (sk-746n). */
-  const item = (field: GrantField, name: string, label: string, detail?: string) => (
-    <GrantItem key={`${field}:${name}`} label={label} {...(detail === undefined ? {} : { detail })} level={levelIn(draft.grants[field], name)} onChange={(level) => setLevel(field, name, level)} />
+  const item = (entry: CapabilityItem) => (
+    <GrantItem key={`${entry.field}:${entry.name}`} label={entry.label} detail={entry.description} level={entry.level} onChange={(level) => setLevel(entry.field, entry.name, level)} />
   )
   const save = async () => {
     setSaving(true)
@@ -82,42 +87,36 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       <h2>Tools</h2>
       <div className="muted">Allow: the Robot uses it freely. Ask: each use waits for your answer. Deny: the Robot does not have it.{mrRobot ? ' Mr. Robot holds everything you can reach at allow unless you lower it here.' : ''}</div>
       <div className="check-grid scroll-box">
-        {catalog.toolGroups.map((group) => item('tools', group.name, group.name, group.description))}
+        {of('tools').map(item)}
       </div>
       <h2>Skills</h2>
       {catalog.skills.length === 0 ? <div className="muted">No skills in the library yet.</div> : (
         <div className="check-grid scroll-box">
-          {catalog.skills.map((skill) => item('skills', skill.name, skill.name, skill.description))}
+          {of('skills').map(item)}
         </div>
       )}
       <h2>Recipients</h2>
       {mrRobot ? <div className="muted">Mr. Robot can message every Robot you can reach.</div> : catalog.robots.length === 0 ? <div className="muted">No other Robots to message.</div> : (
         <div className="check-grid">
-          {catalog.robots.map((robot) => item('recipients', robot.id, robot.name))}
+          {of('recipients').map(item)}
         </div>
       )}
       <h2>Connections</h2>
       {(catalog.connections ?? []).length === 0 ? <div className="muted">No connections yet: connect accounts under your name → Connections.</div> : (
         <div className="check-grid">
-          {(catalog.connections ?? []).flatMap((connection) => {
-            const canWrite = connection.kind === 'slack' || (connection.kind === 'google' && connection.services.includes('gmail-send'))
-            const read = item('connections', connection.id, connection.label, `${connection.kind} · ${connection.account}${connection.mine ? '' : ` · ${connection.ownerName}'s`}${connection.status === 'connected' ? '' : ' · needs attention'}`)
-            if (!canWrite) return [read]
-            return [read, item('connections', `${connection.id}:write`, `${connection.label}: ${connection.kind === 'google' ? 'send e-mail' : 'post and mark read'}`, 'A separate grant: without it the Robot only reads')]
-          })}
+          {of('connections').map(item)}
         </div>
       )}
       <h2>Hosts</h2>
       {(catalog.hosts ?? []).length === 0 ? <div className="muted">No computers yet: install the Mr. Robot app on one and pair it (your name → Hosts).</div> : (
         <div className="check-grid">
-          {(catalog.hosts ?? []).flatMap((host) => (['browser', 'files', 'shell'] as const).map((kind) => item('hosts', `${host.id}:${kind}`, `${host.name}: ${kind}`,
-            `${kind === 'browser' ? 'Its Chrome, when chosen as this Robot\'s browser above' : kind === 'files' ? 'host_read, host_write as the host owner' : 'host_run as the host owner, in their shell'} · ${host.online ? 'online' : 'offline'}${host.mine ? '' : ` · ${host.ownerName}'s`}`)))}
+          {of('hosts').map(item)}
         </div>
       )}
       <h2>Logins</h2>
       {catalog.secrets.length === 0 ? <div className="muted">No logins yet: add them under your name → Logins.</div> : (
         <div className="check-grid">
-          {catalog.secrets.map((secret) => item('secrets', secret.name, secret.name, [secret.username, (secret.websites ?? []).join(', '), secret.scope === 'home' ? 'shared with the Home' : 'yours'].filter((part) => part !== undefined && part !== '').join(' · ')))}
+          {of('secrets').map(item)}
         </div>
       )}
 
@@ -149,6 +148,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           ? <button type="button" className="button" onClick={onResume}>Resume</button>
           : <button type="button" className="button" onClick={onPause}>Pause</button>}
         {panel.canEdit ? <button type="button" className="button button-danger" onClick={() => setDanger('clear')}>Clear history…</button> : null}
+        {panel.canEdit ? <button type="button" className="button button-danger" onClick={() => setDanger('start-over')}>Start over…</button> : null}
         {mrRobot || !panel.canEdit ? null : <button type="button" className="button button-danger" onClick={() => setDanger('delete')}>Delete…</button>}
         <span className="spacer" />
         <button type="button" className="button button-primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
@@ -157,12 +157,12 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         <ConfirmByName title={`Delete ${name}`} name={name} action="Delete robot"
           goes="The robot, its conversation, files, memory and routines are deleted, and other robots stop being able to message it."
           onCancel={() => setDanger(undefined)} onConfirm={() => onDelete(name)} />
+      ) : danger === 'start-over' ? (
+        <ConfirmByName title={`Start ${name} over`} name={name} action="Start over" goes={START_OVER_GOES} stays={START_OVER_STAYS}
+          onCancel={() => setDanger(undefined)} onConfirm={async () => { const exit = await onStartOver(name); if (exit._tag === 'Success') setDanger(undefined); return exit }} />
       ) : danger === 'clear' ? (
-        <ConfirmByName title={`Clear ${name}'s history`} name={name} action="Clear history"
-          goes="The conversation and its history are deleted; the robot starts a fresh conversation."
-          stays="Its settings, grants, routines and files stay."
-          option={{ label: 'Also clear its memory', note: 'MEMORY.md, the memory bank and daily notes go back to empty.' }}
-          onCancel={() => setDanger(undefined)} onConfirm={async (memory) => { const exit = await onClear(name, memory); if (exit._tag === 'Success') setDanger(undefined); return exit }} />
+        <ConfirmByName title={`Clear ${name}'s history`} name={name} action="Clear history" goes={CLEAR_GOES} stays={CLEAR_STAYS}
+          onCancel={() => setDanger(undefined)} onConfirm={async () => { const exit = await onClear(name); if (exit._tag === 'Success') setDanger(undefined); return exit }} />
       ) : null}
     </div>
   )

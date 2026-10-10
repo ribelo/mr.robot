@@ -71,17 +71,17 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
     expect(JSON.parse(results[3]!)).toEqual([])
   })
 
-  it('schedule_create refuses after_seconds under 60 as it does every_seconds, in Routine words (ts-lnox, ts-x0kl)', async () => {
+  it('routine_set refuses after_seconds under 60 and every_seconds under 300, in Routine words (ts-lnox, ts-x0kl)', async () => {
     const id = await robotWith({ tools: ['routines'] })
     const [after, every, fine] = await say(id, [
-      { name: 'schedule_create', args: { title: 'Soon', prompt: 'ping', after_seconds: 5 } },
-      { name: 'schedule_create', args: { title: 'Often', prompt: 'ping', every_seconds: 5 } },
-      { name: 'schedule_create', args: { title: 'Later', prompt: 'ping', after_seconds: 120 } },
+      { name: 'routine_set', args: { title: 'Soon', prompt: 'ping', after_seconds: 5 } },
+      { name: 'routine_set', args: { title: 'Often', prompt: 'ping', every_seconds: 120 } },
+      { name: 'routine_set', args: { title: 'Later', prompt: 'ping', after_seconds: 120 } },
     ])
     expect(after).toContain('after_seconds must be at least 60')
-    expect(every).toContain('every_seconds must be at least 60')
+    expect(every).toContain('at least 5 minutes')
     expect(fine).not.toContain('must be at least')
-    const [both] = await say(id, [{ name: 'schedule_create', args: { title: 'Two', prompt: 'ping', after_seconds: 120, every_seconds: 120 } }])
+    const [both] = await say(id, [{ name: 'routine_set', args: { title: 'Two', prompt: 'ping', after_seconds: 120, every_seconds: 120 } }])
     expect(both).toContain('Routine')
     expect(both).not.toMatch(/reminder/i)
   })
@@ -161,6 +161,22 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
     await api(ANNA, `/api/robots/${id}/proposals/${question.proposal.id}`, { body: { revision: question.proposal.revision, approve: true } })
     await settle(id)
     expect((await grantsOf(id)).tools).toEqual({ files: 'allow', web: 'ask', routines: 'allow' })
+  })
+})
+
+describe('code mode declares only the tools a Robot may use (sk-3i46)', () => {
+  it('has allow and ask tools in the SDK the model reads and no deny tool', async () => {
+    const id = await robotWith({})
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true, grants: { tools: { files: 'allow', web: 'ask', browser: 'deny', exa: 'deny', routines: 'deny' } } } })
+    await say(id, [])
+    const request = requests.get(id)!.at(-1)!
+    // Code mode offers one tool; the SDK it declares is part of the system prompt.
+    expect((request.tools ?? []).map((tool) => tool.name)).toEqual(['run_code'])
+    const system = request.messages.filter((message) => message.role === 'system').flatMap((message) => message.content.map((block) => ('text' in block ? block.text : ''))).join('\n')
+    // The tools the SDK declares are the keys of its ToolArgsMap.
+    const declared = [...(/interface ToolArgsMap \{([\s\S]*?)\n\}\n/.exec(system)?.[1] ?? '').matchAll(/^  ([a-z_0-9]+): /gm)].map((match) => match[1]!)
+    expect(declared).toEqual(expect.arrayContaining(['delete_file', 'read', 'web_fetch', 'my_capabilities']))
+    for (const absent of ['browser_open', 'web_search_exa', 'schedule_create']) expect(declared, absent).not.toContain(absent)
   })
 })
 
@@ -246,7 +262,7 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     await say(id, [])
     const offered = lastTools(id)
     const names = offered.map((tool) => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'schedule_create', 'drive_replace', 'browser_wait', 'discord_accounts', 'host_write', 'host_run', 'login_fill', 'propose_member_file_edit']))
+    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'routine_set', 'routine_list', 'routine_pause', 'routine_delete', 'drive_replace', 'browser_wait', 'discord_accounts', 'host_write', 'host_run', 'login_fill', 'propose_member_file_edit']))
     expect(names).not.toContain('web_search')
     expect(names).not.toContain('drive_import')
     expect(contractProblems(offered)).toEqual([])
@@ -254,11 +270,10 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     const describedAs = (name: string) => offered.find((tool) => tool.name === name)!.description
     expect(describedAs('web_fetch')).toContain('web_search_exa')
     expect(describedAs('web_fetch')).toContain('statusCode')
-    // The rewrite of DSH's "reminder" wording must have happened, not merely found nothing to change.
-    const schedule = offered.filter((entry) => entry.name.startsWith('schedule_'))
-    expect(schedule.length).toBeGreaterThan(2)
-    for (const tool of schedule) expect(tool.description + JSON.stringify(tool.parameters)).not.toMatch(/reminder/i)
-    expect(describedAs('schedule_create') + describedAs('schedule_delete')).toMatch(/Routine/)
+    // DSH's schedule tools are not offered; the product's Routine tools are the only ones, in Routine words (sk-xs60).
+    expect(names.filter((name) => name.startsWith('schedule_'))).toEqual([])
+    for (const tool of offered.filter((entry) => entry.name.startsWith('routine_'))) expect(tool.description + JSON.stringify(tool.parameters)).not.toMatch(/reminder/i)
+    expect(describedAs('routine_set') + describedAs('routine_delete')).toMatch(/Routine/)
     expect(describedAs('browser_wait')).toMatch(/page title/)
     expect(describedAs('browser_wait')).toMatch(/30 000/)
     expect(describedAs('drive_replace')).toContain('Overwrite')
@@ -273,7 +288,7 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     await testRobot(mr).activateForTest()
     await say(mr, [])
     const offered = lastTools(mr)
-    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write', 'robot_list', 'robot_settings_set', 'robot_routine_set', 'conversation_search', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
+    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write', 'robot_list', 'robot_settings_set', 'routine_set', 'conversation_search', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
     expect(contractProblems(offered)).toEqual([])
     expect(await returnedWithoutArguments(mr, offered)).toEqual([])
   })

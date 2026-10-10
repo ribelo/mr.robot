@@ -6,8 +6,8 @@
 
 **Blocked by:** 01 (plugin prompt sections are filtered there)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Product Routine tools for own and other Robots; DSH schedule tools absent
-- [ ] Routine cards in the Conversation still render for the new tool names
-- [ ] Workerd tests: own and other Robot Routines through the one API, limits, DSH tools gone
+- [x] Product Routine tools for own and other Robots; DSH schedule tools absent
+- [x] Routine cards in the Conversation still render for the new tool names
+- [x] Workerd tests: own and other Robot Routines through the one API, limits, DSH tools gone

@@ -52,7 +52,7 @@ describe('delete, clear and reset (v1.3 ticket 06)', () => {
     expect(JSON.stringify(panel.settings.grants.recipients)).not.toContain(id)
   })
 
-  it('clears history keeping configuration, routines and memory, or memory too when chosen (pl-05eu, pl-y228)', async () => {
+  it('clears history keeping configuration, routines and every file (pl-05eu, pl-y228, sk-8won)', async () => {
     const id = await robot('Bills')
     await api(ANNA, `/api/robots/${id}/file?path=MEMORY.md`, { method: 'PUT', body: { content: '# MEMORY.md\nPays on the 10th.' } })
     await say(id, 'zebra-before-clear', [{ text: 'Remembered.' }])
@@ -69,8 +69,9 @@ describe('delete, clear and reset (v1.3 ticket 06)', () => {
     await say(id, 'hello again', [{ text: 'Hi.' }])
     expect(JSON.stringify(requests.get(id)!.at(-1)!.messages)).not.toContain('zebra-before-clear')
 
+    // The old `memory` flag is ignored: Clear history never touches files (sk-8won).
     await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'New robot', memory: true } })
-    expect((await api<{ text: string }>(ANNA, `/api/robots/${id}/file?path=MEMORY.md`)).body.text).not.toContain('Pays on the 10th.')
+    expect((await api<{ text: string }>(ANNA, `/api/robots/${id}/file?path=MEMORY.md`)).body.text).toContain('Pays on the 10th.')
 
     const mr = (await mrRobot()).id
     expect((await api(ANNA, `/api/robots/${mr}/clear`, { body: { confirm: 'Mr. Robot' } })).status).toBe(200)

@@ -1,11 +1,10 @@
-/** Routines: DSH's schedule tools over the Robot's alarm. */
+/** Routines: the product's own tools over the Robot's routine table and alarm. */
 import z from '@deepseek-ai/schemastery'
-import { schedulePlugin, SCHEDULE_TOOL_NAMES, type AlarmSchedule } from '../agent/schedule.ts'
+import { routineTools, type RoutinesHost } from '../agent/tools/routines.ts'
 import { capability } from './define.ts'
 
-export const Routines = capability<{ schedule: AlarmSchedule }>({
+export const Routines = capability<{ host: RoutinesHost }>({
   name: 'routines',
-  Config: z.object({ schedule: z.any().required() }) as never,
-  seams: (ctx, { schedule }) => schedulePlugin(schedule)(ctx),
-  extraToolNames: [...SCHEDULE_TOOL_NAMES],
+  Config: z.object({ host: z.any().required() }) as never,
+  tools: ({ host }) => routineTools(host),
 })

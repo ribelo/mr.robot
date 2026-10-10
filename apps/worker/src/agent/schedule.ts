@@ -1,18 +1,15 @@
 /**
- * DSH's schedule plugin ported onto Durable Object alarms (robot-c8hq, robot-gbbt). The model
- * gets DSH's own schedule_create / schedule_list / schedule_update / schedule_delete tools and
- * DSH's records and recurrence arithmetic, the same as in the desktop harness. What DSH keeps in
- * a Host storage domain and drives with timers lives here in the Robot's SQLite and its alarm.
+ * The Routine rules over the Robot's SQLite and its Durable Object alarm (robot-c8hq, robot-gbbt). A Routine is stored
+ * as a DSH schedule record, so DSH's recurrence arithmetic still decides when it fires; the Robot is told the Routine's
+ * own prompt under the Routine label; the product's own tools (routine_set and the rest, ticket 09) are the only way a Robot reaches them.
  */
-import type { Context } from '@deepseek-ai/cordis'
 import {
   createAfterScheduleRecord, createAtScheduleRecord, createCronScheduleRecord, createDailyScheduleRecord, createEveryScheduleRecord,
-  createWeeklyScheduleRecord, isRecurringScheduleRecord, registerScheduleTools, renderRecurringReminderBatchFraming, renderReminderFraming,
+  createWeeklyScheduleRecord, isRecurringScheduleRecord,
   resolveRecurringOccurrence, MIN_EVERY_INTERVAL_SECONDS, ScheduleId, ScheduleInputError, scheduleTitle,
-  type ScheduleCatalogEntry, type ScheduleCreateRequest, type ScheduleDeleteRequest, type ScheduleDeleteResult, type ScheduleRecord,
+  type ScheduleCreateRequest, type ScheduleRecord,
   type ScheduleUpdateRequest, type ScheduleUpdateResult,
 } from '@deepseek-ai/dsh-schedule'
-import { withToolRewrite, routineWords, withDescriptions } from './tool-wording.ts'
 import { resolveScheduleUpdate } from './schedule-update.ts'
 import { cronMinGapMinutes } from '../robot/schedule.ts'
 import type { RoutineSchedule } from '@mr-robot/protocol'
@@ -50,7 +47,7 @@ export interface ScheduleStorage {
   changed(): void
 }
 
-/** The ctx.schedule service DSH's schedule tools call, over the Robot's storage. */
+/** Creating and editing Routines over the Robot's storage; the limits and the validation live here. */
 export class AlarmSchedule {
   constructor(private readonly storage: ScheduleStorage) {}
 
@@ -79,22 +76,6 @@ export class AlarmSchedule {
     return record
   }
 
-  async list(request: { sessionId: string }): Promise<ScheduleRecord[]> {
-    return this.storage.tasks().filter((task) => task.active && task.sessionId === request.sessionId).map((task) => task.record)
-  }
-
-  async catalog(): Promise<ScheduleCatalogEntry[]> {
-    return this.storage.tasks().map((task) => ({ ...task.record, sessionId: task.sessionId, status: task.active ? 'active' : 'inactive' }) as ScheduleCatalogEntry)
-  }
-
-  async delete(request: ScheduleDeleteRequest): Promise<ScheduleDeleteResult> {
-    const task = this.storage.tasks().find((entry) => entry.record.id === request.id)
-    if (task === undefined || task.sessionId !== request.sessionId) return { id: request.id, deleted: false, code: 'schedule_not_found' }
-    this.storage.remove(request.id)
-    this.storage.changed()
-    return { id: request.id, deleted: true }
-  }
-
   async update(request: ScheduleUpdateRequest): Promise<ScheduleUpdateResult> {
     const task = this.storage.tasks().find((entry) => entry.record.id === request.id)
     if (task === undefined || task.sessionId !== request.sessionId) return { id: request.id, updated: false, code: 'schedule_not_found' }
@@ -110,28 +91,15 @@ export class AlarmSchedule {
   }
 }
 
-/** Mount ctx.schedule and attach DSH's schedule tools to every agent (only when routines are granted). */
-export function schedulePlugin(service: AlarmSchedule): (ctx: Context) => Promise<void> {
-  return async (ctx) => {
-    ;(ctx as unknown as { provide(name: string, value: unknown): void }).provide('schedule', service)
-    const on = ctx as unknown as { on(event: string, listener: (input: { agent: { ctx: { effect(body: () => () => void): void } } }) => void): void }
-    on.on('agent/created', ({ agent }) => {
-      // DSH words its tools "reminder"; the product says Routine (ts-x0kl).
-      const toolCtx = withToolRewrite(agent.ctx, (definition) => withDescriptions(definition, routineWords))
-      agent.ctx.effect(() => registerScheduleTools(ctx, toolCtx as never, agent as never))
-    })
-  }
-}
-
-/** The tools DSH registers, for prompt previews and the admin view. */
-export const SCHEDULE_TOOL_NAMES = ['schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete'] as const
-
-/** A due task becomes a wake-up: DSH's own framing, and the next target for recurring tasks. */
+/**
+ * A due task becomes a wake-up: the Routine's own prompt (the Routine label in front of it comes
+ * from the wake-up source, not DSH's "schedule reminder" framing), and the next target for recurring tasks.
+ */
 export function dueDelivery(record: ScheduleRecord, now: number): { text: string; next: ScheduleRecord | null } {
-  if (!isRecurringScheduleRecord(record)) return { text: renderReminderFraming(record), next: null }
+  if (!isRecurringScheduleRecord(record)) return { text: record.prompt, next: null }
   const occurrence = resolveRecurringOccurrence(record, now)
   return {
-    text: renderRecurringReminderBatchFraming([{ record, occurrenceAt: occurrence.occurrenceAt }]),
+    text: record.prompt,
     next: occurrence.nextScheduledAt === undefined ? null : { ...record, scheduledAt: occurrence.nextScheduledAt },
   }
 }

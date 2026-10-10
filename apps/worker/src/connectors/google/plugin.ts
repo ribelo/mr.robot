@@ -9,6 +9,8 @@ import { contactsTools } from './contacts.ts'
 export const GooglePlugin: ConnectorPlugin = {
   kind: 'google',
   tools: (host) => connectorTools(host, [...gmailTools(host), ...calendarTools(host), ...driveTools(host), ...docsSheetsTools(host), ...contactsTools(host)]),
+  // Drive's scopes (oauth.ts) cover Docs and Sheets: a Connection with drive offers their tools too (sk-w8fb).
+  listedServices: (services) => services.flatMap((service) => (service === 'drive' ? ['drive', 'docs', 'sheets'] : [service])),
   prompt: () => [
     '- Google: a tool appears only for the services the account granted. Prefer gmail_draft over sending when the owner did not ask you to send; a sent e-mail cannot be taken back.',
     '- Attachments you save land in your Workspace under attachments/gmail/, Drive downloads and exports under drive/; you can attach or upload Workspace files by path.',

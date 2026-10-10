@@ -27,9 +27,11 @@ An item with no stored level is deny.
 
 1. The Robot calls a tool in an ask item. The call needs a reason argument. The Robot says why it needs the call.
 2. The platform stores an Ask of kind tool-call. It shows the tool, the arguments and the reason.
-3. The Turn waits. If nobody watches, the Turn ends as waiting. It continues when the owner answers.
-4. If the owner approves, the platform runs the tool. The Robot gets the result.
-5. If the owner rejects, the Robot gets an error with the owner's reason.
+3. The tool does not run. The call gives the result "waiting for your owner" with the Ask id. The Robot ends its Turn with one short line. In code mode, the program gets the same result and continues.
+4. If the owner approves, the platform runs the stored call: the same tool with the same arguments. A Wake-up "[Your owner approved <tool> (<Ask id>)]" gives the Robot the result.
+5. If the owner rejects, the call does not run. A Wake-up "[Your owner rejected <tool> (<Ask id>): <reason>]" tells the Robot.
+
+This also works in a Routine Turn that nobody watches: the Ask waits, and the answer wakes the Robot later.
 
 One approval covers exactly one call. The platform never remembers an approval.
 

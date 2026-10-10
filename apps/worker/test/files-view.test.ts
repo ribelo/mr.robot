@@ -45,9 +45,8 @@ describe('the Files view (v1.1 ticket 08)', () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await testRobot(body.id).saveScreenForTest()
-    const shot = (await api<WorkspaceFileView[]>(ANNA, `/api/robots/${body.id}/files`)).body.find((file) => file.group === 'screens')!
-    const opened = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${body.id}/file?path=${encodeURIComponent(shot.path)}`)).body
+    await env.FILES.put(`robots/${body.id}/out/chart.png`, new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]))
+    const opened = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${body.id}/file?path=out/chart.png`)).body
     expect(opened).toMatchObject({ text: null, readOnly: true })
     expect(opened.note).toContain('binary file')
   })
