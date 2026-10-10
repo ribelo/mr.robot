@@ -35,6 +35,8 @@ export class DiscordAtHome {
     private readonly inbound: (message: GatewayMessage, ownerId: string) => Promise<void>,
     /** Ask the Durable Object for its alarm, to drive heartbeats and reconnects. */
     private readonly setAlarm: (at: number) => Promise<void>,
+    /** Every bot the gateway may use, default connections first; defaults to the one bot(null) gives. */
+    private readonly bots: () => Promise<readonly BotConnection[]> = async () => { const one = await bot(null); return one === null ? [] : [one] },
   ) {
     sql.exec('CREATE TABLE IF NOT EXISTS discord_channel (channel_id TEXT PRIMARY KEY, robot_id TEXT NOT NULL, owner_id TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS discord_connect (at INTEGER NOT NULL)')
@@ -86,10 +88,17 @@ export class DiscordAtHome {
   }
 
   private async connect(): Promise<void> {
-    const bot = await this.bot(null)
-    if (bot === null) return
-    const tokenHash = await hashOf(bot.token)
-    if (this.sql.exec('SELECT 1 FROM discord_stopped WHERE token_hash = ?', tokenHash).toArray().length > 0) return
+    // The first bot whose token has not been refused for good (an old connection may still hold a reset token).
+    let chosen: { bot: BotConnection; tokenHash: string } | undefined
+    for (const candidate of await this.bots()) {
+      const hash = await hashOf(candidate.token)
+      if (this.sql.exec('SELECT 1 FROM discord_stopped WHERE token_hash = ?', hash).toArray().length === 0) {
+        chosen = { bot: candidate, tokenHash: hash }
+        break
+      }
+    }
+    if (chosen === undefined) return
+    const { bot, tokenHash } = chosen
     const now = Date.now()
     this.sql.exec('DELETE FROM discord_connect WHERE at < ?', now - 2 * 24 * 60 * 60 * 1000)
     const at = nextConnectAt(this.sql.exec<{ at: number }>('SELECT at FROM discord_connect').toArray().map((row) => row.at), now)

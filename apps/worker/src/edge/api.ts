@@ -62,6 +62,16 @@ function owner(c: ApiContext, robotId: string): Effect.Effect<void, ApiError> {
   return reach(c, robotId).pipe(Effect.flatMap((access) => access === 'owner' ? Effect.void : Effect.fail(forbidden('only the owner can do that'))))
 }
 
+/** A connection as the person's connection list shows it (what the app decodes after a change). */
+function connectionView(c: ApiContext, id: string) {
+  return call(() => home(c.env).connectionsFor(c.member.id)).pipe(
+    Effect.flatMap((views) => {
+      const view = views.find((entry) => entry.id === id)
+      return view === undefined ? Effect.fail(notFound('no such connection of yours')) : Effect.succeed(view)
+    }),
+  )
+}
+
 function admin(c: ApiContext): Effect.Effect<void, ApiError> {
   return c.member.role === 'admin' ? Effect.void : Effect.fail(forbidden('admin only'))
 }
@@ -170,9 +180,10 @@ export const api = new Router<ApiContext>()
     if (plugin === undefined || connect === undefined || connect.method !== 'paste') return yield* Effect.fail(notFound('this connector does not connect by pasting'))
     const parsed = parseForm(plugin.name, connect.schema, body.values, new Set())
     if (!parsed.ok) return yield* Effect.fail(badRequest(parsed.error.message))
-    return yield* call(() => c.env.MEMBER.getByName(c.member.id).connectPasted({
+    const added = yield* call(() => c.env.MEMBER.getByName(c.member.id).connectPasted({
       kind: plugin.connector!.kind, label: body.label ?? null, shared: body.shared, services: [], secrets: parsed.secrets,
     })).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return yield* connectionView(c, added.id)
   }))
   .on('PATCH', '/api/connections/:id', (c, { id }) => Effect.gen(function* () {
     const body = yield* decodeBody(c.request, ConnectionPatch)
@@ -181,7 +192,7 @@ export const api = new Router<ApiContext>()
       ...(body.shared === undefined ? {} : { shared: body.shared }),
       ...(body.isDefault === true ? { isDefault: true } : {}),
     }))
-    return updated === undefined ? yield* Effect.fail(notFound('no such connection of yours')) : updated
+    return updated === undefined ? yield* Effect.fail(notFound('no such connection of yours')) : yield* connectionView(c, updated.id)
   }))
   .on('DELETE', '/api/connections/:id', (c, { id }) => Effect.gen(function* () {
     const removed = yield* call(() => c.env.MEMBER.getByName(c.member.id).removeConnection(id))

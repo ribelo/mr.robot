@@ -1,6 +1,7 @@
 import { env, reset, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { ConnectionView, Conversation, Me, RobotPanel } from '@mr-robot/protocol'
+import { ConnectionView as ConnectionViewSchema, type ConnectionView, type Conversation, type Me, type RobotPanel } from '@mr-robot/protocol'
+import * as Schema from 'effect/Schema'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { scripts, requests } from './stub-llm.ts'
 import { connectorFixtures, type RecordedCall } from './connector-fixtures.ts'
@@ -129,6 +130,22 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
     })
   })
 
+  it('listens with the next bot when the first one holds a token Discord refused', async () => {
+    await runInDurableObject(env.HOME.getByName('discord-second-bot-test'), async (_home, state) => {
+      const sql = state.storage.sql
+      const used: string[] = []
+      const fetcher = (async () => { const pair = new WebSocketPair(); pair[1].accept(); return new Response(null, { status: 101, webSocket: pair[0] }) }) as typeof fetch
+      const old = { ownerId: 'm-1', connectionId: 'c-old', token: 'old-token' }
+      const fresh = { ownerId: 'm-1', connectionId: 'c-new', token: 'new-token' }
+      const gateway = new DiscordAtHome(sql, async () => null, async (input, init) => { used.push(String(input)); return fetcher(input, init) }, async () => {}, async () => {}, async () => [old, fresh])
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('old-token')))
+      sql.exec('INSERT INTO discord_stopped (token_hash, code, at) VALUES (?, 4004, ?)', [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join(''), Date.now())
+      await gateway.ensure()
+      expect(used).toHaveLength(1)
+      expect((gateway as unknown as { live?: { token: string } }).live?.token).toBe('new-token')
+    })
+  })
+
   it('stops connecting when the daily budget is used up', async () => {
     await runInDurableObject(env.HOME.getByName('discord-budget-test'), async (_home, state) => {
       const sql = state.storage.sql
@@ -223,6 +240,12 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     expect(connected.status).toBe(200)
     expect(connected.body).toMatchObject({ kind: 'discord', label: 'Bot Mr. Robot (B1)', account: 'mr-robot', setupLink: inviteUrl('B1'), setupLabel: 'Invite the bot to a server' })
     expect(connectorFixtures.calls.find((call) => call.url === `${API}/users/@me`)!.headers['authorization']).toBe('Bot ' + TOKEN)
+    // The app decodes these answers as a ConnectionView ("the server sent an answer this page does not understand").
+    expect(() => Schema.decodeUnknownSync(ConnectionViewSchema)(connected.body)).not.toThrow()
+    const patched = await api<ConnectionView>(ANNA, `/api/connections/${connected.body.id}`, { method: 'PATCH', body: { isDefault: true } })
+    expect(patched.status).toBe(200)
+    expect(() => Schema.decodeUnknownSync(ConnectionViewSchema)(patched.body)).not.toThrow()
+    expect(patched.body).toMatchObject({ mine: true, isDefault: true })
   })
 
   it('a Robot listing its Discord bot sees the id next to the name, and so does the settings list (sk-7dg7)', async () => {

@@ -1403,7 +1403,7 @@ export class Home extends DurableObject<Env> {
     this.discordAt ??= new DiscordAtHome(this.ctx.storage.sql, (memberId) => this.discordBot(memberId), this.connectorFetch(), async (message, ownerId) => { await this.discordReceived(message, ownerId) }, async (at) => {
       const current = await this.ctx.storage.getAlarm()
       if (current === null || current > at) await this.ctx.storage.setAlarm(at)
-    })
+    }, () => this.discordBots())
     return this.discordAt
   }
 
@@ -1425,6 +1425,25 @@ export class Home extends DurableObject<Env> {
       if (token !== undefined) return { ownerId: candidate.ownerId, connectionId: candidate.connection.id, token }
     }
     return null
+  }
+
+  /** Every Discord bot the gateway may listen with: any active Member's own or shared bot, default ones first. */
+  private async discordBots(): Promise<BotConnection[]> {
+    const owners = this.ctx.storage.sql.exec<{ id: string }>("SELECT id FROM member WHERE status = 'active'").toArray().map((row) => row.id)
+    const candidates: Array<{ ownerId: string; connection: { id: string; isDefault: boolean } }> = []
+    for (const owner of owners) {
+      for (const connection of await this.connectionsFor(owner)) {
+        if (connection.kind === 'discord' && connection.status === 'connected' && !candidates.some((known) => known.connection.id === connection.id)) candidates.push({ ownerId: connection.ownerId, connection })
+      }
+    }
+    candidates.sort((a, b) => Number(b.connection.isDefault) - Number(a.connection.isDefault))
+    const bots: BotConnection[] = []
+    for (const candidate of candidates) {
+      const use = await this.env.MEMBER.getByName(candidate.ownerId).useConnection(candidate.connection.id)
+      const token = use?.secrets['token']
+      if (token !== undefined) bots.push({ ownerId: candidate.ownerId, connectionId: candidate.connection.id, token })
+    }
+    return bots
   }
 
   /**
