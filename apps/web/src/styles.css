@@ -497,3 +497,13 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .pending-mark { margin-top: 2px; color: var(--faint); font-size: var(--font-xs); display: inline-flex; align-items: center; gap: 6px; }
 .pending-mark.failed { color: var(--danger-text); }
 .pending-mark .link { color: var(--danger-text); text-decoration: underline; font-size: inherit; }
+
+.thread-tag { font-size: 12px; margin-right: 6px; }
+.thread-card { align-self: center; border: 1px solid var(--line); background: var(--surface-raised); border-radius: 14px; padding: 10px 14px; font-size: 14px; }
+.thread-topic { font-weight: 600; }
+.thread-meta { margin-top: 4px; }
+.thread-summary { margin-top: 6px; color: var(--muted); }
+.thread-event { font-size: 12.5px; margin-bottom: 2px; }
+.thread-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.thread-scope { display: block; margin-top: 8px; font-size: 14px; }
+.thread-scope textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; }

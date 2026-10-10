@@ -144,8 +144,8 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   const [sentCount, setSentCount] = useState(0)
   const post = useCallback((message: OutgoingMessage) => command((api) => api.send(id, message), [keys.robot(id), keys.robots]), [command, id])
   const outgoing = usePendingSends(conversation.items, me.id, post)
-  const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[]) => {
-    setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved), [keys.robot(id), keys.robots])))
+  const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string) => {
+    setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved, scope), [keys.robot(id), keys.robots])))
   }
 
   // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
@@ -200,7 +200,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
         <ChatScroll itemCount={conversation.items.length + outgoing.pending.length} pinSignal={sentCount} growth={(stream?.text.length ?? 0) + (stream?.thinking.length ?? 0) + (conversation.working ? 1 : 0)}>
           {(scrollRef, following) => (<>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved) => void answer(proposal, approve, approved)} pending={outgoing.pending} onRetry={outgoing.retry} />
+          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved, scope) => void answer(proposal, approve, approved, scope)} pending={outgoing.pending} onRetry={outgoing.retry} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>
@@ -210,7 +210,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
           </>)}
         </ChatScroll>
         {asks.length > 0 && !replyingInstead ? (
-          <AskBar asks={asks} onAnswer={(proposal, approve, approved) => void answer(proposal, approve, approved)} onReplyInstead={() => setReplyingInstead(true)} />
+          <AskBar asks={asks} onAnswer={(proposal, approve, approved, scope) => void answer(proposal, approve, approved, scope)} onReplyInstead={() => setReplyingInstead(true)} />
         ) : (
         <Composer
           placeholder={`Message ${identity.name}`}
@@ -249,6 +249,7 @@ function searchText(item: ConversationData['items'][number]): string {
     case 'reply': case 'notice': case 'thinking': return item.text
     case 'routine': return item.name
     case 'question': return item.proposal.purpose
+    case 'thread': return item.thread.topic
     default: return ''
   }
 }

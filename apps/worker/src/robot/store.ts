@@ -15,10 +15,12 @@ import type {
   NotificationSettings,
   ProposalKind,
   ProposalView,
+  ThreadAsk,
   ReviewView,
   RewindView,
   RobotStatus,
   RoutineSchedule,
+  ThreadView,
   BrowserBackend,
   Sender,
   Sharing,
@@ -90,12 +92,27 @@ export interface ProposalRow extends ProposalView {
 }
 
 /** A notice the chat shows as a Routine card instead of a line of text (a Routine another Robot changed). */
-export interface NoticeCard {
+export interface RoutineCard {
   readonly kind: 'routine'
   readonly action: 'created' | 'updated' | 'deleted' | 'paused' | 'resumed'
   readonly name: string
   /** Who changed it. */
   readonly by: string
+}
+
+/** A notice the chat shows as a Thread card (ch-iy16). */
+export interface ThreadCard {
+  readonly kind: 'thread'
+  readonly threadId: string
+  readonly event: 'opened' | 'declined' | 'closed' | 'idle'
+}
+
+export type NoticeCard = RoutineCard | ThreadCard
+
+/** This chief's copy of a Thread: the state the Home last told it, and the messages since the owner last let it go on (ch-408z). */
+export interface ThreadCopy {
+  readonly view: ThreadView
+  readonly windowCount: number
 }
 
 export interface NoticeRow {
@@ -119,9 +136,11 @@ export interface RoutineRun {
   readonly firstLine: string
 }
 
-const SCHEMA_VERSION = 6
+const SCHEMA_VERSION = 7
 
 const MIGRATIONS: Record<number, readonly string[]> = {
+  // This chief's copy of each Thread (v1.9).
+  7: ['CREATE TABLE thread (id TEXT PRIMARY KEY, view TEXT NOT NULL, window_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)'],
   // Run records with a finish time and the 20-run window (cd-3t0p); a Routine card in the chat (cd-n9pi).
   6: [
     `CREATE TABLE routine_run_v6 (
@@ -331,17 +350,57 @@ export class RobotStore {
    * Compare-and-swap answer: succeeds only for an open proposal at exactly this revision.
    * @returns the answered proposal, or undefined when the revision is stale or it is closed.
    */
-  answerProposal(id: string, revision: number, approve: boolean, now: number, decision?: { approved: readonly string[]; rejected: readonly string[] }): ProposalRow | undefined {
+  answerProposal(id: string, revision: number, approve: boolean, now: number, decision?: { approved: readonly string[]; rejected: readonly string[] }, scope?: string): ProposalRow | undefined {
     const status = approve ? 'approved' : 'rejected'
     // A review's decision is kept beside the stored payload, which itself stays as proposed.
     const cursor = decision === undefined
       ? this.sql.exec("UPDATE proposal SET status = ?, answered_at = ? WHERE id = ? AND revision = ? AND status = 'open'", status, now, id, revision)
       : this.sql.exec("UPDATE proposal SET status = ?, answered_at = ?, payload = json_set(payload, '$.decision', json(?)) WHERE id = ? AND revision = ? AND status = 'open'", status, now, JSON.stringify(decision), id, revision)
-    return cursor.rowsWritten === 1 ? this.proposal(id) : undefined
+    if (cursor.rowsWritten !== 1) return undefined
+    // A Thread invitation's scope is stored with the answer, as the owner edited it (ch-vrl7).
+    if (scope !== undefined) this.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.scope', ?) WHERE id = ?", scope, id)
+    return this.proposal(id)
   }
 
   closeProposal(id: string, now: number): void {
     this.sql.exec("UPDATE proposal SET status = 'done', answered_at = ? WHERE id = ? AND status = 'open'", now, id)
+  }
+
+  // ------------------------------------------------------------ Threads (v1.9)
+
+  threads(): ThreadCopy[] {
+    return this.sql.exec<{ view: string; window_count: number }>('SELECT view, window_count FROM thread ORDER BY created_at DESC').toArray()
+      .map((row) => ({ view: JSON.parse(row.view) as ThreadView, windowCount: row.window_count }))
+      .sort((a, b) => b.view.lastActivityAt - a.view.lastActivityAt)
+  }
+
+  thread(id: string): ThreadCopy | undefined {
+    const row = this.sql.exec<{ view: string; window_count: number }>('SELECT view, window_count FROM thread WHERE id = ?', id).toArray()[0]
+    return row === undefined ? undefined : { view: JSON.parse(row.view) as ThreadView, windowCount: row.window_count }
+  }
+
+  /** Take the state the Home sent; the message count only grows, and the pause window is this chief's own. */
+  saveThread(view: ThreadView, now: number): ThreadCopy {
+    const known = this.thread(view.id)
+    const next: ThreadView = known === undefined ? view : { ...view, messageCount: Math.max(view.messageCount, known.view.messageCount) }
+    this.sql.exec(
+      'INSERT INTO thread (id, view, window_count, created_at) VALUES (?, ?, 0, ?) ON CONFLICT (id) DO UPDATE SET view = excluded.view',
+      view.id, JSON.stringify(next), now,
+    )
+    return this.thread(view.id)!
+  }
+
+  /** A message went out or came in: both count towards the pause, and the Thread is open whatever the Home's note said first. */
+  threadMessage(id: string, now: number): ThreadCopy | undefined {
+    const known = this.thread(id)
+    if (known === undefined) return undefined
+    const view: ThreadView = { ...known.view, state: 'open', messageCount: known.view.messageCount + 1, lastActivityAt: now }
+    this.sql.exec('UPDATE thread SET view = ?, window_count = window_count + 1 WHERE id = ?', JSON.stringify(view), id)
+    return this.thread(id)
+  }
+
+  resetThreadWindow(id: string): void {
+    this.sql.exec('UPDATE thread SET window_count = 0 WHERE id = ?', id)
   }
 
   // ------------------------------------------------------------ routines
@@ -576,6 +635,13 @@ function reviewOf(payload: Record<string, unknown>): { review: ReviewView } | Re
   return { review: { ...review, ...(decision === undefined ? {} : { decision }) } }
 }
 
+function threadOf(payload: Record<string, unknown>): { thread: ThreadAsk } | Record<string, never> {
+  const thread = payload['thread'] as Omit<ThreadAsk, 'scope'> & { scope: string } | undefined
+  if (thread === undefined) return {}
+  // The scope the owner answered with replaces the one proposed.
+  return { thread: { ...thread, scope: typeof payload['scope'] === 'string' ? payload['scope'] : thread.scope } }
+}
+
 function proposalFromSql(row: ProposalSql): ProposalRow {
   const payload = JSON.parse(row.payload) as Record<string, unknown>
   return {
@@ -589,6 +655,7 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
     file: (payload['file'] as ProposalView['file'] | undefined) ?? null,
     skill: (payload['skill'] as ProposalView['skill'] | undefined) ?? null,
     ...reviewOf(payload),
+    ...threadOf(payload),
     createdAt: row.created_at,
     answeredAt: row.answered_at,
   }

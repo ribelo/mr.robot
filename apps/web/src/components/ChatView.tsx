@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react'
 import { useMeasuredRows, useRowWindow } from './row-window.ts'
-import type { ChatItem, ProposalView, WorkDetails } from '@mr-robot/protocol'
+import type { ChatItem, ProposalView, ThreadView, WorkDetails } from '@mr-robot/protocol'
 import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
@@ -16,7 +16,7 @@ export interface ChatViewProps {
   /** The tool running now, while working. */
   readonly activity?: string
   readonly canAnswer: boolean
-  readonly onAnswer?: (proposal: ProposalView, approve: boolean, approved?: readonly string[]) => void
+  readonly onAnswer?: (proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string) => void
   readonly now?: number
   /** How much of the Robot's work to show (pl-6eir); Compact by default. */
   readonly workDetails?: WorkDetails
@@ -163,6 +163,7 @@ function Item({ item, meId, canAnswer, onAnswer, level, robotId, robotColor }: {
         <div className={own ? 'row row-own' : 'row'}>
           <div className={own ? 'bubble bubble-own' : 'bubble bubble-robot'} style={item.sender.kind === 'robot' ? robotTint(item.sender.avatarColor) : undefined}>
             {label === null ? null : <>{label} </>}
+            {item.thread === undefined ? null : <span className="thread-tag muted">in Thread “{item.thread.topic}”</span>}
             <RichText text={item.text} />
             {item.attachments.length > 0 ? (
               <div className="attachments">{item.attachments.map((file) => robotId === undefined
@@ -185,6 +186,8 @@ function Item({ item, meId, canAnswer, onAnswer, level, robotId, robotColor }: {
       )
     case 'notice':
       return <div className="chat-separator notice">{item.text}</div>
+    case 'thread':
+      return <ThreadCard thread={item.thread} event={item.event} />
     case 'activity':
       return level === 'compact' || item.calls === undefined ? (item.tools.length === 0 ? null : <ActivityLine tools={item.tools} />) : <ToolCards calls={item.calls} level={level} />
     case 'thinking':
@@ -207,7 +210,8 @@ export function askTitle(proposal: ProposalView): string {
       : proposal.kind === 'member-file' ? `Proposes an edit to ${proposal.file?.name ?? 'your file'}`
         : proposal.kind === 'skill' ? 'Proposes a skill for the library'
           : proposal.kind === 'review' ? `Review: ${proposal.review?.title ?? proposal.purpose}`
-            : 'Needs you'
+            : proposal.kind === 'thread' ? (proposal.thread?.phase === 'continue' ? 'Go on with the Thread?' : proposal.thread?.phase === 'invitation-out' ? 'Invite to a Thread' : 'Thread invitation')
+              : 'Needs you'
 }
 
 export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; counter?: string }) {
@@ -229,13 +233,58 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { propo
       {proposal.file === null ? null : <pre className="file-preview">{proposal.file.content}</pre>}
       {proposal.review === undefined ? null : <ReviewItems key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />}
       {proposal.skill === null ? null : <div className="question-purpose"><b>{proposal.skill.name}</b>: {proposal.skill.description}</div>}
-      {proposal.review !== undefined ? (proposal.status === 'open' && canAnswer ? null : <div className="question-status">{statusText(proposal)}</div>)
+      {proposal.thread !== undefined ? <ThreadAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} /> : null}
+      {proposal.thread !== undefined ? null : proposal.review !== undefined ? (proposal.status === 'open' && canAnswer ? null : <div className="question-status">{statusText(proposal)}</div>)
       : proposal.status === 'open' && canAnswer ? (
         <div className="question-actions">
           <button type="button" className="button" onClick={() => onAnswer?.(proposal, false)}>Reject</button>
           <button type="button" className="button button-primary" onClick={() => onAnswer?.(proposal, true)}>Approve</button>
         </div>
       ) : <div className="question-status">{statusText(proposal)}</div>}
+    </div>
+  )
+}
+
+/**
+ * A Thread Ask (ch-vrl7, ch-hikl, ch-408z): an invitation comes with a scope the owner edits before accepting,
+ * and the edited text is what the answer carries. Going on after 20 messages needs no scope.
+ */
+function ThreadAnswer({ proposal, canAnswer, onAnswer }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
+  const thread = proposal.thread!
+  const invitation = thread.phase !== 'continue'
+  const open = proposal.status === 'open' && canAnswer
+  const [scope, setScope] = useState(thread.scope)
+  return (
+    <>
+      {!invitation ? null : open ? (
+        <label className="thread-scope">In this Thread you may use:
+          <textarea rows={3} value={scope} placeholder="Nothing, unless you name it here" onChange={(event) => setScope(event.target.value)} />
+        </label>
+      ) : <div className="question-purpose">In this Thread your chief may use: {thread.scope.trim() === '' ? 'nothing' : thread.scope}</div>}
+      {open ? (
+        <div className="question-actions">
+          <button type="button" className="button" onClick={() => onAnswer?.(proposal, false)}>{invitation ? 'Decline' : 'Stop'}</button>
+          <button type="button" className="button button-primary" onClick={() => (invitation ? onAnswer?.(proposal, true, undefined, scope) : onAnswer?.(proposal, true))}>{invitation ? 'Accept' : 'Go on'}</button>
+        </div>
+      ) : <div className="question-status">{statusText(proposal)}</div>}
+    </>
+  )
+}
+
+const THREAD_EVENT: Record<'opened' | 'declined' | 'closed' | 'idle', string> = {
+  opened: 'Thread opened', declined: 'Thread declined', closed: 'Thread closed', idle: 'Thread closed after 7 days without a message',
+}
+const THREAD_STATE: Record<ThreadView['state'], string> = { invited: 'Invited', open: 'Open', closed: 'Closed', declined: 'Declined' }
+
+/** The Thread card (ch-iy16, ch-6fcp): topic, the other chief, state and message count. */
+export function ThreadCard({ thread, event }: { thread: ThreadView; event?: 'opened' | 'declined' | 'closed' | 'idle' }) {
+  return (
+    <div className="thread-card" data-state={thread.state}>
+      {event === undefined ? null : <div className="thread-event muted">{THREAD_EVENT[event]}</div>}
+      <div className="thread-topic">{thread.topic}</div>
+      <div className="muted">with {thread.other.label}</div>
+      <div className="thread-meta"><span className="thread-state">{THREAD_STATE[thread.state]}</span> · {thread.messageCount} {thread.messageCount === 1 ? 'message' : 'messages'}</div>
+      {thread.summary === null ? null : <div className="thread-summary">{thread.summary}</div>}
     </div>
   )
 }

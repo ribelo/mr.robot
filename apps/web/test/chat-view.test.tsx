@@ -134,3 +134,46 @@ describe('ChatView (robot-q4b2)', () => {
     expect(live.container.textContent).toContain('Half of the ans')
   })
 })
+
+describe('Thread Asks and the Thread card (ch-vrl7, ch-hikl, ch-iy16)', () => {
+  const invitation: ProposalView = {
+    id: 'p-t', kind: 'thread', revision: 1, status: 'open', purpose: 'Ben\'s Mr. Robot wants to talk about "Dinner on Friday"', grants: null, file: null, skill: null,
+    thread: { id: 'th-1', phase: 'invitation-in', topic: 'Dinner on Friday', other: 'Ben\'s Mr. Robot', scope: '' },
+  }
+
+  it('shows the topic and an editable scope; accepting answers with the edited text (ch-hikl)', () => {
+    const onAnswer = vi.fn()
+    render(<AskBar asks={[invitation]} onAnswer={onAnswer} onReplyInstead={vi.fn()} />)
+    expect(screen.getByText('Thread invitation')).toBeTruthy()
+    expect(screen.getByText(/wants to talk about "Dinner on Friday"/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(/In this Thread you may use/), { target: { value: 'my food preferences' } })
+    fireEvent.click(screen.getByText('Accept'))
+    expect(onAnswer).toHaveBeenLastCalledWith(invitation, true, undefined, 'my food preferences')
+    fireEvent.click(screen.getByText('Decline'))
+    expect(onAnswer).toHaveBeenLastCalledWith(invitation, false)
+  })
+
+  it('starts the outgoing invitation with the scope the chief proposed (ch-vrl7)', () => {
+    const out: ProposalView = { ...invitation, thread: { ...invitation.thread!, phase: 'invitation-out', scope: 'my calendar for Friday' } }
+    render(<AskBar asks={[out]} onAnswer={vi.fn()} onReplyInstead={vi.fn()} />)
+    expect((screen.getByLabelText(/In this Thread you may use/) as HTMLTextAreaElement).value).toBe('my calendar for Friday')
+  })
+
+  it('shows a labelled Thread message and the Thread card with state and count (ch-iy16)', () => {
+    const thread = {
+      id: 'th-1', topic: 'Dinner on Friday', state: 'open' as const, self: { robotId: 'r-1', label: 'Anna\'s Mr. Robot', avatarColor: '#5ec4b6' },
+      other: { robotId: 'r-2', label: 'Ben\'s Mr. Robot', ownerName: 'Ben' }, scope: 'my calendar', accepted: 'accepted' as const, messageCount: 3,
+      createdAt: at, openedAt: at, closedAt: null, lastActivityAt: at, closedBy: null, summary: null,
+    }
+    const list: ChatItem[] = [
+      { kind: 'thread', id: 'c', seq: 1, at, event: 'opened', thread },
+      { kind: 'message', id: 'm', seq: 2, at, sender: { kind: 'robot', robotId: 'r-2', name: 'Ben\'s Mr. Robot', avatarColor: '#5ec4b6' }, text: 'Friday works.', attachments: [], reaction: null, thread: { id: 'th-1', topic: 'Dinner on Friday' } },
+    ]
+    render(<ChatView items={list} meId="m-1" working={false} canAnswer={false} now={at} />)
+    expect(screen.getByText('Thread opened')).toBeTruthy()
+    expect(screen.getByText('Dinner on Friday')).toBeTruthy()
+    expect(screen.getByText('3 messages', { exact: false })).toBeTruthy()
+    expect(screen.getAllByText("Ben's Mr. Robot", { exact: false }).length).toBeGreaterThan(1)
+    expect(screen.getByText('Friday works.')).toBeTruthy()
+  })
+})

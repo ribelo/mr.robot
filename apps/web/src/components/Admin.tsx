@@ -67,6 +67,24 @@ function AdminPage({ view }: { view: AdminView }) {
         </table>
       )}
 
+      <h2>Threads</h2>
+      {(view.threads ?? []).length === 0 ? <div className="muted">No Threads between chiefs.</div> : (
+        <table className="grid">
+          <thead><tr><th>Topic</th><th>Chiefs</th><th>State</th><th>Messages</th><th>Last message</th></tr></thead>
+          <tbody>
+            {(view.threads ?? []).map((thread) => (
+              <tr key={thread.id}>
+                <td>{thread.topic}</td>
+                <td>{thread.participants.map((participant) => participant.chiefName).join(' and ')}</td>
+                <td>{thread.state}</td>
+                <td>{thread.messageCount}</td>
+                <td className="muted">{new Date(thread.lastActivityAt).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
       <h2>Members and costs</h2>
       <table className="grid">
         <thead><tr><th>Member</th><th>Status</th><th>This month</th><th /></tr></thead>

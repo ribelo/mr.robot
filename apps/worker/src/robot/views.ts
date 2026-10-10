@@ -61,6 +61,7 @@ export const conversation = (details = false) => Effect.gen(function* () {
     details,
     events,
     notices: store.notices(current.liveSessionId),
+    thread: (id) => store.thread(id)?.view,
     proposal: (id) => {
       const row = store.proposal(id)
       return row === undefined ? undefined : proposalView(row)
@@ -252,6 +253,7 @@ export const panel = (canEdit: boolean, summary: RobotSummary) => Effect.gen(fun
     usage: yield* usage,
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
+    ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),
   } as RobotPanel
 })
 

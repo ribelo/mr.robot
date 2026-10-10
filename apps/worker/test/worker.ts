@@ -21,6 +21,16 @@ import { Home as ProductionHome } from '../src/index.ts'
 
 /** The production Home with recorded HTTP for Discord. */
 export class Home extends ProductionHome {
+  /** Every Thread's last message moves into the past by `ms`, and the alarm is due now. */
+  async backdateThreadsForTest(ms: number): Promise<void> {
+    this.ctx.storage.sql.exec('UPDATE thread SET last_activity_at = last_activity_at - ?', ms)
+    await this.ctx.storage.setAlarm(Date.now() + 1)
+  }
+
+  async alarmForTest(): Promise<number | null> {
+    return this.ctx.storage.getAlarm()
+  }
+
   protected override connectorFetch(): typeof globalThis.fetch {
     return connectorFixtures.fetch
   }

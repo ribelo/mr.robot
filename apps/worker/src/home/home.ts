@@ -17,6 +17,8 @@ import type {
   ModelOption,
   RobotStatus,
   AdminView,
+  AdminThread,
+  ThreadView,
   ProvidersView,
   ProviderView,
   RobotSummary,
@@ -35,6 +37,7 @@ import { connectionView, HomePlugins } from './plugins.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
+import { ThreadRegistry, type Side, type ThreadRow } from './threads.ts'
 import type { GatewayMessage } from '../connectors/discord-gateway.ts'
 import type { PlainValue } from '../connectors/schema-form.ts'
 import type { ConnectionChange, ConnectionMeta, OwnConnection } from '../member/connections.ts'
@@ -931,6 +934,7 @@ const orDie = <A, E, X>(effect: Effect.Effect<A, E, X>) => effect.pipe(Effect.ca
 /** The Durable Object: tables, the platform layer, and one RPC method per program. */
 export class Home extends DurableObject<Env> {
   private readonly runtime: DurableRuntime<R>
+  private readonly threads: ThreadRegistry
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -969,6 +973,7 @@ export class Home extends DurableObject<Env> {
         if (objects.objects.length > 0) await env.FILES.delete(objects.objects.map((object) => object.key))
       })))
     }
+    this.threads = new ThreadRegistry(sql)
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map() })))
   }
 
@@ -996,7 +1001,7 @@ export class Home extends DurableObject<Env> {
   startingModel(memberId: string, wanted?: ModelChoice): Promise<ModelChoice> { return this.run(startingModel(memberId, wanted)) }
   createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> { return this.run(createRobot(ownerId, brief, model)) }
   syncMrRobots(): Promise<void> { return this.run(syncMrRobots) }
-  adminView(adminId: string): Promise<AdminView> { return this.run(adminView(adminId)) }
+  async adminView(adminId: string): Promise<AdminView> { return { ...(await this.run(adminView(adminId))), threads: this.adminThreads() } }
   /** What a Member can grant: tool groups of plugins that are on, and their usable connections (v1.5). */
   async catalog(memberId: string, robotId: string): Promise<SettingsCatalog> {
     const base = await this.run(catalog(memberId, robotId))
@@ -1219,7 +1224,136 @@ export class Home extends DurableObject<Env> {
 
   /** The Home's alarm keeps the Discord gateway alive: heartbeats, and reconnects after a drop or a restart. */
   override async alarm(): Promise<void> {
+    await this.closeIdleThreads().catch((error: unknown) => console.warn('idle Threads not closed', error))
     await this.ensureDiscordGateway()
+    await this.rearmThreads()
+  }
+
+  // ---------------------------------------------------------------- Threads between chiefs (v1.9)
+
+  private robotRow(id: string): { owner_id: string; kind: string; status: string; fleet_state: string; identity: Identity } | undefined {
+    const row = this.ctx.storage.sql.exec<{ owner_id: string; kind: string; status: string; fleet_state: string; identity: string }>('SELECT owner_id, kind, status, fleet_state, identity FROM robot WHERE id = ?', id).toArray()[0]
+    return row === undefined ? undefined : { ...row, identity: JSON.parse(row.identity) as Identity }
+  }
+
+  /** A chief as people name it: "Anna's Mr. Robot". */
+  private chiefOf(side: Side): { label: string; ownerName: string; avatarColor: string } {
+    const ownerName = this.memberName(side.memberId)
+    const identity = this.robotRow(side.robotId)?.identity
+    return { label: `${ownerName}'s ${identity?.name ?? 'Mr. Robot'}`, ownerName, avatarColor: identity?.avatarColor ?? MR_ROBOT_COLOR }
+  }
+
+  /** The Thread as one chief and its owner see it. */
+  private threadView(row: ThreadRow, forRobotId: string): ThreadView {
+    const mine = row.initiator.robotId === forRobotId ? row.initiator : row.invitee
+    const other = mine === row.initiator ? row.invitee : row.initiator
+    const self = this.chiefOf(mine)
+    const them = this.chiefOf(other)
+    return {
+      id: row.id,
+      topic: row.topic,
+      state: row.state,
+      self: { robotId: mine.robotId, label: self.label, avatarColor: self.avatarColor },
+      other: { robotId: other.robotId, label: them.label, ownerName: them.ownerName },
+      scope: mine.scope,
+      accepted: mine.answer,
+      messageCount: row.messageCount,
+      createdAt: row.createdAt,
+      openedAt: row.openedAt,
+      closedAt: row.closedAt,
+      lastActivityAt: row.lastActivityAt,
+      closedBy: row.closedBy === null ? null : row.closedBy === 'idle' ? 'idle' : row.closedBy === 'declined' ? 'declined' : row.closedBy === forRobotId ? 'self' : 'other',
+      summary: row.summary,
+    }
+  }
+
+  /** The other chiefs of the Home a chief may invite: Mr. Robots of other active Members that are active themselves (ch-c2xa). */
+  threadChiefs(memberId: string): Array<{ id: string; ownerName: string; name: string; availability: string }> {
+    const rows = this.ctx.storage.sql.exec<{ id: string; owner_id: string; fleet_state: string; identity: string }>(
+      "SELECT robot.id AS id, robot.owner_id AS owner_id, robot.fleet_state AS fleet_state, robot.identity AS identity FROM robot JOIN member ON member.id = robot.owner_id WHERE robot.kind = 'mr-robot' AND robot.status = 'active' AND member.status = 'active' AND robot.owner_id <> ? ORDER BY member.created_at",
+      memberId,
+    ).toArray()
+    return rows.map((row) => ({ id: row.id, ownerName: this.memberName(row.owner_id), name: (JSON.parse(row.identity) as Identity).name, availability: row.fleet_state }))
+  }
+
+  /** A chief invites another to a Thread; both owners get an Ask with the topic and the scope to edit (ch-l4jg, ch-vrl7, ch-hikl). */
+  async threadOpen(robotId: string, topic: string, chiefId: string, scope: string): Promise<{ threadId: string }> {
+    const me = this.robotRow(robotId)
+    if (me === undefined || me.kind !== 'mr-robot') throw new Error('only Mr. Robot opens a Thread')
+    const wanted = this.threadChiefs(me.owner_id).find((chief) => chief.id === chiefId)
+    if (wanted === undefined) throw new Error(`${chiefId} is not another chief of this Home you can invite; use thread_chiefs`)
+    const other = this.robotRow(chiefId)!
+    const row = this.threads.create(topic, { memberId: me.owner_id, robotId, scope }, { memberId: other.owner_id, robotId: chiefId }, Date.now())
+    await Promise.all([
+      this.env.ROBOT.getByName(robotId).threadInvitation(this.threadView(row, robotId), 'invitation-out'),
+      this.env.ROBOT.getByName(chiefId).threadInvitation(this.threadView(row, chiefId), 'invitation-in'),
+    ])
+    return { threadId: row.id }
+  }
+
+  /** The owner of a chief answered the invitation with the scope they approved (ch-fri7, ch-0cn1). */
+  async threadAnswer(threadId: string, robotId: string, accepted: boolean, scope: string): Promise<'waiting' | 'opened' | 'declined'> {
+    const result = this.threads.answer(threadId, robotId, accepted, scope, Date.now())
+    if ('error' in result) throw new Error(result.error)
+    const { row, outcome } = result
+    const both = [row.initiator.robotId, row.invitee.robotId]
+    if (outcome === 'opened') {
+      await Promise.all(both.map((id) => this.env.ROBOT.getByName(id).threadChanged(this.threadView(row, id), 'opened', 'wake')))
+    } else if (outcome === 'declined') {
+      // The other chief learns that it was declined and nothing else.
+      await Promise.all(both.map((id) => this.env.ROBOT.getByName(id).threadChanged(this.threadView(row, id), 'declined', id === robotId ? 'note' : 'wake')))
+    }
+    await this.rearmThreads()
+    return outcome
+  }
+
+  /** A chief is about to send a message: the Thread must be open; the count and the idle clock move. */
+  async threadMessage(threadId: string, robotId: string): Promise<{ messageCount: number }> {
+    const check = this.threads.message(threadId, robotId, Date.now())
+    if (!check.ok) throw new Error(check.reason)
+    await this.rearmThreads()
+    return { messageCount: check.row.messageCount }
+  }
+
+  /** A chief closes the Thread with a summary both chiefs receive (ch-rlnd). */
+  async threadClose(threadId: string, robotId: string, summary: string): Promise<void> {
+    const result = this.threads.close(threadId, robotId, summary, Date.now())
+    if ('error' in result) throw new Error(result.error)
+    const { row } = result
+    await Promise.all([row.initiator.robotId, row.invitee.robotId].map((id) => this.env.ROBOT.getByName(id).threadChanged(this.threadView(row, id), 'closed', id === robotId ? 'note' : 'wake')))
+    await this.rearmThreads()
+  }
+
+  /** Threads with no message for 7 days close, with a note in both Conversations (ch-gckb). */
+  private async closeIdleThreads(): Promise<void> {
+    for (const idle of this.threads.idle(Date.now())) {
+      const result = this.threads.close(idle.id, 'idle', null, Date.now())
+      if ('error' in result) continue
+      const { row } = result
+      await Promise.all([row.initiator.robotId, row.invitee.robotId].map((id) => this.env.ROBOT.getByName(id).threadChanged(this.threadView(row, id), 'idle', 'note').catch((error: unknown) => console.warn('Thread not told', error))))
+    }
+  }
+
+  /** The alarm also stands for the first open Thread to turn idle; an earlier alarm (Discord) stays. */
+  private async rearmThreads(): Promise<void> {
+    const at = this.threads.nextIdleAt()
+    if (at === null) return
+    const current = await this.ctx.storage.getAlarm()
+    if (current === null || current > at) await this.ctx.storage.setAlarm(Math.max(at, Date.now() + 1))
+  }
+
+  /** Every Thread, for the admin view (ch-5ngu). */
+  private adminThreads(): AdminThread[] {
+    return this.threads.all().map((row) => ({
+      id: row.id,
+      topic: row.topic,
+      state: row.state,
+      participants: [row.initiator, row.invitee].map((side) => ({ ownerName: this.chiefOf(side).ownerName, chiefName: this.chiefOf(side).label, robotId: side.robotId })),
+      messageCount: row.messageCount,
+      createdAt: row.createdAt,
+      lastActivityAt: row.lastActivityAt,
+      closedAt: row.closedAt,
+    }))
   }
 
   /** fetch for Discord HTTP; tests substitute recorded responses. */
