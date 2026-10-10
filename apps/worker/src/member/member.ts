@@ -636,8 +636,13 @@ export class Member extends DurableObject<Env> {
     return added
   }
 
-  startGoogleConsent(origin: string, services: string[], shared: boolean, reconnect: string | null): Promise<string> { return this.google.start(origin, services, shared, reconnect) }
-  finishGoogleConsent(origin: string, code: string, state: string): Promise<OwnConnection> { return this.google.finish(origin, code, state) }
+  async startGoogleConsent(origin: string, services: string[], shared: boolean, reconnect: string | null, external = false): Promise<string> {
+    return this.google.start((await this.run(profile)).id, origin, services, shared, reconnect, external)
+  }
+  async finishGoogleConsent(origin: string, code: string, state: string): Promise<{ account: string; external: boolean }> {
+    const { connection, external } = await this.google.finish(origin, code, state)
+    return { account: connection.account, external }
+  }
 
   connections(): OwnConnection[] { return this.connectionsOf.list() }
   connection(id: string): OwnConnection | undefined { return this.connectionsOf.get(id) }

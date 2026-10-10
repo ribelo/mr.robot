@@ -148,23 +148,10 @@ export const api = new Router<ApiContext>()
     const url = new URL(c.request.url)
     const services = (url.searchParams.get('services') ?? '').split(',').filter(Boolean)
     try {
-      const consent = await c.env.MEMBER.getByName(c.member.id).startGoogleConsent(url.origin, services, url.searchParams.get('shared') === '1', url.searchParams.get('reconnect'))
+      const consent = await c.env.MEMBER.getByName(c.member.id).startGoogleConsent(url.origin, services, url.searchParams.get('shared') === '1', url.searchParams.get('reconnect'), url.searchParams.get('external') === '1')
       return Response.redirect(consent, 302)
     } catch (error) {
       return Response.redirect(`${url.origin}/#/me?connection-error=${encodeURIComponent(error instanceof Error ? error.message : 'could not start the sign-in')}`, 302)
-    }
-  }))
-  .on('GET', '/api/connections/google/oauth/callback', (c) => Effect.promise(async () => {
-    const url = new URL(c.request.url)
-    const back = (query: string) => Response.redirect(`${url.origin}/#/me?${query}`, 302)
-    const code = url.searchParams.get('code')
-    const state = url.searchParams.get('state')
-    if (code === null || state === null) return back(`connection-error=${encodeURIComponent(url.searchParams.get('error') === 'access_denied' ? 'you declined on Google\'s screen; nothing was connected' : 'Google sent no sign-in code')}`)
-    try {
-      const connection = await c.env.MEMBER.getByName(c.member.id).finishGoogleConsent(url.origin, code, state)
-      return back(`connected=${encodeURIComponent(connection.account)}`)
-    } catch (error) {
-      return back(`connection-error=${encodeURIComponent(error instanceof Error ? error.message : 'the sign-in did not complete')}`)
     }
   }))
   .on('POST', '/api/connections/:kind', (c, { kind }) => Effect.gen(function* () {

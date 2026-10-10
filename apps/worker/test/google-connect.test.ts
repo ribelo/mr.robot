@@ -69,7 +69,20 @@ describe('Connect Google (v1.5 ticket 02)', () => {
     expect(params.get('access_type')).toBe('offline')
     expect(params.get('prompt')).toBe('select_account consent')
     expect(params.get('scope')!.split(' ')).toEqual(['openid', 'email', 'https://www.googleapis.com/auth/gmail.modify', 'https://www.googleapis.com/auth/calendar'])
-    expect(params.get('state')).toMatch(/^[0-9a-f-]{36}$/)
+    expect(params.get('state')).toMatch(new RegExp(`^${annaId}\\.[0-9a-f-]{36}$`))
+  })
+
+  it('finishes a consent from the desktop app in the system browser, without a Mr. Robot session (pa-4sr1)', async () => {
+    await setUpClient()
+    const start = await visit('/api/connections/google/oauth/start?services=gmail&shared=0&external=1')
+    google('anna@gmail.test', SCOPES('gmail.modify'))
+    // The system browser has no Access session: no identity header at all.
+    const response = await SELF.fetch(`${ORIGIN}/api/connections/google/oauth/callback?state=${start.searchParams.get('state')}&code=code-1`, { redirect: 'manual' })
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('Connected anna@gmail.test')
+    expect((await api<ConnectionView[]>(ANNA, '/api/connections')).body.map((connection) => connection.account)).toEqual(['anna@gmail.test'])
+    const forged = await SELF.fetch(`${ORIGIN}/api/connections/google/oauth/callback?state=${annaId}.not-a-state&code=code-2`, { redirect: 'manual' })
+    expect(decodeURIComponent(forged.headers.get('location') ?? '')).toContain('expired or was already used')
   })
 
   it('stores the connection with what Google granted; the state works once; a second account keeps its own services', async () => {

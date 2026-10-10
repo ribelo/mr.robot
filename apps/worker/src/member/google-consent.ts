@@ -25,26 +25,31 @@ export class GoogleConsents {
     private readonly fetch: typeof globalThis.fetch,
   ) {
     sql.exec('CREATE TABLE IF NOT EXISTS oauth_state (state TEXT PRIMARY KEY, services TEXT NOT NULL, shared INTEGER NOT NULL, reconnect TEXT, created_at INTEGER NOT NULL)')
+    // A consent started in the desktop app finishes in the system browser (pa-e7xj).
+    if (!sql.exec<{ name: string }>('PRAGMA table_info(oauth_state)').toArray().some((column) => column.name === 'external')) sql.exec('ALTER TABLE oauth_state ADD COLUMN external INTEGER NOT NULL DEFAULT 0')
   }
 
-  /** Google's consent URL for the chosen services; reconnect repairs an existing connection. */
-  async start(origin: string, services: readonly string[], shared: boolean, reconnect: string | null): Promise<string> {
+  /**
+   * Google's consent URL for the chosen services; reconnect repairs an existing connection. The state
+   * starts with the Member id, so the callback finds this Member without an Access session (pa-4sr1).
+   */
+  async start(owner: string, origin: string, services: readonly string[], shared: boolean, reconnect: string | null, external = false): Promise<string> {
     const client = await this.client()
     if (client === null) throw new GoogleConsentFailed('the Home admin has not set up the Google OAuth client yet')
     const repaired = reconnect === null ? undefined : this.store.get(reconnect)
     if (reconnect !== null && repaired === undefined) throw new GoogleConsentFailed('no such connection of yours')
     const chosen = (repaired?.services ?? services).filter(isGoogleService)
     if (chosen.length === 0) throw new GoogleConsentFailed('choose at least one service')
-    const state = crypto.randomUUID()
+    const state = `${owner}.${crypto.randomUUID()}`
     const now = Date.now()
     this.sql.exec('DELETE FROM oauth_state WHERE created_at < ?', now - STATE_TTL_MS)
-    this.sql.exec('INSERT INTO oauth_state (state, services, shared, reconnect, created_at) VALUES (?, ?, ?, ?, ?)', state, JSON.stringify(chosen), (repaired?.shared ?? shared) ? 1 : 0, reconnect, now)
+    this.sql.exec('INSERT INTO oauth_state (state, services, shared, reconnect, created_at, external) VALUES (?, ?, ?, ?, ?, ?)', state, JSON.stringify(chosen), (repaired?.shared ?? shared) ? 1 : 0, reconnect, now, external ? 1 : 0)
     return consentUrl(client, origin, chosen, state, repaired?.account)
   }
 
   /** Google sent the person back: the code becomes a stored connection (cn-aq2a). */
-  async finish(origin: string, code: string, state: string): Promise<OwnConnection> {
-    const row = this.sql.exec<{ services: string; shared: number; reconnect: string | null; created_at: number }>('SELECT services, shared, reconnect, created_at FROM oauth_state WHERE state = ?', state).toArray()[0]
+  async finish(origin: string, code: string, state: string): Promise<{ connection: OwnConnection; external: boolean }> {
+    const row = this.sql.exec<{ services: string; shared: number; reconnect: string | null; created_at: number; external: number }>('SELECT services, shared, reconnect, created_at, external FROM oauth_state WHERE state = ?', state).toArray()[0]
     this.sql.exec('DELETE FROM oauth_state WHERE state = ?', state)
     if (row === undefined || row.created_at < Date.now() - STATE_TTL_MS) throw new GoogleConsentFailed('this sign-in expired or was already used; start again from your connections')
     const client = await this.client()
@@ -58,10 +63,11 @@ export class GoogleConsents {
     const meta = { expiresAt: granted.expiresAt }
     const existing = (row.reconnect === null ? undefined : this.store.get(row.reconnect))
       ?? this.store.list().find((connection) => connection.kind === 'google' && connection.account.toLowerCase() === granted.email.toLowerCase())
+    const external = row.external === 1
     if (existing !== undefined) {
-      return (await this.store.update(existing.id, { account: granted.email, services, status: 'connected', statusNote: null, secrets, meta }))!
+      return { connection: (await this.store.update(existing.id, { account: granted.email, services, status: 'connected', statusNote: null, secrets, meta }))!, external }
     }
-    return this.store.add({ kind: 'google', label: granted.email, account: granted.email, services, shared: row.shared === 1, meta, secrets })
+    return { connection: await this.store.add({ kind: 'google', label: granted.email, account: granted.email, services, shared: row.shared === 1, meta, secrets }), external }
   }
 
   /** A use of a Google connection with an access token that is valid now (cn-j1la). */

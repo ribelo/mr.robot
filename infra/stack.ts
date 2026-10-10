@@ -87,6 +87,20 @@ export const HookChannel = Effect.gen(function* () {
 })
 
 /**
+ * Google's OAuth callback (v1.10 ticket 01): outside the Access login so a sign-in finished in the
+ * system browser needs no Mr. Robot session; the one-time consent state is checked by the Worker.
+ */
+export const GoogleCallback = Effect.gen(function* () {
+  const edge = yield* Edge
+  return yield* Cloudflare.Access.Application('GoogleCallback', {
+    type: 'self_hosted',
+    name: 'Mr. Robot Google callback',
+    domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/api/connections/google/oauth/callback`)),
+    policies: [{ name: 'Consent state checked by the Worker', decision: 'bypass', include: ['everyone'] }],
+  })
+})
+
+/**
  * The desktop app's channel (v1.2 ticket 01): /api/host/* is outside the Access login (a bypass
  * application on that path); the Worker checks the host's own token there.
  */

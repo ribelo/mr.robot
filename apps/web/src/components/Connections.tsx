@@ -80,7 +80,7 @@ export function ConnectorPanel({ plugin, connections }: { plugin: PluginView; co
                 <b>{connection.label}</b> <span className="muted">{connection.account}{connection.mine ? '' : ` · ${connection.ownerName}'s, shared`}</span>
                 {connection.services.length > 0 ? <div className="muted">{connection.services.join(', ')}</div> : null}
                 {connection.status === 'connected' ? null : <div className="host-log-failed">{connection.status === 'needs-reconsent' ? 'Needs consent again' : 'Paste again'}{connection.statusNote === null ? '' : `: ${connection.statusNote}`}</div>}
-                {connection.mine && connection.status === 'needs-reconsent' && connector.connect.method === 'oauth' ? <a className="button" href={`/api/connections/${connector.kind}/oauth/start?reconnect=${encodeURIComponent(connection.id)}`}>Reconnect</a> : null}
+                {connection.mine && connection.status === 'needs-reconsent' && connector.connect.method === 'oauth' ? <a className="button" href={`/api/connections/${connector.kind}/oauth/start?reconnect=${encodeURIComponent(connection.id)}${'mrRobotHost' in window ? '&external=1' : ''}`}>Reconnect</a> : null}
                 {connection.setupLink === null ? null : <a className="button" href={connection.setupLink} target="_blank" rel="noreferrer">{connection.setupLabel ?? 'Finish setup'}</a>}
               </div>
               {connection.mine ? (
@@ -131,7 +131,9 @@ function PasteConnect({ plugin, fields, instructions }: { plugin: PluginView; fi
 function OAuthConnect({ plugin, services }: { plugin: PluginView; services: ReadonlyArray<{ value: string; label: string }> }) {
   const [chosen, setChosen] = useState<string[]>(services.map((service) => service.value).filter((value) => value !== 'gmail-send'))
   const [shared, setShared] = useState(false)
-  const start = `/api/connections/${plugin.connector!.kind}/oauth/start?services=${encodeURIComponent(chosen.join(','))}&shared=${shared ? 1 : 0}`
+  // In the desktop app Google's sign-in finishes in the system browser (pa-e7xj).
+  const external = typeof window !== 'undefined' && 'mrRobotHost' in window
+  const start = `/api/connections/${plugin.connector!.kind}/oauth/start?services=${encodeURIComponent(chosen.join(','))}&shared=${shared ? 1 : 0}${external ? '&external=1' : ''}`
   return (
     <div className="form connect-form">
       <div className="muted">Choose what this account grants. Robots can never get more than you choose here; each Robot still needs its own grant. {plugin.title} asks which account to add; repeat this for each of your accounts.</div>

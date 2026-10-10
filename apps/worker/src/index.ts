@@ -7,6 +7,7 @@ import * as Effect from 'effect/Effect'
 import { api, type ApiContext } from './edge/api.ts'
 import { call, forbidden, json, notFound, respond, type ApiError } from './edge/http.ts'
 import { hookChannel, isHookPath } from './edge/hooks.ts'
+import { GOOGLE_CALLBACK_PATH, googleCallback } from './edge/google-callback.ts'
 import { identityEmail } from './edge/identity.ts'
 import { HOME_ID, type Env } from './env.ts'
 import type { SignIn } from './home/home.ts'
@@ -57,6 +58,8 @@ export default {
     }
     // The webhook Channel is outside Access too; its key is the credential (v1.6 ticket 07).
     if (isHookPath(path)) return Effect.runPromise(hookChannel(request, env))
+    // Google's callback is outside Access too; its one-time state is the credential (pa-4sr1).
+    if (path === GOOGLE_CALLBACK_PATH && request.method === 'GET') return googleCallback(request, env)
     const program = Effect.gen(function* () {
       const email = yield* identityEmail(request, env, ctx)
       const signIn = yield* call((): Promise<SignIn> => env.HOME.getByName(HOME_ID).signIn(email))

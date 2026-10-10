@@ -72,11 +72,29 @@ function openWindow(path = ''): void {
       void shell.openExternal(url)
       return { action: 'deny' }
     })
+    // Sign-ins elsewhere (Google) go to the system browser, where the password manager and passkeys are (pa-e7xj, pa-6ljh).
+    const leave = (event: { preventDefault(): void }, url: string) => {
+      if (stays(url)) return
+      event.preventDefault()
+      void shell.openExternal(url)
+    }
+    window.webContents.on('will-navigate', (event, url) => leave(event, url))
+    window.webContents.on('will-redirect', (event, url) => leave(event, url))
   }
   if (config.server === null) void window.loadFile(join(__dirname, 'window.html'))
   else void window.loadURL(`${config.server}/${path}`)
   window.show()
   window.focus()
+}
+
+/** Pages the app window shows itself: the server, its Access sign-in, and the local address prompt. */
+function stays(url: string): boolean {
+  if (url.startsWith('file://') || (config.server !== null && (url === config.server || url.startsWith(`${config.server}/`)))) return true
+  try {
+    return new URL(url).hostname.endsWith('.cloudflareaccess.com')
+  } catch {
+    return true
+  }
 }
 
 /** The bridge answers only pages of the configured server, or the local address prompt. */
