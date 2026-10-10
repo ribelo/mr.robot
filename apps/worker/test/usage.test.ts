@@ -1,91 +1,79 @@
 import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Conversation, Me, RobotPanel, RobotSummary } from '@mr-robot/protocol'
-import { api, robots, settle, stubModels, testRobot } from './api.ts'
-import { scripts } from './stub-llm.ts'
+import type { AccountUsage, Me, ProviderView, ProvidersView } from '@mr-robot/protocol'
+import { api, stubModels } from './api.ts'
+import { connectorFixtures } from './connector-fixtures.ts'
+import type { Member as TestMember } from './worker.ts'
 
 const ANNA = 'anna@example.com'
+const BEN = 'ben@example.com'
 
 beforeEach(async () => {
   await reset()
-  scripts.clear()
+  connectorFixtures.reset()
   await stubModels()
   await api(ANNA, '/api/me')
-  // The stub model costs $1 per million input tokens and $10 per million output tokens.
-  await api(ANNA, '/api/admin/settings', {
-    method: 'PATCH',
-    body: { models: [{ provider: 'stub', model: 'stub', label: 'Stub', contextWindow: 128000, price: { input: 1, output: 10 } }] },
-  })
+  await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+  await api(BEN, '/api/me')
 })
 
-async function activeRobot(): Promise<string> {
-  scripts.set('*', [{ text: 'Hello.' }])
-  const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
-  await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
-  await testRobot(body.id).activateForTest()
-  return body.id
-}
+const member = (id: string) => env.MEMBER.getByName(id) as unknown as DurableObjectStub<TestMember>
+const mine = async (as: string) => (await api<ProvidersView>(as, '/api/providers')).body.mine
+const usage = (as: string, account: ProviderView) => api<AccountUsage>(as, `/api/accounts/${account.id}/usage?owner=${account.ownerId}`)
+const calls = (url: string) => connectorFixtures.calls.filter((call) => call.url === url).length
 
-async function say(id: string, text: string) {
-  await api(ANNA, `/api/robots/${id}/messages`, { body: { text } })
-  await settle(id)
-}
+describe('Account usage and checks (v1.10 tickets 04, 05)', () => {
+  it('shows Claude windows, cached a minute, to the owner and to Members it is shared with (pa-lmbl, pa-7d50, pa-sstr)', async () => {
+    const anna = (await api<Me>(ANNA, '/api/me')).body
+    await member(anna.id).seedLegacyForTest('anthropic', 'oauth', { access: 'access-1', refresh: 'refresh-1', expires: Date.now() + 3_600_000 }, false)
+    connectorFixtures.on('GET', 'https://api.anthropic.com/api/oauth/usage', (call: { headers: Record<string, string> }) => (call.headers['authorization'] === 'Bearer access-1' && call.headers['anthropic-beta'] === 'oauth-2025-04-20' ? {
+      five_hour: { utilization: 6.0, resets_at: '2026-10-10T18:59:59Z' },
+      seven_day: { utilization: 35.4, resets_at: '2026-10-14T16:59:59Z' },
+      seven_day_opus: { utilization: 12, resets_at: '2026-10-14T17:59:59Z' },
+      extra: null,
+    } : new Response('no', { status: 401 })))
+    const [claude] = await mine(ANNA)
+    const first = (await usage(ANNA, claude!)).body
+    expect(first.windows).toEqual([
+      { name: 'Current session', percent: 6, resetsAt: '2026-10-10T18:59:59Z' },
+      { name: 'This week', percent: 35, resetsAt: '2026-10-14T16:59:59Z' },
+      { name: 'Opus this week', percent: 12, resetsAt: '2026-10-14T17:59:59Z' },
+    ])
+    await usage(ANNA, claude!)
+    expect(calls('https://api.anthropic.com/api/oauth/usage')).toBe(1)
 
-const panel = async (id: string) => (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
-const summary = async (id: string) => (await robots(ANNA)).find((robot) => robot.id === id) as RobotSummary
-
-describe('usage and spend limits', () => {
-  it('sums every Turn into the Robot and Member counters, shown for the current month (robot-6jqh)', async () => {
-    const id = await activeRobot()
-    const before = (await panel(id)).usage
-    scripts.set(id, [{ text: 'one' }, { text: 'two' }])
-    await say(id, 'first')
-    await say(id, 'second')
-    const usage = (await panel(id)).usage
-    expect(usage.month).toBe(new Date().toISOString().slice(0, 7))
-    expect(usage.inputTokens - before.inputTokens).toBe(200)
-    expect(usage.outputTokens - before.outputTokens).toBe(20)
-    expect(usage.costUsd - before.costUsd).toBeCloseTo((200 * 1 + 20 * 10) / 1_000_000, 10)
-    const me = (await api<Me>(ANNA, '/api/me')).body
-    const member = await env.MEMBER.getByName(me.id).usage(usage.month)
-    expect(member.byRobot.find((row) => row.robotId === id)).toMatchObject({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })
+    expect((await usage(BEN, claude!)).status).toBe(404)
+    await api(ANNA, `/api/accounts/${claude!.id}`, { method: 'PATCH', body: { shared: true } })
+    expect((await usage(BEN, claude!)).body.windows).toHaveLength(3)
+    expect(JSON.stringify((await api<ProvidersView>(BEN, '/api/providers')).body.shared)).not.toContain('access-1')
   })
 
-  it('finishes the Turn that crosses the limit, blocks the next Wake-up, and resumes when raised (robot-8gag, robot-40nw)', async () => {
-    const id = await activeRobot()
-    // A limit just above what setup already spent: the next Turn crosses it.
-    const spent = (await panel(id)).usage.costUsd
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { spendLimitUsd: spent + 0.0001 } })
-    scripts.set(id, [{ text: 'Expensive answer.' }, { text: 'After the raise.' }])
-    await say(id, 'do the expensive thing')
-    let conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.some((item) => item.kind === 'reply' && item.text === 'Expensive answer.')).toBe(true)
-    expect(conversation.items.at(-1)).toMatchObject({ kind: 'notice' })
-    expect((conversation.items.at(-1) as { text: string }).text).toContain('monthly spend limit')
-    expect(await summary(id)).toMatchObject({ status: 'blocked', fleetState: 'blocked' })
-
-    await say(id, 'and the next thing')
-    conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.some((item) => item.kind === 'reply' && item.text === 'After the raise.')).toBe(false)
-
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { spendLimitUsd: 100 } })
-    await settle(id)
-    conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'After the raise.' })
-    expect(await summary(id)).toMatchObject({ status: 'active' })
+  it('shows OpenCode Go windows and no bars for Providers without a usage endpoint (pa-sps4, pa-afb9)', async () => {
+    await api(ANNA, '/api/providers/opencode-go/accounts', { body: { key: 'sk-opencode1111', shared: false } })
+    await api(ANNA, '/api/providers/deepseek/accounts', { body: { key: 'sk-deepseek-key', shared: false } })
+    connectorFixtures.on('GET', 'https://opencode.ai/zen/go/v1/usage', { usage: {
+      rolling: { status: 'ok', percent: 0, resetsAt: '2026-10-10T15:00:00.000Z' },
+      weekly: { status: 'ok', percent: 3, resetsAt: '2026-10-12T00:00:00.000Z' },
+      monthly: { status: 'ok', percent: 65, resetsAt: '2026-10-21T00:00:00.000Z' },
+    } })
+    const [opencode, deepseek] = await mine(ANNA)
+    expect((await usage(ANNA, opencode!)).body.windows).toEqual([
+      { name: 'Rolling (5 hours)', percent: 0, resetsAt: '2026-10-10T15:00:00.000Z' },
+      { name: 'This week', percent: 3, resetsAt: '2026-10-12T00:00:00.000Z' },
+      { name: 'This month', percent: 65, resetsAt: '2026-10-21T00:00:00.000Z' },
+    ])
+    expect((await usage(ANNA, deepseek!)).body.windows).toBeNull()
+    expect(connectorFixtures.calls.filter((call) => call.url.includes('deepseek'))).toEqual([])
   })
 
-  it('applies the Home member limit to all of a Member\'s Robots and lifts it when the admin raises it', async () => {
-    const id = await activeRobot()
-    await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { memberSpendLimitUsd: 0.0001 } })
-    scripts.set(id, [{ text: 'Costly.' }, { text: 'Resumed.' }])
-    await say(id, 'go')
-    expect(await summary(id)).toMatchObject({ status: 'blocked' })
-    await say(id, 'more')
-    await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { memberSpendLimitUsd: null } })
-    await settle(id)
-    const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'Resumed.' })
+  it('checks an account at once and sets its state from the answer (pa-hq0v)', async () => {
+    await api(ANNA, '/api/providers/deepseek/accounts', { body: { key: 'sk-deepseek-key', shared: false } })
+    const [account] = await mine(ANNA)
+    connectorFixtures.on('GET', 'https://api.deepseek.com/user/balance', { is_available: false })
+    await api(ANNA, `/api/accounts/${account!.id}/check`, { body: {} })
+    expect((await mine(ANNA))[0]).toMatchObject({ status: 'broken', note: 'no balance left' })
+    connectorFixtures.on('GET', 'https://api.deepseek.com/user/balance', { is_available: true })
+    await api(ANNA, `/api/accounts/${account!.id}/check`, { body: {} })
+    expect((await mine(ANNA))[0]).toMatchObject({ status: 'ok', note: null, until: null })
   })
 })

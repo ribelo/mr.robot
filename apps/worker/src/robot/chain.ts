@@ -27,3 +27,15 @@ export function withModel(chain: readonly ChainEntry[], active: number, model: M
 export function chainAccounts(chain: readonly ChainEntry[]): string[] {
   return [...new Set(chain.map((entry) => entry.account).filter((account) => account !== '' && account !== 'workers-ai'))]
 }
+
+/** What a failed model call says about its account: a limit, a broken account, or neither (pa-gqff, pa-bc78). */
+export function failureKind(failure: { code?: string; status?: number; message?: string }): 'limited' | 'broken' | null {
+  if (failure.status === 429 || (failure.code === 'RATE_LIMIT' && failure.status !== 529 && failure.status !== 503)) return 'limited'
+  if (failure.status === 401 || failure.status === 402 || failure.status === 403 || failure.code === 'AUTH') return 'broken'
+  return null
+}
+
+/** A time as the owner reads it, in the Robot's zone. */
+export function clock(at: number, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(at)
+}

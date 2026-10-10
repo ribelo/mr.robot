@@ -519,3 +519,9 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .chain-index { color: var(--muted); padding-top: 6px; min-width: 1.2em; }
 .chain-fields { flex: 1; display: grid; gap: 6px; min-width: 0; }
 .chain-buttons { display: flex; gap: 4px; align-items: center; }
+.usage-bars { display: grid; gap: 6px; margin-top: 6px; }
+.usage-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(80px, 2fr) auto; gap: 10px; align-items: center; font-size: 12.5px; }
+.usage-track { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.usage-fill { display: block; height: 100%; background: var(--success); }
+.usage-fill.high { background: var(--danger); }
+.usage-percent { color: var(--muted); white-space: nowrap; }

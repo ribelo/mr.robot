@@ -265,6 +265,15 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('DELETE', '/api/accounts/:id', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).removeAccount(id)).pipe(Effect.as({ ok: true })))
+  // Usage windows (pa-lmbl, pa-sps4); another Member's account only when it is shared with the Home (pa-sstr).
+  .on('GET', '/api/accounts/:id/usage', (c, { id }) => Effect.gen(function* () {
+    const owner = new URL(c.request.url).searchParams.get('owner') ?? c.member.id
+    if (owner === c.member.id) return yield* call(() => c.env.MEMBER.getByName(owner).accountUsage(id, false))
+    const { shared } = yield* call(() => home(c.env).accountsFor(c.member.id))
+    if (!shared.some((account) => account.id === id && account.ownerId === owner)) return yield* Effect.fail(notFound('no such shared account'))
+    return yield* call(() => c.env.MEMBER.getByName(owner).accountUsage(id, true))
+  }))
+  .on('POST', '/api/accounts/:id/check', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).checkAccount(id)))
   .on('GET', '/api/admin/settings', (c) => admin(c).pipe(Effect.andThen(call(async () => ({ ...(await home(c.env).settings()), models: await home(c.env).modelList() })))))
   .on('PATCH', '/api/admin/settings', (c) => Effect.gen(function* () {
     yield* admin(c)

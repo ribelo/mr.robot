@@ -673,6 +673,14 @@ export type RobotPanel = typeof RobotPanel.Type
 export const ProviderName = Schema.Literals(['deepseek', 'openrouter', 'workers-ai', 'openai', 'anthropic', 'opencode-go'])
 export type ProviderName = typeof ProviderName.Type
 
+/** One usage window of a subscription: percent used and when it resets (pa-lmbl, pa-sps4). */
+export const UsageWindow = Schema.Struct({ name: Schema.String, percent: Schema.Number, resetsAt: Schema.NullOr(Schema.String) })
+export type UsageWindow = typeof UsageWindow.Type
+
+/** An account's usage: windows when the Provider reports them, null when it has no usage endpoint (pa-afb9). */
+export const AccountUsage = Schema.Struct({ windows: Schema.NullOr(Schema.Array(UsageWindow)), checkedAt: Schema.Number, error: Schema.NullOr(Schema.String) })
+export type AccountUsage = typeof AccountUsage.Type
+
 /** ok; limited until a reset; broken (cancelled, unpaid, revoked) and tried again later (pa-gqff, pa-bc78). */
 export const AccountStatus = Schema.Literals(['ok', 'limited', 'broken'])
 export type AccountStatus = typeof AccountStatus.Type

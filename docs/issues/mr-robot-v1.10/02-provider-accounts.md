@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] account table and migration; Home provider_account index
-- [ ] API and Profile UI: add many, rename, share, remove
-- [ ] OpenCode pool code removed; workerd tests for many accounts, sharing, migration
+- [x] account table and migration; Home provider_account index
+- [x] API and Profile UI: add many, rename, share, remove
+- [x] OpenCode pool code removed; workerd tests for many accounts, sharing, migration

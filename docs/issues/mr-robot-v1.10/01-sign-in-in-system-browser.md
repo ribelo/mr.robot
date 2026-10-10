@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Electron prevents will-navigate/will-redirect off the server and Access domains and opens them externally
-- [ ] Consent state names the Member; callback route bypasses Access (alchemy bypass app); external consents end on a small HTML page
-- [ ] Workerd test: callback without Access identity completes for the Member in the state
+- [x] Electron prevents will-navigate/will-redirect off the server and Access domains and opens them externally
+- [x] Consent state names the Member; callback route bypasses Access (alchemy bypass app); external consents end on a small HTML page
+- [x] Workerd test: callback without Access identity completes for the Member in the state

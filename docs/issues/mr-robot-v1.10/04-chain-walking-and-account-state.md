@@ -6,6 +6,6 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd tests: 429 with reset → switch, line, continue, return after reset; 401 → broken, one notification, 6-hour retry, Check now; all unusable → blocked and resumed by alarm
+- [x] Workerd tests: 429 with reset → switch, line, continue, return after reset; 401 → broken, one notification, 6-hour retry, Check now; all unusable → blocked and resumed by alarm

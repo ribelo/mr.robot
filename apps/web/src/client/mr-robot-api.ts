@@ -12,7 +12,7 @@ import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
-  ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
+  AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
@@ -106,6 +106,8 @@ const make = Effect.gen(function* () {
     finishOAuth: (provider: string, shared: boolean, pasted?: string) => request(OAuthFinished, 'POST', `/api/providers/${enc(provider)}/oauth/finish`, pasted === undefined ? { shared } : { shared, pasted }),
     updateAccount: (id: string, change: { label?: string; shared?: boolean }) => send('PATCH', `/api/accounts/${enc(id)}`, change),
     removeAccount: (id: string) => send('DELETE', `/api/accounts/${enc(id)}`),
+    accountUsage: (id: string, owner: string) => request(AccountUsage, 'GET', `/api/accounts/${enc(id)}/usage?owner=${enc(owner)}`),
+    checkAccount: (id: string) => send('POST', `/api/accounts/${enc(id)}/check`, {}),
 
     admin: get(AdminView, '/api/admin'),
     homeSettings: get(HomeSettingsView, '/api/admin/settings'),

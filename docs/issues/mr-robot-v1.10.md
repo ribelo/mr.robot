@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.10 — provider accounts, model chains, usage, sign-in in the system browser"
-status: ready-for-agent
+status: done
 story-prefix: pa
 parent: mr-robot-v1.9.md
 ---

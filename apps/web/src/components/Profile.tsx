@@ -6,7 +6,7 @@ import { Connections } from './Connections.tsx'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import type { Me, ProviderView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
+import type { AccountUsage, Me, ProviderView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
 import { applyTheme } from '../theme/theme.ts'
 import { keys, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
@@ -93,6 +93,37 @@ function ProviderList({ view }: { view: ProvidersView }) {
   )
 }
 
+/** A subscription's usage windows (pa-lmbl, pa-sps4): read when the profile opens, cached a minute by the server. */
+function UsageBars({ account }: { account: ProviderView }) {
+  const command = useCommand()
+  const [usage, setUsage] = useState<AccountUsage>()
+  const [failure, setFailure] = useState<string>()
+  useEffect(() => {
+    let live = true
+    void command((api) => api.accountUsage(account.id, account.ownerId), []).then((exit) => {
+      if (!live) return
+      if (Exit.isSuccess(exit)) setUsage(exit.value)
+      else setFailure(exitFailure(exit))
+    })
+    return () => { live = false }
+  }, [account.id, account.ownerId, command])
+  if (failure !== undefined) return <div className="muted">Usage unavailable: {failure}</div>
+  if (usage === undefined) return <div className="muted">Reading usage…</div>
+  if (usage.error !== null) return <div className="muted">{usage.error}</div>
+  if (usage.windows === null) return null
+  return (
+    <div className="usage-bars">
+      {usage.windows.map((window) => (
+        <div key={window.name} className="usage-row">
+          <span className="usage-name">{window.name}{window.resetsAt === null ? null : <small className="muted"> · resets {new Date(window.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</small>}</span>
+          <span className="usage-track" role="progressbar" aria-label={window.name} aria-valuenow={window.percent} aria-valuemin={0} aria-valuemax={100}><span className={window.percent >= 90 ? 'usage-fill high' : 'usage-fill'} style={{ width: `${Math.min(100, window.percent)}%` }} /></span>
+          <span className="usage-percent">{window.percent}% used</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** A Provider's accounts (v1.10): the person's own with their switches, or ones others share. */
 function AccountList({ accounts, mine }: { accounts: readonly ProviderView[]; mine: boolean }) {
   const command = useCommand()
@@ -105,11 +136,14 @@ function AccountList({ accounts, mine }: { accounts: readonly ProviderView[]; mi
         <li key={account.id} className="connection">
           <div className="connection-name">
             <b>{account.label}</b>{mine ? null : <span className="muted"> · {account.ownerName}'s, shared</span>}
+            {account.provider === 'anthropic' || account.provider === 'opencode-go' ? <UsageBars account={account} /> : null}
+            {mine && (account.usedBy ?? []).length > 0 ? <div className="muted">Used by {(account.usedBy ?? []).map((use) => `${use.robotName} (${use.ownerName})`).join(', ')}</div> : null}
             {account.status === 'ok' ? null : <div className="host-log-failed">{account.status === 'limited' ? 'Limited' : 'Needs attention'}{account.note === null ? '' : `: ${account.note}`}{account.until === null ? '' : ` · tried again ${new Date(account.until).toLocaleString()}`}</div>}
           </div>
           {mine ? (
             <div className="connection-actions">
               <label className="check"><input type="checkbox" checked={account.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateAccount(account.id, { shared })) }} /><span>Shared with the Home</span></label>
+              <button type="button" className="link" onClick={() => void change((api) => api.checkAccount(account.id))}>Check now</button>
               <button type="button" className="link" onClick={() => { const label = prompt('Name of this account', account.label); if (label !== null && label.trim() !== '') void change((api) => api.updateAccount(account.id, { label })) }}>Rename</button>
               <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${account.label}? Robots that use it move on to the next entry of their model chain.`)) void change((api) => api.removeAccount(account.id)) }}>Remove</button>
             </div>

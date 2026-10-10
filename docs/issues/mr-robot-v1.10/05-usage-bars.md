@@ -6,7 +6,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Parsing of recorded responses; cache; shared visibility (workerd tests)
-- [ ] Bars in the profile (component test)
+- [x] Parsing of recorded responses; cache; shared visibility (workerd tests)
+- [x] Bars in the profile (component test)

@@ -863,7 +863,9 @@ export const rearm = Effect.gen(function* () {
   const runnable = config.status === 'active' || config.status === 'setup'
   const outbox = store.sql.exec<{ at: number | null }>("SELECT MIN(next_attempt) AS at FROM outbox WHERE status = 'pending'").one().at
   const watch = store.get<number>('watch-next')
+  const resume = store.get<number>('chain-resume-at')
   const candidates = [
+    ...(resume === undefined ? [] : [resume]),
     ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) ? [Date.now() + HEARTBEAT_MS] : []),
     ...store.routines().flatMap((routine) => (routine.nextRun === null ? [] : [routine.nextRun])),
     ...(outbox === null ? [] : [outbox]),

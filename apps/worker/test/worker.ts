@@ -74,6 +74,11 @@ export class Member extends ProductionMember {
     return this.ctx.storage.sql.exec<{ sealed: string }>('SELECT sealed FROM account WHERE provider = ? ORDER BY created_at LIMIT 1', provider).one().sealed
   }
 
+  /** Every limited or broken account is past its retry time. */
+  async expireAccountStatesForTest(): Promise<void> {
+    this.ctx.storage.sql.exec('UPDATE account SET until = 1 WHERE until IS NOT NULL')
+  }
+
   /** A credential or OpenCode pool as stored before accounts existed (pa-mdlk). */
   async seedLegacyForTest(provider: string, kind: 'api-key' | 'oauth', data: unknown, shared: boolean): Promise<void> {
     const sealed = await Effect.runPromise(makeVault(this.env.DATA_KEY, 'credentials').seal(JSON.stringify(data)))
@@ -118,6 +123,13 @@ export class Robot extends ProductionRobot {
   }
 
   /** Skip the setup interview: the Robot becomes active with its current Grants. */
+  /** The chain's resume time came (as the alarm sees it). */
+  async resumeChainDueForTest(): Promise<number | null> {
+    const at = this.store.get<number>('chain-resume-at') ?? null
+    if (at !== null) this.store.set('chain-resume-at', 1)
+    return at
+  }
+
   async activateForTest(): Promise<void> {
     this.store.updateConfig(() => ({ status: 'active' }))
     await this.changed()

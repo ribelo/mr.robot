@@ -45,7 +45,18 @@ export async function httpFailure(provider: string, response: Response): Promise
       : response.status >= 500 ? 'PROVIDER_ERROR'
         : response.status === 400 && /context|too long|maximum/i.test(text) ? 'CONTEXT_OVERFLOW'
           : 'PROVIDER_ERROR'
-  throw new LlmError(`${provider} answered ${response.status}: ${text || response.statusText}`, code, { status: response.status } as never)
+  // A limit names its reset, so the model chain knows when the account works again (pa-gqff).
+  const reset = limitReset(response.headers, Date.now())
+  throw new LlmError(`${provider} answered ${response.status}: ${text || response.statusText}${reset === null ? '' : ` (resets at ${new Date(reset).toISOString()})`}`, code, { status: response.status } as never)
+}
+
+/** When a limited account is usable again: Anthropic's unified reset (epoch seconds), else retry-after; null when unsaid. */
+export function limitReset(headers: Headers, now: number): number | null {
+  const unified = Number(headers.get('anthropic-ratelimit-unified-reset') ?? Number.NaN)
+  if (Number.isFinite(unified) && unified * 1000 > now) return unified * 1000
+  const after = Number(headers.get('retry-after') ?? Number.NaN)
+  if (Number.isFinite(after) && after > 0) return now + after * 1000
+  return null
 }
 
 export type DshMessage = GenerateOptions['messages'][number]

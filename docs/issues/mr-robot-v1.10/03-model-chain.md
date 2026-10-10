@@ -6,8 +6,8 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] RobotConfig.chain, settings patch, deputy patch
-- [ ] Chain editor with drag and drop and account filtering (component test)
-- [ ] Workerd tests: default and migrated chain, credential of the bound account, used by
+- [x] RobotConfig.chain, settings patch, deputy patch
+- [x] Chain editor with drag and drop and account filtering (component test)
+- [x] Workerd tests: default and migrated chain, credential of the bound account, used by

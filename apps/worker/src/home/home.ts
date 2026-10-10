@@ -3,7 +3,7 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { ChainEntry, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
+import type { AccountStatus, ChainEntry, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -1302,6 +1302,8 @@ export class Home extends DurableObject<Env> {
   providerCredential(memberId: string, provider: ProviderId): Promise<(ProviderCredential & { owner: string }) | null> { return this.run(providerCredential(memberId, provider)) }
   accountCredential(memberId: string, entryOwner: string, account: string): Promise<ProviderCredential | null> { return this.run(accountCredential(memberId, entryOwner, account)) }
   chainRefusal(memberId: string, chain: readonly ChainEntry[]): Promise<string | null> { return this.run(chainRefusal(memberId, chain)) }
+  /** A Robot reports an account's state to the account's owner (pa-gqff, pa-bc78). */
+  markAccount(entryOwner: string, account: string, change: { status: AccountStatus; until: number | null; note: string | null }, robot: { id: string; name: string }): Promise<string | null> { return this.env.MEMBER.getByName(entryOwner).markAccount(account, change, robot) }
   accountsFor(memberId: string): Promise<{ mine: ProviderView[]; shared: ProviderView[] }> { return this.run(accountsFor(memberId)) }
   providersView(memberId: string): Promise<ProvidersView> { return this.run(providersView(memberId)) }
 

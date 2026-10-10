@@ -14,7 +14,8 @@ import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
-import type { AccountStatus, ConnectorKind, NotificationKind, ProviderView, QuietHours, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
+import { probeAccount, type Probe } from '../providers/usage.ts'
+import type { AccountStatus, AccountUsage, ConnectorKind, NotificationKind, ProviderView, QuietHours, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -268,6 +269,53 @@ const accountCredential = (id: string, forHome: boolean) => Effect.gen(function*
   const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
   if (row === undefined || (forHome && row.shared !== 1)) return null
   return yield* openAccount(row)
+})
+
+/** An account and its credential for a usage read or a check; a shared view sees only shared accounts. */
+const openForProbe = (id: string, forHome: boolean) => Effect.gen(function* () {
+  yield* migrateAccounts
+  const sql = yield* Sql
+  const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
+  if (row === undefined || (forHome && row.shared !== 1)) return yield* notFound('no such account')
+  return { provider: row.provider, credential: yield* openAccount(row) }
+})
+
+/** "Check now" (pa-hq0v): the Provider's answer sets the account's state. */
+const applyProbe = (id: string, probe: Probe) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const now = Date.now()
+  if (probe.kind === 'ok') yield* sql.run("UPDATE account SET status = 'ok', note = NULL, until = NULL, notified = 0, checked_at = ?, updated_at = ? WHERE id = ?", now, now, id)
+  else if (probe.kind === 'limited') yield* sql.run("UPDATE account SET status = 'limited', note = ?, until = ?, checked_at = ?, updated_at = ? WHERE id = ?", probe.note, probe.until ?? now + 3_600_000, now, now, id)
+  else if (probe.kind === 'broken') yield* sql.run("UPDATE account SET status = 'broken', note = ?, until = ?, checked_at = ?, updated_at = ? WHERE id = ?", probe.note, now + BROKEN_RETRY_MS, now, now, id)
+  const me = yield* profile
+  const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
+  return row === undefined ? null : accountView(row, me)
+})
+
+/** Six hours before a broken account is tried again by a Robot (pa-bc78). */
+export const BROKEN_RETRY_MS = 6 * 3_600_000
+
+/**
+ * A Robot found an account limited or broken, or working again (pa-gqff, pa-bc78). A broken account
+ * tells its owner once per break; working again clears the state.
+ */
+const markAccount = (id: string, change: { status: AccountStatus; until: number | null; note: string | null }, robot: { id: string; name: string }) => Effect.gen(function* () {
+  yield* migrateAccounts
+  const sql = yield* Sql
+  const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
+  if (row === undefined) return null
+  const now = Date.now()
+  if (change.status === 'ok') {
+    if (row.status !== 'ok') yield* sql.run("UPDATE account SET status = 'ok', note = NULL, until = NULL, notified = 0, checked_at = ?, updated_at = ? WHERE id = ?", now, now, id)
+    return row.label
+  }
+  const until = change.status === 'broken' ? now + BROKEN_RETRY_MS : change.until ?? now + 3_600_000
+  yield* sql.run('UPDATE account SET status = ?, note = ?, until = ?, checked_at = ?, updated_at = ? WHERE id = ?', change.status, change.note, until, now, now, id)
+  if (change.status === 'broken' && row.notified === 0) {
+    yield* sql.run('UPDATE account SET notified = 1 WHERE id = ?', id)
+    yield* notify({ robotId: robot.id, robotName: robot.name, kind: 'needs you', body: `Your ${PROVIDER_LABELS[row.provider]} account "${row.label}" stopped working${change.note === null ? '' : `: ${change.note}`}. Fix it under your name → Providers, then press Check now.` })
+  }
+  return row.label
 })
 
 /** The first account of a Provider (oldest first) a Robot may use. */
@@ -524,6 +572,28 @@ export class Member extends DurableObject<Env> {
   removeAccount(id: string): Promise<void> { return this.run(removeAccount(id)) }
   credential(provider: ProviderId, forHome: boolean): Promise<ProviderCredential | null> { return this.run(credential(provider, forHome)) }
   accountCredential(id: string, forHome: boolean): Promise<ProviderCredential | null> { return this.run(accountCredential(id, forHome)) }
+  /** Usage windows of a Claude or OpenCode Go account, cached a minute (pa-lmbl, pa-sps4, pa-7d50); none for others (pa-afb9). */
+  private readonly usageCache = new Map<string, AccountUsage>()
+  async accountUsage(id: string, forHome: boolean): Promise<AccountUsage> {
+    const cached = this.usageCache.get(id)
+    if (cached !== undefined && Date.now() - cached.checkedAt < 60_000) return cached
+    const { provider, credential } = await this.run(openForProbe(id, forHome))
+    if (provider !== 'anthropic' && provider !== 'opencode-go') return { windows: null, checkedAt: Date.now(), error: null }
+    const probe = await probeAccount(provider, credential, this.connectorFetch())
+    const usage: AccountUsage = {
+      windows: probe.kind === 'ok' || probe.kind === 'limited' ? [...(probe.windows ?? [])] : null,
+      checkedAt: Date.now(),
+      error: probe.kind === 'broken' || probe.kind === 'unknown' ? `usage unavailable: ${probe.note}` : null,
+    }
+    this.usageCache.set(id, usage)
+    return usage
+  }
+  async checkAccount(id: string): Promise<ProviderView | null> {
+    const { provider, credential } = await this.run(openForProbe(id, false))
+    this.usageCache.delete(id)
+    return this.run(applyProbe(id, await probeAccount(provider, credential, this.connectorFetch())))
+  }
+  markAccount(id: string, change: { status: AccountStatus; until: number | null; note: string | null }, robot: { id: string; name: string }): Promise<string | null> { return this.run(markAccount(id, change, robot)) }
   listPrefs(): Promise<Record<string, { pinned: boolean; hidden: boolean; markedUnread: boolean; seenAt: number | null }>> { return this.run(listPrefs) }
   setListPref(robotId: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }): Promise<void> { return this.run(setListPref(robotId, change)) }
   markSeen(robotId: string, at: number): Promise<void> { return this.run(markSeen(robotId, at)) }

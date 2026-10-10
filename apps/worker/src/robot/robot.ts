@@ -59,7 +59,8 @@ import { maskSecrets, type SecretHost } from '../agent/tools/secrets.ts'
 import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
-import { chainOf } from './chain.ts'
+import { chainOf, clock, failureKind, modelOf } from './chain.ts'
+import type { ChainEntry, ProviderView } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage, type ThreadWake } from '../agent/sources.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
@@ -336,6 +337,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config !== undefined && config.status !== 'deleted') await this.fireRoutines(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
     if (config !== undefined) await this.deliverOutbox()
+    if (config !== undefined && config.status !== 'deleted') this.resumeChain(Date.now())
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
   }
@@ -390,11 +392,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // While a takeover is pending the Robot waits for the hand-back; later wake-ups queue behind it (robot-doqx).
       if (active === undefined && this.store.get('takeover') !== undefined) return
       if (active === undefined && this.store.pendingWakeups() > 0 && config.status === 'active' && (await this.checkLimits())) return
+      // Every entry of the model chain is unavailable: wait for the earliest reset (pa-dus3).
+      if (active === undefined && (this.store.get<number>('chain-resume-at') ?? 0) > Date.now()) return
       const wakeup = active === undefined ? this.store.nextWakeup() : this.store.wakeup(active.wakeupId)
       if (wakeup === undefined) {
         if (active !== undefined) this.store.endTurn(active.wakeupId)
         return
       }
+      if (active === undefined && config.status === 'active' && !(await this.pickEntry())) return
       this.starting = wakeup
       try {
         await this.runTurn(wakeup, active !== undefined)
@@ -461,6 +466,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
     const failedTurn = this.rememberFailure(wakeup, startSeq)
+    if (failedTurn) await this.chainFailure(startSeq).catch((error: unknown) => console.warn('model chain not advanced', error))
+    else await this.chainSucceeded().catch(() => undefined)
     const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
     if (!failedTurn && wakeup.kind !== 'routine' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
       // A Turn that ends with nothing to show (e.g. a reasoning model spent its output cap thinking) is not silent.
@@ -633,6 +640,112 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     for (const item of replies) {
       if (item.kind !== 'reply') continue
       await this.sendToChannels({ kind: 'reply', id: item.id, robotId: config.id, robotName: config.identity.name, text: this.mask(item.text), route, final: item === replies.at(-1), unprompted })
+    }
+  }
+
+  // ---------------------------------------------------------------- the model chain (v1.10 ticket 04)
+
+  /** Account states as of the last pick, so a good Turn can clear a state it ran through. */
+  private chainStates = new Map<string, ProviderView>()
+
+  private activeIndex(chain: readonly ChainEntry[]): number {
+    return Math.min(this.store.get<number>('chain-active') ?? 0, chain.length - 1)
+  }
+
+  /** Each entry's account state now; unbound entries and Workers AI are always usable. */
+  private async entryStates(chain: readonly ChainEntry[]): Promise<Array<{ usable: boolean; until: number | null; label: string }>> {
+    const config = this.store.requireConfig()
+    const bound = chain.some((entry) => entry.account !== '' && entry.account !== 'workers-ai')
+    const { mine, shared } = bound ? await this.home().accountsFor(config.ownerId) : { mine: [], shared: [] }
+    this.chainStates = new Map([...mine, ...shared].map((account) => [account.id, account]))
+    const now = Date.now()
+    return chain.map((entry) => {
+      if (entry.account === '' || entry.account === 'workers-ai') return { usable: true, until: null, label: entry.account === 'workers-ai' ? 'Workers AI' : entry.provider }
+      const account = this.chainStates.get(entry.account)
+      if (account === undefined) return { usable: false, until: null, label: 'an account that is gone' }
+      return { usable: account.status === 'ok' || (account.until ?? 0) <= now, until: account.until, label: account.label }
+    })
+  }
+
+  /**
+   * Run on the first usable entry of the chain (pa-14yx, pa-dus3). A change is a line in the
+   * Conversation; with no usable entry the Robot waits for the earliest reset. False: do not run now.
+   */
+  private async pickEntry(reason?: string): Promise<boolean> {
+    const config = this.store.requireConfig()
+    const chain = chainOf(config)
+    const states = await this.entryStates(chain)
+    const index = states.findIndex((state) => state.usable)
+    if (index < 0) {
+      const earliest = Math.min(...states.map((state) => state.until ?? Date.now() + 3_600_000))
+      if (this.store.get<number>('chain-resume-at') !== earliest) {
+        this.store.set('chain-resume-at', earliest)
+        this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Every model in the chain is unavailable${reason === undefined ? '' : ` (${reason})`}. ${config.identity.name} continues by itself at ${clock(earliest, config.timeZone)}, or sooner when you add another entry.`, Date.now())
+        this.ctx.waitUntil(this.notifyMembers('blocked', `Every model in its chain is unavailable; it continues at ${clock(earliest, config.timeZone)}.`).catch(() => 0))
+        await this.changed()
+      }
+      await this.rearm()
+      return false
+    }
+    this.store.delete('chain-resume-at')
+    const active = this.activeIndex(chain)
+    if (index === active) return true
+    const entry = chain[index]!
+    const was = states[active]!
+    const line = index < active
+      ? `Back to ${entry.model} on ${states[index]!.label}: it works again.`
+      : `Switched to ${entry.model} on ${states[index]!.label}: ${reason ?? `${was.label} is unavailable${was.until === null ? '' : ` until ${clock(was.until, config.timeZone)}`}`}.`
+    this.store.set('chain-active', index)
+    this.store.updateConfig(() => ({ model: modelOf(entry) }))
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), line, Date.now())
+    await this.changed()
+    return true
+  }
+
+  /** A Turn failed: a limited or broken account moves the Robot down its chain and the work goes on (pa-kvsr, pa-q0dg). */
+  private async chainFailure(startSeq: number): Promise<void> {
+    const config = this.store.requireConfig()
+    const end = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
+      .filter((event) => event.seq >= startSeq && event.type === 'turn/end').at(-1)
+    const failure = (end?.data as { reason?: { kind?: string; error?: { code?: string; status?: number; message?: string } } } | undefined)?.reason?.error
+    if (failure === undefined) return
+    const kind = failureKind(failure)
+    if (kind === null) return
+    const chain = chainOf(this.store.requireConfig())
+    const entry = chain[this.activeIndex(chain)]!
+    if (entry.account === '' || entry.account === 'workers-ai') return
+    const resets = /resets at (\S+?)\)/.exec(failure.message ?? '')?.[1]
+    const until = resets === undefined ? null : Date.parse(resets)
+    const note = (failure.message ?? failure.code ?? 'failed').slice(0, 200)
+    const label = await this.home().markAccount(entry.owner, entry.account, { status: kind, until: until !== null && Number.isFinite(until) ? until : null, note }, { id: config.id, name: config.identity.name })
+    const reason = `${label ?? 'its account'} ${kind === 'limited' ? 'hit its limit' : 'stopped working'}`
+    const before = this.activeIndex(chain)
+    if (!(await this.pickEntry(reason))) return
+    if (this.activeIndex(chain) === before) return
+    // The work goes on with the next entry; the failed wake-up is not run again from the start.
+    this.store.delete('failed-wakeup')
+    this.store.enqueue('platform', { kind: 'platform' }, 'The previous model call failed because its account was unavailable; the Robot now runs on the next entry of its model chain. Continue the work from where it stopped; do not redo finished steps.', {}, Date.now())
+  }
+
+  /** A good Turn on an account marked limited or broken: it works again (pa-gqff, pa-bc78). */
+  private async chainSucceeded(): Promise<void> {
+    const config = this.store.requireConfig()
+    const chain = chainOf(config)
+    const entry = chain[this.activeIndex(chain)]!
+    const state = this.chainStates.get(entry.account)
+    if (state === undefined || state.status === 'ok') return
+    await this.home().markAccount(entry.owner, entry.account, { status: 'ok', until: null, note: null }, { id: config.id, name: config.identity.name })
+    this.chainStates.set(entry.account, { ...state, status: 'ok', until: null, note: null })
+  }
+
+  /** The earliest reset came: the Robot continues the work it was blocked on (pa-dus3). */
+  private resumeChain(now: number): void {
+    const at = this.store.get<number>('chain-resume-at')
+    if (at === undefined || at > now) return
+    this.store.delete('chain-resume-at')
+    if (this.store.get('failed-wakeup') !== undefined || this.store.pendingWakeups() === 0) {
+      this.store.delete('failed-wakeup')
+      this.store.enqueue('platform', { kind: 'platform' }, 'Your model chain is usable again. Continue the work from where it stopped; do not redo finished steps.', {}, now)
     }
   }
 
