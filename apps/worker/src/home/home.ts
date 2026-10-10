@@ -17,6 +17,9 @@ import type {
   ModelOption,
   RobotStatus,
   AdminView,
+  AdminThread,
+  ThreadEvent,
+  ThreadView,
   ProvidersView,
   ProviderView,
   RobotSummary,
@@ -35,6 +38,7 @@ import { connectionView, HomePlugins } from './plugins.ts'
 import { disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
+import { abandoned, answered, closed, invited, lapsed, messaged, ThreadRegistry, type AnswerOutcome, type Side, type Step, type ThreadRow } from './threads.ts'
 import type { GatewayMessage } from '../connectors/discord-gateway.ts'
 import type { PlainValue } from '../connectors/schema-form.ts'
 import type { ConnectionChange, ConnectionMeta, OwnConnection } from '../member/connections.ts'
@@ -90,6 +94,10 @@ type RobotSql = {
 export interface HomePlatformShape {
   readonly env: Env
   readonly secrets: VaultShape
+  /** The Threads between chiefs (v1.9). */
+  readonly threads: ThreadRegistry
+  /** The alarm runs by `at` at the latest; an earlier alarm stays. */
+  readonly alarmBy: (at: number) => Effect.Effect<void>
   /** When each Provider's list was last tried, so a failing Provider is not asked on every request. */
   readonly catalogTries: Map<string, number>
 }
@@ -181,6 +189,7 @@ const remove = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run("UPDATE member SET status = 'removed' WHERE id = ?", memberId)
   const owned = yield* sql.all<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId)
+  yield* Effect.forEach(owned, ({ id }) => endThreadsOf(id), { discard: true })
   yield* Effect.forEach(owned, ({ id }) => remote((env) => env.ROBOT.getByName(id).pause()), { concurrency: 'unbounded', discard: true })
   const viewed = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home')", memberId)
   yield* Effect.forEach(viewed, ({ id }) => remote((env) => env.ROBOT.getByName(id).disconnectMember(memberId)), { concurrency: 'unbounded', discard: true })
@@ -351,6 +360,7 @@ const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
 /** Remove a Robot everywhere: its DO and files, its registry row, and every recipient grant naming it. */
 const destroyRobot = (robotId: string) => Effect.gen(function* () {
   const sql = yield* Sql
+  yield* endThreadsOf(robotId)
   yield* remote((env) => env.ROBOT.getByName(robotId).destroy())
   yield* sql.run('DELETE FROM robot WHERE id = ?', robotId)
   const others = yield* sql.all<{ id: string }>('SELECT id FROM robot')
@@ -427,6 +437,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     exaConfigured: (yield* setting<string>('exa-key')) !== undefined,
     proxyConfigured: (yield* setting<string>('proxy-config')) !== undefined,
     hosts: yield* allHosts,
+    threads: yield* adminThreads,
   } as AdminView
 })
 
@@ -925,6 +936,175 @@ const providersView = (memberId: string) => Effect.gen(function* () {
   return { mine, shared, models: yield* models(memberId), defaultModel: (yield* settings).defaultModel } as ProvidersView
 })
 
+// ------------------------------------------------------------------ Threads between chiefs (v1.9)
+
+export interface Chief { readonly id: string; readonly ownerName: string; readonly name: string; readonly availability: string }
+
+/** A chief as people name it ("Anna's Mr. Robot"); a deleted chief keeps its owner's name. */
+const chiefOf = (side: Side) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<{ owner_name: string | null; identity: string | null }>(
+    'SELECT (SELECT name FROM member WHERE id = ?) AS owner_name, (SELECT identity FROM robot WHERE id = ?) AS identity', side.memberId, side.robotId,
+  )
+  const ownerName = row?.owner_name ?? 'someone'
+  const identity = row?.identity === null || row?.identity === undefined ? undefined : (JSON.parse(row.identity) as Identity)
+  return { label: `${ownerName}'s ${identity?.name ?? 'Mr. Robot'}`, ownerName, avatarColor: identity?.avatarColor ?? MR_ROBOT_COLOR }
+})
+
+/** How a Thread that is over ended, as one chief sees it. */
+const endedAs = (row: ThreadRow, forRobotId: string): ThreadView['closedBy'] => {
+  if (row.state === 'declined') return 'declined'
+  if (row.state !== 'closed') return null
+  return row.ending.cause === 'chief' ? (row.ending.robotId === forRobotId ? 'self' : 'other') : row.ending.cause
+}
+
+/** The Thread as one chief and its owner see it: its own scope only, never the other owner's. */
+const threadView = (row: ThreadRow, forRobotId: string) => Effect.gen(function* () {
+  const mine = row.initiator.robotId === forRobotId ? row.initiator : row.invitee
+  const other = mine === row.initiator ? row.invitee : row.initiator
+  const self = yield* chiefOf(mine)
+  const them = yield* chiefOf(other)
+  return {
+    id: row.id,
+    topic: row.topic,
+    state: row.state,
+    self: { robotId: mine.robotId, label: self.label, avatarColor: self.avatarColor },
+    other: { robotId: other.robotId, label: them.label, ownerName: them.ownerName },
+    scope: mine.scope,
+    accepted: mine.answer,
+    messageCount: row.messageCount,
+    createdAt: row.createdAt,
+    openedAt: row.state === 'open' || row.state === 'closed' ? row.openedAt : null,
+    closedAt: row.state === 'declined' || row.state === 'closed' ? row.closedAt : null,
+    lastActivityAt: row.lastActivityAt,
+    closedBy: endedAs(row, forRobotId),
+    summary: row.state === 'closed' && row.ending.cause === 'chief' ? row.ending.summary : null,
+  } satisfies ThreadView
+})
+
+/** Apply one transition to a Thread; a refusal is the chief's mistake, said in words it can act on. */
+const stepThread = <T extends object>(threadId: string, transition: (row: ThreadRow) => Step<T>) => Effect.gen(function* () {
+  const { threads } = yield* HomePlatform
+  const step = threads.step(threadId, transition)
+  if (!step.ok) return yield* (step.reason === 'no such Thread' ? notFound(step.reason) : invalid(step.reason))
+  return step
+})
+
+/** Tell one chief what happened to a Thread; `wake` when it has to act, a note in its Conversation otherwise. */
+const tellChief = (row: ThreadRow, robotId: string, event: ThreadEvent, wake: boolean) => Effect.gen(function* () {
+  const view = yield* threadView(row, robotId)
+  yield* remote((env) => env.ROBOT.getByName(robotId).threadChanged(view, event, wake))
+})
+
+const bothChiefs = (row: ThreadRow) => [row.initiator.robotId, row.invitee.robotId]
+
+/** The alarm stands for the first Thread to lapse. */
+const rearmThreads = Effect.gen(function* () {
+  const { threads, alarmBy } = yield* HomePlatform
+  const at = threads.nextLapseAt()
+  if (at !== null) yield* alarmBy(at)
+})
+
+/** The other chiefs of the Home a chief may invite: active Mr. Robots of other active Members (ch-c2xa). */
+const threadChiefs = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const rows = yield* sql.all<{ id: string; owner_name: string; fleet_state: string; identity: string }>(
+    "SELECT robot.id AS id, member.name AS owner_name, robot.fleet_state AS fleet_state, robot.identity AS identity FROM robot JOIN member ON member.id = robot.owner_id WHERE robot.kind = 'mr-robot' AND robot.status = 'active' AND member.status = 'active' AND robot.owner_id <> ? ORDER BY member.created_at",
+    memberId,
+  )
+  return rows.map((row): Chief => ({ id: row.id, ownerName: row.owner_name, name: (JSON.parse(row.identity) as Identity).name, availability: row.fleet_state }))
+})
+
+/** A chief invites another chief to a Thread; both owners get an Ask with the topic and the scope to edit (ch-l4jg, ch-vrl7, ch-hikl). */
+const threadOpen = (robotId: string, topic: string, chiefId: string, scope: string) => Effect.gen(function* () {
+  const { threads } = yield* HomePlatform
+  const me = yield* entry(robotId)
+  if (me === undefined || me.kind !== 'mr-robot') return yield* invalid('only Mr. Robot opens a Thread')
+  const other = yield* entry(chiefId)
+  const notAChief = invalid(`${chiefId} is not another chief of this Home you can invite; use thread_chiefs`)
+  if (other === undefined || other.kind !== 'mr-robot') return yield* notAChief
+  if (other.ownerId === me.ownerId) return yield* invalid('a Thread is between the chiefs of two different Members')
+  if (!(yield* threadChiefs(me.ownerId)).some((chief) => chief.id === chiefId)) return yield* notAChief
+  const row = threads.insert(invited(`th-${crypto.randomUUID()}`, topic, { memberId: me.ownerId, robotId, scope }, { memberId: other.ownerId, robotId: chiefId }, Date.now()))
+  const out = yield* threadView(row, robotId)
+  const into = yield* threadView(row, chiefId)
+  yield* remote((env) => Promise.all([env.ROBOT.getByName(robotId).threadInvitation(out, 'invitation-out'), env.ROBOT.getByName(chiefId).threadInvitation(into, 'invitation-in')]))
+  yield* rearmThreads
+  return { threadId: row.id }
+})
+
+/** The owner of a chief answered the invitation with the scope they approved (ch-fri7, ch-0cn1). */
+const threadAnswer = (threadId: string, robotId: string, accepted: boolean, scope: string) => Effect.gen(function* () {
+  const { row, outcome } = yield* stepThread(threadId, (current) => answered(current, robotId, accepted, scope, Date.now()))
+  // On a decline the other chief learns that it was declined and nothing else.
+  if (outcome !== 'waiting') yield* Effect.forEach(bothChiefs(row), (id) => tellChief(row, id, outcome, outcome === 'opened' || id !== robotId), { discard: true })
+  yield* rearmThreads
+  return outcome
+})
+
+/** A chief is about to send a message: only an open Thread, accepted by both owners, takes one; the count and the idle clock move. */
+const threadMessage = (threadId: string, robotId: string) => Effect.gen(function* () {
+  const { row } = yield* stepThread(threadId, (current) => messaged(current, robotId, Date.now()))
+  yield* rearmThreads
+  return { messageCount: row.messageCount }
+})
+
+/** A chief closes the Thread with a summary both chiefs receive (ch-rlnd). */
+const threadClose = (threadId: string, robotId: string, summary: string) => Effect.gen(function* () {
+  const { row } = yield* stepThread(threadId, (current) => closed(current, robotId, summary, Date.now()))
+  yield* Effect.forEach(bothChiefs(row), (id) => tellChief(row, id, 'closed', id !== robotId), { discard: true })
+})
+
+const threadFor = (threadId: string, robotId: string) => Effect.gen(function* () {
+  const { threads } = yield* HomePlatform
+  const row = threads.get(threadId)
+  if (row === undefined || !bothChiefs(row).includes(robotId)) return undefined
+  return yield* threadView(row, robotId)
+})
+
+/** A chief that cannot be told is noted in the log; the Thread is over either way. */
+const tellQuietly = (row: ThreadRow, robotId: string, event: ThreadEvent) =>
+  tellChief(row, robotId, event, false).pipe(Effect.catchDefect((error) => Effect.sync(() => console.warn('chief not told about its Thread', error))))
+
+/** Open Threads without a message for 7 days close, and invitations unanswered for 7 days expire, with a note in both Conversations (ch-gckb). */
+const lapseThreads = Effect.gen(function* () {
+  const { threads } = yield* HomePlatform
+  for (const id of threads.lapsing(Date.now())) {
+    const step = threads.step(id, (row) => lapsed(row, Date.now()))
+    if (!step.ok) continue
+    const event = step.row.state === 'closed' && step.row.ending.cause === 'expired' ? 'expired' : 'idle'
+    yield* Effect.forEach(bothChiefs(step.row), (robotId) => tellQuietly(step.row, robotId, event), { discard: true })
+  }
+})
+
+/** A chief that is deleted or whose owner left ends its Threads; the other chief gets a note. */
+const endThreadsOf = (robotId: string) => Effect.gen(function* () {
+  const { threads } = yield* HomePlatform
+  for (const id of threads.activeOf(robotId)) {
+    const step = threads.step(id, (row) => abandoned(row, robotId, Date.now()))
+    if (!step.ok) continue
+    yield* Effect.forEach(bothChiefs(step.row).filter((id) => id !== robotId), (other) => tellQuietly(step.row, other, 'gone'), { discard: true })
+  }
+})
+
+/** Every Thread for the admin view (ch-5ngu): topic, chiefs, state and counts; never a scope or a message. */
+const adminThreads = Effect.gen(function* () {
+  const { threads } = yield* HomePlatform
+  return yield* Effect.forEach(threads.all(), (row) => Effect.gen(function* () {
+    const participants = yield* Effect.forEach([row.initiator, row.invitee], (side) => Effect.map(chiefOf(side), (chief) => ({ ownerName: chief.ownerName, chiefName: chief.label, robotId: side.robotId })))
+    return {
+      id: row.id,
+      topic: row.topic,
+      state: row.state,
+      participants,
+      messageCount: row.messageCount,
+      createdAt: row.createdAt,
+      lastActivityAt: row.lastActivityAt,
+      closedAt: row.state === 'declined' || row.state === 'closed' ? row.closedAt : null,
+    } satisfies AdminThread
+  }))
+})
+
 /** Failures the caller should see stay typed; anything else (vault, network) is a defect, i.e. a 500. */
 const orDie = <A, E, X>(effect: Effect.Effect<A, E, X>) => effect.pipe(Effect.catch((error: unknown) => (error !== null && typeof error === 'object' && '_tag' in error && ['NotFound', 'Invalid', 'Conflict'].includes((error as { _tag: string })._tag) ? Effect.fail(error as never) : Effect.die(error)))) as Effect.Effect<A, never, X>
 
@@ -969,7 +1149,12 @@ export class Home extends DurableObject<Env> {
         if (objects.objects.length > 0) await env.FILES.delete(objects.objects.map((object) => object.key))
       })))
     }
-    this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map() })))
+    const threads = new ThreadRegistry(sql, (work) => ctx.storage.transactionSync(work))
+    const alarmBy = (at: number) => Effect.promise(async () => {
+      const current = await ctx.storage.getAlarm()
+      if (current === null || current > at) await ctx.storage.setAlarm(Math.max(at, Date.now() + 1))
+    })
+    this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
   }
 
   private run<A, E>(program: Effect.Effect<A, E, R>): Promise<A> {
@@ -1219,8 +1404,20 @@ export class Home extends DurableObject<Env> {
 
   /** The Home's alarm keeps the Discord gateway alive: heartbeats, and reconnects after a drop or a restart. */
   override async alarm(): Promise<void> {
+    await this.run(lapseThreads).catch((error: unknown) => console.warn('idle Threads not closed', error))
     await this.ensureDiscordGateway()
+    await this.run(rearmThreads)
   }
+
+  // ---------------------------------------------------------------- Threads between chiefs (v1.9)
+
+  threadChiefs(memberId: string): Promise<Chief[]> { return this.run(threadChiefs(memberId)) }
+  threadOpen(robotId: string, topic: string, chiefId: string, scope: string): Promise<{ threadId: string }> { return this.run(threadOpen(robotId, topic, chiefId, scope)) }
+  threadAnswer(threadId: string, robotId: string, accepted: boolean, scope: string): Promise<AnswerOutcome> { return this.run(threadAnswer(threadId, robotId, accepted, scope)) }
+  threadMessage(threadId: string, robotId: string): Promise<{ messageCount: number }> { return this.run(threadMessage(threadId, robotId)) }
+  threadClose(threadId: string, robotId: string, summary: string): Promise<void> { return this.run(threadClose(threadId, robotId, summary)) }
+  /** The Thread as this chief sees it, from the registry; undefined when it is not one of its Threads. */
+  threadView(threadId: string, robotId: string): Promise<ThreadView | undefined> { return this.run(threadFor(threadId, robotId)) }
 
   /** fetch for Discord HTTP; tests substitute recorded responses. */
   protected connectorFetch(): typeof globalThis.fetch {

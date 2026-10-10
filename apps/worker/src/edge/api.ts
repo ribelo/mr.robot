@@ -466,7 +466,7 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/robots/:id/proposals/:proposal', (c, { id, proposal }) => Effect.gen(function* () {
     yield* owner(c, id)
     const answer = yield* decodeBody(c.request, ProposalAnswer)
-    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved))
+    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved, answer.scope))
     if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : notFound('no such proposal'))
     return result.proposal
   }))

@@ -43,6 +43,8 @@ import type {
   UsageView,
   SettingsPatch,
   Sharing,
+  ThreadEvent,
+  ThreadView,
   Trajectory,
   TrajectoryEvent,
 } from '@mr-robot/protocol'
@@ -58,7 +60,7 @@ import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../age
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
-import { wakeupMessage } from '../agent/sources.ts'
+import { wakeupMessage, type ThreadWake } from '../agent/sources.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
@@ -109,6 +111,7 @@ import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import * as Views from './views.ts'
+import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
 import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type ReceiveResult, type RobotMessage, type WakeInput } from './programs.ts'
@@ -416,6 +419,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         ...optionalString(wakeup.payload, 'replyTo'),
         ...optionalString(wakeup.payload, 'replyHandle'),
         ...optionalString(wakeup.payload, 'summary'),
+        ...(wakeup.payload['thread'] !== undefined && wakeup.kind === 'robot' ? { thread: wakeup.payload['thread'] as ThreadWake } : {}),
         ...optionalString(wakeup.payload, 'clientId'),
       }))
     } else {
@@ -1282,8 +1286,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
    * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
    */
-  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[]): Promise<AnswerResult> {
-    return this.program(Programs.answer(proposalId, revision, approve, approved))
+  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string): Promise<AnswerResult> {
+    return this.program(Programs.answer(proposalId, revision, approve, approved, scope))
   }
 
 
@@ -1687,6 +1691,38 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const proposal = this.propose('grants', purpose, { grants })
     await this.changed()
     return proposal
+  }
+
+  // ---------------------------------------------------------------- Threads between chiefs (v1.9)
+
+  threadChiefs(): Promise<Array<{ id: string; ownerName: string; name: string; availability: string }>> {
+    return this.program(Threads.chiefs)
+  }
+
+  threadOpen(chiefId: string, topic: string, scope: string): Promise<{ threadId: string; status: string }> {
+    return this.program(Threads.open(chiefId, topic, scope))
+  }
+
+  threadSend(threadId: string, text: string, idempotencyKey: string): Promise<unknown> {
+    return this.program(Threads.send(threadId, text, idempotencyKey))
+  }
+
+  threadClose(threadId: string, summary: string): Promise<unknown> {
+    return this.program(Threads.close(threadId, summary))
+  }
+
+  threadList(): Promise<unknown> {
+    return this.program(Threads.list)
+  }
+
+  /** The Home tells this chief about an invitation to answer (ch-vrl7, ch-hikl). */
+  threadInvitation(view: ThreadView, phase: 'invitation-out' | 'invitation-in'): Promise<void> {
+    return this.program(Threads.invitation(view, phase))
+  }
+
+  /** The Home tells this chief that a Thread opened, was declined, closed or went idle. */
+  threadChanged(view: ThreadView, event: ThreadEvent, wake: boolean): Promise<void> {
+    return this.program(Threads.changed(view, event, wake))
   }
 
   configureRobot(id: string, change: { name?: string; title?: string; description?: string; avatarColor?: string }): Promise<{ id: string; identity: unknown }> {

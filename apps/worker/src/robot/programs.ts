@@ -14,9 +14,10 @@ import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { cronOf, describeSchedule } from './schedule.ts'
 import { displaySchedule, resumed, type AlarmSchedule } from '../agent/schedule.ts'
 import type { ScheduleCreateRequest, ScheduleTimingChange } from '@deepseek-ai/dsh-schedule'
-import type { NoticeCard, ProposalRow, RobotConfig, RobotStore, RoutineRow, RoutineRun, WakeupKind } from './store.ts'
+import type { RoutineCard, ProposalRow, RobotConfig, RobotStore, RoutineRow, RoutineRun, WakeupKind } from './store.ts'
 import { dueDelivery } from '../agent/schedule.ts'
 import { MR_ROBOT_TOOLS } from '../agent/catalog.ts'
+import { THREAD_PAUSE_AT } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
@@ -24,6 +25,7 @@ import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 
 export const MAX_CHAIN_HOPS = 8
+export { THREAD_PAUSE_AT }
 export const MAX_QUEUED_WAKEUPS = 32
 
 export interface WakeInput {
@@ -37,16 +39,20 @@ export interface WakeInput {
 }
 
 /** A message between Robots, as the platform carries it (robot-mv15). */
-export interface RobotMessage {
+interface MessageCommon {
   readonly id: string
-  readonly kind: 'request' | 'reply'
   readonly from: { readonly robotId: string; readonly ownerId: string; readonly name: string; readonly avatarColor: string }
   readonly text: string
   readonly requestId: string
   readonly chain: { readonly id: string; readonly hops: number }
 }
 
-export type ReceiveResult = { readonly accepted: true } | { readonly accepted: false; readonly reason: 'unavailable' | 'queue-full' | 'chain-limit' }
+export type RobotMessage =
+  | MessageCommon & { readonly kind: 'request' | 'reply' }
+  /** A message in a Thread between two chiefs (v1.9): the chain limit does not apply to it, the pause at 20 does. */
+  | MessageCommon & { readonly kind: 'thread'; readonly threadId: string }
+
+export type ReceiveResult = { readonly accepted: true } | { readonly accepted: false; readonly reason: 'unavailable' | 'queue-full' | 'chain-limit' | 'thread-closed' }
 
 /** The Robot's SQLite state. */
 export class RobotState extends Context.Service<RobotState, RobotStore>()('mr-robot/RobotState') {}
@@ -172,7 +178,7 @@ const view = (routine: RoutineRow) => Effect.gen(function* () {
 })
 
 /** A Routine another Robot changed shows in the Conversation as a card naming who did it (cd-n9pi). */
-function routineCard(store: RobotStore, sessionId: string, card: NoticeCard): void {
+function routineCard(store: RobotStore, sessionId: string, card: RoutineCard): void {
   const verb = { created: 'created', updated: 'updated', deleted: 'deleted', paused: 'paused', resumed: 'resumed' }[card.action]
   store.addNotice(sessionId, storedLength(store.sql, sessionId), `Routine ${verb} by ${card.by}: ${card.name}`, Date.now(), card)
 }
@@ -294,7 +300,7 @@ export const directory = Effect.gen(function* () {
     .map((robot): DirectoryEntry => ({ id: robot.id, name: robot.identity.name, description: robot.identity.description, availability: robot.fleetState }))
 })
 
-const enqueueOutbox = (recipient: string, message: RobotMessage) => Effect.gen(function* () {
+export const enqueueOutbox = (recipient: string, message: RobotMessage) => Effect.gen(function* () {
   const store = yield* RobotState
   store.sql.exec(
     "INSERT INTO outbox (id, recipient, payload, status, attempts, next_attempt, created_at) VALUES (?, ?, ?, 'pending', 0, ?, ?) ON CONFLICT (id) DO NOTHING",
@@ -302,8 +308,8 @@ const enqueueOutbox = (recipient: string, message: RobotMessage) => Effect.gen(f
   )
 })
 
-function undeliverable(reason: 'unavailable' | 'queue-full' | 'chain-limit'): string {
-  return reason === 'unavailable' ? 'that Robot is not active' : reason === 'queue-full' ? 'that Robot has too much queued work; try later' : 'the chain of Robot messages is too long'
+function undeliverable(reason: 'unavailable' | 'queue-full' | 'chain-limit' | 'thread-closed'): string {
+  return reason === 'unavailable' ? 'that Robot is not active' : reason === 'queue-full' ? 'that Robot has too much queued work; try later' : reason === 'thread-closed' ? 'that Thread is closed for the other chief' : 'the chain of Robot messages is too long'
 }
 
 /** Deliver pending outbox rows; a lost RPC is retried on the alarm, the recipient dedupes. */
@@ -334,7 +340,7 @@ export const deliverOutbox: Effect.Effect<void, never, R> = Effect.gen(function*
   yield* platform.rearm()
 })
 
-async function digest(text: string): Promise<string> {
+export async function digest(text: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
   return [...bytes.slice(0, 12)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
@@ -377,6 +383,30 @@ export const receive = (message: RobotMessage) => Effect.gen(function* () {
   const current = store.config()
   if (current === undefined || current.status === 'deleted' || current.status === 'setup') return { accepted: false, reason: 'unavailable' } as ReceiveResult
   if (store.sql.exec('SELECT 1 FROM intake WHERE key = ?', message.id).toArray().length > 0) return { accepted: true } as ReceiveResult
+  if (message.kind === 'thread') {
+    // A Thread message (v1.9): the chain limit does not apply, the pause at 20 does.
+    const known = store.thread(message.threadId)
+    if (known === undefined || known.view.other.robotId !== message.from.robotId) return { accepted: false, reason: 'thread-closed' } as ReceiveResult
+    // The "opened" note may come after the first message: a copy still invited asks the Home, which opens a Thread only when both owners accepted.
+    const copy = known.view.state === 'invited'
+      ? yield* Effect.promise(() => platform.env.HOME.getByName(HOME_ID).threadView(message.threadId, current.id)).pipe(Effect.map((view) => (view === undefined ? known : store.saveThread({ ...view, messageCount: known.view.messageCount }, Date.now()))))
+      : known
+    if (copy.view.state !== 'open') return { accepted: false, reason: 'thread-closed' } as ReceiveResult
+    if (store.pendingWakeups() >= MAX_QUEUED_WAKEUPS) return { accepted: false, reason: 'queue-full' } as ReceiveResult
+    store.transaction(() => {
+      store.sql.exec('INSERT INTO intake (key, sender, received_at) VALUES (?, ?, ?)', message.id, message.from.robotId, Date.now())
+      const updated = store.threadMessage(copy.view.id, Date.now())!
+      store.enqueue(
+        'robot',
+        { kind: 'robot', robotId: message.from.robotId, name: message.from.name, avatarColor: message.from.avatarColor },
+        message.text,
+        { threadId: copy.view.id, thread: { id: copy.view.id, topic: copy.view.topic, scope: copy.view.scope, count: updated.view.messageCount, windowCount: updated.windowCount } },
+        Date.now(),
+      )
+    })
+    yield* platform.drain()
+    return { accepted: true } as ReceiveResult
+  }
   if (message.kind === 'request' && message.chain.hops > MAX_CHAIN_HOPS) return { accepted: false, reason: 'chain-limit' } as ReceiveResult
   if (store.pendingWakeups() >= MAX_QUEUED_WAKEUPS) return { accepted: false, reason: 'queue-full' } as ReceiveResult
   const handle = message.kind === 'request' ? `rh-${crypto.randomUUID()}` : undefined
@@ -535,12 +565,15 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
 // ------------------------------------------------------------------ proposals and the owner's answers (robot-cobv, robot-vy9z)
 
 export function proposalView(row: ProposalRow): ProposalView {
-  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill, ...(row.review === undefined ? {} : { review: row.review }) }
+  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill, ...(row.review === undefined ? {} : { review: row.review }), ...(row.thread === undefined ? {} : { thread: row.thread }) }
 }
 
 function approvedNote(proposal: ProposalRow): string {
   switch (proposal.kind) {
     case 'setup': return 'Your owner approved your setup. You are active now with exactly the Grants you proposed. Say hello in one line and tell them what happens next.'
+    case 'thread': return proposal.thread?.phase === 'continue'
+      ? `Your owner approved going on in the Thread about "${proposal.thread.topic}". You may send up to ${THREAD_PAUSE_AT} more messages.`
+      : `Your owner accepted the Thread about "${proposal.thread?.topic ?? ''}" with the scope they gave you. The Thread opens when both owners have accepted; you will be told.`
     case 'grants': return `Your owner approved your Grant proposal (${proposal.purpose}). The new Grants are available from now on.`
     default: return `Your owner approved your ${proposal.kind} proposal (${proposal.purpose}).`
   }
@@ -588,6 +621,10 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
       })
       return
     }
+    case 'thread':
+    case 'takeover':
+    case 'review':
+      return
     case 'member-file': {
       if (proposal.file === null) return
       const file = proposal.file
@@ -606,7 +643,25 @@ export type AnswerResult =
  * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
  * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
  */
-export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[]) => Effect.gen(function* () {
+/**
+ * A Thread Ask was answered (v1.9): an invitation goes to the Home, which opens the Thread when both owners accepted
+ * and ends it on a decline; approving a "continue" Ask starts another window of messages. A Thread that ended meanwhile is only noted.
+ */
+const threadAnswered = (proposal: ProposalRow, approved: boolean) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const ask = proposal.thread
+  if (ask === undefined) return
+  if (ask.phase === 'continue') {
+    if (approved) store.resetThreadWindow(ask.id)
+    return
+  }
+  const current = yield* config
+  const told = yield* Effect.tryPromise({ try: () => platform.env.HOME.getByName(HOME_ID).threadAnswer(ask.id, current.id, approved, ask.scope), catch: (error) => error instanceof Error ? error.message : String(error) }).pipe(Effect.result)
+  if (told._tag === 'Failure') store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), `Thread "${ask.topic}": ${String(told.failure)}`, Date.now())
+})
+
+export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[], scope?: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const pending = store.proposal(proposalId)
@@ -617,9 +672,10 @@ export const answer = (proposalId: string, revision: number, approve: boolean, a
   const approvedSet = new Set(approve ? (approvedIds ?? ids) : [])
   const decision = review === undefined ? undefined : { approved: ids.filter((id) => approvedSet.has(id)), rejected: ids.filter((id) => !approvedSet.has(id)) }
   const approved = decision === undefined ? approve : decision.approved.length > 0
-  const answered = store.answerProposal(proposalId, revision, approved, Date.now(), decision)
+  const answered = store.answerProposal(proposalId, revision, approved, Date.now(), decision, pending.kind === 'thread' ? scope : undefined)
   if (answered === undefined) return { ok: false, reason: 'stale' } as AnswerResult
   if (approved) yield* apply(answered)
+  if (answered.kind === 'thread') yield* threadAnswered(answered, approved)
   yield* platform.changed()
   yield* wake({
     kind: 'platform',

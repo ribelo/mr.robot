@@ -3,7 +3,7 @@
  * log the Trajectory shows (robot-frf5). Nothing here is stored separately except notices.
  */
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender } from '@mr-robot/protocol'
+import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender, ThreadView } from '@mr-robot/protocol'
 import type { NoticeRow } from './store.ts'
 
 interface ContentBlock { readonly type: string; readonly text?: string }
@@ -28,6 +28,8 @@ export interface ProjectionInput {
   readonly events: readonly SessionEvent[]
   readonly notices: readonly NoticeRow[]
   readonly proposal: (id: string) => ProposalView | undefined
+  /** This chief's copy of a Thread (v1.9), for its card and for labelling the messages it sent. */
+  readonly thread?: (id: string) => ThreadView | undefined
 }
 
 export function projectChat(input: ProjectionInput): ChatItem[] {
@@ -40,10 +42,21 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
   const flushNotices = (seq: number) => {
     while (notices.length > 0 && notices[0]!.afterSeq < seq) {
       const notice = notices.shift()!
-      items.push(notice.card === undefined
+      const thread = notice.card?.kind === 'thread' ? input.thread?.(notice.card.threadId) : undefined
+      items.push(notice.card === undefined || (notice.card.kind === 'thread' && thread === undefined)
         ? { kind: 'notice', id: notice.id, seq: notice.afterSeq, at: notice.at, text: notice.text }
-        : { kind: 'routine', id: notice.id, seq: notice.afterSeq, at: notice.at, action: notice.card.action, name: notice.card.name, by: notice.card.by })
+        : notice.card.kind === 'thread'
+          ? { kind: 'thread', id: notice.id, seq: notice.afterSeq, at: notice.at, event: notice.card.event, thread: thread! }
+          : { kind: 'routine', id: notice.id, seq: notice.afterSeq, at: notice.at, action: notice.card.action, name: notice.card.name, by: notice.card.by })
     }
+  }
+
+  // A message this chief sent in a Thread is shown labelled with the chief's own name (ch-iy16).
+  const sentMessage = (args: Record<string, unknown>, id: string, event: SessionEvent, result: Record<string, unknown> | undefined) => {
+    if (result !== undefined && result['sent'] !== true) return
+    const view = input.thread?.(String(args['thread_id'] ?? result?.['threadId'] ?? ''))
+    if (view === undefined || typeof args['text'] !== 'string') return
+    items.push({ kind: 'message', id: 'thread-' + id, seq: event.seq, at: event.time, sender: { kind: 'robot', robotId: view.self.robotId, name: view.self.label, avatarColor: view.self.avatarColor }, text: args['text'], attachments: [], reaction: null, thread: { id: view.id, topic: view.topic } })
   }
 
   for (const event of input.events) {
@@ -83,6 +96,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           attachments: (message.source?.['attachments'] as Attachment[] | undefined) ?? [],
           reaction: null,
           ...(typeof message.source?.['clientId'] === 'string' ? { clientId: message.source['clientId'] } : {}),
+          ...(typeof message.source?.['threadId'] === 'string' ? { thread: { id: message.source['threadId'], topic: String(message.source['topic'] ?? '') } } : {}),
         })
         if (sender.kind === 'member') lastMemberMessage = items.length - 1
         break
@@ -153,6 +167,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           else items.push({ kind: 'activity', id: 'activity-' + message.id, seq: event.seq, at: event.time, tools: used })
         }
         inners.forEach((inner, index) => {
+          if (inner.name === 'thread_send') sentMessage(inner.args, message.id + '-' + String(index), event, undefined)
           const innerAction = ROUTINE_TOOLS[inner.name]
           if (innerAction !== undefined) {
             items.push({ kind: 'routine', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, name: String(inner.args['title'] ?? inner.args['name'] ?? 'Routine') })
@@ -162,6 +177,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           }
         })
         const result = parseResult(message)
+        if (call.name === 'thread_send') sentMessage(call.args, message.id, event, result)
         const action = ROUTINE_TOOLS[call.name]
         if (action !== undefined) {
           const name = String(result['title'] ?? result['name'] ?? call.args['title'] ?? call.args['name'] ?? 'Routine')

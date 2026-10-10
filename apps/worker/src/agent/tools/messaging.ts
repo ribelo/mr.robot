@@ -61,6 +61,11 @@ export interface RobotsHost {
   createRobot(brief: string): Promise<{ id: string; status: string }>
   proposeGrantsFor(robotId: string, purpose: string, grants: { tools: string[]; skills: string[]; recipients: string[]; secrets: string[] }): Promise<{ proposalId: string; status: string }>
   configureRobot(id: string, change: { name?: string; title?: string; description?: string; avatarColor?: string }): Promise<{ id: string; identity: unknown }>
+  threadChiefs(): Promise<Array<{ id: string; ownerName: string; name: string; availability: string }>>
+  threadOpen(chiefId: string, topic: string, scope: string): Promise<{ threadId: string; status: string }>
+  threadSend(threadId: string, text: string, idempotencyKey: string): Promise<unknown>
+  threadClose(threadId: string, summary: string): Promise<unknown>
+  threadList(): Promise<unknown>
 }
 
 /** Mr. Robot's coordination tools (robot-hk2s): new Robots still get their Grants from the owner. */
@@ -90,6 +95,62 @@ export function robotsTools(host: RobotsHost): ToolDefinition[] {
       description: "Change the identity of one of your owner's Robots: name, title, description and avatar colour (#rrggbb). Its Conversation shows a line naming you. Grants are never changed this way.",
       parameters: { properties: { robot_id: { type: 'string', description: 'Robot id from robot_directory' }, name: { type: 'string', description: 'New name' }, title: { type: 'string', description: 'New title, a few words on its role' }, description: { type: 'string', description: 'New description of what the Robot does' }, avatarColor: { type: 'string', description: 'New avatar colour as #rrggbb' } }, required: ['robot_id'] },
       execute: async ({ robot_id, ...change }) => host.configureRobot(robot_id, change),
+    }),
+    tool<Record<string, never>>({
+      name: 'thread_chiefs',
+      description: "List the other chiefs (Mr. Robots) of your Home you may invite to a Thread: whose Mr. Robot it is, its name and whether it is available. Robots other than Mr. Robot never talk across Members.",
+      parameters: { properties: {} },
+      concurrencySafe: true,
+      execute: async () => {
+        const chiefs = await host.threadChiefs()
+        return chiefs.length === 0 ? { chiefs: [], hint: 'Nobody else in your Home has an active Mr. Robot.' } : { chiefs }
+      },
+    }),
+    tool<{ chief_id: string; topic: string; scope: string }>({
+      name: 'thread_open',
+      description: "Invite another chief to a Thread: a conversation on one topic between two Mr. Robots. Both owners get an Ask with the topic and an editable scope and the Thread opens only when both accept; nothing leaves before that. Give the scope you propose for your own owner: what you may use and disclose in this Thread. Nothing a Thread agrees on binds anyone: put the outcome to your owner as an Ask.",
+      parameters: {
+        properties: {
+          chief_id: { type: 'string', description: 'Robot id of the other chief, from thread_chiefs' },
+          topic: { type: 'string', description: 'What the Thread is about, in one line' },
+          scope: { type: 'string', description: 'The scope you propose for your owner: what you may use and disclose in this Thread (for example "my calendar for next week, my dietary preferences")' },
+        },
+        required: ['chief_id', 'topic', 'scope'],
+      },
+      emptyAllowed: ['scope'],
+      execute: async ({ chief_id, topic, scope }) => host.threadOpen(chief_id, topic, scope),
+    }),
+    tool<{ thread_id: string; text: string; idempotency_key: string }>({
+      name: 'thread_send',
+      description: "Send a message to the other chief in an open Thread. Its reply arrives later as a labelled message in your Conversation. Use and disclose only your owner's scope for that Thread. After 20 messages you must report to your owner and they must agree to go on. Use a fresh idempotency_key per distinct message; resending the same key does not send twice.",
+      parameters: {
+        properties: {
+          thread_id: { type: 'string', description: 'Thread id from thread_list or the Thread opened message' },
+          text: { type: 'string', description: 'The message to the other chief' },
+          idempotency_key: { type: 'string', description: 'A fresh key per distinct message; resending a key does not send twice' },
+        },
+        required: ['thread_id', 'text', 'idempotency_key'],
+      },
+      execute: async ({ thread_id, text, idempotency_key }) => host.threadSend(thread_id, text, idempotency_key),
+    }),
+    tool<{ thread_id: string; summary: string }>({
+      name: 'thread_close',
+      description: 'Close an open Thread with a summary of what was said and settled. Both chiefs receive the summary. Put any outcome to your owner as an Ask first or after; closing agrees nothing.',
+      parameters: {
+        properties: {
+          thread_id: { type: 'string', description: 'Thread id from thread_list' },
+          summary: { type: 'string', description: 'What the Thread covered and where it ended, in a few sentences' },
+        },
+        required: ['thread_id', 'summary'],
+      },
+      execute: async ({ thread_id, summary }) => host.threadClose(thread_id, summary),
+    }),
+    tool<Record<string, never>>({
+      name: 'thread_list',
+      description: 'List your Threads, open and closed: id, topic, the other chief, state, the scope your owner gave you for it, the message count and how many messages remain before you must report to your owner.',
+      parameters: { properties: {} },
+      concurrencySafe: true,
+      execute: async () => host.threadList(),
     }),
   ]
 }

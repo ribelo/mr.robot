@@ -339,7 +339,7 @@ export type RoutineView = typeof RoutineView.Type
 
 // ---------------------------------------------------------------- Grant proposals and questions
 
-export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover', 'review'])
+export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover', 'review', 'thread'])
 export type ProposalKind = typeof ProposalKind.Type
 
 /** A review Ask (cd-dt2x): a titled list of items the owner approves one by one or all at once. */
@@ -360,6 +360,20 @@ export const ReviewView = Schema.Struct({
 })
 export type ReviewView = typeof ReviewView.Type
 
+/**
+ * A Thread Ask (ch-vrl7, ch-hikl, ch-408z): an invitation sent by this chief, an invitation received,
+ * or the question whether to go on after 20 messages. `scope` is the proposed text, or the answered one.
+ */
+export const ThreadAsk = Schema.Struct({
+  id: Schema.String,
+  phase: Schema.Literals(['invitation-out', 'invitation-in', 'continue']),
+  topic: Schema.String,
+  /** The other chief, as people name it ("Ben's Mr. Robot"). */
+  other: Schema.String,
+  scope: Schema.String,
+})
+export type ThreadAsk = typeof ThreadAsk.Type
+
 export const ProposalView = Schema.Struct({
   id: Schema.String,
   kind: ProposalKind,
@@ -374,6 +388,8 @@ export const ProposalView = Schema.Struct({
   skill: Schema.NullOr(Schema.Struct({ name: Schema.String, description: Schema.String })),
   /** Review Ask: the items and, once answered, the decision. */
   review: Schema.optional(ReviewView),
+  /** Thread Ask: the Thread, its topic, and the scope the owner edits before approving. */
+  thread: Schema.optional(ThreadAsk),
 })
 export type ProposalView = typeof ProposalView.Type
 
@@ -382,7 +398,57 @@ export const ProposalAnswer = Schema.Struct({
   approve: Schema.Boolean,
   /** Review Ask only: the ids the owner approved; the rest are rejected. Left out, approve means every item. */
   approved: Schema.optional(Schema.Array(Schema.String)),
+  /** Thread invitation only: the scope the owner approved ("in this Thread you may use: …"), stored with the answer. */
+  scope: Schema.optional(Schema.String),
 })
+
+// ---------------------------------------------------------------- Threads (v1.9)
+
+export const ThreadState = Schema.Literals(['invited', 'open', 'closed', 'declined'])
+export type ThreadState = typeof ThreadState.Type
+
+/**
+ * What happened to a Thread, as its card in the Conversation says: it opened, an owner declined it, a chief closed it,
+ * it closed after 7 days without a message, the invitation expired after 7 days unanswered, or the other chief is gone.
+ */
+export const ThreadEvent = Schema.Literals(['opened', 'declined', 'closed', 'idle', 'expired', 'gone'])
+export type ThreadEvent = typeof ThreadEvent.Type
+
+/** One Thread as a chief and its owner see it: the chief's own scope, the other chief, the state and the count. */
+export const ThreadView = Schema.Struct({
+  id: Schema.String,
+  topic: Schema.String,
+  state: ThreadState,
+  /** This chief. */
+  self: Schema.Struct({ robotId: Schema.String, label: Schema.String, avatarColor: Schema.String }),
+  /** The other chief. */
+  other: Schema.Struct({ robotId: Schema.String, label: Schema.String, ownerName: Schema.String }),
+  /** What this chief may use and disclose in the Thread: proposed until the owner accepts, then as accepted. */
+  scope: Schema.String,
+  accepted: Schema.Literals(['pending', 'accepted', 'declined']),
+  messageCount: Schema.Number,
+  createdAt: Schema.Number,
+  openedAt: Schema.NullOr(Schema.Number),
+  closedAt: Schema.NullOr(Schema.Number),
+  lastActivityAt: Schema.Number,
+  /** How a closed Thread ended. */
+  closedBy: Schema.NullOr(Schema.Literals(['self', 'other', 'idle', 'expired', 'gone', 'declined'])),
+  summary: Schema.NullOr(Schema.String),
+})
+export type ThreadView = typeof ThreadView.Type
+
+/** A Thread in the admin view: who talks about what, and the state. */
+export const AdminThread = Schema.Struct({
+  id: Schema.String,
+  topic: Schema.String,
+  state: ThreadState,
+  participants: Schema.Array(Schema.Struct({ ownerName: Schema.String, chiefName: Schema.String, robotId: Schema.String })),
+  messageCount: Schema.Number,
+  createdAt: Schema.Number,
+  lastActivityAt: Schema.Number,
+  closedAt: Schema.NullOr(Schema.Number),
+})
+export type AdminThread = typeof AdminThread.Type
 
 // ---------------------------------------------------------------- Conversation
 
@@ -425,7 +491,11 @@ export const ChatItem = Schema.Union([
     kind: Schema.Literal('message'), ...itemFields, sender: Sender, text: Schema.String, attachments: Schema.Array(Attachment), reaction: Schema.NullOr(Schema.String),
     /** The client id the Member's app sent it with: the app's pending copy of it is this item (ap-3si6). */
     clientId: Schema.optional(Schema.String),
+    /** A message of a Thread between two chiefs (ch-iy16): which one. */
+    thread: Schema.optional(Schema.Struct({ id: Schema.String, topic: Schema.String })),
   }),
+  /** A Thread card (ch-iy16): what happened to the Thread, with its state now. */
+  Schema.Struct({ kind: Schema.Literal('thread'), ...itemFields, event: ThreadEvent, thread: ThreadView }),
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
   /** A Routine card; `by` names who changed it when it was not the Robot itself (Mr. Robot, cd-n9pi). */
   Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran', 'paused', 'resumed']), name: Schema.String, by: Schema.optional(Schema.String) }),
@@ -576,6 +646,8 @@ export const RobotPanel = Schema.Struct({
   canEdit: Schema.Boolean,
   /** The Robot asked for a takeover of its browser (robot-doqx). */
   takeover: Schema.NullOr(Schema.Struct({ reason: Schema.String, claimedBy: Schema.NullOr(Schema.String) })),
+  /** Mr. Robot's open and closed Threads, newest first (ch-6fcp). */
+  threads: Schema.optional(Schema.Array(ThreadView)),
 })
 export type RobotPanel = typeof RobotPanel.Type
 
@@ -704,6 +776,8 @@ export const AdminView = Schema.Struct({
   exaConfigured: Schema.optional(Schema.Boolean),
   /** Every Host of the Home (hs-w8vi). */
   hosts: Schema.optional(Schema.Array(HostView)),
+  /** Every Thread of the Home (ch-5ngu). */
+  threads: Schema.optional(Schema.Array(AdminThread)),
   proxyConfigured: Schema.optional(Schema.Boolean),
 })
 export type AdminView = typeof AdminView.Type

@@ -1,5 +1,6 @@
 import type { RobotPanel } from '@mr-robot/protocol'
 import { RoutineList } from './RobotSheets.tsx'
+import { ThreadCard } from './ChatView.tsx'
 
 export interface PanelProps {
   readonly panel: RobotPanel
@@ -39,6 +40,12 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
           <div className="screen-caption">{name}’s screen</div>
           <h3 className="panel-section">Routines</h3>
           <RoutineList routines={panel.routines} onOpen={(routine) => onOpenRoutine(routine.id)} />
+          {panel.threads === undefined ? null : (
+            <>
+              <h3 className="panel-section">Threads</h3>
+              {panel.threads.length === 0 ? <div className="muted">No Threads.</div> : <ul className="thread-list">{panel.threads.map((thread) => <li key={thread.id}><ThreadCard thread={thread} /></li>)}</ul>}
+            </>
+          )}
           <div className="panel-links">
             <button type="button" className="link" onClick={onFiles}>Files</button>
             <button type="button" className="link" onClick={onTrajectory}>Trajectory</button>

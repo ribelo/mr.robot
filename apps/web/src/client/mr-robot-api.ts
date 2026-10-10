@@ -70,7 +70,7 @@ const make = Effect.gen(function* () {
     send: (id: string, message: SendMessage) => send('POST', `/api/robots/${enc(id)}/messages`, message),
     retry: (id: string) => request(RetryResult, 'POST', `/api/robots/${enc(id)}/retry`, {}),
     updateSettings: (id: string, patch: SettingsPatch) => request(RobotSettings, 'PATCH', `/api/robots/${enc(id)}/settings`, patch),
-    answer: (id: string, proposal: ProposalView, approve: boolean, approved?: readonly string[]) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}`, { revision: proposal.revision, approve, ...(approved === undefined ? {} : { approved }) }),
+    answer: (id: string, proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}`, { revision: proposal.revision, approve, ...(approved === undefined ? {} : { approved }), ...(scope === undefined ? {} : { scope }) }),
     pause: (id: string) => send('POST', `/api/robots/${enc(id)}/pause`),
     resume: (id: string) => send('POST', `/api/robots/${enc(id)}/resume`),
     remove: (id: string, confirm: string) => send('DELETE', `/api/robots/${enc(id)}`, { confirm }),
