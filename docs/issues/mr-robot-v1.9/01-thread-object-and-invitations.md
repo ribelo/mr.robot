@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Thread registry in the Home; ProposalKind thread with a scope text the owner edits in the AskBar before approving
-- [ ] thread_chiefs and thread_open exist for Mr. Robot only; workerd test with two Members and two chiefs covers open-after-both, decline, and that an ordinary Robot lacks the tools
-- [ ] Component test: invitation Ask shows topic and scope field
+- [x] Thread registry in the Home; ProposalKind thread with a scope text the owner edits in the AskBar before approving
+- [x] thread_chiefs and thread_open exist for Mr. Robot only; workerd test with two Members and two chiefs covers open-after-both, decline, and that an ordinary Robot lacks the tools
+- [x] Component test: invitation Ask shows topic and scope field

@@ -6,8 +6,8 @@
 
 **Blocked by:** 01 Thread object and symmetrical invitations
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Messages both ways in a workerd test; Wake-up carries topic and scope; chain limit not applied inside a Thread
-- [ ] 21st message refused; continue Ask approval resets the counter
-- [ ] Prompt test for the rule; Thread card component test
+- [x] Messages both ways in a workerd test; Wake-up carries topic and scope; chain limit not applied inside a Thread
+- [x] 21st message refused; continue Ask approval resets the counter
+- [x] Prompt test for the rule; Thread card component test

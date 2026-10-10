@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.9 — chief threads: the Mr. Robots of a Home talk to each other"
-status: ready-for-agent
+status: done
 story-prefix: ch
 parent: mr-robot-v1.6.md
 ---

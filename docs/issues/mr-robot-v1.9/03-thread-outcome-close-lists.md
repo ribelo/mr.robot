@@ -6,8 +6,8 @@
 
 **Blocked by:** 02 Thread messages, the 20-message pause and the prompt rule
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] thread_close and thread_list; idle close by alarm in a workerd test
-- [ ] Panel list and admin rows (component and workerd tests)
-- [ ] Docs: GLOSSARY.md gains Thread and Scope entries
+- [x] thread_close and thread_list; idle close by alarm in a workerd test
+- [x] Panel list and admin rows (component and workerd tests)
+- [x] Docs: GLOSSARY.md gains Thread and Scope entries
