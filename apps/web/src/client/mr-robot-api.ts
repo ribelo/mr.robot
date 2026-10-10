@@ -27,13 +27,19 @@ const enc = encodeURIComponent
 
 export type LoginChange = { readonly username?: string; readonly password?: string; readonly websites?: readonly string[]; readonly notes?: string; readonly allowRead?: boolean; readonly shared: boolean }
 export type ListPrefChange = { readonly pinned?: boolean; readonly hidden?: boolean; readonly unread?: boolean }
-export type MePatch = Partial<Pick<Me, 'name' | 'timeZone' | 'quietHours' | 'workDetails' | 'theme'>>
+export type MePatch = Partial<Pick<Me, 'name' | 'timeZone' | 'quietHours' | 'workDetails' | 'theme'>> & { readonly useDetectedTimeZone?: true }
+
+/** The zone this app runs in: the browser's in the PWA, the system's in the desktop app (its renderer is a browser). */
+const appTimeZone = (): string | undefined => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined } catch { return undefined }
+}
 
 const make = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
   /** One request: JSON in, the Schema-decoded body out; a non-2xx status is ApiRejected with the server's message. */
-  const request = <S extends Schema.Top>(schema: S, method: Method, path: string, body?: unknown, raw?: { readonly bytes: Uint8Array; readonly contentType: string }): Call<S['Type']> => Effect.gen(function* () {
+  const request = <S extends Schema.Top>(schema: S, method: Method, path: string, body?: unknown, raw?: { readonly bytes: Uint8Array; readonly contentType: string }, headers?: Record<string, string>): Call<S['Type']> => Effect.gen(function* () {
     let req = HttpClientRequest.make(method)(path)
+    if (headers !== undefined) req = HttpClientRequest.setHeaders(req, headers)
     if (raw !== undefined) req = HttpClientRequest.bodyUint8Array(req, raw.bytes, raw.contentType)
     else if (body !== undefined) req = HttpClientRequest.bodyJsonUnsafe(req, body)
     const response = yield* client.execute(req).pipe(Effect.mapError((cause) => new ApiUnreachable({ path, cause })))
@@ -49,7 +55,11 @@ const make = Effect.gen(function* () {
   const send = (method: Method, path: string, body?: unknown) => Effect.asVoid(request(Ignored, method, path, body ?? (method === 'DELETE' ? undefined : {})))
 
   return {
-    me: get(Me, '/api/me'),
+    // The app tells the server where the person is each time it asks who they are.
+    me: Effect.suspend(() => {
+      const zone = appTimeZone()
+      return request(Me, 'GET', '/api/me', undefined, undefined, zone === undefined ? undefined : { 'X-Time-Zone': zone })
+    }),
     updateMe: (patch: MePatch) => send('PATCH', '/api/me', patch),
     memberFile: (name: string) => get(NamedText, `/api/me/files/${enc(name)}`),
     writeMemberFile: (name: string, content: string) => send('PUT', `/api/me/files/${enc(name)}`, { content }),

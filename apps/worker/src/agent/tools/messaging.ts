@@ -1,5 +1,7 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { GRANT_LEVELS, type GrantField, type GrantSet } from '@mr-robot/protocol'
 import { tool } from './define.ts'
+import { grantParameters, proposedGrants } from './proposals.ts'
 
 export interface DirectoryEntry {
   readonly id: string
@@ -59,7 +61,7 @@ export function replyTools(host: MessagingHost): ToolDefinition[] {
 
 export interface RobotsHost {
   createRobot(brief: string): Promise<{ id: string; status: string }>
-  proposeGrantsFor(robotId: string, purpose: string, grants: { tools: string[]; skills: string[]; recipients: string[]; secrets: string[] }): Promise<{ proposalId: string; status: string }>
+  proposeGrantsFor(robotId: string, purpose: string, grants: GrantSet): Promise<{ proposalId: string; status: string }>
   configureRobot(id: string, change: { name?: string; title?: string; description?: string; avatarColor?: string }): Promise<{ id: string; identity: unknown }>
   threadChiefs(): Promise<Array<{ id: string; ownerName: string; name: string; availability: string }>>
   threadOpen(chiefId: string, topic: string, scope: string): Promise<{ threadId: string; status: string }>
@@ -77,18 +79,17 @@ export function robotsTools(host: RobotsHost): ToolDefinition[] {
       parameters: { properties: { brief: { type: 'string', description: 'What the Robot is for, in a few sentences' } }, required: ['brief'] },
       execute: async ({ brief }) => host.createRobot(brief),
     }),
-    tool<{ robot_id: string; purpose: string; tools?: string[]; skills?: string[]; logins?: string[]; recipients?: string[] }>({
+    tool<{ robot_id: string; purpose: string; logins?: unknown } & Partial<Record<Exclude<GrantField, 'secrets'>, unknown>>>({
       name: 'robot_propose_grants',
-      description: "Ask your owner to grant one of their Robots tool groups, skills, logins or recipient Robots. It appears as a question in that Robot's chat; nothing is granted until your owner approves. You cannot grant anything yourself.",
+      description: "Ask your owner to set levels on one of their Robots' Grants: tool groups, skills, logins, recipient Robots, hosts, connections. Each item gets a level: allow, ask (each call waits for the owner's answer) or deny (removes it); allow when you name no level. Items you do not name keep their level. It appears as a question in that Robot's chat; nothing changes until your owner approves. You cannot grant anything yourself; robot_grants shows the current levels.",
       parameters: {
         properties: {
           robot_id: { type: 'string', description: 'Robot id from robot_directory' }, purpose: { type: 'string', description: 'Why that Robot needs it, in one sentence' },
-          tools: { type: 'array', items: { type: 'string' }, description: 'Tool group names to grant' }, skills: { type: 'array', items: { type: 'string' }, description: 'Skill names to grant' },
-          logins: { type: 'array', items: { type: 'string' }, description: 'Login or secret names to grant' }, recipients: { type: 'array', items: { type: 'string' }, description: 'Robot ids it may send requests to' },
+          ...grantParameters(GRANT_LEVELS, 'logins'),
         },
         required: ['robot_id', 'purpose'],
       },
-      execute: async ({ robot_id, purpose, tools, skills, logins, recipients }) => host.proposeGrantsFor(robot_id, purpose, { tools: tools ?? [], skills: skills ?? [], recipients: recipients ?? [], secrets: logins ?? [] }),
+      execute: async ({ robot_id, purpose, logins, ...items }) => host.proposeGrantsFor(robot_id, purpose, proposedGrants({ ...items, secrets: logins }, GRANT_LEVELS)),
     }),
     tool<{ robot_id: string; name?: string; title?: string; description?: string; avatarColor?: string }>({
       name: 'robot_configure',

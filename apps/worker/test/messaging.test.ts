@@ -126,7 +126,7 @@ describe('Robot-to-Robot messaging', () => {
     ])
     const created = (await robots(ANNA)).find((entry) => entry.kind === 'robot')!
     expect(created.status).toBe('setup')
-    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([created.id])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [created.id]: 'allow' })
     await settle(created.id)
     expect((await chat(created.id)).at(-1)).toMatchObject({ kind: 'reply', text: 'Hi, I am new. What should I watch?' })
   })

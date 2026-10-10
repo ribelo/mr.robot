@@ -57,10 +57,11 @@ import { AlarmSchedule, dueDelivery, type ScheduleTask } from '../agent/schedule
 import { type NotifyHost } from '../agent/tools/notify.ts'
 import { maskSecrets, type SecretHost } from '../agent/tools/secrets.ts'
 import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
-import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
-import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
+import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
+import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf } from './chain.ts'
 import type { ChainEntry, ProviderView } from '@mr-robot/protocol'
+import { usableLevel, usableNames } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage, type ThreadWake } from '../agent/sources.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
@@ -74,7 +75,7 @@ import { DiscordChannel } from '../channels/discord.ts'
 import { backendLabel, browserCost, driverFor } from '../browser/backends.ts'
 import { containerOpenStages } from '../browser/driver.ts'
 import { mount, type Mount } from '../plugins/define.ts'
-import { Memory, type MemoryHost, type SharedFile } from '../plugins/memory.ts'
+import { Memory, sharedFileEdit, type MemoryHost, type SharedFile } from '../plugins/memory.ts'
 import { renderBaseline, type MemoryChange, type MemoryFile } from '../agent/memory.ts'
 import { Browser } from '../plugins/browser.ts'
 import { Conversation as ConversationPlugin } from '../plugins/conversation.ts'
@@ -102,6 +103,7 @@ import { Web } from '../plugins/web.ts'
 import { type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
+import { PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, type WorkspaceShape } from '../workspace/workspace.ts'
@@ -109,6 +111,7 @@ import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
 import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.ts'
+import { rezoneRecord } from './time-zone.ts'
 import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
@@ -317,13 +320,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const owner = this.owner()
     await this.refreshPersona()
     await this.loadSecretMasks()
-    const sections = [{ name: 'Platform', text: platformPrompt(config, owner.name) }]
+    // Exactly what the model reads (sk-xsat): the provider's identity line and the bridge when its adapter puts one first.
+    const identity = this.providerIdentity(config)
+    const sections = [
+      ...(identity === null ? [] : [{ name: 'Provider identity', text: identity }]),
+      { name: 'Platform', text: platformPrompt({ config, ownerName: owner.name, afterProviderIdentity: identity !== null }) },
+    ]
     if (config.status === 'setup') sections.push({ name: 'Setup interview', text: setupPrompt(owner.name, this.store.get<string>('brief') ?? null) })
-    sections.push({ name: 'Memory (first message of the context)', text: renderBaseline(await this.memoryFiles(), MEMORY_BYTES) })
+    // The shared-memory tools are off during setup (mounts()).
+    sections.push({ name: 'Memory (first message of the context)', text: renderBaseline(await this.memoryFiles(), MEMORY_BYTES, sharedFileEdit(config.kind, config.status !== 'setup')) })
     return {
       sections: sections.map((section) => ({ ...section, text: this.mask(section.text) })),
       tools: config.codeMode && config.status !== 'setup' ? ['run_code (code mode), calling:', ...this.toolNames()] : this.toolNames(),
-      skills: config.status === 'setup' ? [] : [...this.store.effectiveGrants().skills],
+      skills: config.status === 'setup' ? [] : usableNames(this.store.effectiveGrants().skills),
     }
   }
 
@@ -818,11 +827,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.releaseComposition()
     const owner = this.owner()
     const brief = this.store.get<string>('brief') ?? null
-    const prompt = [{ name: 'platform', text: () => platformPrompt(this.store.requireConfig(), owner.name) }]
-    if (config.status === 'setup') prompt.push({ name: 'setup', text: () => setupPrompt(owner.name, brief) })
     const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
     const chosen = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)
     const contextWindow = chosen?.contextWindow
+    const adapter = this.adapter(config.model.provider, contextWindow, config.model.model, chosen?.wire)
+    // The bridge follows the adapter that runs this composition (sk-74ym); every text is read at each request.
+    const afterProviderIdentity = prependedIdentity(adapter) !== null
+    const prompt = [
+      ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), ownerName: owner.name, afterProviderIdentity }) })),
+      ...(config.status === 'setup' ? [{ name: 'setup', text: () => setupPrompt(owner.name, brief) }] : []),
+    ]
     const scope = await Effect.runPromise(Scope.make())
     const value = await Effect.runPromise(Scope.provide(scope)(composeScoped({
       storage: this.ctx.storage,
@@ -833,7 +847,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       provider: config.model.provider,
       model: config.model.model,
       effort: config.model.effort,
-      adapter: this.adapter(config.model.provider, contextWindow, config.model.model, chosen?.wire),
+      adapter,
       contextBudget: config.contextBudget,
       ...(contextWindow === undefined ? {} : { modelWindow: contextWindow }),
       compactionInstruction: config.compactionInstruction,
@@ -850,6 +864,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.composition = { revision: config.revision, value, scope }
     this.pendingSeed = undefined
     return value
+  }
+
+  /** The identity line the adapter of the Robot's model puts before its prompt; null when none, or when no adapter can be built for it. */
+  private providerIdentity(config: RobotConfig): string | null {
+    try {
+      return prependedIdentity(this.adapter(config.model.provider, undefined, config.model.model))
+    } catch {
+      return null
+    }
   }
 
   /** The LLM adapter for a Provider; tests override it with a scripted stub. */
@@ -903,13 +926,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
     mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
+    // Items at allow or ask are registered, deny items are not (sk-746n); ask behaves as allow until the ask-per-call wrapper.
     const grants = this.store.effectiveGrants()
     // Plugins the Home switched off are not mounted for anyone (cn-dbm9).
     const off = disabledToolGroups(this.pluginsOn)
-    const granted = new Set(grants.tools.filter(isToolGroup).filter((group) => !off.has(group)))
+    const granted = new Set(usableNames(grants.tools).filter(isToolGroup).filter((group) => !off.has(group)))
     if (granted.has('files')) mounts.push(mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }))
     if (granted.has('notify')) mounts.push(mount(Notify, { host: this }))
-    if (granted.has('secrets')) mounts.push(mount(Logins, { host: this, granted: grants.secrets }))
+    if (granted.has('secrets')) mounts.push(mount(Logins, { host: this, granted: usableNames(grants.secrets) }))
     if (granted.has('messaging')) mounts.push(mount(Messaging, { host: this }))
     if (granted.has('browser')) mounts.push(mount(Browser, { host: this }))
     if (granted.has('robots') && config.kind === 'mr-robot') mounts.push(mount(Robots, { host: this }))
@@ -932,7 +956,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       }))
     }
     // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
-    const hostGrants = grants.hosts ?? []
+    const hostGrants = usableNames(grants.hosts)
     const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
     if (names('files').length > 0 || names('shell').length > 0) mounts.push(mount(Host, { host: this, files: names('files'), shell: names('shell') }))
     for (const [kind, plugin] of Object.entries(this.connectorPlugins()) as Array<[ConnectorKind, ConnectorPlugin]>) {
@@ -947,7 +971,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Skills of the connector kinds this Robot holds a granted connection for (and whose plugin is on). */
   private connectorSkillNames(): string[] {
-    return heldSkillNames({ skills: [], connections: this.store.effectiveGrants().connections }, this.knownConnections, this.connectorKindsOn())
+    return heldSkillNames({ skills: {}, connections: this.store.effectiveGrants().connections }, this.knownConnections, this.connectorKindsOn())
   }
 
   /** Every skill this Robot holds: granted, or brought by a connector it holds. */
@@ -972,10 +996,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Connections of a kind this Robot holds a grant for, with the write grant marked (cn-xezx). */
   private grantedConnections(kind: ConnectorKind): GrantedConnection[] {
-    const grants = this.store.effectiveGrants().connections ?? []
+    const usable = (name: string) => this.store.mayUse('connection', name)
     return this.knownConnections
-      .filter((connection) => connection.kind === kind && grants.includes(connection.id))
-      .map((connection) => ({ id: connection.id, kind, label: connection.label, account: connection.account, services: connection.services, write: grants.includes(`${connection.id}:write`), isDefault: connection.isDefault }))
+      .filter((connection) => connection.kind === kind && usable(connection.id))
+      .map((connection) => ({ id: connection.id, kind, label: connection.label, account: connection.account, services: connection.services, write: usable(`${connection.id}:write`), isDefault: connection.isDefault }))
   }
 
   private connectorHost(kind: ConnectorKind, accounts: GrantedConnection[]): ConnectorHost {
@@ -986,7 +1010,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       fetch: this.connectorFetch(),
       use: async (connectionId) => {
         // Checked again at each call: a grant withdrawn mid-Turn stops working at once.
-        if (!(this.store.effectiveGrants().connections ?? []).includes(connectionId)) throw new Error('this connection is no longer granted')
+        if (!this.store.mayUse('connection', connectionId)) throw new Error('this connection is no longer granted')
         const use = await this.home().useConnection(ownerId, connectionId)
         if (use === null) throw new Error('this connection no longer exists or is no longer shared')
         // Secrets of the call are masked out of everything this Turn writes (cn-a1i0).
@@ -1034,7 +1058,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** For the host owner's Member DO: who this Robot is and whether it holds the grant (hs-5ktw, hs-44cm). */
   async hostAccess(hostId: string, grant: 'browser' | 'files' | 'shell'): Promise<{ ownerId: string; name: string; granted: boolean; mrRobot: boolean }> {
     const config = this.store.requireConfig()
-    return { ownerId: config.ownerId, name: config.identity.name, granted: this.store.hasGrant('host', `${hostId}:${grant}`), mrRobot: config.kind === 'mr-robot' }
+    const facet = `${hostId}:${grant}`
+    // The host's Member checks that the owner reaches the host; Mr. Robot then holds the facet unless his owner lowered it to deny (sk-br7y).
+    const lowered = this.store.grants().hosts[facet]
+    const granted = config.kind === 'mr-robot' ? lowered === undefined || usableLevel(lowered) : this.store.mayUse('host', facet)
+    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot' }
   }
 
   private async hostOwnerStub(hostId: string) {
@@ -1558,7 +1586,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         // Autofill in the takeover window (rb-o52a): the Robot's granted entries for the page shown.
         const page = await this.page()
         const config = this.store.requireConfig()
-        const entries = await Promise.all(this.store.effectiveGrants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+        const entries = await Promise.all(usableNames(this.store.effectiveGrants().secrets).map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
         socket.send(JSON.stringify({ type: 'logins', entries: entries.flatMap(([name, entry]) => entry !== null && entryMatches(entry, page.url()) ? [{ name, username: entry.username }] : []) }))
         return
       }
@@ -1566,7 +1594,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         const takeover = this.store.get<TakeoverState>('takeover')
         if (takeover?.claimedBy !== viewer.memberId) throw new Error('claim the browser first')
         const name = String(input['name'] ?? '')
-        if (!this.store.effectiveGrants().secrets.includes(name)) throw new Error(`"${name}" is not granted to this Robot`)
+        if (!this.store.mayUse('secret', name)) throw new Error(`"${name}" is not granted to this Robot`)
         const entry = await this.home().resolveLogin(this.store.requireConfig().ownerId, name)
         if (entry === null) throw new Error(`"${name}" no longer exists`)
         socket.send(JSON.stringify({ type: 'filled', message: await this.fillEntry(name, entry, await this.page()) }))
@@ -1929,10 +1957,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** The Workspace as the Files view lists it (rb-1miy): persona and memory first, then the rest. */
   async files(): Promise<WorkspaceFileView[]> {
-    const entries = await this.run(this.workspace.list(''))
+    const stored = (await this.run(this.workspace.list(''))).filter((entry) => !isDocsPath(entry.path))
+    // The product docs come from the Worker bundle, never from R2 (v1.11 ticket 02).
+    const bundled = PRODUCT_DOCS.map((entry) => ({ path: entry.path, size: new TextEncoder().encode(entry.text).length, uploaded: 0, etag: '' }))
+    const entries = [...stored, ...bundled]
     const order = (path: string) => { const index = (PERSONA_FILES as readonly string[]).indexOf(path); return index === -1 ? PERSONA_FILES.length : index }
     const group = (path: string): WorkspaceFileView['group'] =>
       (PERSONA_FILES as readonly string[]).includes(path) ? 'persona'
+        : isDocsPath(path) ? 'docs'
         : /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path) ? 'daily'
           : path.startsWith('skills/') ? 'skills'
             : path.startsWith('screens/') ? 'screens'
@@ -1945,12 +1977,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** One file for the editor; binary and large files are read-only (rb-q5eb). */
   /** A Workspace file as bytes, for preview and download (pl-ojbr). */
   async fileRaw(path: string): Promise<{ body: ArrayBuffer; mediaType: string } | undefined> {
+    if (isDocsPath(path)) {
+      const bundled = productDoc(path)
+      return bundled === undefined ? undefined : { body: new TextEncoder().encode(bundled.text).buffer as ArrayBuffer, mediaType: mediaTypeOf(path) }
+    }
     const file = await this.run(this.workspace.read(path))
     if (file === undefined) return undefined
     return { body: file.body as ArrayBuffer, mediaType: mediaTypeOf(path) }
   }
 
   async fileContent(path: string): Promise<WorkspaceFileContent> {
+    if (isDocsPath(path)) {
+      const bundled = productDoc(path)
+      if (bundled === undefined) throw Object.assign(new Error(`no file "${path}"`), { name: 'NotFound', status: 404 })
+      return { path, size: new TextEncoder().encode(bundled.text).length, text: bundled.text, readOnly: true, note: 'Product docs belong to the platform. They are read-only and a new release updates them.' }
+    }
     const file = await this.run(this.workspace.read(path))
     if (file === undefined) throw Object.assign(new Error(`no file "${path}"`), { name: 'NotFound', status: 404 })
     if (file.size > MAX_EDITABLE_BYTES) return { path, size: file.size, text: null, readOnly: true, note: `${formatBytes(file.size)}: too large to edit here.` }
@@ -1966,6 +2007,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** The owner saved a file; the Robot hears about it at its next Turn (rb-xwks). */
   async saveFile(path: string, content: string, by?: string): Promise<WorkspaceFileContent> {
+    if (isDocsPath(path)) throw Object.assign(new Error(docsReadOnlyMessage(path)), { name: 'Invalid', status: 400 })
     const current = await this.run(this.workspace.stat(path))
     if (current !== undefined && current.size > MAX_EDITABLE_BYTES) throw Object.assign(new Error('this file is too large to edit here'), { name: 'Invalid', status: 400 })
     await this.run(this.workspace.write(path, content, path.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8'))
@@ -2022,6 +2064,31 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.set('memory-changes', [...pending, { path, by }].slice(-50))
   }
 
+  /**
+   * The owner's profile zone changed (v1.11 ticket 08). The Robot's zone is the owner's, so the
+   * next Turn, daily notes and Routines use the new one; wall-clock Routines in the old zone keep
+   * their local time in the new one, and the model hears it once with its next step.
+   */
+  async timeZoneChanged(timeZone: string): Promise<void> {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted' || config.timeZone === timeZone) return
+    const from = config.timeZone
+    const now = Date.now()
+    this.store.transaction(() => {
+      this.store.updateConfig(() => ({ timeZone }))
+      for (const routine of this.store.routines()) {
+        const record = rezoneRecord(routine.record, from, timeZone, now)
+        const moved = record !== routine.record
+        if (!moved && routine.timeZone !== from) continue
+        this.store.saveRoutine({ ...routine, record, timeZone: 'timeZone' in record ? record.timeZone : timeZone, nextRun: moved && !routine.paused ? Date.parse(record.scheduledAt) : routine.nextRun })
+      }
+      const pending = this.store.get<MemoryChange[]>('memory-changes') ?? []
+      this.store.set('memory-changes', [...pending, { path: 'time zone', by: 'your owner', notice: `Your owner's time zone changed to ${timeZone}. Daily notes, Routines and clock times use it from now on.` }].slice(-50))
+    })
+    await this.rearm()
+    await this.changed()
+  }
+
   /** Every memory file in scope: the Home, the owner, and this Robot's own (pl-o3ck, pl-fkg7, pl-yqno). */
   async memoryFiles(): Promise<MemoryFile[]> {
     const config = this.store.requireConfig()
@@ -2064,13 +2131,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       memoryChanges: () => this.memoryChanges(),
       needsBaseline: (sessionId) => this.needsBaseline(sessionId),
       memoryDelivered: (sessionId, baseline) => this.memoryDelivered(sessionId, baseline),
-      propose: (kind, purpose, payload) => this.propose(kind, purpose, payload),
-      ...(config.kind === 'mr-robot' ? { writeShared: (file: SharedFile, content: string) => this.writeShared(file, content) } : {}),
+      shared: config.kind === 'mr-robot'
+        ? { kind: 'mr-robot', write: (file: SharedFile, content: string) => this.writeShared(file, content) }
+        : { kind: 'robot', propose: (kind, purpose, payload) => this.propose(kind, purpose, payload) },
     }
   }
 
   /** The owner deleted a file (a local skill, an old note). */
   async deleteFile(path: string, by?: string): Promise<void> {
+    if (isDocsPath(path)) throw Object.assign(new Error(docsReadOnlyMessage(path)), { name: 'Invalid', status: 400 })
     await this.run(this.workspace.remove(path))
     await this.memoryChanged(path, `${by ?? 'your owner'} (deleted)`)
     if (by !== undefined) {
@@ -2106,7 +2175,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async logins(): Promise<Array<{ name: string; username: string; websites: readonly string[]; matchesPage: boolean; readable: boolean }>> {
     const config = this.store.requireConfig()
     const url = this.browserPage === undefined ? null : (await this.browserPage.catch(() => undefined))?.url() ?? null
-    const entries = await Promise.all(this.store.effectiveGrants().secrets.map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+    const entries = await Promise.all(usableNames(this.store.effectiveGrants().secrets).map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
     return entries.flatMap(([name, entry]) => entry === null ? [] : [{ name, username: entry.username, websites: entry.websites, matchesPage: url !== null && entryMatches(entry, url), readable: entry.allowRead }])
   }
 
@@ -2116,7 +2185,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    */
   async fillLogin(name: string): Promise<string> {
     const config = this.store.requireConfig()
-    if (!this.store.effectiveGrants().secrets.includes(name)) throw new Error(`The login "${name}" is not granted to you. Ask with propose_grants.`)
+    if (!this.store.mayUse('secret', name)) throw new Error(`The login "${name}" is not granted to you. Ask with propose_grants.`)
     const entry = await this.home().resolveLogin(config.ownerId, name)
     if (entry === null) throw new Error(`The login "${name}" no longer exists`)
     return this.fillEntry(name, entry, await this.page())
@@ -2150,7 +2219,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected async loadSecretMasks(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
-    const granted = this.store.effectiveGrants().secrets
+    const granted = usableNames(this.store.effectiveGrants().secrets)
     const values = await Promise.all(granted.map(async (name) => [name, await this.home().resolveSecret(config.ownerId, name).catch(() => null)] as const))
     this.secretValues = values.filter((entry): entry is readonly [string, string] => entry[1] !== null)
   }
@@ -2188,12 +2257,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  settings(): Promise<RobotSettings> {
+  async settings(): Promise<RobotSettings> {
+    await this.reachForView()
     return this.program(Programs.settings)
   }
 
+  /** Mr. Robot's settings show his real levels (sk-8llz): what his owner reaches now, not at his last Turn. */
+  private async reachForView(): Promise<void> {
+    if (this.store.config()?.kind === 'mr-robot') await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
+  }
 
-  panel(canEdit: boolean, summary: RobotSummary): Promise<RobotPanel> {
+
+  async panel(canEdit: boolean, summary: RobotSummary): Promise<RobotPanel> {
+    await this.reachForView()
     return this.program(Views.panel(canEdit, summary))
   }
 

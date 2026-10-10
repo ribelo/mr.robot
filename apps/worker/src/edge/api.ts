@@ -35,6 +35,7 @@ import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import { modelRefusal } from '../robot/model-choice.ts'
 import type { AnswerResult } from '../robot/robot.ts'
+import { parseTimeZone } from '../robot/time-zone.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
 import { PLUGINS, pluginByName } from '../plugins/catalog.ts'
 import { parseForm } from '../connectors/schema-form.ts'
@@ -64,13 +65,19 @@ function admin(c: ApiContext): Effect.Effect<void, ApiError> {
   return c.member.role === 'admin' ? Effect.void : Effect.fail(forbidden('admin only'))
 }
 
+/** The request header with the app's time zone (browser zone in the PWA, system zone in the desktop app). */
+const TIME_ZONE_HEADER = 'X-Time-Zone'
+
 const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
 
 export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ me
   .on('GET', '/api/me', (c) => call(async (): Promise<Me> => {
-    const profile = await c.env.MEMBER.getByName(c.member.id).profile()
-    return { ...c.member, home: c.env.HOME_NAME, timeZone: profile.timeZone, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system' }
+    const member = c.env.MEMBER.getByName(c.member.id)
+    // The app tells its zone each time it opens; anything that is not a zone is ignored.
+    const reported = parseTimeZone(c.request.headers.get(TIME_ZONE_HEADER) ?? '')
+    const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))
+    return { ...c.member, home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system' }
   }))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
     const patch = yield* decodeBody(c.request, MemberPreferences)

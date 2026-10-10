@@ -22,7 +22,8 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     await api(ANNA, '/api/secrets/shop', { method: 'PUT', body: { username: 'anna', password: 'right-password', websites: ['shop.test'], shared: false } })
     const id = await mrRobotId()
     await settle(id)
-    expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.grants.secrets).toEqual([])
+    // His settings show what he really holds: every login his owner has, at allow (sk-8llz).
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.grants.secrets).toEqual({ shop: 'allow' })
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(id, [
       { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] },
@@ -49,9 +50,34 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'give the new robot web access' } })
     await settle(id)
     expect(toolResults(id)[0]).toContain('nothing is granted until they approve')
-    expect((await api<RobotPanel>(ANNA, `/api/robots/${other}/panel`)).body.settings.grants.tools).not.toContain('web')
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${other}/panel`)).body.settings.grants.tools['web']).toBeUndefined()
     const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
     expect(ask?.kind === 'question' ? ask.proposal.purpose : '').toBe('Mr. Robot asks: it needs to search the web')
+  })
+
+  it('proposes levels for another Robot and reads them back with robot_grants (sk-iq3n)', async () => {
+    scripts.set('*', [{ text: 'Hello.' }])
+    const other = (await api<{ id: string }>(ANNA, '/api/robots', { body: {} })).body.id
+    await settle(other)
+    await api(ANNA, `/api/robots/${other}/settings`, { method: 'PATCH', body: { grants: { tools: { routines: 'allow', files: 'allow' } } } })
+    await testRobot(other).activateForTest()
+    const id = await mrRobotId()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
+    const tools = ['web', { name: 'browser', level: 'ask' }, { name: 'routines', level: 'deny' }]
+    scripts.set(id, [{ calls: [{ name: 'robot_propose_grants', args: { robot_id: other, purpose: 'it should browse with you watching', tools } }] }, { text: 'Asked.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'set up the new robot' } })
+    await settle(id)
+    const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
+    if (ask?.kind !== 'question') throw new Error('no grant question')
+    expect(ask.proposal.grants?.tools).toEqual({ web: 'allow', browser: 'ask', routines: 'deny' })
+    await api(ANNA, `/api/robots/${other}/proposals/${ask.proposal.id}`, { body: { revision: ask.proposal.revision, approve: true } })
+    await settle(other)
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${other}/panel`)).body.settings.grants.tools).toEqual({ files: 'allow', web: 'allow', browser: 'ask' })
+
+    scripts.set(id, [{ calls: [{ name: 'robot_grants', args: { robot_id: other } }] }, { text: 'Seen.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'what may it do now?' } })
+    await settle(id)
+    expect(JSON.parse(toolResults(id).at(-1)!).grants.tools).toEqual({ files: 'allow', web: 'allow', browser: 'ask' })
   })
 
   it('edits a library skill without approval (rb-axxy)', async () => {

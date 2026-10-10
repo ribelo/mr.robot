@@ -5,7 +5,7 @@
 import { env, reset, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { jsonSchemaToTs } from '@deepseek-ai/dsh-tools'
-import type { RobotSummary, Trajectory } from '@mr-robot/protocol'
+import { emptyGrants, type Conversation, type GrantSet, type RobotPanel, type RobotSummary, type Trajectory } from '@mr-robot/protocol'
 import { TOOL_GROUP_NAMES } from '../src/agent/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../src/connectors/registry.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -98,6 +98,69 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
     expect(result).toContain('parameter "id" is required')
     const blank = (await say(id, [{ name: 'exa_agent_get_run', args: { id: '' } }])).at(-1)
     expect(blank).toContain('parameter "id" is required and must not be empty')
+  })
+})
+
+describe('grant levels decide what a Robot is given (v1.11)', () => {
+  const grantsOf = async (id: string): Promise<GrantSet> => (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.grants
+  const registered = (id: string) => env.ROBOT.getByName(id).toolNames()
+
+  it('registers the tools of allow and ask items and not of deny items (sk-746n)', async () => {
+    const id = await robotWith({})
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow', web: 'ask', exa: 'ask', browser: 'deny' } } } })
+    expect(await grantsOf(id)).toEqual({ ...emptyGrants, tools: { files: 'allow', web: 'ask', exa: 'ask' } })
+    const names = await registered(id)
+    expect(names).toEqual(expect.arrayContaining(['delete_file', 'web_search_exa']))
+    expect(names).not.toContain('browser_open')
+    // What the model is offered follows the same levels.
+    await say(id, [])
+    const offered = lastTools(id).map((tool) => tool.name)
+    expect(offered).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa']))
+    expect(offered).not.toContain('browser_open')
+  })
+
+  it("holds every group and everything Mr. Robot's owner reaches at allow, shows it, and honours what the owner lowers (sk-br7y, sk-8llz)", async () => {
+    await api(ANNA, '/api/secrets/shop', { method: 'PUT', body: { username: 'anna', password: 'pw', websites: ['shop.test'], shared: false } })
+    const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    await settle(mr)
+    const shown = await grantsOf(mr)
+    expect(shown.tools).toEqual(Object.fromEntries(TOOL_GROUP_NAMES.map((group) => [group, 'allow'])))
+    expect(shown.secrets).toEqual({ shop: 'allow' })
+    expect(await registered(mr)).toEqual(expect.arrayContaining(['web_search_exa', 'browser_open', 'robot_list']))
+
+    // The owner saves the page with exa lowered to deny, browser to ask and the login to deny.
+    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { grants: { ...shown, tools: { ...shown.tools, exa: 'deny', browser: 'ask' }, secrets: { shop: 'deny' } } } })
+    expect(await grantsOf(mr)).toEqual({ ...shown, tools: { ...shown.tools, exa: 'deny', browser: 'ask' }, secrets: { shop: 'deny' } })
+    const lowered = await registered(mr)
+    expect(lowered).not.toContain('web_search_exa')
+    expect(lowered).toEqual(expect.arrayContaining(['browser_open', 'robot_list']))
+
+    // Raised again: back to allow.
+    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { grants: shown } })
+    expect(await grantsOf(mr)).toEqual(shown)
+    expect(await registered(mr)).toContain('web_search_exa')
+  })
+
+  it('migrates grants stored before levels to allow (sk-xj5q)', async () => {
+    const id = await robotWith({})
+    await testRobot(id).grantsBeforeLevelsForTest([{ kind: 'tool', name: 'exa' }, { kind: 'tool', name: 'files' }, { kind: 'secret', name: 'shop' }])
+    expect(await grantsOf(id)).toEqual({ ...emptyGrants, tools: { exa: 'allow', files: 'allow' }, secrets: { shop: 'allow' } })
+    expect(await registered(id)).toEqual(expect.arrayContaining(['web_search_exa', 'delete_file']))
+  })
+
+  it('propose_grants asks for allow or ask per item and approval applies those levels (sk-8e0f)', async () => {
+    const id = await robotWith({ tools: ['files'] })
+    const [refused] = await say(id, [{ name: 'propose_grants', args: { purpose: 'Lower myself', tools: [{ name: 'web', level: 'deny' }] } }])
+    expect(refused).toContain('must be allow or ask')
+    // The Conversation so far comes back too: the newest result is the last.
+    const asked = (await say(id, [{ name: 'propose_grants', args: { purpose: 'Read listing pages', tools: [{ name: 'web', level: 'ask' }, 'routines'] } }])).at(-1)
+    expect(JSON.parse(asked!).grants.tools).toEqual({ web: 'ask', routines: 'allow' })
+    const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
+    if (question?.kind !== 'question') throw new Error('no grant question')
+    scripts.set(id, [{ text: 'Thanks.' }])
+    await api(ANNA, `/api/robots/${id}/proposals/${question.proposal.id}`, { body: { revision: question.proposal.revision, approve: true } })
+    await settle(id)
+    expect((await grantsOf(id)).tools).toEqual({ files: 'allow', web: 'ask', routines: 'allow' })
   })
 })
 

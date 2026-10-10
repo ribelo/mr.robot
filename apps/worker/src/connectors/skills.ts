@@ -4,7 +4,7 @@
  * skill library (the admin may edit them; a later seed never overwrites an edit) and a Robot loads
  * them only through a connector it is granted, never by an ordinary skill grant.
  */
-import type { ConnectorKind } from '@mr-robot/protocol'
+import { usableNames, type ConnectorKind, type GrantSet } from '@mr-robot/protocol'
 
 export interface ConnectorSkill {
   readonly name: string
@@ -121,14 +121,15 @@ export const CONNECTOR_SKILL_NAMES: ReadonlySet<string> = new Set(Object.values(
  * Turn and the Home's skill_library holders (cd-56kk) both answer through this one rule.
  */
 export function heldSkillNames(
-  grants: { readonly skills: readonly string[]; readonly connections?: readonly string[] | undefined },
+  grants: Pick<GrantSet, 'skills' | 'connections'>,
   connections: readonly { readonly id: string; readonly kind: ConnectorKind }[],
   kindsOn: readonly ConnectorKind[],
 ): string[] {
-  const granted = new Set(grants.connections ?? [])
+  // Held means usable: at allow or ask (sk-746n).
+  const granted = new Set(usableNames(grants.connections))
   const held = new Set(connections.filter((connection) => granted.has(connection.id)).map((connection) => connection.kind))
   return [
-    ...grants.skills.filter((name) => !CONNECTOR_SKILL_NAMES.has(name)),
+    ...usableNames(grants.skills).filter((name) => !CONNECTOR_SKILL_NAMES.has(name)),
     ...kindsOn.filter((kind) => held.has(kind)).flatMap((kind) => CONNECTOR_SKILLS[kind].map((entry) => entry.name)),
   ]
 }

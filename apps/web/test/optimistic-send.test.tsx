@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Conversation, Me, RobotPanel } from '@mr-robot/protocol'
 import { RobotConversation } from '../src/App.tsx'
 
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', home: 'Home', timeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' } as Me
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', home: 'Home', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' } as Me
 const identity = { name: 'Sales', title: '', description: '', avatarColor: '#f4a03a' }
 const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', identity, lastLine: '', lastAt: 0, unread: false } as const
 const panel = { summary, canEdit: true } as unknown as RobotPanel

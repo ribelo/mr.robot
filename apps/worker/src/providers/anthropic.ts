@@ -11,7 +11,8 @@ import { finishReason } from './openai-chat.ts'
 import { httpFailure, imagesOf, loadImages, replayBlocks, sse, StreamWriter, systemText, textWithoutImages, type DshMessage, type ImageLoader, type LoadedImages } from './stream.ts'
 
 const URL_ = 'https://api.anthropic.com/v1/messages?beta=true'
-const IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
+/** The line a Claude subscription requires first in the system prompt. */
+export const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 const BUDGETS: Record<string, number> = { low: 2_048, medium: 6_000, high: 12_000, xhigh: 18_000, max: 24_000 }
 
 /**
@@ -94,8 +95,8 @@ function safeJson(text: string): unknown {
 export interface AnthropicEndpoint {
   readonly url: string
   readonly headers: (options: GenerateOptions) => Promise<Record<string, string>>
-  /** Claude subscriptions require the Claude Code identity line first in the system prompt. */
-  readonly claudeCode: boolean
+  /** The identity line put before the system prompt (Claude subscriptions require the Claude Code line), or null. */
+  readonly identity: string | null
   readonly fetch?: typeof fetch
 }
 
@@ -103,7 +104,7 @@ export interface AnthropicEndpoint {
 export function claudeSubscription(token: () => Promise<string>): AnthropicEndpoint {
   return {
     url: URL_,
-    claudeCode: true,
+    identity: CLAUDE_CODE_IDENTITY,
     headers: async () => ({
       authorization: `Bearer ${await token()}`,
       'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
@@ -117,6 +118,11 @@ export function claudeSubscription(token: () => Promise<string>): AnthropicEndpo
 export class AnthropicAdapter extends LlmAdapter {
   constructor(private readonly endpoint: AnthropicEndpoint, private readonly contextWindow: number, private readonly images?: ImageLoader, private readonly cacheTtl: CacheTtl = '1h') {
     super()
+  }
+
+  /** The identity line this adapter puts before the Robot's system prompt (v1.11, sk-74ym), or null. */
+  get prependedIdentity(): string | null {
+    return this.endpoint.identity
   }
 
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
@@ -158,7 +164,7 @@ export class AnthropicAdapter extends LlmAdapter {
         model: options.model,
         max_tokens: maxTokens,
         stream: true,
-        system: breakpoint([...(this.endpoint.claudeCode ? [{ type: 'text', text: IDENTITY }] : []), ...(system === '' ? [] : [{ type: 'text', text: system }])], ttl),
+        system: breakpoint([...(this.endpoint.identity === null ? [] : [{ type: 'text', text: this.endpoint.identity }]), ...(system === '' ? [] : [{ type: 'text', text: system }])], ttl),
         messages,
         ...(options.tools === undefined || options.tools.length === 0 ? {} : { tools: breakpoint(options.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })), ttl) }),
         // Newer models omit thinking text unless asked; the summary is what the chat shows (pl-jzr7).

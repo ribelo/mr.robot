@@ -140,7 +140,7 @@ export function opencodeGoAdapter(model: string, pool: OpencodePool, contextWind
     case 'chat':
       return new ChatCompletionsAdapter({ name: 'OpenCode Go', url: `${OPENCODE_GO_BASE}/chat/completions`, contextWindow: entry.contextWindow, headers: headers('bearer'), fetch: fetcher })
     case 'anthropic':
-      return new AnthropicAdapter({ url: `${OPENCODE_GO_BASE}/messages`, claudeCode: false, headers: headers('x-api-key'), fetch: fetcher }, entry.contextWindow)
+      return new AnthropicAdapter({ url: `${OPENCODE_GO_BASE}/messages`, identity: null, headers: headers('x-api-key'), fetch: fetcher }, entry.contextWindow)
     case 'responses':
       return new CodexAdapter({ url: `${OPENCODE_GO_BASE}/responses`, headers: headers('bearer'), fetch: fetcher }, entry.contextWindow)
   }

@@ -98,7 +98,7 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
     await api<ProposalView>(ANNA, `/api/robots/${id}/proposals/${question.proposal.id}`, { body: { revision: question.proposal.revision, approve: true } })
     await settle(id)
     const settings = await testRobot(id).settings()
-    expect([...settings.grants.tools].sort()).toEqual(['files', 'web'])
+    expect(settings.grants.tools).toEqual({ files: 'allow', web: 'allow' })
     expect(toolNames(id)).toEqual(expect.arrayContaining(['read', 'web_fetch']))
     expect(toolNames(id)).not.toContain('web_search')
   })

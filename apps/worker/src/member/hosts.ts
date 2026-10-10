@@ -258,7 +258,7 @@ export class HostHub {
 
   /**
    * A Robot's call on one of this Member's hosts (hs-5ktw): the Robot must hold the grant for that
-   * host and kind, or be its owner's Mr. Robot; a shared host serves every Home member's robots.
+   * host and kind (Mr. Robot holds it unless his owner lowered it, sk-br7y); a shared host serves every Home member's robots.
    */
   async authorize(id: string, robotId: string, grant: HostGrant): Promise<HostRow> {
     const row = this.row(id)
@@ -266,7 +266,7 @@ export class HostHub {
     const robot = await this.env.ROBOT.getByName(robotId).hostAccess(id, grant)
     this.robotNames.set(robotId, robot.name)
     const reaches = robot.ownerId === this.ownerId() || row.sharing === 'home'
-    if (!reaches || !(robot.granted || robot.mrRobot)) throw new HostRefused(`${robot.name} has no ${grant} grant on the host "${row.name}". Ask your owner with propose_grants.`)
+    if (!reaches || !robot.granted) throw new HostRefused(`${robot.name} has no ${grant} grant on the host "${row.name}". Ask your owner with propose_grants.`)
     if (row.online !== 1) throw new HostOffline(`the host "${row.name}" is offline (last seen ${row.last_seen === null ? 'never' : new Date(row.last_seen).toISOString().slice(0, 16).replace('T', ' ')} UTC)`)
     return row
   }

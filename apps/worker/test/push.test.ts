@@ -23,7 +23,8 @@ beforeEach(async () => {
     return realFetch(input, init)
   }) as typeof fetch
   await stubModels()
-  await api(ANNA, '/api/me')
+  // Quiet hours are read in the profile zone; the test builds its window in Warsaw.
+  await api(ANNA, '/api/me', { headers: { 'X-Time-Zone': 'Europe/Warsaw' } })
 })
 
 afterEach(() => {

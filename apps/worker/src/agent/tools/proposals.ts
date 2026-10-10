@@ -1,22 +1,57 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { GrantSet } from '@mr-robot/protocol'
-import { TOOL_GROUPS, TOOL_GROUP_NAMES, isToolGroup } from '../catalog.ts'
+import { isGrantLevel, type GrantField, type GrantLevel, type GrantLevels, type GrantSet } from '@mr-robot/protocol'
+import { TOOL_GROUPS, TOOL_GROUP_NAMES, isToolGroup, setupGrants } from '../catalog.ts'
 import type { RobotHost } from '../host.ts'
 import { tool } from './define.ts'
 
-const grantSchema = {
-  tools: { type: 'array', items: { type: 'string', enum: TOOL_GROUP_NAMES }, description: 'Tool groups' },
-  skills: { type: 'array', items: { type: 'string' }, description: 'Skill names from the Home library' },
-  recipients: { type: 'array', items: { type: 'string' }, description: 'Robot ids to message' },
-  secrets: { type: 'array', items: { type: 'string' }, description: 'Login entry names (see login_list)' },
+/** Levels a Robot may ask for itself (sk-8e0f); lowering an item is its owner's, in settings. */
+export const PROPOSABLE_LEVELS: readonly GrantLevel[] = ['allow', 'ask']
+
+/** The grant parameters of a proposal tool: a list per kind, each item a name (at allow) or { name, level }. */
+export function grantParameters(levels: readonly GrantLevel[], logins: 'secrets' | 'logins' = 'secrets'): Record<string, unknown> {
+  const list = (description: string, name: Record<string, unknown> = { type: 'string' }) => ({
+    type: 'array',
+    items: {
+      oneOf: [
+        name,
+        { type: 'object', additionalProperties: false, properties: { name: { ...name, description: 'The item' }, level: { type: 'string', enum: levels, description: `${levels.join(', ')}; allow when left out` } }, required: ['name'] },
+      ],
+    },
+    description: `${description}. Each item is a name (at allow) or { name, level }.`,
+  })
+  return {
+    tools: list('Tool groups', { type: 'string', enum: TOOL_GROUP_NAMES }),
+    skills: list('Skill names from the Home library'),
+    recipients: list('Robot ids to message'),
+    [logins]: list('Login entry names (see login_list)'),
+    hosts: list('Host facets: "<hostId>:browser", "<hostId>:files" or "<hostId>:shell"'),
+    connections: list('Connection ids; "<connectionId>:write" also sends (Gmail send, Slack post)'),
+  }
 }
 
-function grantSet(input: Partial<Record<keyof GrantSet, unknown>>): GrantSet {
-  const list = (value: unknown) => Array.isArray(value) ? [...new Set(value.map(String))] : []
-  const tools = list(input.tools)
-  const unknown = tools.filter((name) => !isToolGroup(name))
+/**
+ * The grant items of a proposal tool's arguments (sk-8e0f, sk-iq3n): each item a name at allow or
+ * { name, level } with one of `levels`. Unknown tool groups, levels and shapes are refused.
+ */
+export function proposedGrants(input: Partial<Record<GrantField, unknown>>, levels: readonly GrantLevel[]): GrantSet {
+  const parse = (field: GrantField): GrantLevels => {
+    const value = input[field]
+    if (value === undefined || value === null) return {}
+    if (!Array.isArray(value)) throw new Error(`${field} must be a list`)
+    const entries = value.map((item: unknown): [string, GrantLevel] => {
+      if (typeof item === 'string') return [item, 'allow']
+      const { name, level } = (item ?? {}) as { name?: unknown; level?: unknown }
+      if (typeof name !== 'string') throw new Error(`${field}: each item is a name or { name, level }`)
+      if (level === undefined) return [name, 'allow']
+      if (isGrantLevel(level) && levels.includes(level)) return [name, level]
+      throw new Error(`${field}: the level of "${name}" must be ${levels.join(' or ')}`)
+    })
+    return Object.fromEntries(entries)
+  }
+  const grants: GrantSet = { tools: parse('tools'), skills: parse('skills'), recipients: parse('recipients'), secrets: parse('secrets'), hosts: parse('hosts'), connections: parse('connections') }
+  const unknown = Object.keys(grants.tools).filter((name) => !isToolGroup(name))
   if (unknown.length > 0) throw new Error(`Unknown tool groups: ${unknown.join(', ')}. Known: ${TOOL_GROUP_NAMES.join(', ')}`)
-  return { tools, skills: list(input.skills), recipients: list(input.recipients), secrets: list(input.secrets) }
+  return grants
 }
 
 const catalogText = Object.entries(TOOL_GROUPS).map(([name, text]) => `- ${name}: ${text}`).join('\n')
@@ -24,12 +59,12 @@ const catalogText = Object.entries(TOOL_GROUPS).map(([name, text]) => `- ${name}
 /** Asking for more reach (robot-vy9z): the owner answers a stored proposal. */
 export function grantProposalTools(host: RobotHost): ToolDefinition[] {
   return [
-    tool<{ purpose: string } & Partial<Record<keyof GrantSet, unknown>>>({
+    tool<{ purpose: string } & Partial<Record<GrantField, unknown>>>({
       name: 'propose_grants',
-      description: `Ask your owner for additional Grants. Name exactly what you need and why; they approve or reject the stored list. Tool groups:\n${catalogText}`,
-      parameters: { properties: { purpose: { type: 'string', description: 'Why you need this, in one or two sentences' }, ...grantSchema }, required: ['purpose'] },
+      description: `Ask your owner to change your Grants for good. Name exactly what you need and why; they approve or reject the stored list. Each item gets a level: allow (you use it freely) or ask (each call waits for your owner's answer); allow when you name no level. Tool groups:\n${catalogText}`,
+      parameters: { properties: { purpose: { type: 'string', description: 'Why you need this, in one or two sentences' }, ...grantParameters(PROPOSABLE_LEVELS) }, required: ['purpose'] },
       execute: async ({ purpose, ...grants }) => {
-        const proposal = host.propose('grants', purpose, { grants: grantSet(grants) })
+        const proposal = host.propose('grants', purpose, { grants: proposedGrants(grants, PROPOSABLE_LEVELS) })
         return { proposalId: proposal.id, status: 'waiting for your owner', grants: proposal.grants }
       },
     }),
@@ -84,12 +119,13 @@ export function setupTools(host: RobotHost): ToolDefinition[] {
       },
       execute: async (input) => ({ identity: host.setIdentity(input) }),
     }),
-    tool<{ purpose: string } & Partial<Record<keyof GrantSet, unknown>>>({
+    tool<{ purpose: string } & Partial<Record<GrantField, unknown>>>({
       name: 'setup_complete',
-      description: `Finish setup: propose the one summary of Grants you need. Only Grants are approved; your persona files are your own business. Approval activates you. Tool groups:\n${catalogText}`,
-      parameters: { properties: { purpose: { type: 'string', description: 'What you will do, in one or two sentences' }, ...grantSchema }, required: ['purpose'] },
+      description: `Finish setup: propose the one summary of Grants you need, each at allow or ask (allow when you name no level). Approval activates you with what you proposed; files, web and exa are at ask unless you propose them, everything else stays denied. Only Grants are approved; your persona files are your own business. Tool groups:\n${catalogText}`,
+      parameters: { properties: { purpose: { type: 'string', description: 'What you will do, in one or two sentences' }, ...grantParameters(PROPOSABLE_LEVELS) }, required: ['purpose'] },
       execute: async ({ purpose, ...grants }) => {
-        const proposal = host.propose('setup', purpose, { grants: grantSet(grants) })
+        // The stored proposal is what approval applies, defaults included, so the owner sees it all (sk-3sij).
+        const proposal = host.propose('setup', purpose, { grants: setupGrants(proposedGrants(grants, PROPOSABLE_LEVELS)) })
         return { proposalId: proposal.id, status: 'waiting for your owner to approve the Grants', grants: proposal.grants }
       },
     }),

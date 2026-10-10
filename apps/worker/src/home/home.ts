@@ -4,6 +4,7 @@
  * One per deployment, addressed by HOME_ID.
  */
 import type { AccountStatus, ChainEntry, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
+import { usableNames } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -49,6 +50,7 @@ import { makeVault, type VaultShape } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
+import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
 export const MR_ROBOT_COLOR = '#5ec4b6'
@@ -337,11 +339,15 @@ const createRobot = (ownerId: string, brief?: string, model?: ModelChoice) => Ef
   return created
 })
 
+/** The owner's profile zone for a new Mr. Robot; UTC before the Member has a profile. The Robot follows the profile from then on. */
+const ownerTimeZone = (memberId: string) => remote((env) => env.MEMBER.getByName(memberId).profile().then((profile) => profile.timeZone, () => DEFAULT_TIME_ZONE))
+
 const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
   const id = `mr-robot-${owner.id}`
   if ((yield* entry(id)) !== undefined) return
   // Mr. Robot exists from the first sign-in; with nothing connected his first Turn points to Providers.
   const model = yield* startingModel(owner.id).pipe(Effect.catch(() => Effect.map(settings, (current) => current.defaultModel)))
+  const timeZone = yield* ownerTimeZone(owner.id)
   yield* remote((env) => env.ROBOT.getByName(id).create({
     id,
     ownerId: owner.id,
@@ -351,7 +357,7 @@ const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
     sharing: 'private',
     status: 'active',
     model,
-    timeZone: 'Europe/Warsaw',
+    timeZone,
     spendLimitUsd: null,
   }))
   yield* syncMrRobots
@@ -591,10 +597,12 @@ const grantableSecrets = (memberId: string) => Effect.gen(function* () {
   return [...own, ...shared] as SettingsCatalog['secrets']
 })
 
-/** What a Member can grant a Robot and which models it can run on. */
+/** What a Member can grant a Robot and which models it can run on; Mr. Robot's own groups only for Mr. Robot (sk-8llz). */
 const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const mrRobot = (yield* sql.first<{ kind: string }>('SELECT kind FROM robot WHERE id = ?', robotId))?.kind === 'mr-robot'
   return {
-    toolGroups: yield* Effect.map(setting<string>('exa-key'), (key) => Object.entries(TOOL_GROUPS).filter(([name]) => !MR_ROBOT_ONLY_GROUPS.includes(name)).map(([name, description]) => ({ name, description: name.startsWith('exa') && key === undefined ? `${description} Needs the Home's Exa API key: the Home admin adds it under Admin → Exa.` : description }))),
+    toolGroups: yield* Effect.map(setting<string>('exa-key'), (key) => Object.entries(TOOL_GROUPS).filter(([name]) => mrRobot || !MR_ROBOT_ONLY_GROUPS.includes(name)).map(([name, description]) => ({ name, description: name.startsWith('exa') && key === undefined ? `${description} Needs the Home's Exa API key: the Home admin adds it under Admin → Exa.` : description }))),
     skills: (yield* skills(memberId)).map(({ name, description }) => ({ name, description })),
     robots: (yield* reachable(memberId)).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
     secrets: yield* grantableSecrets(memberId),
@@ -774,7 +782,7 @@ const secretsView = (memberId: string) => Effect.gen(function* () {
   const own = (yield* remote((env) => env.MEMBER.getByName(memberId).logins())).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
   const shared = (yield* sharedSecrets).map(({ ownerId, ...secret }) => ({ ...secret, scope: 'home' as const, mine: ownerId === memberId }))
   const robots = yield* sql.all<{ id: string; name: string }>("SELECT id, json_extract(identity, '$.name') AS name FROM robot WHERE owner_id = ? AND status != 'deleted'", memberId)
-  const grants = yield* Effect.forEach(robots, (robot) => Effect.map(remote((env) => env.ROBOT.getByName(robot.id).grants()), (granted) => ({ name: robot.name, secrets: granted.secrets })).pipe(Effect.orElseSucceed(() => ({ name: robot.name, secrets: [] as readonly string[] }))), { concurrency: 8 })
+  const grants = yield* Effect.forEach(robots, (robot) => Effect.map(remote((env) => env.ROBOT.getByName(robot.id).grants()), (granted) => ({ name: robot.name, secrets: usableNames(granted.secrets) })).pipe(Effect.orElseSucceed(() => ({ name: robot.name, secrets: [] as readonly string[] }))), { concurrency: 8 })
   return [...own, ...shared].map((entry) => ({ ...entry, robots: grants.filter((robot) => robot.secrets.includes(entry.name)).map((robot) => robot.name) }))
 })
 
@@ -1276,6 +1284,12 @@ export class Home extends DurableObject<Env> {
   async setHomeMemory(content: string, by: string, exceptRobot: string | null): Promise<void> {
     this.ctx.storage.sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(content))
     await this.memoryChanged(null, 'HOME.md', by, exceptRobot)
+  }
+
+  /** A Member's profile zone changed: each of their Robots follows it, recomputes its Routines and notes it. */
+  async timeZoneChanged(memberId: string, timeZone: string): Promise<void> {
+    const robots = this.ctx.storage.sql.exec<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId).toArray()
+    await Promise.all(robots.map((robot) => this.env.ROBOT.getByName(robot.id).timeZoneChanged(timeZone).catch((error: unknown) => console.warn('time zone change not delivered', robot.id, error))))
   }
 
   /** Tell the Robots that read a shared memory file that it changed: one Member's, or every Robot for HOME.md. */

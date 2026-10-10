@@ -41,7 +41,12 @@ export type QuietHours = typeof QuietHours.Type
 export const Me = Schema.Struct({
   ...MemberView.fields,
   home: Schema.String,
+  /** The zone the person's Robots work in: the app's zone, unless the person pinned one by hand. */
   timeZone: Schema.String,
+  /** The person set the zone by hand; the app's zone no longer replaces it. */
+  timeZonePinned: Schema.Boolean,
+  /** The zone the app last reported (browser or system); null before the first report. */
+  detectedTimeZone: Schema.NullOr(Schema.String),
   quietHours: Schema.NullOr(QuietHours),
   vapidPublicKey: Schema.String,
   /** How much of a Robot's work the chat shows (pl-6eir). */
@@ -53,7 +58,10 @@ export type Me = typeof Me.Type
 
 export const MemberPreferences = Schema.Struct({
   name: Schema.optional(Schema.String),
+  /** An IANA zone typed by the person; setting it pins the zone. */
   timeZone: Schema.optional(Schema.String),
+  /** Unpin: adopt the zone the app detected. */
+  useDetectedTimeZone: Schema.optional(Schema.Literal(true)),
   quietHours: Schema.optional(Schema.NullOr(QuietHours)),
   workDetails: Schema.optional(Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])),
   theme: Schema.optional(ThemeChoice),
@@ -82,18 +90,99 @@ export type Identity = typeof Identity.Type
 export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret', 'host', 'connection'])
 export type GrantKind = typeof GrantKind.Type
 
+/**
+ * The level of one grant item (v1.11, sk-746n): allow, ask (each call waits for the owner's answer)
+ * or deny (its tools are not registered). An item that is not named is at deny.
+ */
+export const GrantLevel = Schema.Literals(['allow', 'ask', 'deny'])
+export type GrantLevel = typeof GrantLevel.Type
+export const isGrantLevel = Schema.is(GrantLevel)
+export const GRANT_LEVELS: readonly GrantLevel[] = ['allow', 'ask', 'deny']
+
+/** The items of one kind and their levels, by item name. */
+export const GrantLevels = Schema.Record(Schema.String, GrantLevel)
+export type GrantLevels = typeof GrantLevels.Type
+
+/** Every grant item of a Robot with its level. */
 export const GrantSet = Schema.Struct({
-  tools: Schema.Array(Schema.String),
-  skills: Schema.Array(Schema.String),
-  recipients: Schema.Array(Schema.String),
-  secrets: Schema.Array(Schema.String),
+  /** Tool groups (agent/catalog.ts). */
+  tools: GrantLevels,
+  skills: GrantLevels,
+  /** Robot ids it may message. */
+  recipients: GrantLevels,
+  /** Login entry names. */
+  secrets: GrantLevels,
   /** Host grants (v1.2, hs-5ktw): "<hostId>:browser", "<hostId>:files", "<hostId>:shell". */
-  hosts: Schema.optional(Schema.Array(Schema.String)),
+  hosts: GrantLevels,
   /** Connection grants (v1.5, cn-xezx): "<connectionId>" reads; "<connectionId>:write" also sends (Gmail send, Slack post). */
-  connections: Schema.optional(Schema.Array(Schema.String)),
+  connections: GrantLevels,
 })
 export type GrantSet = typeof GrantSet.Type
-export const emptyGrants: GrantSet = { tools: [], skills: [], recipients: [], secrets: [] }
+export type GrantField = keyof GrantSet
+export const emptyGrants: GrantSet = { tools: {}, skills: {}, recipients: {}, secrets: {}, hosts: {}, connections: {} }
+
+/** The GrantSet field that holds the items of a kind. */
+export const GRANT_FIELDS: Readonly<Record<GrantKind, GrantField>> = { tool: 'tools', skill: 'skills', recipient: 'recipients', secret: 'secrets', host: 'hosts', connection: 'connections' }
+
+/**
+ * Grants as a request names them: per kind, levels by name, or a list of names that are all at allow
+ * (the shape before v1.11, still accepted). A kind left out has no items.
+ */
+const GrantItemsInput = Schema.Union([Schema.Array(Schema.String), GrantLevels])
+export const GrantSetInput = Schema.Struct({
+  tools: Schema.optional(GrantItemsInput),
+  skills: Schema.optional(GrantItemsInput),
+  recipients: Schema.optional(GrantItemsInput),
+  secrets: Schema.optional(GrantItemsInput),
+  hosts: Schema.optional(GrantItemsInput),
+  connections: Schema.optional(GrantItemsInput),
+})
+export type GrantSetInput = typeof GrantSetInput.Type
+
+const levelsFrom = (items: typeof GrantItemsInput.Type | undefined): GrantLevels =>
+  items === undefined ? {} : isNameList(items) ? Object.fromEntries(items.map((name) => [name, 'allow' as const])) : { ...items }
+
+function isNameList(items: typeof GrantItemsInput.Type): items is readonly string[] {
+  return Array.isArray(items)
+}
+
+/** A decoded request's grants as a GrantSet: lists become allow. */
+export function grantSetFrom(input: GrantSetInput): GrantSet {
+  return {
+    tools: levelsFrom(input.tools), skills: levelsFrom(input.skills), recipients: levelsFrom(input.recipients),
+    secrets: levelsFrom(input.secrets), hosts: levelsFrom(input.hosts), connections: levelsFrom(input.connections),
+  }
+}
+
+/** Stored or foreign grants (a proposal payload of any version); null when they do not decode. */
+export function parseGrantSet(value: unknown): GrantSet | null {
+  const decoded = Schema.decodeUnknownOption(GrantSetInput)(value)
+  return decoded._tag === 'Some' ? grantSetFrom(decoded.value) : null
+}
+
+/** The level of one item: what the set names, deny when it names nothing (sk-746n). */
+export function grantLevel(grants: GrantSet, kind: GrantKind, name: string): GrantLevel {
+  const levels = grants[GRANT_FIELDS[kind]]
+  return Object.hasOwn(levels, name) ? levels[name]! : 'deny'
+}
+
+/** Whether a level lets the Robot use the item: allow, or ask (each call asks the owner). */
+export function usableLevel(level: GrantLevel): boolean {
+  return level !== 'deny'
+}
+
+/** The names of one kind the Robot may use (allow or ask). */
+export function usableNames(levels: GrantLevels): string[] {
+  return Object.entries(levels).filter(([, level]) => usableLevel(level)).map(([name]) => name)
+}
+
+/** `top` over `base`: every item `top` names takes its level from `top`. */
+export function overlayGrants(base: GrantSet, top: GrantSet): GrantSet {
+  return {
+    tools: { ...base.tools, ...top.tools }, skills: { ...base.skills, ...top.skills }, recipients: { ...base.recipients, ...top.recipients },
+    secrets: { ...base.secrets, ...top.secrets }, hosts: { ...base.hosts, ...top.hosts }, connections: { ...base.connections, ...top.connections },
+  }
+}
 
 export const ModelChoice = Schema.Struct({
   provider: Schema.String,
@@ -130,7 +219,7 @@ export const WorkspaceFileView = Schema.Struct({
   size: Schema.Number,
   updatedAt: Schema.Number,
   /** persona and memory files pinned first, then daily notes, local skills, screenshots, the rest. */
-  group: Schema.Literals(['persona', 'daily', 'skills', 'screens', 'other']),
+  group: Schema.Literals(['persona', 'daily', 'skills', 'screens', 'docs', 'other']),
 })
 export type WorkspaceFileView = typeof WorkspaceFileView.Type
 
@@ -282,7 +371,8 @@ export const SettingsPatch = Schema.Struct({
   wakeOnScreenNotifications: Schema.optional(Schema.Boolean),
   browserBackend: Schema.optional(Schema.NullOr(BrowserBackend)),
   compactionInstruction: Schema.optional(Schema.String),
-  grants: Schema.optional(GrantSet),
+  /** Replaces the whole set; lists of names (before v1.11) are at allow. */
+  grants: Schema.optional(GrantSetInput),
   notifications: Schema.optional(NotificationSettings),
   spendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
   discordChannel: Schema.optional(Schema.NullOr(Schema.String)),

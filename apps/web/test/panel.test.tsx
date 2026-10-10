@@ -1,8 +1,9 @@
 import { RegistryProvider } from '@effect/atom-react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { RobotPanel } from '@mr-robot/protocol'
+import { emptyGrants, type RobotPanel, type SettingsCatalog, type SettingsPatch } from '@mr-robot/protocol'
 import { Panel } from '../src/components/Panel.tsx'
+import { AdvancedSettings } from '../src/components/AdvancedSettings.tsx'
 import { EditProfileSheet, RoutineSheet } from '../src/components/RobotSheets.tsx'
 
 afterEach(cleanup)
@@ -16,7 +17,7 @@ const panel: RobotPanel = {
   settings: {
     identity: { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a' },
     sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
-    codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: { tools: [], skills: [], recipients: [], secrets: [] },
+    codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: null, discordChannel: null, discordProactive: true,
   },
   routines: [{
@@ -98,6 +99,47 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
     fireEvent.click(screen.getByText('Save'))
     await vi.waitFor(() => expect(closed).toHaveBeenCalled())
     expect(calls.find((call) => call.method === 'PATCH')!.body).toMatchObject({ identity: { name: 'Outbound' }, notifications: { enabled: false }, wakeOnScreenNotifications: true })
+    vi.unstubAllGlobals()
+  })
+})
+describe('grant levels in Advanced settings (sk-746n, sk-8llz)', () => {
+  const catalog: SettingsCatalog = {
+    toolGroups: [{ name: 'web', description: 'Fetch web pages' }, { name: 'files', description: 'Its Workspace' }, { name: 'deputy', description: 'Mr. Robot only' }],
+    skills: [], robots: [{ id: 'r-2', name: 'Accountant' }], secrets: [{ name: 'shop', scope: 'member' }], models: [],
+  }
+  const settingsOf = (patch: Partial<RobotPanel['settings']>, kind: 'robot' | 'mr-robot'): RobotPanel => ({ ...panel, summary: { ...panel.summary, kind }, settings: { ...panel.settings, ...patch } })
+  const open = (shown: RobotPanel) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
+    const saved: SettingsPatch[] = []
+    render(<RegistryProvider><AdvancedSettings panel={shown} catalog={catalog} onSave={async (patch) => { saved.push(patch) }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} /></RegistryProvider>)
+    return saved
+  }
+  const levelOf = (item: string) => screen.getByRole('radiogroup', { name: item }).querySelector('[aria-checked="true"]')?.textContent
+
+  it('shows allow, ask or deny per item, deny when not granted, and saves the chosen level', async () => {
+    const saved = open(settingsOf({ grants: { ...emptyGrants, tools: { web: 'ask' } } }, 'robot'))
+    expect(levelOf('web')).toBe('ask')
+    expect(levelOf('files')).toBe('deny')
+    expect(levelOf('Accountant')).toBe('deny')
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'files' })).getByRole('radio', { name: 'allow' }))
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'shop' })).getByRole('radio', { name: 'ask' }))
+    expect(levelOf('files')).toBe('allow')
+    fireEvent.click(screen.getByText('Save'))
+    await vi.waitFor(() => expect(saved).toHaveLength(1))
+    expect(saved[0]!.grants).toMatchObject({ tools: { web: 'ask', files: 'allow' }, secrets: { shop: 'ask' } })
+    vi.unstubAllGlobals()
+  })
+
+  it("shows Mr. Robot's real levels, lets the owner lower one, and keeps his recipients automatic", async () => {
+    const saved = open(settingsOf({ grants: { ...emptyGrants, tools: { web: 'allow', files: 'allow', deputy: 'allow' }, secrets: { shop: 'allow' } } }, 'mr-robot'))
+    expect(levelOf('deputy')).toBe('allow')
+    expect(levelOf('shop')).toBe('allow')
+    expect(screen.getByText('Mr. Robot can message every Robot you can reach.')).toBeTruthy()
+    expect(screen.queryByRole('radiogroup', { name: 'Accountant' })).toBeNull()
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'web' })).getByRole('radio', { name: 'deny' }))
+    fireEvent.click(screen.getByText('Save'))
+    await vi.waitFor(() => expect(saved).toHaveLength(1))
+    expect(saved[0]!.grants).toMatchObject({ tools: { web: 'deny', files: 'allow', deputy: 'allow' } })
     vi.unstubAllGlobals()
   })
 })

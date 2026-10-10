@@ -59,7 +59,8 @@ describe('creating a Robot', () => {
 
   it('asks for Grants in one summary; approval is a compare-and-swap that applies exactly that set (robot-cobv)', async () => {
     const { id, proposal } = await setupThroughProposal(ANNA)
-    expect(proposal).toMatchObject({ kind: 'setup', status: 'open', grants: { tools: ['web', 'routines'] } })
+    // What the owner approves is what is applied: the asked items at allow, files, web and exa at ask unless asked (sk-3sij).
+    expect(proposal).toMatchObject({ kind: 'setup', status: 'open', grants: { tools: { web: 'allow', routines: 'allow', files: 'ask', exa: 'ask' } } })
     expect(proposal.file).toBeNull()
 
     const stale = await api(ANNA, `/api/robots/${id}/proposals/${proposal.id}`, { body: { revision: proposal.revision + 1, approve: true } })
@@ -73,7 +74,12 @@ describe('creating a Robot', () => {
     const robot = (await robots(ANNA)).find((entry) => entry.id === id)
     expect(robot).toMatchObject({ status: 'active', identity: { name: 'Flat Watcher' } })
     const settings = await env.ROBOT.getByName(id).settings()
-    expect(settings.grants).toEqual({ tools: ['routines', 'web'], skills: [], recipients: [], secrets: [], hosts: [], connections: [] })
+    expect(settings.grants).toEqual({ tools: { exa: 'ask', files: 'ask', routines: 'allow', web: 'allow' }, skills: {}, recipients: {}, secrets: {}, hosts: {}, connections: {} })
+    // Ask items are registered; what was neither approved nor a default is not (sk-3sij).
+    const registered = await env.ROBOT.getByName(id).toolNames()
+    expect(registered).toEqual(expect.arrayContaining(['delete_file', 'web_search_exa', 'schedule_create']))
+    expect(registered).not.toContain('browser_open')
+    expect(registered).not.toContain('exa_agent_list_events')
 
     const again = await api(ANNA, `/api/robots/${id}/proposals/${proposal.id}`, { body: { revision: proposal.revision, approve: true } })
     expect(again.status).toBe(409)
@@ -116,16 +122,16 @@ describe('sharing and lifecycle', () => {
   it("keeps Mr. Robot's recipient Grants in step with what his Member can reach (robot-70kf)", async () => {
     const mrRobot = (await robots(ANNA)).find((robot) => robot.kind === 'mr-robot')!
     const own = await newRobot(ANNA)
-    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([own])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [own]: 'allow' })
 
     const bens = await newRobot(BEN)
     const bensMrRobot = (await robots(BEN)).find((robot) => robot.kind === 'mr-robot')!
-    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([own])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [own]: 'allow' })
     await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
-    expect([...(await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients].sort()).toEqual([own, bens].sort())
-    expect((await env.ROBOT.getByName(bensMrRobot.id).settings()).grants.recipients).toEqual([bens])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [own]: 'allow', [bens]: 'allow' })
+    expect((await env.ROBOT.getByName(bensMrRobot.id).settings()).grants.recipients).toEqual({ [bens]: 'allow' })
 
     await api(ANNA, `/api/robots/${own}`, { method: 'DELETE', body: { confirm: 'New robot' } })
-    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual([bens])
+    expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [bens]: 'allow' })
   })
 })

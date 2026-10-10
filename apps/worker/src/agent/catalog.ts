@@ -1,8 +1,10 @@
 /**
- * Grantable tool groups. A Grant names a group; only granted groups' tools are
- * registered in the Robot's composition (robot-f9ln). There is no shell, terminal
+ * Grantable tool groups. A Grant names a group at a level; only the tools of groups at
+ * allow or ask are registered in the Robot's composition (robot-f9ln, sk-746n). There is no shell, terminal
  * or container group (robot-0ms7).
  */
+import { emptyGrants, overlayGrants, type GrantSet } from '@mr-robot/protocol'
+
 export const TOOL_GROUPS = {
   files: 'Read, write, edit, glob and grep files in its own Workspace.',
   web: 'Fetch web pages by address (searching the web is the exa group).',
@@ -28,5 +30,14 @@ export function isToolGroup(name: string): name is ToolGroup {
   return Object.hasOwn(TOOL_GROUPS, name)
 }
 
-/** What Mr. Robot holds from the start; his recipient Grants follow reachability. */
-export const MR_ROBOT_TOOLS: readonly ToolGroup[] = ['files', 'web', 'routines', 'messaging', 'notify', 'robots', 'deputy']
+/**
+ * Groups a new Robot holds at ask after setup when its owner did not approve them (sk-3sij): useful
+ * at once, but every call waits for the owner. Everything else not approved stays at deny.
+ */
+export const SETUP_ASK_GROUPS: readonly ToolGroup[] = ['files', 'web', 'exa']
+
+/** What setup approval stores: the approved items at their proposed levels over the ask defaults. */
+export function setupGrants(approved: GrantSet): GrantSet {
+  return overlayGrants({ ...emptyGrants, tools: Object.fromEntries(SETUP_ASK_GROUPS.map((group) => [group, 'ask' as const])) }, approved)
+}
+

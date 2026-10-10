@@ -1,7 +1,8 @@
 /**
  * The DSH fs seam over the Robot's R2 Workspace (robot-8pqy): DSH's read, write and edit tools
  * work on /workspace, which is the Robot's R2 prefix. The owner's Member files appear at the
- * root read-only; writing them is refused with a pointer to propose_member_file_edit.
+ * root read-only; writing them is refused with a pointer to propose_member_file_edit. The product
+ * docs (docs/) are bundled with the Worker, mounted read-only, and never stored in R2.
  * A thin Cordis adapter: every operation is the Workspace Effect service run to a promise.
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -20,6 +21,7 @@ import {
   type FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
 import * as Effect from 'effect/Effect'
+import { DOCS_DIRECTORY, PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { MEMBER_FILE_NAMES, type MemberFileName } from '../member/member.ts'
 import { normalizePath, type WorkspaceShape } from './workspace.ts'
 
@@ -87,6 +89,11 @@ export class R2FileSystem extends FileSystem {
       const text = await this.member(member)
       return { version: await contentVersion(text), type: 'file', size: new TextEncoder().encode(text).length }
     }
+    if (isDocsPath(key)) {
+      const bundled = productDoc(key)
+      if (bundled !== undefined) return { version: await contentVersion(bundled.text), type: 'file', size: new TextEncoder().encode(bundled.text).length }
+      return key === DOCS_DIRECTORY ? { version: FsVersion('docs'), type: 'directory' } : undefined
+    }
     const entry = await this.run(this.workspace.stat(key))
     if (entry !== undefined) return { version: FsVersion(entry.etag), type: 'file', size: entry.size }
     const inside = await this.run(this.workspace.list(key))
@@ -101,6 +108,11 @@ export class R2FileSystem extends FileSystem {
     const key = String(fsTarget.targetKey)
     const member = memberFile(key)
     if (member !== undefined) return this.member(member)
+    if (isDocsPath(key)) {
+      const bundled = productDoc(key)
+      if (bundled === undefined) throw new FsError(`${fsTarget.displayPath} does not exist`, 'FS_NOT_FOUND')
+      return bundled.text
+    }
     const text = key === '' ? undefined : await this.run(this.workspace.readText(key))
     if (text === undefined) throw new FsError(`${fsTarget.displayPath} does not exist`, 'FS_NOT_FOUND')
     return text
@@ -114,10 +126,13 @@ export class R2FileSystem extends FileSystem {
   async readBytes(fsTarget: FsTarget, _signal: AbortSignal | undefined, maxBytes: number): Promise<Uint8Array> {
     const key = String(fsTarget.targetKey)
     const member = memberFile(key)
+    const bundled = productDoc(key)
     const bytes = member !== undefined
       ? new TextEncoder().encode(await this.member(member))
-      : new Uint8Array((await this.run(this.workspace.read(key)))?.body ?? new ArrayBuffer(0))
-    if (member === undefined && bytes.length === 0 && (await this.stat(fsTarget)) === undefined) throw new FsError(`${fsTarget.displayPath} does not exist`, 'FS_NOT_FOUND')
+      : bundled !== undefined
+        ? new TextEncoder().encode(bundled.text)
+        : isDocsPath(key) ? new Uint8Array() : new Uint8Array((await this.run(this.workspace.read(key)))?.body ?? new ArrayBuffer(0))
+    if (member === undefined && bundled === undefined && bytes.length === 0 && (await this.stat(fsTarget)) === undefined) throw new FsError(`${fsTarget.displayPath} does not exist`, 'FS_NOT_FOUND')
     if (bytes.length > maxBytes) throw new FsError(`${fsTarget.displayPath} is larger than ${maxBytes} bytes`, 'FS_TOO_LARGE')
     return bytes
   }
@@ -129,7 +144,12 @@ export class R2FileSystem extends FileSystem {
 
   async listDir(fsTarget: FsTarget): Promise<FsDirEntry[]> {
     const key = String(fsTarget.targetKey)
-    const entries = await this.run(this.workspace.list(key))
+    if (isDocsPath(key)) {
+      if (key !== DOCS_DIRECTORY) throw new FsError(`${fsTarget.displayPath} is not a directory`, 'FS_NOT_FOUND')
+      const size = (text: string) => new TextEncoder().encode(text).length
+      return Promise.all(PRODUCT_DOCS.map(async (entry): Promise<FsDirEntry> => ({ name: entry.path.slice(DOCS_DIRECTORY.length + 1), type: 'file', target: target(entry.path), version: await contentVersion(entry.text), size: size(entry.text) })))
+    }
+    const entries = (await this.run(this.workspace.list(key))).filter((entry) => !isDocsPath(entry.path))
     const prefix = key === '' ? '' : `${key}/`
     const seen = new Map<string, FsDirEntry>()
     for (const entry of entries) {
@@ -139,7 +159,10 @@ export class R2FileSystem extends FileSystem {
       if (more.length === 0) seen.set(first, { name: first, type: 'file', target: target(`${prefix}${first}`), version: FsVersion(entry.etag), size: entry.size })
       else if (!seen.has(first)) seen.set(first, { name: first, type: 'directory', target: target(`${prefix}${first}`) })
     }
-    if (key === '') for (const name of MEMBER_FILE_NAMES) seen.set(name, { name, type: 'file', target: target(name) })
+    if (key === '') {
+      for (const name of MEMBER_FILE_NAMES) seen.set(name, { name, type: 'file', target: target(name) })
+      seen.set(DOCS_DIRECTORY, { name: DOCS_DIRECTORY, type: 'directory', target: target(DOCS_DIRECTORY) })
+    }
     if (seen.size === 0 && key !== '') throw new FsError(`${fsTarget.displayPath} is not a directory`, 'FS_NOT_FOUND')
     return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name))
   }
@@ -174,6 +197,7 @@ export class R2FileSystem extends FileSystem {
     if (member !== undefined) {
       throw new FsError(`${member} belongs to your owner and is read-only to you. Change it with the tool you were given for shared files: memory_write_shared, or propose_member_file_edit.`, 'FS_PERMISSION_DENIED')
     }
+    if (isDocsPath(key)) throw new FsError(docsReadOnlyMessage(fsTarget.displayPath), 'FS_PERMISSION_DENIED')
     if (key === '') throw new FsError('the Workspace root is a directory', 'FS_NOT_REGULAR_FILE')
     return key
   }

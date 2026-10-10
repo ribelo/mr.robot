@@ -7,7 +7,7 @@
  */
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
-import { renderBaseline, renderChanges, type MemoryChange, type MemoryFile } from '../agent/memory.ts'
+import { renderBaseline, renderChanges, type MemoryChange, type MemoryFile, type SharedFileEdit } from '../agent/memory.ts'
 import { tool } from '../agent/tools/define.ts'
 import { capability } from './define.ts'
 
@@ -23,10 +23,19 @@ export interface MemoryHost {
   needsBaseline(sessionId: string): boolean
   /** The message entered the context: clear pending changes; a baseline marks the session current. */
   memoryDelivered(sessionId: string, baseline: boolean): void
-  /** Mr. Robot only: write an owner or Home file directly. */
-  writeShared?(file: SharedFile, content: string): Promise<void>
-  /** Other Robots: ask the owner to approve an edit. */
-  propose(kind: 'member-file', purpose: string, payload: Record<string, unknown>): { id: string }
+  /** How this Robot changes owner and Home files, by its kind (v1.11, sk-a2yy). */
+  readonly shared: SharedFiles
+}
+
+/** Mr. Robot writes owner and Home files directly; other Robots ask the owner to approve an edit. */
+export type SharedFiles =
+  | { readonly kind: 'mr-robot'; write(file: SharedFile, content: string): Promise<void> }
+  | { readonly kind: 'robot'; propose(kind: 'member-file', purpose: string, payload: Record<string, unknown>): { id: string } }
+
+/** What the memory header says about shared files: only the tool this Robot has (none while tools are off). */
+export function sharedFileEdit(kind: SharedFiles['kind'], tools: boolean): SharedFileEdit {
+  if (!tools) return 'none'
+  return kind === 'mr-robot' ? 'write' : 'propose'
 }
 
 export interface MemoryConfig {
@@ -45,10 +54,10 @@ const memoryMessage = (text: string, form: 'baseline' | 'changes'): UserMessage 
 const isMemory = (message: unknown) => (message as { source?: { memory?: unknown } }).source?.memory !== undefined
 
 function memoryTools(config: MemoryConfig) {
-  const { host } = config
+  const { shared } = config.host
   if (!config.tools) return []
-  if (host.writeShared !== undefined) {
-    const write = host.writeShared.bind(host)
+  if (shared.kind === 'mr-robot') {
+    const write = shared.write.bind(shared)
     return [tool<{ file: SharedFile; content: string }>({
       name: 'memory_write_shared',
       description: "Write the complete new version of one of your owner's shared memory files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) or the Home's HOME.md. Every Robot that reads it is told it changed.",
@@ -75,7 +84,7 @@ function memoryTools(config: MemoryConfig) {
     emptyAllowed: ['content'],
     execute: async ({ file, content, purpose }) => {
       if (!SHARED_FILES.includes(file)) throw new Error(`Only ${SHARED_FILES.join(', ')} can be proposed`)
-      const proposal = host.propose('member-file', purpose, { file: { name: file, content } })
+      const proposal = shared.propose('member-file', purpose, { file: { name: file, content } })
       return { proposalId: proposal.id, status: 'waiting for your owner' }
     },
   })]
@@ -105,7 +114,7 @@ export const Memory = {
       const changes = config.host.memoryChanges()
       if (!baseline && changes.length === 0) return decision
       const files = await config.host.memoryFiles()
-      const message = baseline ? memoryMessage(renderBaseline(files, config.maxBytes), 'baseline') : memoryMessage(renderChanges(changes, files, config.maxBytes), 'changes')
+      const message = baseline ? memoryMessage(renderBaseline(files, config.maxBytes, sharedFileEdit(config.host.shared.kind, config.tools)), 'baseline') : memoryMessage(renderChanges(changes, files, config.maxBytes), 'changes')
       config.host.memoryDelivered(sessionId, baseline)
       // Right after the claimed batch: the wake-up message first, then the memory it should be read with.
       const last = decision.messages.findLastIndex((entry) => messages.includes(entry))

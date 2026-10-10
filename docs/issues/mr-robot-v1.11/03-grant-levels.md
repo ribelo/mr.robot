@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Level column with migration; effectiveGrants returns levels; Mr. Robot's defaults and lowering work and his settings page shows the truth
-- [ ] Three-state control in Advanced settings; setup defaults; deputy and propose tools with levels
-- [ ] Tool-surface test extended: registration follows levels; workerd tests for Mr. Robot defaults, lowering, setup defaults, migration
+- [x] Level column with migration; effectiveGrants returns levels; Mr. Robot's defaults and lowering work and his settings page shows the truth
+- [x] Three-state control in Advanced settings; setup defaults; deputy and propose tools with levels
+- [x] Tool-surface test extended: registration follows levels; workerd tests for Mr. Robot defaults, lowering, setup defaults, migration

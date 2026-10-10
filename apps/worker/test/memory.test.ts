@@ -95,17 +95,17 @@ describe('memory as a plugin (v1.3 ticket 02)', () => {
       { scope: 'member', path: 'USER.md', content: 'user '.repeat(100) },
       { scope: 'robot', path: 'MEMORY.md', content: 'memory '.repeat(100) },
     ]
-    const full = renderBaseline(files, 100_000)
+    const full = renderBaseline(files, 100_000, 'propose')
     const at = (path: string) => full.indexOf(`path="${path}"`)
     expect(at('HOME.md')).toBeLessThan(at('USER.md'))
     expect(at('USER.md')).toBeLessThan(at('MEMORY.md'))
     expect(at('MEMORY.md')).toBeLessThan(at('memory/2026-10-07.md'))
-    const tight = renderBaseline(files, 2000)
+    const tight = renderBaseline(files, 2000, 'propose')
     expect(new TextEncoder().encode(tight).length).toBeLessThanOrEqual(2000)
     expect(tight).not.toContain('home home')
     expect(tight).toContain('today today')
     expect(tight).toContain('Memory budget: HOME.md')
-    const tighter = renderBaseline(files, 900)
+    const tighter = renderBaseline(files, 900, 'propose')
     expect(new TextEncoder().encode(tighter).length).toBeLessThanOrEqual(900)
     expect(tighter).toContain('[truncated]')
   })

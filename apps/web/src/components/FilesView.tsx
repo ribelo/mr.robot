@@ -12,6 +12,7 @@ const GROUPS: ReadonlyArray<readonly [WorkspaceFileView['group'], string]> = [
   ['daily', 'Daily notes'],
   ['skills', 'Skills'],
   ['other', 'Other files'],
+  ['docs', 'Product docs (read-only)'],
   ['screens', 'Screenshots'],
 ]
 
@@ -49,7 +50,7 @@ function FileList({ robotId, files, canEdit, onOpen }: { robotId: string; files:
               <li key={file.path}>
                 <button type="button" className="file-row" onClick={() => onOpen(file.path)}>
                   <span className="file-name">{file.path}</span>
-                  <span className="muted">{size(file.size)} · {new Date(file.updatedAt).toLocaleString()}</span>
+                  <span className="muted">{file.group === 'docs' ? size(file.size) : `${size(file.size)} · ${new Date(file.updatedAt).toLocaleString()}`}</span>
                 </button>
               </li>
             ))}
@@ -97,7 +98,7 @@ function FileText({ robotId, path, canEdit, file, onBack }: { robotId: string; p
               <button type="button" className="button" onClick={() => { if (confirm(`Delete ${path}?`)) void command((api) => api.deleteFile(robotId, path), [keys.files(robotId)]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) onBack(); else setStatus(failure) }) }}>Delete</button>
               <button type="button" className="button button-primary" disabled={text === file.text} onClick={() => void save()}>Save</button>
             </div>
-          ) : <div className="muted">{canEdit ? file.note : 'Only the owner edits this Robot\'s files.'}</div>}
+          ) : <div className="muted">{file.readOnly && file.note !== null ? file.note : canEdit ? file.note : 'Only the owner edits this Robot\'s files.'}</div>}
         </>
       )}
     </div>

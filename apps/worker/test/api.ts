@@ -10,10 +10,10 @@ export async function stubModels(): Promise<void> {
 }
 
 /** Call the edge API as a person (signed in through the dev identity). */
-export async function api<T = unknown>(as: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<{ status: number; body: T }> {
+export async function api<T = unknown>(as: string, path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<{ status: number; body: T }> {
   const response = await SELF.fetch(`https://mr-robot.test${path}`, {
     method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
-    headers: { 'x-dev-identity': as, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
+    headers: { 'x-dev-identity': as, ...init.headers, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   })
   return { status: response.status, body: (await response.json()) as T }

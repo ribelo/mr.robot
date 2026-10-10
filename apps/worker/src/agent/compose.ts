@@ -67,6 +67,10 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     })
     await ctx.plugin(TokenMeter)
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
+    ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+      const assembly = await next()
+      return { ...assembly, sections: assembly.sections.filter((section) => isProductSection(section.name)) }
+    })
     await ctx.plugin(ToolRuntime, {})
     for (const { plugin, config } of input.mounts) {
       await plugin.seams?.(ctx, config as never)
@@ -87,7 +91,8 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     const agentOptions = { provider: input.provider, model: input.model, ...reasoning(input.effort, efforts) }
     const setup = (agentCtx: Context) => {
       for (const [index, section] of input.prompt.entries()) {
-        agentCtx.systemPrompt.section({ name: `robot:${section.name}`, order: index, text: () => section.text() })
+        // Literal text: a name or a file with "{{" in it must not be read as a DSH prompt variable.
+        agentCtx.systemPrompt.section({ name: `robot:${section.name}`, order: index, interpolate: false, text: () => section.text() })
       }
       if (input.ptcRuntime !== undefined) agentCtx.tools.presentAs('ptc')
     }
@@ -116,6 +121,16 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     await ctx.fiber.dispose()
     throw error
   }
+}
+
+/**
+ * The prompt allow-list (v1.11, sk-9ekj, sk-xs60): only sections the product wrote are rendered. These are
+ * the Robot's own sections (robot:*), the rules of its capability plugins (mr-robot:*, plugins/define.ts)
+ * and, in code mode, DSH's statement that only run_code is called and the SDK it declares. Every other
+ * section a DSH plugin registers ("not shell commands like cat", the schedule plugin's text) is dropped.
+ */
+function isProductSection(name: string): boolean {
+  return name.startsWith('robot:') || name.startsWith('mr-robot:') || name === 'tools:ptc-only' || name === 'tools:sdk'
 }
 
 /** The supported effort closest to the chosen one; none when the model has no reasoning levels. */

@@ -39,6 +39,14 @@ export interface ProviderContext {
   readonly images?: ImageLoader
 }
 
+/**
+ * The identity line an adapter puts before the Robot's system prompt, or null (v1.11, sk-74ym): the
+ * Anthropic adapter on a Claude subscription declares one; every other adapter puts nothing there.
+ */
+export function prependedIdentity(adapter: LlmAdapter): string | null {
+  return adapter instanceof AnthropicAdapter ? adapter.prependedIdentity : null
+}
+
 export function providerAdapter(provider: string, context: ProviderContext): LlmAdapter {
   const window = context.contextWindow ?? 128_000
   switch (provider) {

@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react'
 import { useMeasuredRows, useRowWindow } from './row-window.ts'
-import type { ChatItem, ProposalView, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
+import type { ChatItem, GrantLevels, ProposalView, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
 import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
@@ -217,11 +217,15 @@ export function askTitle(proposal: ProposalView): string {
 export function QuestionCard({ proposal, canAnswer, onAnswer, counter }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; counter?: string }) {
   const title = askTitle(proposal)
   const grants = proposal.grants
+  // Each item with its level (sk-746n); allow is the plain case.
+  const items = (kind: string, levels: GrantLevels) => Object.entries(levels).map(([name, level]) => [kind, level === 'allow' ? name : `${name} (${level === 'ask' ? 'ask each time' : 'deny'})`] as const)
   const lines = grants === null ? [] : [
-    ...grants.tools.map((name) => ['Tool', name]),
-    ...grants.skills.map((name) => ['Skill', name]),
-    ...grants.recipients.map((name) => ['Recipient', name]),
-    ...grants.secrets.map((name) => ['Login', name]),
+    ...items('Tool', grants.tools),
+    ...items('Skill', grants.skills),
+    ...items('Recipient', grants.recipients),
+    ...items('Login', grants.secrets),
+    ...items('Host', grants.hosts),
+    ...items('Connection', grants.connections),
   ]
   return (
     <div className="question" data-status={proposal.status}>

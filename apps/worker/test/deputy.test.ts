@@ -1,6 +1,6 @@
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Conversation, ConversationPage, ConversationSearchResult, RobotPanel, RobotSummary, RoutineView, TrajectoryExcerpt, WorkspaceFileContent, WorkspaceFileView } from '@mr-robot/protocol'
+import { emptyGrants, type Conversation, type ConversationPage, type ConversationSearchResult, type RobotPanel, type RobotSummary, type RoutineView, type TrajectoryExcerpt, type WorkspaceFileContent, type WorkspaceFileView } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
@@ -12,7 +12,7 @@ beforeEach(async () => {
   scripts.clear()
   requests.clear()
   await stubModels()
-  await api(ANNA, '/api/me')
+  await api(ANNA, '/api/me', { headers: { 'X-Time-Zone': 'Europe/Warsaw' } })
   await api(ANNA, '/api/admin/members', { body: { email: BEN } })
   await api(BEN, '/api/me')
 })
@@ -68,7 +68,7 @@ describe('the deputy sees the Robots the owner reaches (v1.6 ticket 02)', () => 
     scripts.set(accountant, [{ calls: [{ name: 'schedule_create', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: 'Europe/Warsaw' } } }] }, { text: 'Scheduled.' }])
     await api(ANNA, `/api/robots/${accountant}/messages`, { body: { text: 'every day please' } })
     await settle(accountant)
-    await env.ROBOT.getByName(accountant).proposeFromChief('Mr. Robot asks: it needs the web', { tools: ['web'], skills: [], recipients: [], secrets: [] })
+    await env.ROBOT.getByName(accountant).proposeFromChief('Mr. Robot asks: it needs the web', { ...emptyGrants, tools: { web: 'allow' } })
 
     const [listed, page, found, files, soul, grants, routines, settings] = (await chief(chiefRobot, [
       { name: 'robot_list', args: {} },

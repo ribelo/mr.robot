@@ -7,8 +7,11 @@ import { TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import { recordFromLegacy, type ScheduleRecord } from '../agent/schedule.ts'
+import { GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, usableLevel } from '@mr-robot/protocol'
 import type {
   GrantKind,
+  GrantLevel,
+  GrantLevels,
   GrantSet,
   Identity,
   ChainEntry, ModelChoice,
@@ -53,6 +56,7 @@ export interface RobotConfig {
   readonly compactionInstruction: string
   readonly notifications: NotificationSettings
   readonly spendLimitUsd: number | null
+  /** The owner's profile zone, kept current by the Member's fan-out (Robot.timeZoneChanged); never set by hand. */
   readonly timeZone: string
   readonly liveSessionId: string
   /** Bumped on every settings or grant change; the agent composition is rebuilt when it moves. */
@@ -139,9 +143,11 @@ export interface RoutineRun {
   readonly firstLine: string
 }
 
-const SCHEMA_VERSION = 7
+const SCHEMA_VERSION = 8
 
 const MIGRATIONS: Record<number, readonly string[]> = {
+  // Grant levels (v1.11, sk-xj5q): every row stored so far was a grant, so it becomes allow.
+  8: ["ALTER TABLE grant_item ADD COLUMN level TEXT NOT NULL DEFAULT 'allow'"],
   // This chief's copy of each Thread (v1.9).
   7: ['CREATE TABLE thread (id TEXT PRIMARY KEY, view TEXT NOT NULL, window_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)'],
   // Run records with a finish time and the 20-run window (cd-3t0p); a Routine card in the chat (cd-n9pi).
@@ -261,30 +267,29 @@ export class RobotStore {
 
   // ------------------------------------------------------------ grants
 
+  /** The stored rows: every item this Robot was given a level for. */
   grants(): GrantSet {
-    const rows = this.sql.exec<{ kind: GrantKind; name: string }>('SELECT kind, name FROM grant_item ORDER BY kind, name').toArray()
-    const pick = (kind: GrantKind) => rows.filter((row) => row.kind === kind).map((row) => row.name)
+    const rows = this.sql.exec<{ kind: GrantKind; name: string; level: string }>('SELECT kind, name, level FROM grant_item ORDER BY kind, name').toArray()
+    const pick = (kind: GrantKind): GrantLevels => Object.fromEntries(rows.filter((row) => row.kind === kind).map((row) => [row.name, isGrantLevel(row.level) ? row.level : 'deny']))
     return { tools: pick('tool'), skills: pick('skill'), recipients: pick('recipient'), secrets: pick('secret'), hosts: pick('host'), connections: pick('connection') }
   }
 
-  /** Replace the whole grant set exactly. */
+  /**
+   * Replace the stored rows (sk-746n). An ordinary Robot keeps allow and ask rows: an item without a row
+   * is at deny. Mr. Robot keeps his recipients and otherwise only the items his owner lowered (ask or
+   * deny): everything he reaches is at allow without a row, so allow is never pinned (sk-br7y, sk-8llz).
+   */
   setGrants(grants: GrantSet): void {
+    const mrRobot = this.config()?.kind === 'mr-robot'
+    const kept = (kind: GrantKind, level: GrantLevel) => mrRobot && kind !== 'recipient' ? level !== 'allow' : usableLevel(level)
     this.transaction(() => {
       this.sql.exec('DELETE FROM grant_item')
-      const insert = (kind: GrantKind, names: readonly string[]) => {
-        for (const name of new Set(names)) this.sql.exec('INSERT INTO grant_item (kind, name) VALUES (?, ?)', kind, name)
+      for (const [kind, field] of Object.entries(GRANT_FIELDS) as Array<[GrantKind, keyof GrantSet]>) {
+        for (const [name, level] of Object.entries(grants[field])) {
+          if (kept(kind, level)) this.sql.exec('INSERT INTO grant_item (kind, name, level) VALUES (?, ?, ?)', kind, name, level)
+        }
       }
-      insert('tool', grants.tools)
-      insert('skill', grants.skills)
-      insert('recipient', grants.recipients)
-      insert('secret', grants.secrets)
-      insert('host', grants.hosts ?? [])
-      insert('connection', grants.connections ?? [])
     })
-  }
-
-  hasGrant(kind: GrantKind, name: string): boolean {
-    return this.sql.exec('SELECT 1 FROM grant_item WHERE kind = ? AND name = ?', kind, name).toArray().length > 0
   }
 
   /** What Mr. Robot can reach without grants: every login and skill its owner can (rb-b0rs). Kept in memory, refreshed each Turn. */
@@ -294,25 +299,38 @@ export class RobotStore {
     this.reach = reach
   }
 
-  /** The grants that apply: the stored set, or for Mr. Robot every tool group and everything its owner reaches. */
+  /**
+   * The levels that apply (sk-br7y): an ordinary Robot's stored rows; for Mr. Robot every tool group
+   * (also of a plugin added later) and everything his owner reaches at allow, under the rows his owner
+   * stored to lower an item. Recipients are stored rows for both.
+   */
   effectiveGrants(): GrantSet {
     const stored = this.grants()
     if (this.config()?.kind !== 'mr-robot') return stored
-    return {
-      tools: [...TOOL_GROUP_NAMES],
-      skills: [...new Set([...stored.skills, ...this.reach.skills])],
-      recipients: stored.recipients,
-      secrets: [...new Set([...stored.secrets, ...this.reach.secrets])],
-      hosts: [...new Set([...(stored.hosts ?? []), ...(this.reach.hosts ?? []).flatMap((id) => [`${id}:browser`, `${id}:files`, `${id}:shell`])])],
+    const allow = (names: readonly string[]): GrantLevels => Object.fromEntries(names.map((name) => [name, 'allow' as const]))
+    const reached: GrantSet = {
+      tools: allow(TOOL_GROUP_NAMES),
+      skills: allow(this.reach.skills),
+      recipients: {},
+      secrets: allow(this.reach.secrets),
+      hosts: allow((this.reach.hosts ?? []).flatMap((id) => [`${id}:browser`, `${id}:files`, `${id}:shell`])),
       // Mr. Robot reaches every connection his owner can use, writing included (cn-xezx).
-      connections: [...new Set([...(stored.connections ?? []), ...(this.reach.connections ?? []).flatMap((id) => [id, `${id}:write`])])],
+      connections: allow((this.reach.connections ?? []).flatMap((id) => [id, `${id}:write`])),
     }
+    return overlayGrants(reached, stored)
   }
 
+  /**
+   * The level of one grant item for this Robot: the single answer to "may it use X, and how" (sk-746n).
+   * Registration, call-time checks and the ask-per-call wrapper read levels through this.
+   */
+  levelOf(kind: GrantKind, name: string): GrantLevel {
+    return grantLevel(this.effectiveGrants(), kind, name)
+  }
+
+  /** Whether the Robot may use an item: allow, or ask (each call asks the owner). */
   mayUse(kind: GrantKind, name: string): boolean {
-    const grants = this.effectiveGrants()
-    const list = kind === 'tool' ? grants.tools : kind === 'skill' ? grants.skills : kind === 'secret' ? grants.secrets : kind === 'host' ? (grants.hosts ?? []) : kind === 'connection' ? (grants.connections ?? []) : grants.recipients
-    return list.includes(name)
+    return usableLevel(this.levelOf(kind, name))
   }
 
   // ------------------------------------------------------------ proposals
@@ -654,7 +672,7 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
     status: row.status,
     purpose: row.purpose,
     payload,
-    grants: (payload['grants'] as GrantSet | undefined) ?? null,
+    grants: payload['grants'] === undefined ? null : parseGrantSet(payload['grants']),
     file: (payload['file'] as ProposalView['file'] | undefined) ?? null,
     skill: (payload['skill'] as ProposalView['skill'] | undefined) ?? null,
     ...reviewOf(payload),

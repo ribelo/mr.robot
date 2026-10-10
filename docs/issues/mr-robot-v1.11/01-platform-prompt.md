@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Prompt preview shows the bridge on a Claude subscription and not elsewhere; the config name after a rename; Mr. Robot's role block unchanged after editing SOUL.md
-- [ ] Core sections and the language rule present for every Robot; the memory header per Robot kind; no DSH plugin prompt text
-- [ ] Workerd tests through the prompt preview endpoint for the above
+- [x] Prompt preview shows the bridge on a Claude subscription and not elsewhere; the config name after a rename; Mr. Robot's role block unchanged after editing SOUL.md
+- [x] Core sections and the language rule present for every Robot; the memory header per Robot kind; no DSH plugin prompt text
+- [x] Workerd tests through the prompt preview endpoint for the above

@@ -1,9 +1,11 @@
 /**
  * File tools DSH does not provide on R2 (robot-8pqy): delete, glob and grep. read, write and edit
  * come from DSH's tool-fs over the R2 fs seam (workspace/r2-filesystem.ts). Paths here are
- * Workspace-relative or under /workspace; the owner's Member files are read-only (robot-jpzp).
+ * Workspace-relative or under /workspace; the owner's Member files and the platform's docs/ are
+ * read-only (robot-jpzp, v1.11 sk-9db0).
  */
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../../docs/index.ts'
 import { MEMBER_FILE_NAMES, type MemberFileName } from '../../member/member.ts'
 import { normalizePath } from '../../workspace/workspace.ts'
 import type { RobotHost, WorkspaceHost } from '../host.ts'
@@ -19,12 +21,18 @@ function memberFileName(path: string): MemberFileName | undefined {
 
 const READ_ONLY = (name: string) => `${name} belongs to your owner and is read-only to you. To change it, use the tool you were given for shared files: memory_write_shared, or propose_member_file_edit (your owner approves or rejects the new full content).`
 
+const DOCS_PATHS = PRODUCT_DOCS.map((entry) => entry.path)
+/** Stored entries without anything under docs/: the platform's docs come from the bundle only. */
+const stored = <T extends { path: string }>(entries: readonly T[]): T[] => entries.filter((entry) => !isDocsPath(entry.path))
+
 export function fileTools(host: WorkspaceHost): ToolDefinition[] {
   const ws = host.workspace
   const relative = (path: string) => path.replace(/^\/workspace\/?/, '')
   const readText = async (path: string): Promise<string | undefined> => {
     const member = memberFileName(path)
     if (member !== undefined) return host.memberFile(member)
+    const key = normalizePath(relative(path))
+    if (key !== undefined && isDocsPath(key)) return productDoc(key)?.text
     return host.run(ws.readText(path))
   }
   return [
@@ -37,6 +45,7 @@ export function fileTools(host: WorkspaceHost): ToolDefinition[] {
         if (member !== undefined) throw new Error(READ_ONLY(member))
         const target = normalizePath(relative(path))
         if (target === undefined) throw new Error(`"${path}" is not a file path inside your Workspace; nothing was deleted.`)
+        if (isDocsPath(target)) throw new Error(docsReadOnlyMessage(target))
         if ((await host.run(ws.stat(target))) === undefined) throw new Error(`No file "${target}" in your Workspace; nothing was deleted.`)
         await host.run(ws.remove(target))
         return { deleted: target }
@@ -50,7 +59,7 @@ export function fileTools(host: WorkspaceHost): ToolDefinition[] {
       execute: async ({ pattern }) => {
         const matcher = globToRegExp(pattern)
         const entries = await host.run(ws.list())
-        const paths = [...MEMBER_FILE_NAMES, ...entries.map((entry) => entry.path)].filter((path) => matcher.test(path)).sort()
+        const paths = [...MEMBER_FILE_NAMES, ...DOCS_PATHS, ...stored(entries).map((entry) => entry.path)].filter((path) => matcher.test(path)).sort()
         return paths
       },
     }),
@@ -66,7 +75,7 @@ export function fileTools(host: WorkspaceHost): ToolDefinition[] {
         const regex = new RegExp(pattern, ignore_case === true ? 'i' : '')
         const files = glob === undefined ? undefined : globToRegExp(glob)
         const entries = await host.run(ws.list())
-        const paths = [...MEMBER_FILE_NAMES, ...entries.filter((entry) => entry.size <= 1_000_000).map((entry) => entry.path)]
+        const paths = [...MEMBER_FILE_NAMES, ...DOCS_PATHS, ...stored(entries).filter((entry) => entry.size <= 1_000_000).map((entry) => entry.path)]
           .filter((path) => files === undefined || files.test(path))
         const matches: Array<{ path: string; line: number; text: string }> = []
         for (const path of paths) {

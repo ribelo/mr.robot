@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAtomRefresh } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import type { AdminView } from '@mr-robot/protocol'
+import type { AdminView, GrantLevels } from '@mr-robot/protocol'
 import { adminAtom, homeMemoryAtom, keys, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
@@ -20,6 +20,11 @@ export function Admin() {
     return () => clearInterval(timer)
   }, [refresh])
   return <AtomView atom={adminAtom} what="the Home" errorTitle="The admin view cannot be loaded">{(view) => <AdminPage view={view} />}</AtomView>
+}
+
+/** Items a Robot may use, an ask item marked (sk-746n). */
+function grantNames(levels: GrantLevels, prefix: string): string[] {
+  return Object.entries(levels).filter(([, level]) => level !== 'deny').map(([name, level]) => `${prefix}${name}${level === 'ask' ? ' (ask)' : ''}`)
 }
 
 function AdminPage({ view }: { view: AdminView }) {
@@ -43,7 +48,7 @@ function AdminPage({ view }: { view: AdminView }) {
               <td>{robot.ownerName}</td>
               <td><span className={`state state-${robot.fleetState.split(' ')[0]}`}>{robot.fleetState}</span></td>
               <td>{robot.model.model}<div className="muted">{robot.model.effort}</div></td>
-              <td className="muted">{[...robot.grants.tools, ...robot.grants.skills.map((name) => `skill:${name}`), ...robot.grants.secrets.map((name) => `secret:${name}`)].join(', ') || 'none'}{robot.grants.recipients.length === 0 ? '' : ` · ${robot.grants.recipients.length} recipients`}</td>
+              <td className="muted">{[...grantNames(robot.grants.tools, ''), ...grantNames(robot.grants.skills, 'skill:'), ...grantNames(robot.grants.secrets, 'secret:')].join(', ') || 'none'}{Object.keys(robot.grants.recipients).length === 0 ? '' : ` · ${Object.keys(robot.grants.recipients).length} recipients`}</td>
               <td>{usd(robot.usage.costUsd)}<div className="muted">{tokens(robot.usage.inputTokens + robot.usage.outputTokens)} tokens</div></td>
             </tr>
           ))}

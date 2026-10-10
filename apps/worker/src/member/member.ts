@@ -19,6 +19,7 @@ import type { AccountStatus, AccountUsage, ConnectorKind, NotificationKind, Prov
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
+import { DEFAULT_TIME_ZONE, parseTimeZone } from '../robot/time-zone.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { makeVault, type VaultError, type VaultShape } from '../platform/vault.ts'
@@ -32,7 +33,12 @@ export interface MemberProfile {
   readonly id: string
   readonly email: string
   readonly name: string
+  /** The zone the owner's Robots work in: the app's zone, unless pinned. */
   readonly timeZone: string
+  /** The person set the zone by hand; the app's zone no longer replaces it. Absent: not pinned. */
+  readonly timeZonePinned?: boolean
+  /** The zone the app last reported; absent before the first report. */
+  readonly detectedTimeZone?: string
   readonly quietHours: QuietHours | null
   readonly workDetails?: WorkDetails
   readonly theme?: ThemeChoice
@@ -74,7 +80,7 @@ const init = (input: { id: string; email: string; name: string }) => Effect.gen(
   const existing = yield* kvGet<MemberProfile>('profile')
   if (existing !== undefined) return existing
   const sql = yield* Sql
-  const created: MemberProfile = { ...input, timeZone: 'Europe/Warsaw', quietHours: null }
+  const created: MemberProfile = { ...input, timeZone: DEFAULT_TIME_ZONE, quietHours: null }
   yield* sql.transaction(() => {
     sql.raw.exec('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', 'profile', JSON.stringify(created))
     for (const name of MEMBER_FILE_NAMES) {
@@ -84,8 +90,37 @@ const init = (input: { id: string; email: string; name: string }) => Effect.gen(
   return created
 })
 
-const updateProfile = (patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null; workDetails?: WorkDetails; theme?: ThemeChoice }) => Effect.gen(function* () {
-  const next = { ...(yield* profile), ...patch }
+/** What a person can change on the profile. A `timeZone` is typed by hand and pins; `useDetectedTimeZone` unpins. */
+export interface ProfilePatch {
+  readonly name?: string
+  readonly timeZone?: string
+  readonly useDetectedTimeZone?: true
+  readonly quietHours?: QuietHours | null
+  readonly workDetails?: WorkDetails
+  readonly theme?: ThemeChoice
+}
+
+const updateProfile = (patch: ProfilePatch) => Effect.gen(function* () {
+  const current = yield* profile
+  const { timeZone, useDetectedTimeZone, ...rest } = patch
+  if (timeZone !== undefined && useDetectedTimeZone === true) return yield* invalid('give a time zone or ask for the app\'s zone, not both')
+  const typed = timeZone === undefined ? undefined : parseTimeZone(timeZone)
+  if (timeZone !== undefined && typed === undefined) return yield* invalid(`"${timeZone}" is not a time zone; use a name like Europe/Warsaw`)
+  const zone: Partial<MemberProfile> =
+    typed !== undefined ? { timeZone: typed, timeZonePinned: true }
+      : useDetectedTimeZone === true ? { timeZonePinned: false, ...(current.detectedTimeZone === undefined ? {} : { timeZone: current.detectedTimeZone }) }
+        : {}
+  const next = { ...current, ...rest, ...zone }
+  yield* kvSet('profile', next)
+  return next
+})
+
+/** The app reported its zone: it becomes the profile zone unless the person pinned one. */
+const detectTimeZone = (zone: string) => Effect.gen(function* () {
+  const current = yield* profile
+  const adopt = current.timeZonePinned !== true
+  if (current.detectedTimeZone === zone && (!adopt || current.timeZone === zone)) return current
+  const next = { ...current, detectedTimeZone: zone, ...(adopt ? { timeZone: zone } : {}) }
   yield* kvSet('profile', next)
   return next
 })
@@ -554,7 +589,24 @@ export class Member extends DurableObject<Env> {
 
   init(input: { id: string; email: string; name: string }): Promise<MemberProfile> { return this.run(init(input)) }
   profile(): Promise<MemberProfile> { return this.run(profile) }
-  updateProfile(patch: { name?: string; timeZone?: string; quietHours?: QuietHours | null; workDetails?: WorkDetails; theme?: ThemeChoice }): Promise<MemberProfile> { return this.run(updateProfile(patch)) }
+  async updateProfile(patch: ProfilePatch): Promise<MemberProfile> {
+    const before = await this.run(profile)
+    const after = await this.run(updateProfile(patch))
+    await this.zoneMoved(before, after)
+    return after
+  }
+  /** The app opened and reported its zone (an IANA zone, already parsed). */
+  async detectTimeZone(zone: string): Promise<MemberProfile> {
+    const before = await this.run(profile)
+    const after = await this.run(detectTimeZone(zone))
+    await this.zoneMoved(before, after)
+    return after
+  }
+  /** The profile zone changed: every Robot of this Member follows it and is told (v1.11 ticket 08). */
+  private async zoneMoved(before: MemberProfile, after: MemberProfile): Promise<void> {
+    if (before.timeZone === after.timeZone) return
+    await this.env.HOME.getByName(HOME_ID).timeZoneChanged(after.id, after.timeZone).catch((error: unknown) => console.warn('time zone change not delivered', error))
+  }
   file(name: MemberFileName): Promise<string> { return this.run(file(name)) }
   files(): Promise<Record<MemberFileName, string>> { return this.run(files) }
   /** A shared memory file changed: every Robot of this Member hears who changed it (pl-9n7w). */

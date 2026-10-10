@@ -1,7 +1,7 @@
 import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { useState, useEffect } from 'react'
-import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, BrowserBackend } from '@mr-robot/protocol'
+import { GRANT_LEVELS, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
 import type * as Exit from 'effect/Exit'
 import { keys, promptAtom, useCommand, webhookAtom } from '../client/api-atoms.ts'
@@ -33,11 +33,11 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const [saving, setSaving] = useState(false)
   const model = catalog.models.find((option) => option.provider === draft.model.provider && option.model === draft.model.model)
   const maxBudget = model?.contextWindow ?? 1_000_000
-  const toggle = (kind: keyof GrantSet, name: string) => {
-    const current = draft.grants[kind] ?? []
-    const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name]
-    setDraft({ ...draft, grants: { ...draft.grants, [kind]: next } })
-  }
+  const setLevel = (field: GrantField, name: string, level: GrantLevel) => setDraft({ ...draft, grants: { ...draft.grants, [field]: { ...draft.grants[field], [name]: level } } })
+  /** One grant item's three-state control (sk-746n). */
+  const item = (field: GrantField, name: string, label: string, detail?: string) => (
+    <GrantItem key={`${field}:${name}`} label={label} {...(detail === undefined ? {} : { detail })} level={levelIn(draft.grants[field], name)} onChange={(level) => setLevel(field, name, level)} />
+  )
   const save = async () => {
     setSaving(true)
     try {
@@ -80,68 +80,44 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </label>
 
       <h2>Tools</h2>
+      <div className="muted">Allow: the Robot uses it freely. Ask: each use waits for your answer. Deny: the Robot does not have it.{mrRobot ? ' Mr. Robot holds everything you can reach at allow unless you lower it here.' : ''}</div>
       <div className="check-grid scroll-box">
-        {catalog.toolGroups.map((group) => (
-          <label key={group.name} className="check">
-            <input type="checkbox" checked={draft.grants.tools.includes(group.name)} onChange={() => toggle('tools', group.name)} />
-            <span>{group.name}<small>{group.description}</small></span>
-          </label>
-        ))}
+        {catalog.toolGroups.map((group) => item('tools', group.name, group.name, group.description))}
       </div>
       <h2>Skills</h2>
       {catalog.skills.length === 0 ? <div className="muted">No skills in the library yet.</div> : (
         <div className="check-grid scroll-box">
-          {catalog.skills.map((skill) => (
-            <label key={skill.name} className="check"><input type="checkbox" checked={draft.grants.skills.includes(skill.name)} onChange={() => toggle('skills', skill.name)} /><span>{skill.name}<small>{skill.description}</small></span></label>
-          ))}
+          {catalog.skills.map((skill) => item('skills', skill.name, skill.name, skill.description))}
         </div>
       )}
       <h2>Recipients</h2>
       {mrRobot ? <div className="muted">Mr. Robot can message every Robot you can reach.</div> : catalog.robots.length === 0 ? <div className="muted">No other Robots to message.</div> : (
         <div className="check-grid">
-          {catalog.robots.map((robot) => (
-            <label key={robot.id} className="check"><input type="checkbox" checked={draft.grants.recipients.includes(robot.id)} onChange={() => toggle('recipients', robot.id)} /><span>{robot.name}</span></label>
-          ))}
+          {catalog.robots.map((robot) => item('recipients', robot.id, robot.name))}
         </div>
       )}
       <h2>Connections</h2>
-      {mrRobot ? <div className="muted">Mr. Robot can use every connection you can.</div> : (catalog.connections ?? []).length === 0 ? <div className="muted">No connections yet: connect accounts under your name → Connections.</div> : (
+      {(catalog.connections ?? []).length === 0 ? <div className="muted">No connections yet: connect accounts under your name → Connections.</div> : (
         <div className="check-grid">
           {(catalog.connections ?? []).flatMap((connection) => {
             const canWrite = connection.kind === 'slack' || (connection.kind === 'google' && connection.services.includes('gmail-send'))
-            const read = (
-              <label key={connection.id} className="check">
-                <input type="checkbox" checked={(draft.grants.connections ?? []).includes(connection.id)} onChange={() => toggle('connections', connection.id)} />
-                <span>{connection.label}<small>{connection.kind} · {connection.account}{connection.mine ? '' : ` · ${connection.ownerName}'s`}{connection.status === 'connected' ? '' : ' · needs attention'}</small></span>
-              </label>
-            )
+            const read = item('connections', connection.id, connection.label, `${connection.kind} · ${connection.account}${connection.mine ? '' : ` · ${connection.ownerName}'s`}${connection.status === 'connected' ? '' : ' · needs attention'}`)
             if (!canWrite) return [read]
-            return [read, (
-              <label key={`${connection.id}:write`} className="check">
-                <input type="checkbox" checked={(draft.grants.connections ?? []).includes(`${connection.id}:write`)} onChange={() => toggle('connections', `${connection.id}:write`)} />
-                <span>{connection.label}: {connection.kind === 'google' ? 'send e-mail' : 'post and mark read'}<small>A separate grant: without it the Robot only reads</small></span>
-              </label>
-            )]
+            return [read, item('connections', `${connection.id}:write`, `${connection.label}: ${connection.kind === 'google' ? 'send e-mail' : 'post and mark read'}`, 'A separate grant: without it the Robot only reads')]
           })}
         </div>
       )}
       <h2>Hosts</h2>
       {(catalog.hosts ?? []).length === 0 ? <div className="muted">No computers yet: install the Mr. Robot app on one and pair it (your name → Hosts).</div> : (
         <div className="check-grid">
-          {(catalog.hosts ?? []).flatMap((host) => (['browser', 'files', 'shell'] as const).map((kind) => (
-            <label key={`${host.id}:${kind}`} className="check">
-              <input type="checkbox" checked={(draft.grants.hosts ?? []).includes(`${host.id}:${kind}`)} onChange={() => toggle('hosts', `${host.id}:${kind}`)} />
-              <span>{host.name}: {kind === 'browser' ? 'browser' : kind === 'files' ? 'files' : 'shell'}<small>{kind === 'browser' ? 'Its Chrome, when chosen as this Robot\'s browser above' : kind === 'files' ? 'host_read, host_write as the host owner' : 'host_run as the host owner, in their shell'} · {host.online ? 'online' : 'offline'}{host.mine ? '' : ` · ${host.ownerName}'s`}</small></span>
-            </label>
-          )))}
+          {(catalog.hosts ?? []).flatMap((host) => (['browser', 'files', 'shell'] as const).map((kind) => item('hosts', `${host.id}:${kind}`, `${host.name}: ${kind}`,
+            `${kind === 'browser' ? 'Its Chrome, when chosen as this Robot\'s browser above' : kind === 'files' ? 'host_read, host_write as the host owner' : 'host_run as the host owner, in their shell'} · ${host.online ? 'online' : 'offline'}${host.mine ? '' : ` · ${host.ownerName}'s`}`)))}
         </div>
       )}
       <h2>Logins</h2>
       {catalog.secrets.length === 0 ? <div className="muted">No logins yet: add them under your name → Logins.</div> : (
         <div className="check-grid">
-          {catalog.secrets.map((secret) => (
-            <label key={secret.name} className="check"><input type="checkbox" checked={draft.grants.secrets.includes(secret.name)} onChange={() => toggle('secrets', secret.name)} /><span>{secret.name}<small>{[secret.username, (secret.websites ?? []).join(', '), secret.scope === 'home' ? 'shared with the Home' : 'yours'].filter((part) => part !== undefined && part !== '').join(' · ')}</small></span></label>
-          ))}
+          {catalog.secrets.map((secret) => item('secrets', secret.name, secret.name, [secret.username, (secret.websites ?? []).join(', '), secret.scope === 'home' ? 'shared with the Home' : 'yours'].filter((part) => part !== undefined && part !== '').join(' · ')))}
         </div>
       )}
 
@@ -188,6 +164,25 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           option={{ label: 'Also clear its memory', note: 'MEMORY.md, the memory bank and daily notes go back to empty.' }}
           onCancel={() => setDanger(undefined)} onConfirm={async (memory) => { const exit = await onClear(name, memory); if (exit._tag === 'Success') setDanger(undefined); return exit }} />
       ) : null}
+    </div>
+  )
+}
+
+/** The level an item holds: what the set names, deny when it names nothing. */
+function levelIn(levels: GrantLevels, name: string): GrantLevel {
+  return Object.hasOwn(levels, name) ? levels[name]! : 'deny'
+}
+
+/** A grant item with allow, ask and deny (sk-746n). */
+export function GrantItem({ label, detail, level, onChange }: { label: string; detail?: string; level: GrantLevel; onChange: (level: GrantLevel) => void }) {
+  return (
+    <div className="grant-item">
+      <span>{label}{detail === undefined || detail === '' ? null : <small>{detail}</small>}</span>
+      <div className="segmented compact" role="radiogroup" aria-label={label}>
+        {GRANT_LEVELS.map((option) => (
+          <button key={option} type="button" role="radio" aria-checked={level === option} className={level === option ? `segment active level-${option}` : 'segment'} onClick={() => onChange(option)}>{option}</button>
+        ))}
+      </div>
     </div>
   )
 }

@@ -17,7 +17,8 @@ import { displaySchedule, resumed, type AlarmSchedule } from '../agent/schedule.
 import type { ScheduleCreateRequest, ScheduleTimingChange } from '@deepseek-ai/dsh-schedule'
 import type { RoutineCard, ProposalRow, RobotConfig, RobotStore, RoutineRow, RoutineRun, WakeupKind } from './store.ts'
 import { dueDelivery } from '../agent/schedule.ts'
-import { MR_ROBOT_TOOLS } from '../agent/catalog.ts'
+import { setupGrants } from '../agent/catalog.ts'
+import { emptyGrants, grantSetFrom, overlayGrants, usableNames } from '@mr-robot/protocol'
 import { THREAD_PAUSE_AT } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -294,7 +295,7 @@ export const directory = Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
-  const granted = new Set(store.grants().recipients)
+  const granted = new Set(usableNames(store.grants().recipients))
   const reachable = yield* promise(() => platform.env.HOME.getByName(HOME_ID).reachable(current.ownerId))
   return reachable
     .filter((robot) => granted.has(robot.id) && robot.id !== current.id && robot.status === 'active')
@@ -352,7 +353,7 @@ export const sendRobotMessage = (to: string, text: string, idempotencyKey: strin
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
-  if (!store.hasGrant('recipient', to)) return yield* invalid(`You have no Grant to message ${to}. Ask your owner with propose_grants (recipients).`)
+  if (!store.mayUse('recipient', to)) return yield* invalid(`You have no Grant to message ${to}. Ask your owner with propose_grants (recipients).`)
   if (!(yield* directory).some((entry) => entry.id === to)) return yield* invalid(`${to} is not available to you now`)
   const chain = yield* currentChain
   if (chain.hops + 1 > MAX_CHAIN_HOPS) return yield* invalid(`This chain of Robot messages is already ${chain.hops} hops long; finish it without delegating further.`)
@@ -453,7 +454,8 @@ export const settings = Effect.gen(function* () {
     discordChannel: current.discordChannel ?? null,
     discordProactive: current.discordProactive !== false,
     compactionInstruction: current.compactionInstruction,
-    grants: store.grants(),
+    // Mr. Robot's real levels (sk-8llz): what he reaches at allow, under what his owner lowered.
+    grants: store.effectiveGrants(),
     // Discord is on by having a channel; an old 'discord' entry in the list means nothing.
     notifications: { ...current.notifications, channels: current.notifications.channels.filter((channel) => channel !== 'discord') },
     spendLimitUsd: current.spendLimitUsd,
@@ -464,8 +466,9 @@ export const settings = Effect.gen(function* () {
 export const setRecipients = (robotIds: readonly string[]) => Effect.gen(function* () {
   const store = yield* RobotState
   const grants = store.grants()
-  if (grants.recipients.length === robotIds.length && grants.recipients.every((id) => robotIds.includes(id))) return
-  store.setGrants({ ...grants, recipients: [...robotIds] })
+  const held = usableNames(grants.recipients)
+  if (held.length === robotIds.length && held.every((id) => robotIds.includes(id))) return
+  store.setGrants({ ...grants, recipients: Object.fromEntries(robotIds.map((id) => [id, 'allow' as const])) })
   store.updateConfig(() => ({}))
 })
 
@@ -542,7 +545,7 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
   const nextActive = patch.chain !== undefined ? 0 : active
   store.transaction(() => {
     if (chain !== undefined) store.set('chain-active', nextActive)
-    if (patch.grants !== undefined) store.setGrants(patch.grants)
+    if (patch.grants !== undefined) store.setGrants(grantSetFrom(patch.grants))
     store.updateConfig((current) => ({
       ...(patch.identity === undefined ? {} : { identity: patch.identity }),
       ...(patch.sharing === undefined ? {} : { sharing: patch.sharing }),
@@ -601,8 +604,6 @@ function reviewNote(review: ReviewView, decision: { approved: readonly string[];
   ].join('\n')
 }
 
-const NO_GRANTS = { tools: [], skills: [], recipients: [], secrets: [] }
-
 /** What approval does: the stored payload, exactly. */
 const apply = (proposal: ProposalRow) => Effect.gen(function* () {
   const store = yield* RobotState
@@ -610,7 +611,8 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
   const ownerId = (yield* config).ownerId
   switch (proposal.kind) {
     case 'setup': {
-      const grants = proposal.grants ?? NO_GRANTS
+      // Approved items as proposed, files, web and exa at ask unless proposed, the rest deny (sk-3sij).
+      const grants = setupGrants(proposal.grants ?? emptyGrants)
       store.transaction(() => {
         store.setGrants(grants)
         store.updateConfig(() => ({ status: 'active' }))
@@ -618,9 +620,8 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
       return
     }
     case 'grants': {
-      const current = store.grants()
-      const add = proposal.grants ?? NO_GRANTS
-      store.setGrants({ tools: [...current.tools, ...add.tools], skills: [...current.skills, ...add.skills], recipients: [...current.recipients, ...add.recipients], secrets: [...current.secrets, ...add.secrets] })
+      // Each proposed item takes its proposed level; the rest stay as they are (sk-8e0f, sk-iq3n).
+      store.setGrants(overlayGrants(store.grants(), proposal.grants ?? emptyGrants))
       store.updateConfig(() => ({}))
       return
     }
@@ -709,8 +710,7 @@ export const answer = (proposalId: string, revision: number, approve: boolean, a
 export const secret = (name: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
-  const granted = store.effectiveGrants().secrets
-  if (!granted.includes(name)) return yield* invalid(`The secret "${name}" is not granted to you. Granted: ${granted.join(', ') || 'none'}. Ask with propose_grants.`)
+  if (!store.mayUse('secret', name)) return yield* invalid(`The secret "${name}" is not granted to you. Granted: ${usableNames(store.effectiveGrants().secrets).join(', ') || 'none'}. Ask with propose_grants.`)
   const ownerId = (yield* config).ownerId
   const entry = yield* promise(() => platform.env.HOME.getByName(HOME_ID).resolveLogin(ownerId, name))
   if (entry === null) return yield* notFound(`The secret "${name}" no longer exists`)
@@ -823,7 +823,6 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
     store.saveConfig(config)
     store.set('owner', { id: init.ownerId, name: init.ownerName })
     if (init.brief !== undefined) store.set('brief', init.brief)
-    if (init.kind === 'mr-robot') store.setGrants({ tools: [...MR_ROBOT_TOOLS], skills: [], recipients: [], secrets: [] })
   })
   yield* platform.seedWorkspace()
   yield* platform.changed()

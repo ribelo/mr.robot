@@ -121,7 +121,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
     }),
     tool<{ robot_id: string }>({
       name: 'robot_grants',
-      description: "See what another Robot may do: its Grants (tool groups, skills, recipients, logins, hosts, connections) and its open proposals. You cannot change Grants; ask your owner with robot_propose_grants.",
+      description: "See what another Robot may do: the level of each of its Grants (tool groups, skills, recipients, logins as secrets, hosts, connections) as allow, ask (each call waits for the owner) or deny (an item not listed is deny too), and its open proposals. You cannot change Grants; ask your owner with robot_propose_grants.",
       parameters: { properties: { robot_id: robotId }, required: ['robot_id'] },
       concurrencySafe: true,
       execute: async ({ robot_id }) => host.grants(robot_id),

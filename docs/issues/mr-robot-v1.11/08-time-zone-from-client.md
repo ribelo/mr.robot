@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Header on /api/me updates the profile; manual pin and unpin in the Profile page
-- [ ] Robots use the profile zone live; note on change; Routine next runs recomputed
-- [ ] Workerd tests for header update, pinning, note, recomputation; template text updated
+- [x] Header on /api/me updates the profile; manual pin and unpin in the Profile page
+- [x] Robots use the profile zone live; note on change; Routine next runs recomputed
+- [x] Workerd tests for header update, pinning, note, recomputation; template text updated

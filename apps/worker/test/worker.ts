@@ -187,4 +187,15 @@ export class Robot extends ProductionRobot {
     this.store.search = new ConversationIndex(this.store.sql, false)
     return this.store.search.mode
   }
+
+  /** Put the grant table back as it was before levels (schema 7) with these rows, then open the store as after a deploy. */
+  async grantsBeforeLevelsForTest(rows: Array<{ kind: string; name: string }>): Promise<void> {
+    const sql = this.store.sql
+    sql.exec('DROP TABLE grant_item')
+    sql.exec('CREATE TABLE grant_item (kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (kind, name)) WITHOUT ROWID')
+    for (const row of rows) sql.exec('INSERT INTO grant_item (kind, name) VALUES (?, ?)', row.kind, row.name)
+    sql.exec('UPDATE schema_version SET version = 7')
+    this.store.prepare()
+    await this.changed()
+  }
 }

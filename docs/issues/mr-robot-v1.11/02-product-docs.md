@@ -6,8 +6,8 @@
 
 **Blocked by:** 01 (the docs index is a prompt section)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Ten docs readable by the Robot and in the Files view, marked read-only
-- [ ] write, edit and delete_file refuse docs/ paths with a clear message
-- [ ] Docs index in the prompt preview; workerd tests for presence, read-only refusal and the index
+- [x] Ten docs readable by the Robot and in the Files view, marked read-only
+- [x] write, edit and delete_file refuse docs/ paths with a clear message
+- [x] Docs index in the prompt preview; workerd tests for presence, read-only refusal and the index

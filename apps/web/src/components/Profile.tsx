@@ -45,7 +45,14 @@ function Preferences({ me }: { me: Me }) {
   const [quiet, setQuiet] = useState(me.quietHours ?? { start: '', end: '' })
   const [saved, setSaved] = useState<string>()
   const save = async () => {
-    const exit = await command((api) => api.updateMe({ name, timeZone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null }), [keys.me, keys.robots, keys.admin])
+    // Only a zone the person typed is sent: it pins the zone, so saving other fields must not.
+    const zone = timeZone.trim() !== me.timeZone ? { timeZone: timeZone.trim() } : {}
+    const exit = await command((api) => api.updateMe({ name, ...zone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null }), [keys.me, keys.robots, keys.admin])
+    setSaved(exitFailure(exit) ?? 'Saved.')
+  }
+  const useAppZone = async () => {
+    const exit = await command((api) => api.updateMe({ useDetectedTimeZone: true }), [keys.me, keys.robots, keys.admin])
+    if (Exit.isSuccess(exit) && me.detectedTimeZone !== null) setTimeZone(me.detectedTimeZone)
     setSaved(exitFailure(exit) ?? 'Saved.')
   }
   return (
@@ -53,6 +60,11 @@ function Preferences({ me }: { me: Me }) {
       <h2>You</h2>
       <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
       <label>Time zone<input value={timeZone} onChange={(event) => setTimeZone(event.target.value)} placeholder="Europe/Warsaw" /></label>
+      <div className="muted">
+        {me.detectedTimeZone === null ? 'The app has not reported its zone yet.' : `This app reports ${me.detectedTimeZone}.`}{' '}
+        {me.timeZonePinned ? 'You set your zone by hand; it stays until you switch back.' : 'Your zone follows the app.'}
+        {me.timeZonePinned && me.detectedTimeZone !== null ? <> <button type="button" className="button" onClick={() => void useAppZone()}>Use the app's zone</button></> : null}
+      </div>
       <div className="form inline">
         <label>Quiet from<input type="time" value={quiet.start} onChange={(event) => setQuiet({ ...quiet, start: event.target.value })} /></label>
         <label>until<input type="time" value={quiet.end} onChange={(event) => setQuiet({ ...quiet, end: event.target.value })} /></label>

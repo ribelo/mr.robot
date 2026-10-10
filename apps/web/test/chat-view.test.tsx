@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ChatItem, ProposalView } from '@mr-robot/protocol'
+import { emptyGrants, type ChatItem, type ProposalView } from '@mr-robot/protocol'
 import { ChatView } from '../src/components/ChatView.tsx'
 import { AskBar } from '../src/components/AskBar.tsx'
 
@@ -11,7 +11,7 @@ const me = { kind: 'member' as const, memberId: 'm-1', name: 'Anna' }
 
 const proposal: ProposalView = {
   id: 'p-1', kind: 'setup', revision: 2, status: 'open', purpose: 'Watch listings daily',
-  grants: { tools: ['web', 'routines'], skills: [], recipients: [], secrets: [] }, file: null, skill: null,
+  grants: { ...emptyGrants, tools: { web: 'allow', routines: 'allow' } }, file: null, skill: null,
 }
 
 const items: ChatItem[] = [
