@@ -10,6 +10,7 @@ import type { NotificationKind, ProposalView, ReviewView, RobotSettings, Routine
 import type { MemberFileName } from '../member/member.ts'
 import { currentMonth } from '../home/home.ts'
 import { HOME_ID, type Env } from '../env.ts'
+import { chainOf, modelOf, withModel } from './chain.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { cronOf, describeSchedule } from './schedule.ts'
 import { displaySchedule, resumed, type AlarmSchedule } from '../agent/schedule.ts'
@@ -444,6 +445,7 @@ export const settings = Effect.gen(function* () {
     identity: current.identity,
     sharing: current.sharing,
     model: current.model,
+    chain: chainOf(current),
     contextBudget: current.contextBudget,
     codeMode: current.codeMode,
     wakeOnScreenNotifications: current.wakeOnScreenNotifications === true,
@@ -529,12 +531,22 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const before = yield* config
+  // The chain is the model setting (v1.10): a plain model change edits its active entry.
+  const active = Math.min(store.get<number>('chain-active') ?? 0, chainOf(before).length - 1)
+  const chain = patch.chain !== undefined ? [...patch.chain] : patch.model !== undefined ? withModel(chainOf(before), active, patch.model) : undefined
+  if (chain !== undefined) {
+    if (chain.length === 0) return yield* invalid('a Robot needs at least one model in its chain')
+    const refusal = yield* promise(() => platform.env.HOME.getByName(HOME_ID).chainRefusal(before.ownerId, chain))
+    if (refusal !== null) return yield* invalid(refusal)
+  }
+  const nextActive = patch.chain !== undefined ? 0 : active
   store.transaction(() => {
+    if (chain !== undefined) store.set('chain-active', nextActive)
     if (patch.grants !== undefined) store.setGrants(patch.grants)
     store.updateConfig((current) => ({
       ...(patch.identity === undefined ? {} : { identity: patch.identity }),
       ...(patch.sharing === undefined ? {} : { sharing: patch.sharing }),
-      ...(patch.model === undefined ? {} : { model: patch.model }),
+      ...(chain === undefined ? {} : { chain, model: modelOf(chain[nextActive]!) }),
       ...(patch.contextBudget === undefined ? {} : { contextBudget: Math.max(8_000, Math.round(patch.contextBudget)) }),
       ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
       ...(patch.wakeOnScreenNotifications === undefined ? {} : { wakeOnScreenNotifications: patch.wakeOnScreenNotifications }),

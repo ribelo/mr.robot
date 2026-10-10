@@ -190,6 +190,14 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
       discordProactive: false, notifications: { enabled: true, channels: ['pwa', 'fake'] },
       grants: before.grants, spendLimitUsd: before.spendLimitUsd, sharing: before.sharing,
     })
+    // The chain is a setting the deputy may set too, with accounts the owner can use (pa-w81r).
+    const account = (await api<{ id: string }>(ANNA, '/api/providers/deepseek/accounts', { body: { key: 'sk-anna-deepseek', shared: false } })).body.id
+    const ownerId = (await api<{ id: string }>(ANNA, '/api/me')).body.id
+    const chain = [{ account, owner: ownerId, provider: 'deepseek', model: 'deepseek-flash', effort: 'low' }, { account: 'workers-ai', owner: '', provider: 'workers-ai', model: 'any', effort: 'off' }]
+    const [chained] = (await chief(chiefRobot, [{ name: 'robot_settings_set', args: { robot_id: accountant, chain } }])).map((text) => JSON.parse(text) as RobotPanel['settings'])
+    expect(chained!.chain).toEqual(chain)
+    const [foreign] = await chief(chiefRobot, [{ name: 'robot_settings_set', args: { robot_id: accountant, chain: [{ ...chain[0], account: 'acc-not-hers' }] } }])
+    expect(foreign).toContain('not yours or shared')
     expect(await notices(accountant)).toEqual(expect.arrayContaining([
       'Mr. Robot changed model to stub-2 (stub).', 'Mr. Robot changed thinking to high.', 'Mr. Robot changed code mode to on.',
       'Mr. Robot changed the context budget to 40000 tokens.', 'Mr. Robot changed the compaction instruction.',

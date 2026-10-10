@@ -1,8 +1,8 @@
 import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { useState, useEffect } from 'react'
-import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, ThinkingEffort, BrowserBackend } from '@mr-robot/protocol'
-import { ModelSelect } from './ModelSelect.tsx'
+import type { GrantSet, RobotPanel, SettingsCatalog, SettingsPatch, BrowserBackend } from '@mr-robot/protocol'
+import { ChainEditor } from './ChainEditor.tsx'
 import type * as Exit from 'effect/Exit'
 import { keys, promptAtom, useCommand, webhookAtom } from '../client/api-atoms.ts'
 import type { ApiFailure } from '../client/api-failure.ts'
@@ -19,7 +19,6 @@ export interface AdvancedSettingsProps {
   readonly onClear: (confirm: string, memory: boolean) => Promise<Exit.Exit<void, ApiFailure>>
 }
 
-const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max']
 
 /**
  * What the Robot was given (robot-vqtw): model and effort, context budget, code mode,
@@ -42,7 +41,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
     setSaving(true)
     try {
       await onSave({
-        model: draft.model,
+        chain: draft.chain,
         contextBudget: draft.contextBudget,
         codeMode: draft.codeMode,
         browserBackend: draft.browserBackend,
@@ -59,20 +58,9 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const mrRobot = panel.summary.kind === 'mr-robot'
   return (
     <div className="form">
-      <h2>Model</h2>
-      <label>Model
-        <ModelSelect
-          value={draft.model}
-          models={catalog.models}
-          unavailable={catalog.unavailableModels ?? []}
-          onChange={(option) => setDraft({ ...draft, model: { ...draft.model, provider: option.provider, model: option.model } })}
-        />
-      </label>
-      <label>Thinking effort
-        <select value={draft.model.effort} onChange={(event) => setDraft({ ...draft, model: { ...draft.model, effort: event.target.value as ThinkingEffort } })}>
-          {EFFORTS.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
-        </select>
-      </label>
+      <h2>Model chain</h2>
+      <ChainEditor chain={draft.chain} models={catalog.models} unavailable={catalog.unavailableModels ?? []} accounts={catalog.accounts ?? []}
+        onChange={(chain) => setDraft({ ...draft, chain, model: { provider: chain[0]!.provider, model: chain[0]!.model, effort: chain[0]!.effort } })} />
       <label>Context budget: {Math.round(draft.contextBudget / 1000)}k tokens
         <input type="range" min={8000} max={maxBudget} step={8000} value={Math.min(draft.contextBudget, maxBudget)} onChange={(event) => setDraft({ ...draft, contextBudget: Number(event.target.value) })} />
       </label>

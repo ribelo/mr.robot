@@ -11,7 +11,7 @@ import type {
   GrantKind,
   GrantSet,
   Identity,
-  ModelChoice,
+  ChainEntry, ModelChoice,
   NotificationSettings,
   ProposalKind,
   ProposalView,
@@ -36,6 +36,8 @@ export interface RobotConfig {
   readonly status: RobotStatus
   readonly blockedReason: string | null
   readonly model: ModelChoice
+  /** The model chain (v1.10); absent in Robots made before it: one entry on `model`. */
+  readonly chain?: readonly ChainEntry[]
   readonly contextBudget: number
   readonly codeMode: boolean
   /** Absent in Robots created before the setting existed: off. */

@@ -59,6 +59,7 @@ import { maskSecrets, type SecretHost } from '../agent/tools/secrets.ts'
 import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
 import { platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { providerAdapter, type CredentialSource } from '../agent/providers.ts'
+import { chainOf } from './chain.ts'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage, type ThreadWake } from '../agent/sources.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
@@ -754,10 +755,28 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     })
   }
 
+  /**
+   * The active chain entry's account, per request (v1.10). An entry made before accounts existed binds
+   * to the account it first uses, so the chain names it from then on (pa-l3l9).
+   */
   protected credentials(): CredentialSource {
-    const config = this.store.requireConfig()
     return {
-      resolve: async (provider) => (await this.home().providerCredential(config.ownerId, provider)) ?? undefined,
+      resolve: async (provider) => {
+        const config = this.store.requireConfig()
+        const chain = chainOf(config)
+        const index = Math.min(this.store.get<number>('chain-active') ?? 0, chain.length - 1)
+        const entry = chain[index]!
+        if (entry.provider === provider && entry.account !== '') return (await this.home().accountCredential(config.ownerId, entry.owner, entry.account)) ?? undefined
+        const found = await this.home().providerCredential(config.ownerId, provider)
+        if (found === null) return undefined
+        if (entry.provider === provider && found.account !== undefined) {
+          const bound = chain.map((item, at) => (at === index ? { ...item, account: found.account!, owner: found.owner } : item))
+          this.store.updateConfig(() => ({ chain: bound }), false)
+          this.ctx.waitUntil(this.changed())
+        }
+        const { owner: _owner, ...credential } = found
+        return credential
+      },
     }
   }
 

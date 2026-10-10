@@ -3,7 +3,7 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
+import type { ChainEntry, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -78,6 +78,8 @@ export interface RegistryEntry {
   readonly fleetState: FleetState
   readonly lastLine: string
   readonly lastAt: number
+  /** Provider accounts in the Robot's model chain (pa-f59m). */
+  readonly accounts?: readonly string[]
 }
 
 export type SignIn =
@@ -284,12 +286,12 @@ const robotChanged = (changed: RegistryEntry) => Effect.gen(function* () {
   const sql = yield* Sql
   const before = yield* entry(changed.id)
   yield* sql.run(
-    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at, accounts)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET identity = excluded.identity, sharing = excluded.sharing, status = excluded.status,
-       fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at`,
+       fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at, accounts = excluded.accounts`,
     changed.id, changed.ownerId, changed.kind, JSON.stringify(changed.identity), changed.sharing, changed.status,
-    changed.fleetState, changed.lastLine, changed.lastAt,
+    changed.fleetState, changed.lastLine, changed.lastAt, JSON.stringify(changed.accounts ?? []),
   )
   const reach = (value: RegistryEntry | undefined) => value === undefined ? 'none' : `${value.sharing}:${value.status === 'deleted'}`
   if (changed.kind === 'robot' && reach(before) !== reach(changed)) yield* syncMrRobots
@@ -601,6 +603,7 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
     browserBackends: yield* browserBackendsFor(memberId),
     hosts: yield* hostsFor(memberId),
     defaultBrowserBackend: (yield* settings).defaultBrowserBackend,
+    accounts: yield* Effect.map(accountsFor(memberId), ({ mine, shared }) => [...mine, ...shared]),
   } as SettingsCatalog
 })
 
@@ -809,14 +812,46 @@ const metadata = Effect.gen(function* () {
 const providerCredential = (memberId: string, provider: ProviderId) => Effect.gen(function* () {
   const sql = yield* Sql
   const own = (yield* remote((env) => env.MEMBER.getByName(memberId).credential(provider, false) as Promise<ProviderCredential | null>))
-  if (own !== null) return own
+  if (own !== null) return { ...own, owner: memberId } as ProviderCredential & { owner: string }
   const sharers = yield* sql.all<{ member_id: string }>('SELECT member_id FROM shared_credential WHERE provider = ? AND member_id != ?', provider, memberId)
   for (const { member_id } of sharers) {
     if ((yield* member(member_id))?.status !== 'active') continue
     const shared = yield* remote((env) => env.MEMBER.getByName(member_id).credential(provider, true) as Promise<ProviderCredential | null>)
-    if (shared !== null) return shared
+    if (shared !== null) return { ...shared, owner: member_id } as ProviderCredential & { owner: string }
   }
-  return null as ProviderCredential | null
+  return null as (ProviderCredential & { owner: string }) | null
+})
+
+/** Accounts a Member's Robots may put in a chain: their own, then those active Members share (pa-mho0). */
+const accountsFor = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const mine = yield* remote((env) => env.MEMBER.getByName(memberId).accounts())
+  const shared: ProviderView[] = []
+  for (const { member_id } of yield* sql.all<{ member_id: string }>('SELECT DISTINCT member_id FROM shared_credential WHERE member_id != ?', memberId)) {
+    if ((yield* member(member_id))?.status !== 'active') continue
+    shared.push(...(yield* remote((env) => env.MEMBER.getByName(member_id).accounts(true))))
+  }
+  return { mine, shared }
+})
+
+/** Why a chain cannot be saved for this Member's Robot, or null (pa-mho0, pa-w81r). */
+const chainRefusal = (memberId: string, chain: readonly ChainEntry[]) => Effect.gen(function* () {
+  const { mine, shared } = yield* accountsFor(memberId)
+  const usable = [...mine, ...shared]
+  for (const entry of chain) {
+    if (entry.provider === 'workers-ai' || entry.account === '') continue
+    const account = usable.find((candidate) => candidate.id === entry.account)
+    if (account === undefined) return `the account ${entry.account} is not yours or shared with the Home`
+    if (account.provider !== entry.provider) return `${account.label} is a ${account.provider} account, not ${entry.provider}`
+  }
+  return null as string | null
+})
+
+/** One chain entry's credential: the owner's own account, or one an active Member shares (v1.10). */
+const accountCredential = (memberId: string, entryOwner: string, account: string) => Effect.gen(function* () {
+  if (entryOwner === memberId) return yield* remote((env) => env.MEMBER.getByName(memberId).accountCredential(account, false) as Promise<ProviderCredential | null>)
+  if ((yield* member(entryOwner))?.status !== 'active') return null as ProviderCredential | null
+  return yield* remote((env) => env.MEMBER.getByName(entryOwner).accountCredential(account, true) as Promise<ProviderCredential | null>)
 })
 
 const listingAccess = (provider: string, memberId: string) => Effect.gen(function* () {
@@ -906,13 +941,11 @@ const credentialShared = (memberId: string, provider: ProviderId, shared: boolea
 
 const providersView = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  const mine = yield* remote((env) => env.MEMBER.getByName(memberId).accounts())
-  const sharers = yield* sql.all<{ member_id: string }>('SELECT DISTINCT member_id FROM shared_credential WHERE member_id != ?', memberId)
-  const shared: ProviderView[] = []
-  for (const { member_id } of sharers) {
-    if ((yield* member(member_id))?.status !== 'active') continue
-    shared.push(...(yield* remote((env) => env.MEMBER.getByName(member_id).accounts(true))))
-  }
+  const { mine: own, shared } = yield* accountsFor(memberId)
+  // Who uses each of my accounts: the Robots whose chain names it (pa-f59m).
+  const robots = yield* sql.all<{ id: string; owner_id: string; identity: string; accounts: string }>("SELECT id, owner_id, identity, accounts FROM robot WHERE status != 'deleted' AND accounts != '[]'")
+  const names = new Map((yield* members).map((person) => [person.id, person.name]))
+  const mine = own.map((account) => ({ ...account, usedBy: robots.filter((robot) => (JSON.parse(robot.accounts) as string[]).includes(account.id)).map((robot) => ({ robotId: robot.id, robotName: (JSON.parse(robot.identity) as Identity).name, ownerName: names.get(robot.owner_id) ?? '' })) }))
   return { mine, shared, models: yield* models(memberId), defaultModel: (yield* settings).defaultModel } as ProvidersView
 })
 
@@ -1104,6 +1137,7 @@ export class Home extends DurableObject<Env> {
       sharing TEXT NOT NULL, status TEXT NOT NULL, fleet_state TEXT NOT NULL,
       last_line TEXT NOT NULL, last_at INTEGER NOT NULL
     )`)
+    try { sql.exec("ALTER TABLE robot ADD COLUMN accounts TEXT NOT NULL DEFAULT '[]'") } catch { /* added before */ }
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     sql.exec(`CREATE TABLE IF NOT EXISTS skill (
       name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
@@ -1265,7 +1299,10 @@ export class Home extends DurableObject<Env> {
   }
   setVpnConfig(config: string | null): Promise<void> { return this.run(setVpnConfig(config)) }
   credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }
-  providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> { return this.run(providerCredential(memberId, provider)) }
+  providerCredential(memberId: string, provider: ProviderId): Promise<(ProviderCredential & { owner: string }) | null> { return this.run(providerCredential(memberId, provider)) }
+  accountCredential(memberId: string, entryOwner: string, account: string): Promise<ProviderCredential | null> { return this.run(accountCredential(memberId, entryOwner, account)) }
+  chainRefusal(memberId: string, chain: readonly ChainEntry[]): Promise<string | null> { return this.run(chainRefusal(memberId, chain)) }
+  accountsFor(memberId: string): Promise<{ mine: ProviderView[]; shared: ProviderView[] }> { return this.run(accountsFor(memberId)) }
   providersView(memberId: string): Promise<ProvidersView> { return this.run(providersView(memberId)) }
 
   // ---------------------------------------------------------------- Plugins and connections (v1.5)

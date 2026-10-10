@@ -142,8 +142,13 @@ export const routines = (robotId: string) => Effect.gen(function* () {
 export const settings = (robotId: string) => Effect.gen(function* () {
   const { current, robot } = yield* target(robotId, false)
   const platform = yield* RobotPlatform
-  const [shown, models] = yield* Effect.all([ask(robot, 'settings'), promise(() => platform.env.HOME.getByName(HOME_ID).models(current.ownerId))])
-  return { settings: shown, models: models.map((option) => ({ provider: option.provider, model: option.model, label: option.label })) }
+  const [shown, models, accounts] = yield* Effect.all([ask(robot, 'settings'), promise(() => platform.env.HOME.getByName(HOME_ID).models(current.ownerId)), promise(() => platform.env.HOME.getByName(HOME_ID).accountsFor(current.ownerId))])
+  return {
+    settings: shown,
+    models: models.map((option) => ({ provider: option.provider, model: option.model, label: option.label })),
+    // What a chain entry may name (pa-w81r): the owner's accounts and those shared with the Home.
+    accounts: [...accounts.mine, ...accounts.shared].map((account) => ({ account: account.id, owner: account.ownerId, provider: account.provider, label: account.label, status: account.status })),
+  }
 })
 
 // ------------------------------------------------------------------ changes
@@ -191,6 +196,7 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
   }
   const change: SettingsPatch = {
     ...(model === undefined ? {} : { model }),
+    ...(patch.chain === undefined ? {} : { chain: patch.chain }),
     ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
     ...(patch.contextBudget === undefined ? {} : { contextBudget: patch.contextBudget }),
     ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),

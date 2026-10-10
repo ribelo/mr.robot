@@ -11,6 +11,7 @@ import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { invalid, notFound } from '../platform/durable.ts'
 import { proposalView, RobotPlatform, RobotState, routineView, settings } from './programs.ts'
 import { projectChat } from './projection.ts'
+import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig } from './store.ts'
 
 const config = Effect.gen(function* () {
@@ -294,6 +295,7 @@ export const report = Effect.gen(function* () {
   const entry: RegistryEntry = {
     id: current.id, ownerId: current.ownerId, kind: current.kind, identity: current.identity, sharing: current.sharing,
     status: current.status, fleetState: yield* fleetState, lastLine: last?.text ?? '', lastAt: last?.at ?? current.createdAt,
+    accounts: chainAccounts(chainOf(current)),
   }
   yield* Effect.promise(() => platform.env.HOME.getByName(HOME_ID).robotChanged(entry))
 })

@@ -102,6 +102,19 @@ export const ModelChoice = Schema.Struct({
 })
 export type ModelChoice = typeof ModelChoice.Type
 
+/**
+ * One entry of a Robot's model chain (v1.10): a model on one Provider account. `account` and `owner`
+ * are empty while an entry made before accounts existed is not yet bound; Workers AI uses "workers-ai".
+ */
+export const ChainEntry = Schema.Struct({
+  account: Schema.String,
+  owner: Schema.String,
+  provider: Schema.String,
+  model: Schema.String,
+  effort: Schema.Literals(['off', 'low', 'medium', 'high', 'max']),
+})
+export type ChainEntry = typeof ChainEntry.Type
+
 export const NotificationSettings = Schema.Struct({
   enabled: Schema.Boolean,
   /** Members notified; empty means the owner only. */
@@ -212,6 +225,8 @@ export const RobotSettings = Schema.Struct({
   identity: Identity,
   sharing: Sharing,
   model: ModelChoice,
+  /** The ordered model chain (pa-mho0); `model` is its active entry. */
+  chain: Schema.Array(ChainEntry),
   contextBudget: Schema.Number,
   codeMode: Schema.Boolean,
   compactionInstruction: Schema.String,
@@ -244,6 +259,7 @@ export type WebhookView = typeof WebhookView.Type
  */
 export const DeputySettingsPatch = Schema.Struct({
   model: Schema.optional(Schema.Struct({ provider: Schema.String, model: Schema.String })),
+  chain: Schema.optional(Schema.Array(ChainEntry)),
   thinking: Schema.optional(ThinkingEffort),
   codeMode: Schema.optional(Schema.Boolean),
   contextBudget: Schema.optional(Schema.Number),
@@ -260,6 +276,7 @@ export const SettingsPatch = Schema.Struct({
   identity: Schema.optional(Identity),
   sharing: Schema.optional(Schema.Literals(['private', 'home'])),
   model: Schema.optional(ModelChoice),
+  chain: Schema.optional(Schema.Array(ChainEntry)),
   contextBudget: Schema.optional(Schema.Number),
   codeMode: Schema.optional(Schema.Boolean),
   wakeOnScreenNotifications: Schema.optional(Schema.Boolean),
@@ -674,6 +691,8 @@ export const ProviderView = Schema.Struct({
   note: Schema.NullOr(Schema.String),
   /** When a limited account is tried again, or a broken one checked again. */
   until: Schema.NullOr(Schema.Number),
+  /** Robots whose model chain holds this account; filled for the account's owner (pa-f59m). */
+  usedBy: Schema.optional(Schema.Array(Schema.Struct({ robotId: Schema.String, robotName: Schema.String, ownerName: Schema.String }))),
 })
 export type ProviderView = typeof ProviderView.Type
 
@@ -885,6 +904,8 @@ export const SettingsCatalog = Schema.Struct({
   defaultBrowserBackend: Schema.optional(BrowserBackend),
   /** Hosts the owner reaches, for per-host grants (hs-5ktw). */
   hosts: Schema.optional(Schema.Array(HostView)),
+  /** Provider accounts the owner's Robots may put in a model chain: their own and the Home's shared ones (pa-mho0). */
+  accounts: Schema.optional(Schema.Array(ProviderView)),
   /** Connections the owner can grant: their own and the Home's shared ones (cn-xezx). */
   connections: Schema.optional(Schema.Array(ConnectionView)),
 })

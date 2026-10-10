@@ -44,7 +44,7 @@ export interface DeputyHost {
   fileRead(robotId: string, path: string): Promise<WorkspaceFileContent>
   grants(robotId: string): Promise<{ grants: GrantSet; openProposals: ProposalView[] }>
   routines(robotId: string): Promise<RoutineView[]>
-  settings(robotId: string): Promise<{ settings: RobotSettings; models: Array<{ provider: string; model: string; label: string }> }>
+  settings(robotId: string): Promise<{ settings: RobotSettings; models: Array<{ provider: string; model: string; label: string }>; accounts: Array<{ account: string; owner: string; provider: string; label: string; status: string }> }>
   fileWrite(robotId: string, path: string, content: string): Promise<{ path: string; size: number }>
   fileDelete(robotId: string, path: string): Promise<{ deleted: string }>
   settingsSet(robotId: string, patch: unknown): Promise<RobotSettings>
@@ -154,11 +154,12 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
     }),
     tool<{ robot_id: string } & Record<string, unknown>>({
       name: 'robot_settings_set',
-      description: "Change another Robot's settings. Allowed: model {provider, model}, thinking (off, low, medium, high, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Home default), notifications {enabled, channels}, wakeOnScreenNotifications. Grants, spendLimitUsd and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
+      description: "Change another Robot's settings. Allowed: chain (its ordered model chain: entries {account, owner, provider, model, effort}; account ids and owners from robot_settings or your owner's Providers; the Robot moves to the next entry only when an account hits a limit or breaks), model {provider, model} (changes the active chain entry), thinking (off, low, medium, high, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Home default), notifications {enabled, channels}, wakeOnScreenNotifications. Grants, spendLimitUsd and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
       parameters: {
         properties: {
           robot_id: robotId,
           model: { type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' } }, required: ['provider', 'model'], description: 'New model, one of those robot_settings lists' },
+          chain: { type: 'array', items: { type: 'object', properties: { account: { type: 'string', description: 'Provider account id' }, owner: { type: 'string', description: 'Member id owning the account' }, provider: { type: 'string', description: 'Provider of the account' }, model: { type: 'string', description: 'Model id' }, effort: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking effort' } }, required: ['account', 'owner', 'provider', 'model', 'effort'] }, description: 'The whole model chain, first entry preferred' },
           thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking effort' },
           codeMode: { type: 'boolean', description: 'Call tools through code mode programs' },
           contextBudget: { type: 'integer', description: 'Tokens, at least 8000' },
