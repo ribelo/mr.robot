@@ -18,6 +18,8 @@ export interface OAuthTokens {
   /** Epoch ms after which the access token is treated as expired (5 minutes early). */
   readonly expires: number
   readonly accountId?: string
+  /** The account's address when the Provider tells it, for the account's label (pa-i3le). */
+  readonly email?: string
 }
 
 export type PendingFlow =
@@ -174,7 +176,7 @@ export function refreshTokens(clients: OAuthClients, provider: SubscriptionProvi
   return Effect.tryPromise({
     try: async () => {
       const next = await tokenRequest(provider, { grant_type: 'refresh_token', client_id: clients[provider], refresh_token: tokens.refresh })
-      return next.accountId === undefined && tokens.accountId !== undefined ? { ...next, accountId: tokens.accountId } : next
+      return { ...next, ...(next.accountId === undefined && tokens.accountId !== undefined ? { accountId: tokens.accountId } : {}), ...(next.email === undefined && tokens.email !== undefined ? { email: tokens.email } : {}) }
     },
     catch: fail('refresh failed'),
   })
@@ -189,14 +191,28 @@ async function tokenRequest(provider: SubscriptionProvider, params: Record<strin
   })
   const text = await response.text()
   if (!response.ok) throw new Error(`${provider === 'openai' ? 'OpenAI' : 'Anthropic'} token request failed (${response.status}): ${text.slice(0, 200)}`)
-  const body = JSON.parse(text) as { access_token?: string; refresh_token?: string; expires_in?: number; id_token?: string }
+  const body = JSON.parse(text) as { access_token?: string; refresh_token?: string; expires_in?: number; id_token?: string; account?: { email_address?: string } }
   if (typeof body.access_token !== 'string' || typeof body.refresh_token !== 'string') throw new Error('no tokens in the response')
   const accountId = provider === 'openai' ? chatgptAccountId(body.access_token) ?? chatgptAccountId(body.id_token ?? '') : undefined
+  const email = provider === 'openai' ? jwtEmail(body.id_token ?? '') : body.account?.email_address
   return {
+    ...(email === undefined ? {} : { email }),
     access: body.access_token,
     refresh: body.refresh_token,
     expires: Date.now() + (body.expires_in ?? 3600) * 1000 - 5 * 60_000,
     ...(accountId === undefined ? {} : { accountId }),
+  }
+}
+
+function jwtEmail(jwt: string): string | undefined {
+  try {
+    const part = jwt.split('.')[1]
+    if (part === undefined) return undefined
+    const payload = JSON.parse(atob(part.replaceAll('-', '+').replaceAll('_', '/'))) as { email?: unknown; 'https://api.openai.com/profile'?: { email?: unknown } }
+    const email = payload.email ?? payload['https://api.openai.com/profile']?.email
+    return typeof email === 'string' ? email : undefined
+  } catch {
+    return undefined
   }
 }
 

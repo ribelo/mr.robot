@@ -656,13 +656,24 @@ export type RobotPanel = typeof RobotPanel.Type
 export const ProviderName = Schema.Literals(['deepseek', 'openrouter', 'workers-ai', 'openai', 'anthropic', 'opencode-go'])
 export type ProviderName = typeof ProviderName.Type
 
+/** ok; limited until a reset; broken (cancelled, unpaid, revoked) and tried again later (pa-gqff, pa-bc78). */
+export const AccountStatus = Schema.Literals(['ok', 'limited', 'broken'])
+export type AccountStatus = typeof AccountStatus.Type
+
+/** One account of a Provider (v1.10): a key or a signed-in subscription, shared with the Home on its own. */
 export const ProviderView = Schema.Struct({
+  id: Schema.String,
   provider: ProviderName,
+  label: Schema.String,
   kind: Schema.Literals(['api-key', 'oauth']),
   shared: Schema.Boolean,
   connectedAt: Schema.Number,
   ownerId: Schema.String,
   ownerName: Schema.String,
+  status: AccountStatus,
+  note: Schema.NullOr(Schema.String),
+  /** When a limited account is tried again, or a broken one checked again. */
+  until: Schema.NullOr(Schema.Number),
 })
 export type ProviderView = typeof ProviderView.Type
 
@@ -676,19 +687,13 @@ export const ProvidersView = Schema.Struct({
 })
 export type ProvidersView = typeof ProvidersView.Type
 
-/** An OpenCode Go key pool, keys masked (ticket 19). */
-export const OpencodeKeysView = Schema.Struct({
-  keys: Schema.Array(Schema.Struct({ id: Schema.String, masked: Schema.String })),
-  activeId: Schema.NullOr(Schema.String),
-  shared: Schema.Boolean,
-})
-export type OpencodeKeysView = typeof OpencodeKeysView.Type
 
 /** A sign-in started with a provider: open url (and type userCode when the provider shows one). */
 export const OAuthStart = Schema.Struct({ url: Schema.String, userCode: Schema.optional(Schema.String) })
 export type OAuthStart = typeof OAuthStart.Type
 
-export const ApiKeyInput = Schema.Struct({ key: Schema.String, shared: Schema.Boolean })
+export const ApiKeyInput = Schema.Struct({ key: Schema.String, shared: Schema.Boolean, label: Schema.optional(Schema.String) })
+export const AccountPatch = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.optional(Schema.Boolean) })
 export const OAuthFinish = Schema.Struct({ pasted: Schema.optional(Schema.String), shared: Schema.Boolean })
 export const ShareInput = Schema.Struct({ shared: Schema.Boolean })
 export const HomeSettingsPatch = Schema.Struct({

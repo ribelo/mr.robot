@@ -14,6 +14,7 @@ import {
   PluginSwitch,
   BrowserBackend,
   MemberPreferences,
+  AccountPatch,
   ApiKeyInput,
   HomeSettingsPatch,
   OAuthFinish,
@@ -239,26 +240,12 @@ export const api = new Router<ApiContext>()
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
   .on('GET', '/api/providers', (c) => call(() => home(c.env).providersView(c.member.id)))
-  // OpenCode Go key pool (ticket 19)
-  .on('GET', '/api/providers/opencode-go/keys', (c) => call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys()))
-  .on('POST', '/api/providers/opencode-go/keys', (c) => Effect.gen(function* () {
-    const input = yield* decodeBody(c.request, Schema.Struct({ key: Schema.String, shared: Schema.optional(Schema.Boolean) }))
-    yield* call(() => c.env.MEMBER.getByName(c.member.id).addOpencodeKey(input.key, input.shared)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
-    return yield* call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys())
-  }))
-  .on('POST', '/api/providers/opencode-go/keys/:key/activate', (c, { key }) => call(() => c.env.MEMBER.getByName(c.member.id).activateOpencodeKey(key)).pipe(
-    Effect.mapError((error) => badRequest(error.detail ?? error.message)),
-    Effect.andThen(call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys())),
-  ))
-  .on('DELETE', '/api/providers/opencode-go/keys/:key', (c, { key }) => call(() => c.env.MEMBER.getByName(c.member.id).removeOpencodeKey(key)).pipe(
-    Effect.andThen(call(() => c.env.MEMBER.getByName(c.member.id).opencodeKeys())),
-  ))
-  .on('PUT', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
-    const name = yield* providerName(provider, API_KEY_PROVIDERS)
+  // Provider accounts (v1.10 ticket 02): many per Provider, each shared on its own (pa-i3le, pa-f281).
+  .on('POST', '/api/providers/:provider/accounts', (c, { provider }) => Effect.gen(function* () {
+    const name = yield* providerName(provider, [...API_KEY_PROVIDERS, 'opencode-go'])
     const input = yield* decodeBody(c.request, ApiKeyInput)
-    if (input.key.trim().length < 8) return yield* Effect.fail(badRequest('that does not look like an API key'))
-    yield* call(() => c.env.MEMBER.getByName(c.member.id).setApiKey(name, input.key.trim(), input.shared))
-    return { ok: true }
+    const id = yield* call(() => c.env.MEMBER.getByName(c.member.id).addApiKey(name, input.key, input.shared, input.label)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return { id }
   }))
   .on('POST', '/api/providers/:provider/oauth/start', (c, { provider }) => Effect.gen(function* () {
     const name = yield* providerName(provider, OAUTH_PROVIDERS)
@@ -272,17 +259,12 @@ export const api = new Router<ApiContext>()
     )
     return { connected }
   }))
-  .on('PATCH', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
-    const name = yield* providerName(provider, PROVIDER_IDS)
-    const { shared } = yield* decodeBody(c.request, ShareInput)
-    yield* call(() => c.env.MEMBER.getByName(c.member.id).setShared(name, shared))
+  .on('PATCH', '/api/accounts/:id', (c, { id }) => Effect.gen(function* () {
+    const change = yield* decodeBody(c.request, AccountPatch)
+    yield* call(() => c.env.MEMBER.getByName(c.member.id).updateAccount(id, { ...(change.label === undefined ? {} : { label: change.label }), ...(change.shared === undefined ? {} : { shared: change.shared }) }))
     return { ok: true }
   }))
-  .on('DELETE', '/api/providers/:provider', (c, { provider }) => Effect.gen(function* () {
-    const name = yield* providerName(provider, PROVIDER_IDS)
-    yield* call(() => c.env.MEMBER.getByName(c.member.id).removeCredential(name))
-    return { ok: true }
-  }))
+  .on('DELETE', '/api/accounts/:id', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).removeAccount(id)).pipe(Effect.as({ ok: true })))
   .on('GET', '/api/admin/settings', (c) => admin(c).pipe(Effect.andThen(call(async () => ({ ...(await home(c.env).settings()), models: await home(c.env).modelList() })))))
   .on('PATCH', '/api/admin/settings', (c) => Effect.gen(function* () {
     yield* admin(c)

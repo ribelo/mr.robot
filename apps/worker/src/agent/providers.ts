@@ -16,15 +16,14 @@ export const PROVIDER_IDS: readonly ProviderId[] = ['deepseek', 'openrouter', 'w
 export const API_KEY_PROVIDERS: readonly ProviderId[] = ['deepseek', 'openrouter']
 export const OAUTH_PROVIDERS: readonly ProviderId[] = ['openai', 'anthropic']
 
+/** A credential for one request; `account` is the Provider account it came from (v1.10). */
 export type ProviderCredential =
-  | { readonly kind: 'api-key'; readonly key: string }
-  | { readonly kind: 'oauth'; readonly access: string; readonly accountId?: string }
+  | { readonly kind: 'api-key'; readonly key: string; readonly account?: string }
+  | { readonly kind: 'oauth'; readonly access: string; readonly accountId?: string; readonly account?: string }
 
 export interface CredentialSource {
   /** Current credential for a Provider, or undefined when the owner has none usable. */
   resolve(provider: ProviderId): Promise<ProviderCredential | undefined>
-  /** The OpenCode Go key pool the owner can use (their own, else one shared with the Home). */
-  opencodePool?(): OpencodePool
 }
 
 export interface ProviderContext {
@@ -60,8 +59,13 @@ export function providerAdapter(provider: string, context: ProviderContext): Llm
     case 'openai':
       return new CodexAdapter(chatgptSubscription(() => oauth(context, 'openai')), window, context.images)
     case 'opencode-go': {
-      const pool = context.credentials.opencodePool?.()
-      if (pool === undefined || context.model === undefined) throw new LlmError('OpenCode Go is not available here', 'MISSING_CREDENTIAL')
+      if (context.model === undefined) throw new LlmError('OpenCode Go is not available here', 'MISSING_CREDENTIAL')
+      // One account's key per request (v1.10): moving to another account is the model chain's job, never silent.
+      const pool: OpencodePool = {
+        candidates: async () => ({ keys: [{ id: 'account', key: await apiKey(context, 'opencode-go') }], activeId: 'account' }),
+        promote: async () => undefined,
+        stick: async () => undefined,
+      }
       // OpenCode Go's models differ in vision support; they get images as text (DSH projects them).
       return opencodeGoAdapter(context.model, pool, context.contextWindow, context.wire)
     }

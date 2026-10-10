@@ -14,14 +14,13 @@ import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
-import type { ConnectorKind, NotificationKind, ProviderView, QuietHours, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
+import type { AccountStatus, ConnectorKind, NotificationKind, ProviderView, QuietHours, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { makeVault, type VaultError, type VaultShape } from '../platform/vault.ts'
-import type { OpencodeKey } from '../providers/opencode-go.ts'
 import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
 
@@ -106,34 +105,86 @@ const writeFile = (name: MemberFileName, content: string) => Effect.gen(function
   yield* sql.run('INSERT INTO member_file (name, content, updated_at) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at', name, content, Date.now())
 })
 
-// ------------------------------------------------------------------ Provider credentials (robot-dic7, robot-lzu3, robot-7v9s)
+// ------------------------------------------------------------------ Provider accounts (robot-dic7, v1.10 ticket 02)
 
-const publish = (provider: ProviderId, shared: boolean) => Effect.gen(function* () {
+/** One stored account of a Provider; the secret stays sealed until a request needs it. */
+type AccountRow = {
+  id: string; provider: ProviderId; label: string; kind: 'api-key' | 'oauth'; sealed: string; shared: number; expires: number | null
+  status: AccountStatus; note: string | null; until: number | null; checked_at: number | null; notified: number; created_at: number; updated_at: number
+}
+
+/** Whether any account of this Provider is shared, as the Home indexes it. */
+const publish = (provider: ProviderId) => Effect.gen(function* () {
   const platform = yield* MemberPlatform
-  yield* platform.publishSharing((yield* profile).id, provider, shared)
-})
-
-const saveCredential = (provider: ProviderId, kind: 'api-key' | 'oauth', sealed: string, shared: boolean, expires: number | null) => Effect.gen(function* () {
   const sql = yield* Sql
-  yield* sql.run(
-    `INSERT INTO credential (provider, kind, sealed, shared, expires, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (provider) DO UPDATE SET kind = excluded.kind, sealed = excluded.sealed, shared = excluded.shared,
-       expires = excluded.expires, updated_at = excluded.updated_at`,
-    provider, kind, sealed, shared ? 1 : 0, expires, Date.now(),
-  )
+  const shared = (yield* sql.first<{ n: number }>('SELECT COUNT(*) AS n FROM account WHERE provider = ? AND shared = 1', provider))?.n ?? 0
+  yield* platform.publishSharing((yield* profile).id, provider, shared > 0)
 })
 
-const providers = Effect.gen(function* () {
+/**
+ * Credentials and OpenCode Go keys stored before accounts existed become accounts once (pa-mdlk):
+ * each credential one account, each pool key one account.
+ */
+const migrateAccounts = Effect.gen(function* () {
+  if ((yield* kvGet<boolean>('accounts-migrated')) === true) return
+  const sql = yield* Sql
+  const platform = yield* MemberPlatform
+  const old = yield* sql.all<{ provider: ProviderId; kind: 'api-key' | 'oauth'; sealed: string; shared: number; expires: number | null; updated_at: number }>('SELECT * FROM credential')
+  for (const row of old) {
+    if (row.provider === 'opencode-go') {
+      const pool = JSON.parse(yield* platform.credentials.open(row.sealed)) as { keys: Array<{ id: string; key: string }> }
+      for (const entry of pool.keys) yield* insertAccount('opencode-go', keyLabel(entry.key), 'api-key', yield* platform.credentials.seal(JSON.stringify({ key: entry.key })), row.shared === 1, null)
+    } else {
+      const label = row.kind === 'oauth' ? `${PROVIDER_LABELS[row.provider]} 1` : keyLabel((JSON.parse(yield* platform.credentials.open(row.sealed)) as { key?: string }).key ?? '')
+      yield* insertAccount(row.provider, label, row.kind, row.sealed, row.shared === 1, row.expires)
+    }
+  }
+  yield* sql.run('DELETE FROM credential')
+  yield* kvSet('accounts-migrated', true)
+})
+
+const PROVIDER_LABELS: Record<ProviderId, string> = { deepseek: 'DeepSeek', openrouter: 'OpenRouter', 'workers-ai': 'Workers AI', openai: 'ChatGPT', anthropic: 'Claude', 'opencode-go': 'OpenCode Go' }
+
+const keyLabel = (key: string) => `Key ••••${key.length > 8 ? key.slice(-4) : ''}`
+
+const insertAccount = (provider: ProviderId, label: string, kind: 'api-key' | 'oauth', sealed: string, shared: boolean, expires: number | null) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const id = `acc-${crypto.randomUUID()}`
+  const now = Date.now()
+  yield* sql.run(
+    "INSERT INTO account (id, provider, label, kind, sealed, shared, expires, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
+    id, provider, label, kind, sealed, shared ? 1 : 0, expires, now, now,
+  )
+  return id
+})
+
+const accountView = (row: AccountRow, me: MemberProfile): ProviderView => ({
+  id: row.id, provider: row.provider, label: row.label, kind: row.kind, shared: row.shared === 1, connectedAt: row.created_at,
+  ownerId: me.id, ownerName: me.name, status: row.status, note: row.note, until: row.until,
+})
+
+/** The Member's accounts, oldest first; `sharedOnly` for another Member's view (pa-f281). */
+const accounts = (sharedOnly = false) => Effect.gen(function* () {
+  yield* migrateAccounts
   const sql = yield* Sql
   const me = yield* profile
-  const rows = yield* sql.all<{ provider: ProviderId; kind: 'api-key' | 'oauth'; shared: number; expires: number | null; updated_at: number }>('SELECT provider, kind, shared, expires, updated_at FROM credential ORDER BY provider')
-  return rows.map((row): ProviderView => ({ provider: row.provider, kind: row.kind, shared: row.shared === 1, connectedAt: row.updated_at, ownerId: me.id, ownerName: me.name }))
+  const rows = yield* sql.all<AccountRow>(`SELECT * FROM account ${sharedOnly ? 'WHERE shared = 1 ' : ''}ORDER BY created_at, rowid`)
+  return rows.map((row) => accountView(row, me))
 })
 
-const setApiKey = (provider: ProviderId, key: string, shared: boolean) => Effect.gen(function* () {
+/** Keys are checked for shape only; a wrong key shows up as a broken account at its first use. */
+const addApiKey = (provider: ProviderId, raw: string, shared: boolean, label?: string) => Effect.gen(function* () {
+  yield* migrateAccounts
+  const sql = yield* Sql
   const platform = yield* MemberPlatform
-  yield* saveCredential(provider, 'api-key', yield* platform.credentials.seal(JSON.stringify({ key })), shared, null)
-  yield* publish(provider, shared)
+  const key = raw.trim().replace(/^Bearer\s+/i, '').replace(/,+$/, '')
+  if (provider === 'opencode-go' ? !/^(?:sk-|oc_sk_)[A-Za-z0-9_-]+$/.test(key) : key.length < 8 || /\s/.test(key)) return yield* invalid(provider === 'opencode-go' ? 'Enter an OpenCode API key without a Bearer prefix or spaces' : 'that does not look like an API key')
+  for (const row of yield* sql.all<{ sealed: string }>("SELECT sealed FROM account WHERE provider = ? AND kind = 'api-key'", provider)) {
+    if ((JSON.parse(yield* platform.credentials.open(row.sealed)) as { key?: string }).key === key) return yield* invalid('This key is already saved')
+  }
+  const id = yield* insertAccount(provider, label?.trim() || keyLabel(key), 'api-key', yield* platform.credentials.seal(JSON.stringify({ key })), shared, null)
+  yield* publish(provider)
+  return id
 })
 
 const startOAuth = (provider: 'openai' | 'anthropic') => Effect.gen(function* () {
@@ -143,68 +194,88 @@ const startOAuth = (provider: 'openai' | 'anthropic') => Effect.gen(function* ()
   return { url: start.url, ...(start.userCode === undefined ? {} : { userCode: start.userCode }) } as Omit<FlowStart, 'flow'>
 })
 
-const saveTokens = (provider: ProviderId, tokens: OAuthTokens, shared: boolean) => Effect.gen(function* () {
-  const platform = yield* MemberPlatform
-  yield* saveCredential(provider, 'oauth', yield* platform.credentials.seal(JSON.stringify(tokens)), shared, tokens.expires)
-})
-
+/** A finished sign-in adds an account, or renews the account of the same address (pa-i3le). */
 const finishOAuth = (provider: 'openai' | 'anthropic', pasted: string | undefined, shared: boolean) => Effect.gen(function* () {
+  yield* migrateAccounts
+  const sql = yield* Sql
   const platform = yield* MemberPlatform
   const flow = yield* kvGet<PendingFlow>(`oauth-flow:${provider}`)
   if (flow === undefined || flow.provider !== provider) return yield* invalid('start the sign-in first')
   if (Date.now() - flow.createdAt > 15 * 60_000) return yield* invalid('the sign-in expired; start again')
   const tokens = flow.provider === 'openai' ? yield* pollDevice(platform.oauthClients, flow) : yield* finishPasted(platform.oauthClients, flow, pasted ?? '')
   if (tokens === undefined) return false
-  yield* saveTokens(provider, tokens, shared)
+  const sealed = yield* platform.credentials.seal(JSON.stringify(tokens))
+  const same = tokens.email === undefined ? undefined : yield* sql.first<{ id: string }>('SELECT id FROM account WHERE provider = ? AND label = ?', provider, tokens.email)
+  if (same !== undefined) {
+    yield* sql.run("UPDATE account SET sealed = ?, expires = ?, status = 'ok', note = NULL, until = NULL, notified = 0, updated_at = ? WHERE id = ?", sealed, tokens.expires, Date.now(), same.id)
+  } else {
+    const count = (yield* sql.first<{ n: number }>('SELECT COUNT(*) AS n FROM account WHERE provider = ?', provider))?.n ?? 0
+    yield* insertAccount(provider, tokens.email ?? `${PROVIDER_LABELS[provider]} ${count + 1}`, 'oauth', sealed, shared, tokens.expires)
+  }
   yield* kvDelete(`oauth-flow:${provider}`)
-  yield* publish(provider, shared)
+  yield* publish(provider)
   return true
 })
 
-const setShared = (provider: ProviderId, shared: boolean) => Effect.gen(function* () {
+const updateAccount = (id: string, change: { label?: string; shared?: boolean }) => Effect.gen(function* () {
+  yield* migrateAccounts
   const sql = yield* Sql
-  yield* sql.run('UPDATE credential SET shared = ? WHERE provider = ?', shared ? 1 : 0, provider)
-  yield* publish(provider, shared)
+  const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
+  if (row === undefined) return yield* notFound('no such account')
+  if (change.label !== undefined && change.label.trim() !== '') yield* sql.run('UPDATE account SET label = ?, updated_at = ? WHERE id = ?', change.label.trim().slice(0, 80), Date.now(), id)
+  if (change.shared !== undefined) yield* sql.run('UPDATE account SET shared = ?, updated_at = ? WHERE id = ?', change.shared ? 1 : 0, Date.now(), id)
+  yield* publish(row.provider)
 })
 
-const removeCredential = (provider: ProviderId) => Effect.gen(function* () {
+const removeAccount = (id: string) => Effect.gen(function* () {
+  yield* migrateAccounts
   const sql = yield* Sql
-  yield* sql.run('DELETE FROM credential WHERE provider = ?', provider)
-  yield* publish(provider, false)
+  const row = yield* sql.first<{ provider: ProviderId }>('SELECT provider FROM account WHERE id = ?', id)
+  if (row === undefined) return
+  yield* sql.run('DELETE FROM account WHERE id = ?', id)
+  yield* publish(row.provider)
 })
 
 /** Refresh shared by concurrent callers: the second waits for the first instead of spending the rotated token. */
-const refreshOnce = (provider: 'openai' | 'anthropic', tokens: OAuthTokens): Effect.Effect<OAuthTokens, unknown, R> => Effect.gen(function* () {
+const refreshOnce = (row: AccountRow, tokens: OAuthTokens): Effect.Effect<OAuthTokens, unknown, R> => Effect.gen(function* () {
   const platform = yield* MemberPlatform
-  const running = platform.refreshing.get(provider)
+  const running = platform.refreshing.get(row.id)
   if (running !== undefined) return yield* promise(() => running)
-  const sql = yield* Sql
-  const shared = (yield* sql.first<{ shared: number }>('SELECT shared FROM credential WHERE provider = ?', provider))?.shared === 1
   const services = yield* Effect.context<R>()
   const next = Effect.runPromise(Effect.provideContext(Effect.gen(function* () {
-    const fresh = yield* refreshTokens(platform.oauthClients, provider, tokens)
-    yield* saveTokens(provider, fresh, shared)
+    const fresh = yield* refreshTokens(platform.oauthClients, row.provider as 'openai' | 'anthropic', tokens)
+    const sql = yield* Sql
+    yield* sql.run('UPDATE account SET sealed = ?, expires = ?, updated_at = ? WHERE id = ?', yield* platform.credentials.seal(JSON.stringify(fresh)), fresh.expires, Date.now(), row.id)
     return fresh
-  }), services)).finally(() => platform.refreshing.delete(provider))
-  platform.refreshing.set(provider, next)
+  }), services)).finally(() => platform.refreshing.delete(row.id))
+  platform.refreshing.set(row.id, next)
   return yield* promise(() => next)
 })
 
-/**
- * The current credential, refreshed when its access token is about to expire. A request on
- * behalf of another Member's Robot (`forHome`) gets only a credential shared with the Home.
- */
-const credential = (provider: ProviderId, forHome: boolean) => Effect.gen(function* () {
-  if (provider === 'opencode-go') return null
-  const sql = yield* Sql
+const openAccount = (row: AccountRow) => Effect.gen(function* () {
   const platform = yield* MemberPlatform
-  const row = yield* sql.first<{ kind: 'api-key' | 'oauth'; sealed: string; shared: number; expires: number | null }>('SELECT kind, sealed, shared, expires FROM credential WHERE provider = ?', provider)
-  if (row === undefined || (forHome && row.shared !== 1)) return null
   const data = JSON.parse(yield* platform.credentials.open(row.sealed)) as { key?: string } & Partial<OAuthTokens>
-  if (row.kind === 'api-key') return { kind: 'api-key', key: data.key ?? '' } as ProviderCredential
+  if (row.kind === 'api-key') return { kind: 'api-key', key: data.key ?? '', account: row.id } as ProviderCredential
   let tokens = data as OAuthTokens
-  if ((row.expires ?? tokens.expires) <= Date.now()) tokens = yield* refreshOnce(provider as 'openai' | 'anthropic', tokens)
-  return { kind: 'oauth', access: tokens.access, ...(tokens.accountId === undefined ? {} : { accountId: tokens.accountId }) } as ProviderCredential
+  if ((row.expires ?? tokens.expires) <= Date.now()) tokens = yield* refreshOnce(row, tokens)
+  return { kind: 'oauth', access: tokens.access, account: row.id, ...(tokens.accountId === undefined ? {} : { accountId: tokens.accountId }) } as ProviderCredential
+})
+
+/** One account's credential; a request for another Member's Robot (`forHome`) gets only a shared account. */
+const accountCredential = (id: string, forHome: boolean) => Effect.gen(function* () {
+  yield* migrateAccounts
+  const sql = yield* Sql
+  const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
+  if (row === undefined || (forHome && row.shared !== 1)) return null
+  return yield* openAccount(row)
+})
+
+/** The first account of a Provider (oldest first) a Robot may use. */
+const credential = (provider: ProviderId, forHome: boolean) => Effect.gen(function* () {
+  yield* migrateAccounts
+  const sql = yield* Sql
+  const row = yield* sql.first<AccountRow>(`SELECT * FROM account WHERE provider = ? ${forHome ? 'AND shared = 1 ' : ''}ORDER BY created_at, rowid LIMIT 1`, provider)
+  return row === undefined ? null : yield* openAccount(row)
 })
 
 // ------------------------------------------------------------------ the robot list, per person (robot-mktj)
@@ -287,97 +358,6 @@ const usage = (month: string) => Effect.gen(function* () {
     costUsd: rows.reduce((sum, row) => sum + row.costUsd, 0),
     byRobot: rows,
   }
-})
-
-// ------------------------------------------------------------------ OpenCode Go key pool (ticket 19)
-
-type Pool = { keys: OpencodeKey[]; activeId: string | null }
-
-const poolShared = Effect.gen(function* () {
-  const sql = yield* Sql
-  return (yield* sql.first<{ shared: number }>("SELECT shared FROM credential WHERE provider = 'opencode-go'"))?.shared
-})
-
-const readPool = Effect.gen(function* () {
-  const sql = yield* Sql
-  const platform = yield* MemberPlatform
-  const row = yield* sql.first<{ sealed: string }>("SELECT sealed FROM credential WHERE provider = 'opencode-go'")
-  if (row === undefined) return { keys: [], activeId: null } as Pool
-  return JSON.parse(yield* platform.credentials.open(row.sealed)) as Pool
-})
-
-const writePool = (pool: Pool, shared?: boolean) => Effect.gen(function* () {
-  const sql = yield* Sql
-  const platform = yield* MemberPlatform
-  const current = yield* poolShared
-  const share = shared ?? current === 1
-  if (pool.keys.length === 0) {
-    yield* sql.run("DELETE FROM credential WHERE provider = 'opencode-go'")
-    yield* publish('opencode-go', false)
-    return
-  }
-  yield* saveCredential('opencode-go', 'api-key', yield* platform.credentials.seal(JSON.stringify(pool)), share, null)
-  if (current === undefined || shared !== undefined) yield* publish('opencode-go', share)
-})
-
-const withPool = <A, E>(change: Effect.Effect<A, E, R>) => Effect.gen(function* () {
-  const platform = yield* MemberPlatform
-  return yield* platform.poolLock.withPermits(1)(change)
-})
-
-const opencodeKeys = Effect.gen(function* () {
-  const pool = yield* readPool
-  const shared = (yield* poolShared) === 1
-  return { keys: pool.keys.map(({ id, key }) => ({ id, masked: `••••${key.length > 8 ? key.slice(-4) : ''}` })), activeId: pool.activeId, shared }
-})
-
-const addOpencodeKey = (raw: string, shared?: boolean) => Effect.gen(function* () {
-  const key = raw.trim().replace(/,+$/, '')
-  if (!/^(?:sk-|oc_sk_)[A-Za-z0-9_-]+$/.test(key)) return yield* invalid('Enter an OpenCode API key without a Bearer prefix or spaces')
-  yield* withPool(Effect.gen(function* () {
-    const pool = yield* readPool
-    if (pool.keys.some((entry) => entry.key === key)) return yield* invalid('This key is already saved')
-    const id = crypto.randomUUID()
-    pool.keys.push({ id, key })
-    pool.activeId ??= id
-    yield* writePool(pool, shared)
-  }))
-})
-
-const activateOpencodeKey = (id: string) => withPool(Effect.gen(function* () {
-  const pool = yield* readPool
-  if (!pool.keys.some((entry) => entry.id === id)) return yield* notFound('That key no longer exists')
-  pool.activeId = id
-  yield* writePool(pool)
-}))
-
-const removeOpencodeKey = (id: string) => withPool(Effect.gen(function* () {
-  const pool = yield* readPool
-  pool.keys = pool.keys.filter((entry) => entry.id !== id)
-  if (pool.activeId === id) pool.activeId = pool.keys[0]?.id ?? null
-  yield* writePool(pool)
-}))
-
-/** Keys in the order a request should try them: the session's sticky key or the active one first. */
-const opencodeCandidates = (sessionId: string | null, forHome: boolean) => Effect.gen(function* () {
-  if (forHome && (yield* poolShared) !== 1) return { keys: [], activeId: null } as Pool
-  const pool = yield* readPool
-  const sticky = sessionId === null ? undefined : (yield* kvGet<Record<string, string>>('opencode-sticky'))?.[sessionId]
-  const first = pool.keys.findIndex((entry) => entry.id === (sticky !== undefined && pool.keys.some((key) => key.id === sticky) ? sticky : pool.activeId))
-  return { keys: first < 0 ? pool.keys : [...pool.keys.slice(first), ...pool.keys.slice(0, first)], activeId: pool.activeId }
-})
-
-const opencodePromote = (expectedActiveId: string, id: string) => withPool(Effect.gen(function* () {
-  const pool = yield* readPool
-  if (pool.activeId !== expectedActiveId || !pool.keys.some((entry) => entry.id === id)) return
-  pool.activeId = id
-  yield* writePool(pool)
-}))
-
-const opencodeStick = (sessionId: string, id: string) => Effect.gen(function* () {
-  const sticky = (yield* kvGet<Record<string, string>>('opencode-sticky')) ?? {}
-  if (sticky[sessionId] === id) return
-  yield* kvSet('opencode-sticky', Object.fromEntries(Object.entries({ ...sticky, [sessionId]: id }).slice(-500)))
 })
 
 // ------------------------------------------------------------------ Web Push (robot-ajrp, robot-9xoj, robot-bden)
@@ -470,9 +450,8 @@ const deliverDue = (now: number) => Effect.gen(function* () {
 
 /** The Member's programs, as run by the Durable Object. */
 export const MemberProgram = {
-  profile, init, updateProfile, file, files, writeFile, providers, setApiKey, startOAuth, finishOAuth, setShared, removeCredential, credential,
+  profile, init, updateProfile, file, files, writeFile, accounts, addApiKey, startOAuth, finishOAuth, updateAccount, removeAccount, credential, accountCredential,
   listPrefs, setListPref, markSeen, setSecret, secret, takeSecret, secretNames, logins, addUsage, usage,
-  opencodeKeys, addOpencodeKey, activateOpencodeKey, removeOpencodeKey, opencodeCandidates, opencodePromote, opencodeStick,
   addPushDevice, removePushDevice, pushDevices, notify, deliver, deliverDue,
 }
 
@@ -495,6 +474,11 @@ export class Member extends DurableObject<Env> {
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
     sql.exec(`CREATE TABLE IF NOT EXISTS credential (
       provider TEXT PRIMARY KEY, kind TEXT NOT NULL, sealed TEXT NOT NULL, shared INTEGER NOT NULL, expires INTEGER, updated_at INTEGER NOT NULL
+    )`)
+    sql.exec(`CREATE TABLE IF NOT EXISTS account (
+      id TEXT PRIMARY KEY, provider TEXT NOT NULL, label TEXT NOT NULL, kind TEXT NOT NULL, sealed TEXT NOT NULL, shared INTEGER NOT NULL,
+      expires INTEGER, status TEXT NOT NULL DEFAULT 'ok', note TEXT, until INTEGER, checked_at INTEGER, notified INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )`)
     const platform: MemberPlatformShape = {
       credentials: makeVault(env.DATA_KEY, 'credentials'),
@@ -531,13 +515,15 @@ export class Member extends DurableObject<Env> {
     const memberId = (await this.run(profile)).id
     await this.env.HOME.getByName(HOME_ID).memoryChanged(memberId, name, by, exceptRobot ?? null).catch((error: unknown) => console.warn('memory change not delivered', error))
   }
-  providers(): Promise<ProviderView[]> { return this.run(providers) }
-  setApiKey(provider: ProviderId, key: string, shared: boolean): Promise<void> { return this.run(setApiKey(provider, key, shared)) }
+  /** The Member's Provider accounts; `sharedOnly` for another Member's view. */
+  accounts(sharedOnly = false): Promise<ProviderView[]> { return this.run(accounts(sharedOnly)) }
+  addApiKey(provider: ProviderId, key: string, shared: boolean, label?: string): Promise<string> { return this.run(addApiKey(provider, key, shared, label)) }
   startOAuth(provider: 'openai' | 'anthropic'): Promise<Omit<FlowStart, 'flow'>> { return this.run(startOAuth(provider)) }
   finishOAuth(provider: 'openai' | 'anthropic', pasted: string | undefined, shared: boolean): Promise<boolean> { return this.run(finishOAuth(provider, pasted, shared)) }
-  setShared(provider: ProviderId, shared: boolean): Promise<void> { return this.run(setShared(provider, shared)) }
-  removeCredential(provider: ProviderId): Promise<void> { return this.run(removeCredential(provider)) }
+  updateAccount(id: string, change: { label?: string; shared?: boolean }): Promise<void> { return this.run(updateAccount(id, change)) }
+  removeAccount(id: string): Promise<void> { return this.run(removeAccount(id)) }
   credential(provider: ProviderId, forHome: boolean): Promise<ProviderCredential | null> { return this.run(credential(provider, forHome)) }
+  accountCredential(id: string, forHome: boolean): Promise<ProviderCredential | null> { return this.run(accountCredential(id, forHome)) }
   listPrefs(): Promise<Record<string, { pinned: boolean; hidden: boolean; markedUnread: boolean; seenAt: number | null }>> { return this.run(listPrefs) }
   setListPref(robotId: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }): Promise<void> { return this.run(setListPref(robotId, change)) }
   markSeen(robotId: string, at: number): Promise<void> { return this.run(markSeen(robotId, at)) }
@@ -560,13 +546,6 @@ export class Member extends DurableObject<Env> {
   }
   addUsage(month: string, robotId: string, inputTokens: number, outputTokens: number, costUsd: number): Promise<void> { return this.run(addUsage(month, robotId, inputTokens, outputTokens, costUsd)) }
   usage(month: string): Promise<{ inputTokens: number; outputTokens: number; costUsd: number; byRobot: Array<{ robotId: string; inputTokens: number; outputTokens: number; costUsd: number }> }> { return this.run(usage(month)) }
-  opencodeKeys(): Promise<{ keys: Array<{ id: string; masked: string }>; activeId: string | null; shared: boolean }> { return this.run(opencodeKeys) }
-  addOpencodeKey(raw: string, shared?: boolean): Promise<void> { return this.run(addOpencodeKey(raw, shared)) }
-  activateOpencodeKey(id: string): Promise<void> { return this.run(activateOpencodeKey(id)) }
-  removeOpencodeKey(id: string): Promise<void> { return this.run(removeOpencodeKey(id)) }
-  opencodeCandidates(sessionId: string | null, forHome: boolean): Promise<{ keys: OpencodeKey[]; activeId: string | null }> { return this.run(opencodeCandidates(sessionId, forHome)) }
-  opencodePromote(expectedActiveId: string, id: string): Promise<void> { return this.run(opencodePromote(expectedActiveId, id)) }
-  opencodeStick(sessionId: string, id: string): Promise<void> { return this.run(opencodeStick(sessionId, id)) }
   addPushDevice(device: DeviceSubscription & { device?: string }): Promise<void> { return this.run(addPushDevice(device)) }
   removePushDevice(endpoint: string): Promise<void> { return this.run(removePushDevice(endpoint)) }
   pushDevices(): Promise<Array<{ endpoint: string; device: string; createdAt: number }>> { return this.run(pushDevices) }

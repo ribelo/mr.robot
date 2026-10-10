@@ -510,3 +510,5 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 
 .plugin-guide summary { cursor: pointer; }
 .plugin-guide summary h3 { display: inline; }
+.provider-accounts { flex-direction: column; align-items: stretch; }
+.provider-accounts .connection-list { margin: 8px 0 0; }

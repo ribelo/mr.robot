@@ -758,24 +758,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     return {
       resolve: async (provider) => (await this.home().providerCredential(config.ownerId, provider)) ?? undefined,
-      opencodePool: () => this.opencodePool(config.ownerId),
-    }
-  }
-
-  /** The owner's OpenCode Go pool (or the Home's), resolved per request so rotation and sharing apply at once. */
-  private opencodePool(ownerId: string): OpencodePool {
-    const owner = async () => {
-      const found = await this.home().opencodePoolOwner(ownerId)
-      if (found === null) throw new LlmError('Add an OpenCode Go API key under Providers, or use one shared with the Home', 'MISSING_CREDENTIAL')
-      return found
-    }
-    return {
-      candidates: async (sessionId) => {
-        const { ownerId: holder, forHome } = await owner()
-        return this.env.MEMBER.getByName(holder).opencodeCandidates(sessionId, forHome)
-      },
-      promote: async (expected, id) => this.env.MEMBER.getByName((await owner()).ownerId).opencodePromote(expected, id),
-      stick: async (sessionId, id) => this.env.MEMBER.getByName((await owner()).ownerId).opencodeStick(sessionId, id),
     }
   }
 

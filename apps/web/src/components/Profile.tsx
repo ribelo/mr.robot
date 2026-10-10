@@ -6,17 +6,18 @@ import { Connections } from './Connections.tsx'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import type { Me, OpencodeKeysView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
+import type { Me, ProviderView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
 import { applyTheme } from '../theme/theme.ts'
-import { keys, memberFileAtom, opencodeKeysAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
+import { keys, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
 
 const PROVIDERS = [
+  { id: 'anthropic', name: 'Claude', note: 'Your Claude plans, signed in with Anthropic.', kind: 'oauth' },
+  { id: 'openai', name: 'ChatGPT', note: 'Your ChatGPT plans, signed in with OpenAI.', kind: 'oauth' },
+  { id: 'opencode-go', name: 'OpenCode Go', note: 'Every model of the plan, one API key per account.', kind: 'api-key' },
   { id: 'deepseek', name: 'DeepSeek', note: 'DeepSeek models with your API key.', kind: 'api-key' },
   { id: 'openrouter', name: 'OpenRouter', note: 'Hundreds of models with one API key.', kind: 'api-key' },
-  { id: 'openai', name: 'ChatGPT', note: 'Your ChatGPT plan, signed in with OpenAI.', kind: 'oauth' },
-  { id: 'anthropic', name: 'Claude', note: 'Your Claude plan, signed in with Anthropic.', kind: 'oauth' },
 ] as const
 
 /** A Member's own settings: profile, quiet hours, Provider credentials, Member files. */
@@ -66,101 +67,57 @@ function Providers() {
 }
 
 function ProviderList({ view }: { view: ProvidersView }) {
-  const command = useCommand()
   const [message, setMessage] = useState<string>()
-  const run = async (action: Parameters<typeof command>[0], done?: string) => {
-    const failure = exitFailure(await command(action, [keys.providers]))
-    setMessage(failure ?? done)
-  }
-  const sharedBy = (id: string) => view.shared.filter((entry) => entry.provider === id).map((entry) => entry.ownerName)
-  const shareToggle = (id: string) => {
-    const mine = view.mine.find((entry) => entry.provider === id)
-    return mine === undefined ? null : <label className="check"><input type="checkbox" checked={mine.shared} onChange={(event) => { const shared = event.target.checked; void run((api) => api.shareProvider(id, shared)) }} /> shared with the Home</label>
-  }
   return (
     <>
       <h2>Providers</h2>
-      <div className="muted">Your keys and subscriptions run your Robots. Share one with the Home and every Member's Robots can use it.</div>
+      <div className="muted">Your keys and subscriptions run your Robots. Add as many accounts as you have; share each one with the Home on its own. Each Robot's model chain says which accounts it uses.</div>
       {message === undefined ? null : <div className="muted">{message}</div>}
       <div className="providers">
-        {PROVIDERS.map((provider) => {
-          const mine = view.mine.find((entry) => entry.provider === provider.id)
-          return (
-            <ProviderRow key={provider.id} name={provider.name} note={provider.note} sharedBy={sharedBy(provider.id)}>
-              {mine === undefined
-                ? <Connect provider={provider} onDone={(text) => setMessage(text)} />
-                : (
-                  <span className="form inline">
-                    <span className="connected">Connected</span>
-                    {shareToggle(provider.id)}
-                    <button type="button" className="link" onClick={() => void run((api) => api.removeProvider(provider.id), 'Removed.')}>Remove</button>
-                  </span>
-                )}
-            </ProviderRow>
-          )
-        })}
-        <ProviderRow name="OpenCode Go" note="Every model of the plan. With several keys, the next one takes over when a key runs out." sharedBy={sharedBy('opencode-go')}>
-          <AtomView atom={opencodeKeysAtom}>{(keyPool) => <OpencodeKeys view={keyPool} share={shareToggle('opencode-go')} />}</AtomView>
-        </ProviderRow>
-        <ProviderRow name="Workers AI" note="Models on Cloudflare, billed to this Cloudflare account." sharedBy={[]}>
-          <span className="muted">Included</span>
-        </ProviderRow>
+        {PROVIDERS.map((provider) => (
+          <div key={provider.id} className="provider provider-accounts">
+            <div className="provider-head">
+              <div className="provider-name"><div>{provider.name}</div><div className="muted">{provider.note}</div></div>
+              <div className="provider-action"><Connect provider={provider} onDone={setMessage} /></div>
+            </div>
+            <AccountList accounts={view.mine.filter((account) => account.provider === provider.id)} mine />
+            <AccountList accounts={view.shared.filter((account) => account.provider === provider.id)} mine={false} />
+          </div>
+        ))}
+        <div className="provider">
+          <div className="provider-name"><div>Workers AI</div><div className="muted">Models on Cloudflare, billed to this Cloudflare account.</div></div>
+          <div className="provider-action"><span className="muted">Included</span></div>
+        </div>
       </div>
     </>
   )
 }
 
-function ProviderRow({ name, note, sharedBy, children }: { name: string; note: string; sharedBy: string[]; children: ReactNode }) {
-  return (
-    <div className="provider">
-      <div className="provider-name">
-        <div>{name}</div>
-        <div className="muted">{note}{sharedBy.length > 0 ? ` Shared with the Home by ${sharedBy.join(', ')}.` : ''}</div>
-      </div>
-      <div className="provider-action">{children}</div>
-    </div>
-  )
-}
-
-/** OpenCode Go keys (ticket 19): a pool, so it is managed here rather than through Connect. */
-function OpencodeKeys({ view, share }: { view: OpencodeKeysView; share: ReactNode }) {
+/** A Provider's accounts (v1.10): the person's own with their switches, or ones others share. */
+function AccountList({ accounts, mine }: { accounts: readonly ProviderView[]; mine: boolean }) {
   const command = useCommand()
-  const [adding, setAdding] = useState(false)
-  const [key, setKey] = useState('')
   const [error, setError] = useState<string>()
-  const change = async (action: Parameters<typeof command>[0]) => {
-    const failure = exitFailure(await command(action, [keys.providers]))
-    setError(failure)
-    return failure === undefined
-  }
-  const poolKeys = view.keys
-  const form = (
-    <span className="form inline">
-      <input type="password" value={key} placeholder="OpenCode API key (sk-…)" onChange={(event) => setKey(event.target.value)} />
-      <button type="button" className="button" disabled={key.trim() === ''} onClick={() => void change((api) => api.addOpencodeKey(key)).then((ok) => { if (ok) { setKey(''); setAdding(false) } })}>Add</button>
-    </span>
-  )
-  if (poolKeys.length === 0) {
-    return (
-      <span className="form">
-        {adding ? form : <button type="button" className="button" onClick={() => setAdding(true)}>Connect</button>}
-        {error === undefined ? null : <span className="muted">{error}</span>}
-      </span>
-    )
-  }
+  const change = async (action: Parameters<typeof command>[0]) => setError(exitFailure(await command(action, [keys.providers])))
+  if (accounts.length === 0) return null
   return (
-    <span className="form">
-      <span className="form inline"><span className="connected">Connected</span>{share}</span>
-      {poolKeys.map((entry) => (
-        <span key={entry.id} className="form inline key-row">
-          <span className="mono">{entry.masked}</span>
-          {entry.id === view.activeId ? <span className="muted">in use</span> : <button type="button" className="link" onClick={() => void change((api) => api.activateOpencodeKey(entry.id))}>Use this one</button>}
-          <button type="button" className="link" onClick={() => void change((api) => api.removeOpencodeKey(entry.id))}>Remove</button>
-        </span>
+    <ul className="connection-list">
+      {accounts.map((account) => (
+        <li key={account.id} className="connection">
+          <div className="connection-name">
+            <b>{account.label}</b>{mine ? null : <span className="muted"> · {account.ownerName}'s, shared</span>}
+            {account.status === 'ok' ? null : <div className="host-log-failed">{account.status === 'limited' ? 'Limited' : 'Needs attention'}{account.note === null ? '' : `: ${account.note}`}{account.until === null ? '' : ` · tried again ${new Date(account.until).toLocaleString()}`}</div>}
+          </div>
+          {mine ? (
+            <div className="connection-actions">
+              <label className="check"><input type="checkbox" checked={account.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateAccount(account.id, { shared })) }} /><span>Shared with the Home</span></label>
+              <button type="button" className="link" onClick={() => { const label = prompt('Name of this account', account.label); if (label !== null && label.trim() !== '') void change((api) => api.updateAccount(account.id, { label })) }}>Rename</button>
+              <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${account.label}? Robots that use it move on to the next entry of their model chain.`)) void change((api) => api.removeAccount(account.id)) }}>Remove</button>
+            </div>
+          ) : null}
+          {error === undefined ? null : <div className="muted">{error}</div>}
+        </li>
       ))}
-      {adding ? form : <button type="button" className="link" onClick={() => setAdding(true)}>+ Add another key</button>}
-      {error === undefined ? null : <span className="muted">{error}</span>}
-    </span>
+    </ul>
   )
 }
 
@@ -181,7 +138,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
         if (Exit.isSuccess(exit)) {
           if (exit.value.connected) {
             clearInterval(timer)
-            onDone('ChatGPT subscription connected.')
+            onDone('ChatGPT account added.'); setOpen(false); setFlow(undefined)
           }
           return
         }
@@ -192,7 +149,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
     return () => clearInterval(timer)
   }, [flow, provider.id, shared, onDone, command])
 
-  if (!open) return <button type="button" className="button" onClick={() => setOpen(true)}>Connect</button>
+  if (!open) return <button type="button" className="button" onClick={() => setOpen(true)}>Add account</button>
   const sharedBox = <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /> share with the Home</label>
   if (provider.kind === 'api-key') {
     return (
@@ -200,7 +157,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
         <input type="password" value={key} placeholder="API key" onChange={(event) => setKey(event.target.value)} />
         {sharedBox}
         {error === undefined ? null : <span className="muted">{error}</span>}
-        <button type="button" className="button button-primary" onClick={() => void command((api) => api.setApiKey(provider.id, key, shared), [keys.providers]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) onDone('Saved.'); else setError(failure) })}>Save</button>
+        <button type="button" className="button button-primary" onClick={() => void command((api) => api.addAccount(provider.id, key, shared), [keys.providers]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) { onDone('Account added.'); setKey(''); setOpen(false) } else setError(failure) })}>Add</button>
       </span>
     )
   }
@@ -226,7 +183,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
       <span><a href={flow.url} target="_blank" rel="noreferrer">Sign in to Claude</a>. You will land on a page that does not load: copy its whole address and paste it here.</span>
       <input value={pasted} placeholder="http://localhost:53692/callback?code=…" onChange={(event) => setPasted(event.target.value)} />
       {error === undefined ? null : <span className="muted">{error}</span>}
-      <button type="button" className="button button-primary" onClick={() => void command((api) => api.finishOAuth('anthropic', shared, pasted), [keys.providers]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) onDone('Claude subscription connected.'); else setError(failure) })}>Finish</button>
+      <button type="button" className="button button-primary" onClick={() => void command((api) => api.finishOAuth('anthropic', shared, pasted), [keys.providers]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) { onDone('Claude account added.'); setOpen(false); setFlow(undefined); setPasted('') } else setError(failure) })}>Finish</button>
     </span>
   )
 }

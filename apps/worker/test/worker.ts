@@ -11,6 +11,8 @@ import type { BrowserDriver } from '../src/browser/driver.ts'
 import type { BrowserBackend } from '@mr-robot/protocol'
 
 import { Member as ProductionMember } from '../src/member/member.ts'
+import { makeVault } from '../src/platform/vault.ts'
+import * as Effect from 'effect/Effect'
 import { ConversationIndex } from '../src/agent/conversation-search.ts'
 import type { PushNotification } from '../src/platform/push.ts'
 
@@ -48,7 +50,7 @@ export class Member extends ProductionMember {
   }
 
   async expireCredentialsForTest(): Promise<void> {
-    this.ctx.storage.sql.exec('UPDATE credential SET expires = 0')
+    this.ctx.storage.sql.exec('UPDATE account SET expires = 0')
   }
 
   /** Every notification delivered to devices, in order. */
@@ -69,7 +71,14 @@ export class Member extends ProductionMember {
   }
 
   async sealedForTest(provider: string): Promise<string> {
-    return this.ctx.storage.sql.exec<{ sealed: string }>('SELECT sealed FROM credential WHERE provider = ?', provider).one().sealed
+    return this.ctx.storage.sql.exec<{ sealed: string }>('SELECT sealed FROM account WHERE provider = ? ORDER BY created_at LIMIT 1', provider).one().sealed
+  }
+
+  /** A credential or OpenCode pool as stored before accounts existed (pa-mdlk). */
+  async seedLegacyForTest(provider: string, kind: 'api-key' | 'oauth', data: unknown, shared: boolean): Promise<void> {
+    const sealed = await Effect.runPromise(makeVault(this.env.DATA_KEY, 'credentials').seal(JSON.stringify(data)))
+    this.ctx.storage.sql.exec('INSERT INTO credential (provider, kind, sealed, shared, expires, updated_at) VALUES (?, ?, ?, ?, NULL, ?)', provider, kind, sealed, shared ? 1 : 0, Date.now())
+    this.ctx.storage.sql.exec("DELETE FROM kv WHERE k = 'accounts-migrated'")
   }
 }
 

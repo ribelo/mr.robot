@@ -421,7 +421,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limitUsd: current.memberSpendLimitUsd } }
   }), { concurrency: 'unbounded' })
   const providers = (yield* Effect.forEach(everyone.filter((person) => person.status === 'active'), (person) =>
-    Effect.map(remote((env) => env.MEMBER.getByName(person.id).providers()), (views) => views.map((view) => ({ provider: view.provider, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
+    Effect.map(remote((env) => env.MEMBER.getByName(person.id).accounts()), (views) => views.map((view) => ({ provider: view.provider, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
   return {
     fleet: live.map(({ summary: row, row: admin }) => ({ ...row, fleetState: admin.fleetState, status: admin.status, grants: admin.grants, model: admin.model, usage: admin.usage })),
     routines: live.flatMap(({ summary: row, row: admin }) => admin.routines.map((routine) => ({ ...routine, robotName: row.identity.name, ownerName: row.ownerName })))
@@ -781,7 +781,7 @@ const secretsView = (memberId: string) => Effect.gen(function* () {
 const usableProviders = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const usable = new Set<string>(['workers-ai'])
-  for (const view of yield* remote((env) => env.MEMBER.getByName(memberId).providers())) usable.add(view.provider)
+  for (const view of yield* remote((env) => env.MEMBER.getByName(memberId).accounts())) usable.add(view.provider)
   for (const row of yield* sql.all<{ provider: string }>('SELECT DISTINCT provider FROM shared_credential')) usable.add(row.provider)
   return usable
 })
@@ -819,29 +819,10 @@ const providerCredential = (memberId: string, provider: ProviderId) => Effect.ge
   return null as ProviderCredential | null
 })
 
-/** Whose OpenCode Go pool a Member's Robots use: their own, else the first one shared with the Home. */
-const opencodePoolOwner = (memberId: string) => Effect.gen(function* () {
-  const sql = yield* Sql
-  const own = yield* remote((env) => env.MEMBER.getByName(memberId).opencodeKeys())
-  if (own.keys.length > 0) return { ownerId: memberId, forHome: false }
-  for (const { member_id } of yield* sql.all<{ member_id: string }>("SELECT member_id FROM shared_credential WHERE provider = 'opencode-go' AND member_id != ?", memberId)) {
-    if ((yield* member(member_id))?.status === 'active') return { ownerId: member_id, forHome: true }
-  }
-  return null as { ownerId: string; forHome: boolean } | null
-})
-
 const listingAccess = (provider: string, memberId: string) => Effect.gen(function* () {
   const platform = yield* HomePlatform
   if (provider === 'workers-ai') return (platform.env.AI === undefined ? {} : { ai: platform.env.AI }) as ListingAccess
   if (provider === 'openrouter') return {} as ListingAccess
-  if (provider === 'opencode-go') {
-    const owner = yield* opencodePoolOwner(memberId)
-    if (owner === null) return yield* invalid('no OpenCode Go key')
-    const pool = yield* remote((env) => env.MEMBER.getByName(owner.ownerId).opencodeCandidates(null, owner.forHome))
-    const key = pool.keys[0]?.key
-    if (key === undefined) return yield* invalid('no OpenCode Go key')
-    return { key } as ListingAccess
-  }
   const credential = yield* providerCredential(memberId, provider as ProviderId)
   if (credential === null) return yield* invalid(`no ${provider} credential`)
   return (credential.kind === 'api-key' ? { key: credential.key } : { oauth: { access: credential.access, ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }) } }) as ListingAccess
@@ -925,13 +906,12 @@ const credentialShared = (memberId: string, provider: ProviderId, shared: boolea
 
 const providersView = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  const mine = yield* remote((env) => env.MEMBER.getByName(memberId).providers())
-  const others = yield* sql.all<{ provider: ProviderId; member_id: string }>('SELECT provider, member_id FROM shared_credential WHERE member_id != ?', memberId)
+  const mine = yield* remote((env) => env.MEMBER.getByName(memberId).accounts())
+  const sharers = yield* sql.all<{ member_id: string }>('SELECT DISTINCT member_id FROM shared_credential WHERE member_id != ?', memberId)
   const shared: ProviderView[] = []
-  for (const { provider, member_id } of others) {
-    const sharer = yield* member(member_id)
-    if (sharer === undefined || sharer.status !== 'active') continue
-    shared.push({ provider, kind: provider === 'openai' || provider === 'anthropic' ? 'oauth' : 'api-key', shared: true, connectedAt: 0, ownerId: sharer.id, ownerName: sharer.name })
+  for (const { member_id } of sharers) {
+    if ((yield* member(member_id))?.status !== 'active') continue
+    shared.push(...(yield* remote((env) => env.MEMBER.getByName(member_id).accounts(true))))
   }
   return { mine, shared, models: yield* models(memberId), defaultModel: (yield* settings).defaultModel } as ProvidersView
 })
@@ -1286,7 +1266,6 @@ export class Home extends DurableObject<Env> {
   setVpnConfig(config: string | null): Promise<void> { return this.run(setVpnConfig(config)) }
   credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }
   providerCredential(memberId: string, provider: ProviderId): Promise<ProviderCredential | null> { return this.run(providerCredential(memberId, provider)) }
-  opencodePoolOwner(memberId: string): Promise<{ ownerId: string; forHome: boolean } | null> { return this.run(opencodePoolOwner(memberId)) }
   providersView(memberId: string): Promise<ProvidersView> { return this.run(providersView(memberId)) }
 
   // ---------------------------------------------------------------- Plugins and connections (v1.5)

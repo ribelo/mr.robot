@@ -11,7 +11,7 @@ import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
-  LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, OpencodeKeysView, PromptPreview, ProposalView,
+  LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type ModelChoice, type SendMessage, type SettingsPatch,
@@ -101,15 +101,11 @@ const make = Effect.gen(function* () {
     deleteSkill: (name: string) => send('DELETE', `/api/admin/skills/${enc(name)}`),
 
     providers: get(ProvidersView, '/api/providers'),
-    setApiKey: (provider: string, key: string, shared: boolean) => send('PUT', `/api/providers/${enc(provider)}`, { key, shared }),
+    addAccount: (provider: string, key: string, shared: boolean, label?: string) => send('POST', `/api/providers/${enc(provider)}/accounts`, label === undefined ? { key, shared } : { key, shared, label }),
     startOAuth: (provider: string) => request(OAuthStart, 'POST', `/api/providers/${enc(provider)}/oauth/start`, {}),
     finishOAuth: (provider: string, shared: boolean, pasted?: string) => request(OAuthFinished, 'POST', `/api/providers/${enc(provider)}/oauth/finish`, pasted === undefined ? { shared } : { shared, pasted }),
-    shareProvider: (provider: string, shared: boolean) => send('PATCH', `/api/providers/${enc(provider)}`, { shared }),
-    removeProvider: (provider: string) => send('DELETE', `/api/providers/${enc(provider)}`),
-    opencodeKeys: get(OpencodeKeysView, '/api/providers/opencode-go/keys'),
-    addOpencodeKey: (key: string) => request(OpencodeKeysView, 'POST', '/api/providers/opencode-go/keys', { key }),
-    activateOpencodeKey: (id: string) => request(OpencodeKeysView, 'POST', `/api/providers/opencode-go/keys/${enc(id)}/activate`, {}),
-    removeOpencodeKey: (id: string) => request(OpencodeKeysView, 'DELETE', `/api/providers/opencode-go/keys/${enc(id)}`),
+    updateAccount: (id: string, change: { label?: string; shared?: boolean }) => send('PATCH', `/api/accounts/${enc(id)}`, change),
+    removeAccount: (id: string) => send('DELETE', `/api/accounts/${enc(id)}`),
 
     admin: get(AdminView, '/api/admin'),
     homeSettings: get(HomeSettingsView, '/api/admin/settings'),

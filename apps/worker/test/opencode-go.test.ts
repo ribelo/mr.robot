@@ -1,6 +1,6 @@
 import { reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Me, OpencodeKeysView, SettingsCatalog } from '@mr-robot/protocol'
+import type { SettingsCatalog } from '@mr-robot/protocol'
 import { rotatingFetch, type OpencodeKey, type OpencodePool } from '../src/providers/opencode-go.ts'
 import { api } from './api.ts'
 
@@ -105,7 +105,7 @@ describe('OpenCode Go in the Home', () => {
       if (url === 'https://models.dev/api.json') return Response.json({ 'opencode-go': { models: { 'minimax-m3': { name: 'MiniMax-M3', limit: { context: 1000000 }, provider: { npm: '@ai-sdk/anthropic' } } } } })
       return realFetch(input, init)
     }) as typeof fetch
-    await api(ANNA, '/api/providers/opencode-go/keys', { body: { key: 'sk-firstkey1111' } })
+    await api(ANNA, '/api/providers/opencode-go/accounts', { body: { key: 'sk-firstkey1111', shared: false } })
     const { body: robot } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     const catalog = (await api<SettingsCatalog>(ANNA, `/api/robots/${robot.id}/catalog`)).body
     const models = catalog.models.filter((model) => model.provider === 'opencode-go').map((model) => model.model)
@@ -114,27 +114,4 @@ describe('OpenCode Go in the Home', () => {
     globalThis.fetch = realFetch
   })
 
-  it('keeps keys encrypted and masked; add, activate, remove; share with the Home', async () => {
-    const add = (key: string) => api<OpencodeKeysView>(ANNA, '/api/providers/opencode-go/keys', { body: { key } })
-    expect((await add('Bearer sk-x')).status).toBe(400)
-    await add('sk-firstkey1111')
-    const view = (await add('oc_sk_second2222')).body
-    expect(view.keys.map((key) => key.masked)).toEqual(['••••1111', '••••2222'])
-    expect(view.activeId).toBe(view.keys[0]!.id)
-    expect(JSON.stringify(view)).not.toContain('firstkey')
-    const activated = (await api<OpencodeKeysView>(ANNA, `/api/providers/opencode-go/keys/${view.keys[1]!.id}/activate`, { body: {} })).body
-    expect(activated.activeId).toBe(view.keys[1]!.id)
-    const removed = (await api<OpencodeKeysView>(ANNA, `/api/providers/opencode-go/keys/${view.keys[1]!.id}`, { method: 'DELETE' })).body
-    expect(removed.keys).toHaveLength(1)
-    expect(removed.activeId).toBe(view.keys[0]!.id)
-
-    const { env } = await import('cloudflare:test')
-    const annaId = (await api<Me>(ANNA, '/api/me')).body.id
-    const benId = (await api<Me>(BEN, '/api/me')).body.id
-    expect(await env.HOME.getByName('home').opencodePoolOwner(benId)).toBeNull()
-    await api(ANNA, '/api/providers/opencode-go', { method: 'PATCH', body: { shared: true } })
-    expect(await env.HOME.getByName('home').opencodePoolOwner(benId)).toEqual({ ownerId: annaId, forHome: true })
-    const candidates = await env.MEMBER.getByName(annaId).opencodeCandidates(null, true)
-    expect(candidates.keys.map((key) => key.key)).toEqual(['sk-firstkey1111'])
-  })
 })

@@ -45,8 +45,8 @@ beforeEach(async () => {
     return answer === undefined ? realFetch(input, init) : answer()
   }) as typeof fetch
   await api(ANNA, '/api/me')
-  await api(ANNA, '/api/providers/openrouter', { method: 'PUT', body: { key: 'sk-or-test', shared: false } })
-  await api(ANNA, '/api/providers/opencode-go/keys', { body: { key: 'sk-opencode1234' } })
+  await api(ANNA, '/api/providers/openrouter/accounts', { body: { key: 'sk-or-test', shared: false } })
+  await api(ANNA, '/api/providers/opencode-go/accounts', { body: { key: 'sk-opencode1234', shared: false } })
 })
 
 afterEach(() => {

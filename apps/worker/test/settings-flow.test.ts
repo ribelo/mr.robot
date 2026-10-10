@@ -26,7 +26,7 @@ describe('configuring a Robot', () => {
       if (url === 'https://models.dev/api.json') return Response.json({})
       return realFetch(input, init)
     }) as typeof fetch
-    await api(ANNA, '/api/providers/openrouter', { method: 'PUT', body: { key: 'sk-or-test', shared: false } })
+    await api(ANNA, '/api/providers/openrouter/accounts', { body: { key: 'sk-or-test', shared: false } })
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body
     expect(panel.settings.model).toMatchObject({ provider: 'openrouter', model: 'z/model-a' })
