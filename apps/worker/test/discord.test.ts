@@ -1,4 +1,4 @@
-import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
+import { env, reset, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ConnectionView, Conversation, Me, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -7,7 +7,8 @@ import { connectorFixtures, type RecordedCall } from './connector-fixtures.ts'
 import { account, runTool, testHost, bodyOf } from './connector-host.ts'
 import { accountsTool } from '../src/connectors/connector.ts'
 import { DiscordPlugin, inviteUrl, BOT_PERMISSIONS } from '../src/connectors/discord.ts'
-import { gatewayStep, initialGateway, INTENTS, readPayload } from '../src/connectors/discord-gateway.ts'
+import { closeVerdict, DAILY_CONNECTS, gatewayStep, initialGateway, INTENTS, nextConnectAt, readPayload, resumeAddress } from '../src/connectors/discord-gateway.ts'
+import { DiscordAtHome } from '../src/home/discord.ts'
 
 const ANNA = 'anna@example.com'
 const TOKEN = 'bot-token-123'
@@ -55,6 +56,90 @@ describe('the Discord gateway as a state machine (recorded gateway payloads)', (
     expect(invalid.state.sessionId).toBeNull()
     expect(JSON.parse(invalid.send[0]!).op).toBe(2)
     expect(readPayload('not json')).toBeNull()
+  })
+})
+
+describe('gateway reconnects (Discord reset the bot token after 1000 connections)', () => {
+  const MIN = 60_000
+  it('classifies close codes the way Discord documents them', () => {
+    for (const code of [4004, 4010, 4011, 4012, 4013, 4014]) expect(closeVerdict(code)).toBe('fatal')
+    for (const code of [1000, 1001, 4007, 4009]) expect(closeVerdict(code)).toBe('identify')
+    for (const code of [1006, 4000, 4001, 4002, 4003, 4005, 4008]) expect(closeVerdict(code)).toBe('resume')
+    expect(resumeAddress('wss://gateway-us-east1-b.discord.gg')).toBe('https://gateway-us-east1-b.discord.gg/?v=10&encoding=json')
+  })
+
+  it('waits longer after each connection in the hour and keeps a daily budget', () => {
+    const now = 10 * 24 * 60 * MIN
+    expect(nextConnectAt([], now)).toBe(now)
+    expect(nextConnectAt([now - 2 * 60 * MIN], now)).toBe(now)
+    expect(nextConnectAt([now - 1000], now)).toBe(now - 1000 + 5_000)
+    expect(nextConnectAt([now - 3000, now - 2000, now - 1000], now)).toBe(now - 1000 + 20_000)
+    expect(nextConnectAt(Array.from({ length: 30 }, (_, index) => now - 1000 - index), now)).toBe(now - 1000 + 10 * MIN)
+    const day = Array.from({ length: DAILY_CONNECTS }, (_, index) => now - 23 * 60 * MIN + index * 1000)
+    expect(nextConnectAt(day, now)).toBe(day[0]! + 24 * 60 * MIN)
+  })
+
+  it('one socket at a time: a shared connect, a real close on reconnect, a resume, and a stop on a bad token', async () => {
+    await runInDurableObject(env.HOME.getByName('discord-gateway-test'), async (_home, state) => {
+      const sql = state.storage.sql
+      const servers: Array<{ url: string; socket: WebSocket; received: string[]; closed: number[] }> = []
+      const fetcher = (async (input: RequestInfo | URL) => {
+        const pair = new WebSocketPair()
+        const server = { url: String(input), socket: pair[1], received: [] as string[], closed: [] as number[] }
+        server.socket.accept()
+        server.socket.addEventListener('message', (event) => { server.received.push(String(event.data)) })
+        server.socket.addEventListener('close', (event) => { server.closed.push(event.code) })
+        servers.push(server)
+        return new Response(null, { status: 101, webSocket: pair[0] })
+      }) as typeof fetch
+      const gateway = new DiscordAtHome(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async () => {})
+      const until = async (done: () => boolean) => { for (let index = 0; index < 100 && !done(); index++) await new Promise((resolve) => setTimeout(resolve, 10)) }
+      const ops = (server: { received: string[] }) => server.received.map((frame) => (JSON.parse(frame) as { op: number }).op)
+      const lastHourAgo = () => sql.exec('UPDATE discord_connect SET at = at - ?', 2 * 60 * MIN)
+
+      await Promise.all([gateway.ensure(), gateway.ensure(), gateway.ensure()])
+      expect(servers).toHaveLength(1)
+      const first = servers[0]!
+      first.socket.send('{"op":10,"d":{"heartbeat_interval":41250}}')
+      await until(() => first.received.length > 0)
+      expect(ops(first)).toEqual([2])
+      first.socket.send('{"op":0,"t":"READY","s":1,"d":{"session_id":"sess-1","resume_gateway_url":"wss://resume.discord.gg"}}')
+      // Discord asks for a reconnect: the old socket is really closed, resumably.
+      first.socket.send('{"op":7,"d":null}')
+      await until(() => first.closed.length > 0)
+      expect(first.closed).toEqual([4000])
+      // Right after a connection, the next one waits.
+      await gateway.ensure()
+      expect(servers).toHaveLength(1)
+      lastHourAgo()
+      await gateway.ensure()
+      expect(servers).toHaveLength(2)
+      const second = servers[1]!
+      expect(second.url).toBe('https://resume.discord.gg/?v=10&encoding=json')
+      second.socket.send('{"op":10,"d":{"heartbeat_interval":41250}}')
+      await until(() => second.received.length > 0)
+      expect(ops(second)).toEqual([6])
+      // A bad token: no more connections with it, however often the alarm comes.
+      second.socket.close(4004, 'Authentication failed.')
+      await until(() => sql.exec('SELECT 1 FROM discord_stopped').toArray().length > 0)
+      lastHourAgo()
+      await gateway.ensure()
+      await gateway.ensure()
+      expect(servers).toHaveLength(2)
+    })
+  })
+
+  it('stops connecting when the daily budget is used up', async () => {
+    await runInDurableObject(env.HOME.getByName('discord-budget-test'), async (_home, state) => {
+      const sql = state.storage.sql
+      let calls = 0
+      const fetcher = (async () => { calls++; return new Response('no', { status: 503 }) }) as typeof fetch
+      const gateway = new DiscordAtHome(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async () => {})
+      const now = Date.now()
+      for (let index = 0; index < DAILY_CONNECTS; index++) sql.exec('INSERT INTO discord_connect (at) VALUES (?)', now - 20 * 60 * MIN + index)
+      await gateway.ensure()
+      expect(calls).toBe(0)
+    })
   })
 })
 

@@ -130,6 +130,49 @@ export function gatewayStep(state: GatewayState, payload: Payload, token: string
   }
 }
 
+/**
+ * What a closed gateway socket means (Discord's close codes). fatal: the same token can never connect
+ * (bad token, intents or version), so the bot stops until its token changes; identify: open a new
+ * session; resume: connect again and resume the session.
+ */
+export type CloseVerdict = 'fatal' | 'identify' | 'resume'
+
+const FATAL_CLOSES: ReadonlySet<number> = new Set([4004, 4010, 4011, 4012, 4013, 4014])
+const FRESH_CLOSES: ReadonlySet<number> = new Set([1000, 1001, 4007, 4009])
+
+export function closeVerdict(code: number): CloseVerdict {
+  if (FATAL_CLOSES.has(code)) return 'fatal'
+  if (FRESH_CLOSES.has(code)) return 'identify'
+  return 'resume'
+}
+
+/** At most this many gateway connections per 24 hours; Discord resets a bot's token after about 1000. */
+export const DAILY_CONNECTS = 100
+const DAY = 24 * 60 * 60 * 1000
+const HOUR = 60 * 60 * 1000
+const FIRST_RETRY = 5_000
+const LONGEST_RETRY = 10 * 60 * 1000
+
+/**
+ * When the next connection may start, from the times of earlier ones. Each connection within the
+ * last hour doubles the wait after the newest one (5 s, 10 s, 20 s … at most 10 minutes), and the
+ * daily budget holds the rest until the oldest connection of the last 24 hours is a day old.
+ * The times are stored, so the rule holds across restarts of the Durable Object.
+ */
+export function nextConnectAt(connects: readonly number[], now: number): number {
+  const day = connects.filter((at) => at > now - DAY).sort((a, b) => a - b)
+  if (day.length >= DAILY_CONNECTS) return day[day.length - DAILY_CONNECTS]! + DAY
+  const hour = day.filter((at) => at > now - HOUR)
+  if (hour.length === 0) return now
+  const wait = Math.min(LONGEST_RETRY, FIRST_RETRY * 2 ** (hour.length - 1))
+  return Math.max(now, hour[hour.length - 1]! + wait)
+}
+
+/** Where a resumed session connects: Discord's resume address, as the https:// URL a Worker needs. */
+export function resumeAddress(resumeUrl: string): string {
+  return `${resumeUrl.replace(/^wss:/, 'https:').replace(/\/+$/, '')}/?v=10&encoding=json`
+}
+
 /** Parse a frame from Discord; an unreadable one is ignored (Discord adds fields over time). */
 export function readPayload(text: string): Payload | null {
   try {
