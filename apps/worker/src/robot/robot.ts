@@ -266,6 +266,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.releaseComposition()
     const sql = this.ctx.storage.sql
     for (const table of ['session_event', 'session_log', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
+    // Answered Asks go with the history; open ones are still decisions the owner owes.
+    sql.exec("DELETE FROM proposal WHERE status != 'open'")
     this.store.search.clear()
     this.store.abandonRoutineRuns(Date.now())
     for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen']) this.store.delete(key)

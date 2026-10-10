@@ -60,6 +60,9 @@ describe('delete, clear and reset (v1.3 ticket 06)', () => {
     expect((await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'New robot' } })).status).toBe(200)
     const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
     expect(items.filter((item) => item.kind === 'message' || item.kind === 'reply')).toEqual([])
+    // The approved setup Ask is history too; the list line does not keep it.
+    expect(items.filter((item) => item.kind === 'question')).toEqual([])
+    expect((await robots()).find((entry) => entry.id === id)?.lastLine).toBe('')
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.identity.name).toBe('New robot')
     const memory = await api<{ text: string }>(ANNA, `/api/robots/${id}/file?path=MEMORY.md`)
     expect(memory.body.text).toContain('Pays on the 10th.')

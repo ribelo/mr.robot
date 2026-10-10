@@ -276,7 +276,8 @@ function lastLine(items: readonly ChatItem[]): { text: string; at: number } | un
     if (item.kind === 'message') return { text: item.text, at: item.at }
     // A failure notice is shown in the conversation; the list keeps the last real line.
     if (item.kind === 'notice' && !item.text.startsWith('The Turn failed')) return { text: item.text, at: item.at }
-    if (item.kind === 'question') return { text: item.proposal.purpose, at: item.at }
+    // Only an open Ask is news for the list; an answered one is history.
+    if (item.kind === 'question' && item.proposal.status === 'open') return { text: `Waiting for you: ${item.proposal.purpose}`, at: item.at }
   }
   return undefined
 }
