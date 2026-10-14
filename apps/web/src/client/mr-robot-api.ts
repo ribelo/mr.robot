@@ -13,7 +13,7 @@ import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberAvatar, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
-  TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
+  SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type GroupPatch, type HomeSettingsPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
@@ -159,6 +159,10 @@ const make = Effect.gen(function* () {
     removeConnection: (id: string) => send('DELETE', `/api/connections/${enc(id)}`),
     connectionNotes: get(Schema.Array(ConnectionNote), '/api/connections/notes'),
     dismissConnectionNote: (id: string) => send('DELETE', `/api/connections/notes/${enc(id)}`),
+    /** Connect as you through Mr. Robot's browser (v1.12 ticket 11): open the sign-in page, follow it, end it. */
+    startSessionCapture: (kind: string) => request(SessionCaptureStarted, 'POST', `/api/connections/${enc(kind)}/browser-start`, {}),
+    sessionCapture: (kind: string) => get(SessionCapture, `/api/connections/${enc(kind)}/browser`),
+    endSessionCapture: (kind: string) => request(SessionCapture, 'POST', `/api/connections/${enc(kind)}/browser-end`, {}),
   }
 })
 

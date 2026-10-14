@@ -7,6 +7,8 @@ export interface TakeoverProps {
   /** The Robot asked for a takeover; without it the owner can still take an idle Robot's browser (rb-keaw). */
   readonly requested: { readonly reason: string } | null
   readonly onClose: () => void
+  /** What the window is for, in place of the note about logins staying in the browser (a sign-in for a Connection). */
+  readonly note?: string
 }
 
 /** Keys the browser page needs as key events; printable characters go as text. */
@@ -20,7 +22,7 @@ const modifiersOf = (event: KeyboardEvent) => (event.altKey ? 1 : 0) | (event.ct
  * WebSocket. After claiming, the screen takes the keyboard: typing goes straight to the page
  * (pl-485j), with a keyboard button for phones (pl-vwq6). Closing hands the browser back (pl-glfh).
  */
-export function Takeover({ robotId, robotName, requested, onClose }: TakeoverProps) {
+export function Takeover({ robotId, robotName, requested, onClose, note }: TakeoverProps) {
   const { state, send } = useTakeover(robotId)
   const { frame, claimed, status, timing, logins } = state
   const image = useRef<HTMLImageElement>(null)
@@ -77,7 +79,7 @@ export function Takeover({ robotId, robotName, requested, onClose }: TakeoverPro
       </div>
       <div className="takeover-note muted">
         {requested === null ? null : <span>{requested.reason} · </span>}
-        Logins and cookies you enter here stay in {robotName}’s browser for its next tasks. Closing this window hands the browser back.
+        {note ?? `Logins and cookies you enter here stay in ${robotName}’s browser for its next tasks.`} Closing this window hands the browser back.
       </div>
       {message === undefined ? null : <div className="takeover-note">{message}</div>}
       <div

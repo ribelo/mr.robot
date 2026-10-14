@@ -2,8 +2,8 @@
  * A stub browser for Robot DO tests: one fixture shop with a login form. Cookies live in the
  * browser session, so only the Robot's saved state can carry a login into a new session.
  */
-import type { BrowserAction, BrowserDriver, BrowserPage, BrowserState } from '../src/browser/driver.ts'
-import { StaleRef } from '../src/browser/driver.ts'
+import type { BrowserAction, BrowserDriver, BrowserPage, BrowserSite, BrowserState } from '../src/browser/driver.ts'
+import { onSiteDomain, StaleRef, withoutSite } from '../src/browser/driver.ts'
 import type { Observation } from '../src/browser/observe.ts'
 
 export const browserLog: string[] = []
@@ -11,6 +11,7 @@ export const cdpLog: Array<{ method: string; params?: Record<string, unknown> }>
 
 /** Enough of a CDP session for the live view: records input, emits one frame per screencast start. */
 class StubCdp {
+  constructor(private readonly onTap: () => void = () => undefined) {}
   private listeners = new Map<string, Array<(event: unknown) => void>>()
   on(event: string, listener: (event: unknown) => void): void {
     this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener])
@@ -20,6 +21,7 @@ class StubCdp {
   }
   async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
     cdpLog.push({ method, ...(params === undefined ? {} : { params }) })
+    if (method === 'Input.dispatchMouseEvent' && params?.['type'] === 'mouseReleased') this.onTap()
     if (method === 'Page.startScreencast') {
       queueMicrotask(() => {
         for (const listener of this.listeners.get('Page.screencastFrame') ?? []) listener({ data: 'AAAA', sessionId: 1, metadata: { deviceWidth: 1280, deviceHeight: 800 } })
@@ -28,6 +30,12 @@ class StubCdp {
     return {}
   }
 }
+
+/**
+ * A service's sign-in page (v1.12 ticket 11): a tap on a page open at the start URL signs the person in,
+ * leaving the given page, cookies and localStorage in the browser. Set by a test.
+ */
+export const signIns = new Map<string, { readonly url: string; readonly cookies: ReadonlyArray<Record<string, unknown>>; readonly storage: Readonly<Record<string, Readonly<Record<string, string>>>> }>()
 
 /** Sessions left running between Turns, by id (the stub's Browser Rendering). */
 export const runningSessions = new Map<string, StubPage>()
@@ -57,6 +65,7 @@ export class StubPage implements BrowserPage {
 
   constructor(stateArg: BrowserState | null, _unused?: undefined) {
     this.cookies = [...(stateArg?.cookies ?? [])]
+    this.storage = { ...(stateArg?.storage ?? {}) }
     runningSessions.set(this.id, this)
   }
 
@@ -74,6 +83,7 @@ export class StubPage implements BrowserPage {
 
   private current = 'about:blank'
   private cookies: Array<Record<string, unknown>>
+  private storage: Record<string, Readonly<Record<string, string>>>
   private typed = ''
   private shots = 0
 
@@ -160,10 +170,33 @@ export class StubPage implements BrowserPage {
   }
 
   async exportState(): Promise<BrowserState> {
-    return { cookies: this.cookies, storage: {} }
+    return { cookies: this.cookies, storage: this.storage }
   }
 
-  private stubCdp = new StubCdp()
+  async readSite(site: BrowserSite): Promise<BrowserState> {
+    browserLog.push(`read:${site.domain}`)
+    return { cookies: this.cookies.filter((cookie) => onSiteDomain(String(cookie['domain'] ?? ''), site.domain)), storage: Object.fromEntries(site.origins.map((origin) => [origin, this.storage[origin] ?? {}])) }
+  }
+
+  async forgetSite(site: BrowserSite): Promise<void> {
+    browserLog.push(`forget:${site.domain}`)
+    const kept = withoutSite({ cookies: this.cookies, storage: this.storage }, site.domain)
+    this.cookies = [...kept.cookies]
+    this.storage = { ...kept.storage }
+  }
+
+  /** A tap on a sign-in page signs the person in (see signIns). */
+  private tapped(): void {
+    const signIn = signIns.get(this.current)
+    if (signIn === undefined) return
+    this.current = signIn.url
+    // A cookie of the same name and domain is replaced, as a browser does.
+    const same = (a: Record<string, unknown>, b: Record<string, unknown>) => a['name'] === b['name'] && a['domain'] === b['domain']
+    this.cookies = [...this.cookies.filter((cookie) => !signIn.cookies.some((fresh) => same(cookie, fresh))), ...signIn.cookies]
+    this.storage = { ...this.storage, ...signIn.storage }
+  }
+
+  private stubCdp = new StubCdp(() => this.tapped())
 
   async cdp() {
     return this.stubCdp as never

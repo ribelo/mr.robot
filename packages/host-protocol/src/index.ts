@@ -14,6 +14,8 @@ import * as RpcGroup from 'effect/rpc/RpcGroup'
 import * as RpcSerialization from 'effect/rpc/RpcSerialization'
 import * as RpcServer from 'effect/rpc/RpcServer'
 
+export * from './session-sign-in.ts'
+
 /** A host-side failure: an OS error (code like ENOENT, EACCES), a timeout, or a missing capability. */
 export class HostError extends Schema.TaggedError<HostError>()('HostError', {
   message: Schema.String,

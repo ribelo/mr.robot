@@ -138,15 +138,6 @@ describe('Slack and Discord as you in the desktop app (ux-taxm, ux-66a4, ux-wgok
     expect(posts(calls)[0]).toMatchObject({ path: '/api/connections/discord-user', body: { shared: false, values: { token: 'fresh-token' } } })
   })
 
-  it('without the bridge (the PWA) only the paste form shows, with no fold', async () => {
-    serve([slack])
-    render(<RegistryProvider><Connections /></RegistryProvider>)
-    fireEvent.click(await screen.findByText('Connect'))
-    expect(screen.getByText('Copy the token and the cookie by hand.')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
-    expect(screen.queryByText('Paste a session instead')).toBeNull()
-  })
-
   it('an older desktop app without the command also shows only the paste form', async () => {
     serve([slack])
     vi.stubGlobal('mrRobotHost', { nativeNotifications: true })

@@ -1200,6 +1200,23 @@ export const ConnectionPaste = Schema.Struct({ label: Schema.optional(Schema.Str
 export const ConnectionPatch = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.optional(Schema.Boolean), isDefault: Schema.optional(Schema.Boolean) })
 
 /**
+ * Connecting as you through Mr. Robot's browser (v1.12 ticket 11, ux-8pek, ux-wgok): where the
+ * attempt for one connector kind is. The session itself never appears here (ux-j7m1).
+ */
+export const SessionCapture = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('none') }),
+  Schema.Struct({ state: Schema.Literal('waiting'), kind: ConnectorKind, deadline: Schema.Number }),
+  Schema.Struct({ state: Schema.Literal('connected'), kind: ConnectorKind, account: Schema.String }),
+  Schema.Struct({ state: Schema.Literal('timedOut'), kind: ConnectorKind }),
+  Schema.Struct({ state: Schema.Literal('failed'), kind: ConnectorKind, message: Schema.String }),
+])
+export type SessionCapture = typeof SessionCapture.Type
+
+/** The Robot whose browser opened on the sign-in page: the page shows its Takeover. */
+export const SessionCaptureStarted = Schema.Struct({ robotId: Schema.String, robotName: Schema.String })
+export type SessionCaptureStarted = typeof SessionCaptureStarted.Type
+
+/**
  * A connection of the Member's that acts as them and was shared with the Home, unshared by the v1.12
  * update (ux-cop2): shown on the Connections section until the Member dismisses it.
  */

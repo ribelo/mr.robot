@@ -1024,8 +1024,11 @@ export const rearm = Effect.gen(function* () {
   const sweep = store.get<number>('screens-sweep-next')
   const resume = store.get<number>('chain-resume-at')
   const escalation = store.nextHelpEscalation()
+  // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
+  const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
   const candidates = [
     ...(escalation === undefined ? [] : [escalation]),
+    ...(signInEnds === undefined ? [] : [signInEnds]),
     ...(resume === undefined ? [] : [resume]),
     ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) ? [Date.now() + HEARTBEAT_MS] : []),
     ...store.routines().flatMap((routine) => (routine.nextRun === null ? [] : [routine.nextRun])),

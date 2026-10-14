@@ -7,7 +7,7 @@ import { FakeChannel } from './fake-channel.ts'
 import { fakeConnectors, fakeService } from './fake-connector.ts'
 import { connectorFixtures } from './connector-fixtures.ts'
 import type { ChannelAdapter, InboundEvent } from '../src/channels/channel.ts'
-import type { BrowserDriver } from '../src/browser/driver.ts'
+import type { BrowserDriver, BrowserState } from '../src/browser/driver.ts'
 import type { BrowserBackend } from '@mr-robot/protocol'
 
 import { Member as ProductionMember } from '../src/member/member.ts'
@@ -216,6 +216,22 @@ export class Robot extends ProductionRobot {
 
   async alarmForTest(): Promise<number | null> {
     return this.ctx.storage.getAlarm()
+  }
+
+  /** The cookies and storage the Robot keeps for its next browser session. */
+  async browserStateForTest(): Promise<BrowserState | null> {
+    return this.store.get<BrowserState>('browser-state') ?? null
+  }
+
+  async seedBrowserStateForTest(state: BrowserState): Promise<void> {
+    this.store.set('browser-state', state)
+  }
+
+  /** The sign-in under Takeover is past its ten minutes (v1.12 ticket 11), and the alarm with it. */
+  async signInDueForTest(): Promise<void> {
+    const takeover = this.store.get<{ capture?: { deadline: number } }>('takeover')
+    if (takeover?.capture !== undefined) this.store.set('takeover', { ...takeover, capture: { ...takeover.capture, deadline: Date.now() - 1 } })
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
   }
 
   /** How this runtime searches the Conversation. */

@@ -104,7 +104,10 @@ import { routinesHost } from './routines-host.ts'
 import { Setup } from '../plugins/setup.ts'
 import { Skills } from '../plugins/skills.ts'
 import { Web } from '../plugins/web.ts'
-import { type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserState } from '../browser/driver.ts'
+import { onSiteDomain, withoutSite, type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserSite, type BrowserState } from '../browser/driver.ts'
+import { SERVICE, SESSION_SITE, sessionValues, SIGN_IN_TIMEOUT_MS, START_URL, type SignInKind } from '@mr-robot/host-protocol'
+import { connectPastedValues } from '../member/connect-pasted.ts'
+import type { SessionCapture } from '@mr-robot/protocol'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
@@ -378,6 +381,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async runAlarm(): Promise<void> {
     const config = this.store.config()
+    if (config !== undefined && config.status !== 'deleted') await this.expireCapture(Date.now()).catch((error: unknown) => console.warn('sign-in not ended', error))
     if (config !== undefined && config.status !== 'deleted') await this.fireRoutines(Date.now())
     // Due Routines start at once; housekeeping below must not delay their Turns.
     if (this.store.pendingWakeups() > 0) this.drain()
@@ -1897,6 +1901,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   private async completeHandBack(memberId: string): Promise<void> {
+    // A sign-in for a Connection: the tab's state is read and discarded, never saved for the Robot.
+    if (this.store.get<TakeoverState>('takeover')?.capture !== undefined) {
+      await this.endCapture()
+      return
+    }
     const page = await this.page()
     this.store.set('browser-state', await page.exportState())
     await this.saveScreen(await page.screenshot())
@@ -1926,6 +1935,123 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   takeoverState(): TakeoverState | null {
     return this.store.get<TakeoverState>('takeover') ?? null
+  }
+
+  // ---------------------------------------------------------------- session capture through Takeover (v1.12 ticket 11, ux-8pek, ux-wgok, ux-j7m1)
+
+  /** The attempt in progress, so a hand-back and the page's own end share one reading of the browser. */
+  private capturing: Promise<SessionCapture> | undefined
+
+  /**
+   * Connect Slack or Discord as the owner from the PWA: this Mr. Robot's browser opens on the
+   * service's sign-in page under a Takeover the owner takes. Hand-back, the page's end or the
+   * ten-minute deadline reads the session (endCapture).
+   */
+  async startSessionCapture(kind: SignInKind): Promise<SessionCaptureStart> {
+    const config = this.store.requireConfig()
+    const name = config.identity.name
+    if (config.kind !== 'mr-robot') return { ok: false, message: 'only Mr. Robot signs in to services for you' }
+    if (this.store.activeTurn() !== undefined) return { ok: false, message: `${name} is working in its browser; try again when it has finished` }
+    const current = this.store.get<TakeoverState>('takeover')
+    if (current !== undefined && current.capture === undefined) return { ok: false, message: `${name}'s browser is waiting for you; take it over and hand it back first` }
+    // An earlier attempt left open (another tab, a reload) ends first, its session discarded.
+    if (current !== undefined) await this.endCapture()
+    const deadline = Date.now() + SIGN_IN_TIMEOUT_MS
+    const takeover: TakeoverState = { reason: `Sign in to ${SERVICE[kind]}`, url: START_URL[kind], requestedAt: Date.now(), claimedBy: null, byOwner: true, capture: { kind, deadline } }
+    // Stored before the browser opens, so a new session opens straight on the sign-in page.
+    this.store.set('takeover', takeover)
+    this.store.set('session-capture', { state: 'waiting', kind, deadline } satisfies SessionCapture)
+    try {
+      const page = await this.page()
+      if (!onSiteDomain(pageHost(page.url()), SESSION_SITE[kind].domain)) await page.goto(START_URL[kind]).catch(() => undefined)
+      this.store.set('takeover', { ...takeover, url: page.url(), sessionId: page.sessionId() } satisfies TakeoverState)
+    } catch (error) {
+      this.store.delete('takeover')
+      const message = `${name}'s browser did not open: ${error instanceof Error ? error.message : String(error)}`
+      this.store.set('session-capture', { state: 'failed', kind, message } satisfies SessionCapture)
+      return { ok: false, message }
+    }
+    await this.rearm()
+    await this.changed()
+    return { ok: true, robotName: name }
+  }
+
+  /** Where the attempt for a kind is; none when the last one was for another kind. */
+  async sessionCapture(kind: SignInKind): Promise<SessionCapture> {
+    const known = this.store.get<SessionCapture>('session-capture')
+    return known === undefined || known.state === 'none' || known.kind !== kind ? { state: 'none' } : known
+  }
+
+  /** The page's Takeover closed: end the attempt now and tell how it ended. */
+  async endSessionCapture(kind: SignInKind): Promise<SessionCapture> {
+    if (this.store.get<TakeoverState>('takeover')?.capture?.kind === kind) return this.endCapture()
+    return this.capturing ?? this.sessionCapture(kind)
+  }
+
+  /** The alarm's check: an attempt past its deadline ends (ux-wgok). */
+  private async expireCapture(now: number): Promise<void> {
+    const deadline = this.store.get<TakeoverState>('takeover')?.capture?.deadline
+    if (deadline !== undefined && deadline <= now) await this.endCapture()
+  }
+
+  private endCapture(): Promise<SessionCapture> {
+    const capture = this.store.get<TakeoverState>('takeover')?.capture
+    if (capture === undefined) return this.capturing ?? Promise.resolve(this.store.get<SessionCapture>('session-capture') ?? { state: 'none' })
+    this.capturing ??= this.captureSession(capture.kind, capture.deadline).finally(() => { this.capturing = undefined })
+    return this.capturing
+  }
+
+  /**
+   * Read the session the owner signed in to, connect it through the paste path, then close the tab
+   * and remove the service's cookies and storage from the browser and the Robot's saved state: the
+   * session lives only in the Connection. The values never reach a Robot, a log or the page.
+   */
+  private async captureSession(kind: SignInKind, deadline: number): Promise<SessionCapture> {
+    const site = SESSION_SITE[kind]
+    const scope: BrowserSite = { domain: site.domain, origins: [site.storageOrigin] }
+    const page = await this.page().catch(() => undefined)
+    let outcome: SessionCapture
+    try {
+      const held = page === undefined ? undefined : await page.readSite(scope)
+      const values = page === undefined || held === undefined ? undefined : sessionValues(kind, { url: page.url(), cookies: browserCookies(held.cookies), storage: held.storage[site.storageOrigin] ?? {} })
+      outcome = values !== undefined ? await this.connectCaptured(kind, values)
+        : Date.now() >= deadline ? { state: 'timedOut', kind }
+          : { state: 'failed', kind, message: `no signed-in ${SERVICE[kind]} session was found in the browser` }
+    } catch (error) {
+      console.warn('session capture failed', error instanceof Error ? error.message : 'unknown')
+      outcome = { state: 'failed', kind, message: `the browser could not be read` }
+    }
+    await this.discardSignIn(scope, page)
+    this.store.delete('takeover')
+    this.store.set('session-capture', outcome)
+    // Wake-ups held while the owner had the browser run now.
+    await this.rearm()
+    if (this.store.pendingWakeups() > 0) this.drain()
+    await this.changed()
+    return outcome
+  }
+
+  private async connectCaptured(kind: SignInKind, values: Readonly<Record<string, string>>): Promise<SessionCapture> {
+    const added = await Effect.runPromise(Effect.result(connectPastedValues(this.env, this.store.requireConfig().ownerId, kind, { shared: false, values })))
+    return added._tag === 'Success' ? { state: 'connected', kind, account: added.success.account } : { state: 'failed', kind, message: `signing in worked, but connecting failed: ${added.failure.message}` }
+  }
+
+  /** The sign-in tab closes without saving its state; the service's part goes from the browser and from the saved state. */
+  private async discardSignIn(site: BrowserSite, page: BrowserPage | undefined): Promise<void> {
+    this.browserPage = undefined
+    const running = this.screencast
+    this.screencast = undefined
+    await running?.stop()
+    if (page !== undefined) {
+      await page.forgetSite(site).catch((error: unknown) => console.warn('sign-in site not cleared', error instanceof Error ? error.message : 'unknown'))
+      this.openedForViewer = false
+      await page.close().catch(() => undefined)
+      await this.accountBrowser(true)
+    }
+    const saved = this.store.get<BrowserState>('browser-state')
+    if (saved !== undefined) this.store.set('browser-state', withoutSite(saved, site.domain))
+    const url = this.store.get<string>('browser-url')
+    if (url !== undefined && onSiteDomain(pageHost(url), site.domain)) this.store.delete('browser-url')
   }
 
   /** The model's output so far in this attempt, pushed to viewers as it grows (pl-jzr7); the stored log is unchanged. */
@@ -2574,6 +2700,9 @@ interface ViewerState {
   readonly live: boolean
 }
 
+/** Whether the sign-in page opened in Mr. Robot's browser, or why not. */
+export type SessionCaptureStart = { readonly ok: true; readonly robotName: string } | { readonly ok: false; readonly message: string }
+
 export interface TakeoverState {
   readonly reason: string
   readonly url: string
@@ -2583,6 +2712,25 @@ export interface TakeoverState {
   readonly sessionId?: string
   /** The owner opened the browser themselves; hand-back does not wake the Robot. */
   readonly byOwner?: boolean
+  /** The owner signs in to a service here to connect it (v1.12 ticket 11); hand-back reads the session. */
+  readonly capture?: { readonly kind: SignInKind; readonly deadline: number }
+}
+
+/** A page's host name; empty for about:blank and anything that is not a URL. */
+function pageHost(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
+/** Cookies as the browser reported them, with the fields a session is read from. */
+function browserCookies(cookies: BrowserState['cookies']): Array<{ name: string; value: string; domain?: string }> {
+  return cookies.flatMap((cookie) => {
+    const { name, value, domain } = cookie
+    return typeof name === 'string' && typeof value === 'string' ? [{ name, value, ...(typeof domain === 'string' ? { domain } : {}) }] : []
+  })
 }
 
 /** Taps, text, keys and scrolls from the owner's device become CDP input (robot-g6qb). */

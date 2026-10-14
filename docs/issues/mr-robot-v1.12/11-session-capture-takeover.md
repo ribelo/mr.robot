@@ -6,8 +6,8 @@
 
 **Blocked by:** 09 (Discord as you)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Connect through browser creates the Connection from a fake driver's cookies and storage and leaves no session in the browser state (workerd test)
-- [ ] Timeout path tells the person (workerd test)
-- [ ] PWA shows the Takeover and the result (component test)
+- [x] Connect through browser creates the Connection from a fake driver's cookies and storage and leaves no session in the browser state (workerd test: apps/worker/test/session-capture.test.ts)
+- [x] Timeout path tells the person (workerd test: apps/worker/test/session-capture.test.ts; the PWA message in apps/web/test/takeover-sign-in.test.tsx)
+- [x] PWA shows the Takeover and the result (component test: apps/web/test/takeover-sign-in.test.tsx)

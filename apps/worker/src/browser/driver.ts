@@ -11,6 +11,34 @@ export interface BrowserState {
   readonly storage: Readonly<Record<string, Readonly<Record<string, string>>>>
 }
 
+/** One service's part of a browser (v1.12 ticket 11): cookies of a domain and its subdomains, and the localStorage of some of its origins. */
+export interface BrowserSite {
+  readonly domain: string
+  readonly origins: readonly string[]
+}
+
+/** Whether a cookie domain (".slack.com") or host name is the site's domain or under it. */
+export function onSiteDomain(host: string, domain: string): boolean {
+  const bare = host.replace(/^\./, '').toLowerCase()
+  return bare === domain || bare.endsWith(`.${domain}`)
+}
+
+const originHost = (origin: string): string => {
+  try {
+    return new URL(origin).hostname
+  } catch {
+    return ''
+  }
+}
+
+/** The state without anything of the site's domain: its cookies and the storage of all its origins. */
+export function withoutSite(state: BrowserState, domain: string): BrowserState {
+  return {
+    cookies: state.cookies.filter((cookie) => !onSiteDomain(String(cookie['domain'] ?? ''), domain)),
+    storage: Object.fromEntries(Object.entries(state.storage).filter(([origin]) => !onSiteDomain(originHost(origin), domain))),
+  }
+}
+
 export type BrowserAction =
   | { readonly action: 'click'; readonly index: number }
   | { readonly action: 'type'; readonly index: number; readonly text: string; readonly submit?: boolean }
@@ -27,6 +55,10 @@ export interface BrowserPage {
   screenshot(): Promise<Uint8Array>
   url(): string
   exportState(): Promise<BrowserState>
+  /** The site's cookies and the localStorage of its origins as the browser holds them now, whatever the pages did to window.localStorage. */
+  readSite(site: BrowserSite): Promise<BrowserState>
+  /** Remove the site's cookies and its origins' storage from the running browser. */
+  forgetSite(site: BrowserSite): Promise<void>
   /** Raw CDP for the live view and takeover. */
   cdp(): Promise<CDPSession | undefined>
   close(): Promise<void>
@@ -313,6 +345,41 @@ export class RenderingPage implements BrowserPage {
       this.storage[origin] = local as Record<string, string>
     }
     return { cookies, storage: this.storage }
+  }
+
+  async readSite(site: BrowserSite): Promise<BrowserState> {
+    const session = await this.page.createCDPSession()
+    try {
+      const { cookies } = await session.send('Network.getAllCookies') as unknown as { cookies: Record<string, unknown>[] }
+      await session.send('DOMStorage.enable').catch(() => undefined)
+      const current = await this.page.evaluate('location.origin').catch(() => 'null') as string
+      const storage: Record<string, Record<string, string>> = {}
+      for (const origin of site.origins) {
+        // DevTools reads the origin's storage even when the page removed window.localStorage (Discord does).
+        const read = await session.send('DOMStorage.getDOMStorageItems', { storageId: { securityOrigin: origin, isLocalStorage: true } } as never).catch(() => undefined) as unknown as { entries?: unknown[][] } | undefined
+        const entries = (read?.entries ?? []).flatMap((entry) => typeof entry[0] === 'string' && typeof entry[1] === 'string' ? [[entry[0], entry[1]] as const] : [])
+        storage[origin] = entries.length > 0 || origin !== current
+          ? Object.fromEntries(entries)
+          : await this.page.evaluate('Object.fromEntries(Object.entries(localStorage))').catch(() => ({})) as Record<string, string>
+      }
+      return { cookies: cookies.filter((cookie) => onSiteDomain(String(cookie['domain'] ?? ''), site.domain)), storage }
+    } finally {
+      await session.detach().catch(() => undefined)
+    }
+  }
+
+  async forgetSite(site: BrowserSite): Promise<void> {
+    const session = await this.page.createCDPSession()
+    try {
+      const { cookies } = await session.send('Network.getAllCookies') as unknown as { cookies: Record<string, unknown>[] }
+      for (const cookie of cookies.filter((entry) => onSiteDomain(String(entry['domain'] ?? ''), site.domain))) {
+        await session.send('Network.deleteCookies', { name: String(cookie['name']), domain: String(cookie['domain']), path: String(cookie['path'] ?? '/') })
+      }
+      for (const origin of site.origins) await session.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' })
+    } finally {
+      await session.detach().catch(() => undefined)
+    }
+    for (const origin of Object.keys(this.storage)) if (onSiteDomain(originHost(origin), site.domain)) delete this.storage[origin]
   }
 
   async cdp(): Promise<CDPSession | undefined> {

@@ -36,17 +36,19 @@ import {
   type MemberAvatar,
   type MemberView,
   type RobotPanel,
+  type SessionCapture,
 } from '@mr-robot/protocol'
 import { HOME_ID, type Env } from '../env.ts'
 import { memberAvatarObject } from '../home/home.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import { modelRefusal } from '../robot/model-choice.ts'
-import type { AnswerResult, HelpAnswerResult } from '../robot/robot.ts'
+import type { AnswerResult, HelpAnswerResult, SessionCaptureStart } from '../robot/robot.ts'
 import { parseTimeZone } from '../robot/time-zone.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
-import { actsAsPerson, connectorOf, connectorPlugin, pluginByName } from '../plugins/catalog.ts'
-import { parseForm } from '../connectors/schema-form.ts'
+import { actsAsPerson, pluginByName } from '../plugins/catalog.ts'
+import { connectPastedValues, sharingRefusal } from '../member/connect-pasted.ts'
+import { isSignInKind } from '@mr-robot/host-protocol'
 
 export interface ApiContext {
   readonly request: Request
@@ -81,9 +83,18 @@ function connectionView(c: ApiContext, id: string) {
 
 /** A connection that acts as a person (Slack, Google) is never shared with the Home (ux-bk91). */
 function shareable(kind: ConnectorKind, shared: boolean): Effect.Effect<void, ApiError> {
-  return shared && actsAsPerson(kind)
-    ? Effect.fail(badRequest(`a ${connectorPlugin(kind)?.title ?? kind} connection acts as you, so it cannot be shared with the Home`))
-    : Effect.void
+  const refusal = sharingRefusal(kind, shared)
+  return refusal === undefined ? Effect.void : Effect.fail(badRequest(refusal))
+}
+
+/** The caller's Mr. Robot, whose browser signs in to services for them (v1.12 ticket 11). */
+function chief(c: ApiContext): Effect.Effect<string, ApiError> {
+  return call(() => home(c.env).mrRobotOf(c.member.id)).pipe(Effect.flatMap((id) => id === null ? Effect.fail(notFound('you have no Mr. Robot')) : Effect.succeed(id)))
+}
+
+/** A connector kind connected by signing in to the service (Slack, Discord as you). */
+function signInKind(kind: string) {
+  return isSignInKind(kind) ? Effect.succeed(kind) : Effect.fail(notFound('this connector does not connect by signing in'))
 }
 
 function admin(c: ApiContext): Effect.Effect<void, ApiError> {
@@ -214,16 +225,27 @@ export const api = new Router<ApiContext>()
   }))
   .on('POST', '/api/connections/:kind', (c, { kind }) => Effect.gen(function* () {
     const body = yield* decodeBody(c.request, ConnectionPaste)
-    const found = connectorOf(kind)
-    const connect = found?.connector.connect
-    if (found === undefined || connect === undefined || connect.method !== 'paste') return yield* Effect.fail(notFound('this connector does not connect by pasting'))
-    yield* shareable(found.connector.kind, body.shared)
-    const parsed = parseForm(found.plugin.name, connect.schema, body.values, new Set())
-    if (!parsed.ok) return yield* Effect.fail(badRequest(parsed.error.message))
-    const added = yield* call(() => c.env.MEMBER.getByName(c.member.id).connectPasted({
-      kind: found.connector.kind, label: body.label ?? null, shared: body.shared, services: [], secrets: parsed.secrets,
-    })).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    const added = yield* connectPastedValues(c.env, c.member.id, kind, body).pipe(Effect.mapError((refused) => refused.status === 404 ? notFound(refused.message) : badRequest(refused.message)))
     return yield* connectionView(c, added.id)
+  }))
+  // Connect as you through Mr. Robot's browser (v1.12 ticket 11, ux-8pek): the sign-in page opens there
+  // under a Takeover; on hand-back the platform reads the session and connects it as a paste would.
+  .on('POST', '/api/connections/:kind/browser-start', (c, { kind }) => Effect.gen(function* () {
+    const service = yield* signInKind(kind)
+    const robotId = yield* chief(c)
+    const started = yield* call((): Promise<SessionCaptureStart> => robot(c, robotId).startSessionCapture(service))
+    return started.ok ? { robotId, robotName: started.robotName } : yield* Effect.fail(conflict(started.message))
+  }))
+  .on('GET', '/api/connections/:kind/browser', (c, { kind }) => Effect.gen(function* () {
+    const service = yield* signInKind(kind)
+    const robotId = yield* chief(c)
+    return yield* call((): Promise<SessionCapture> => robot(c, robotId).sessionCapture(service))
+  }))
+  // The page's Takeover closed: the attempt ends now (a hand-back already ending it is waited for).
+  .on('POST', '/api/connections/:kind/browser-end', (c, { kind }) => Effect.gen(function* () {
+    const service = yield* signInKind(kind)
+    const robotId = yield* chief(c)
+    return yield* call((): Promise<SessionCapture> => robot(c, robotId).endSessionCapture(service))
   }))
   .on('PATCH', '/api/connections/:id', (c, { id }) => Effect.gen(function* () {
     const body = yield* decodeBody(c.request, ConnectionPatch)
