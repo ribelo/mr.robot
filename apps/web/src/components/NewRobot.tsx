@@ -8,12 +8,11 @@ import { exitFailure } from '../client/api-failure.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { go } from '../route.ts'
 
-/** Create a Robot: what it is for and the model it starts on; the Robot then interviews you. */
+/** Create a Robot: only the model it starts on; the Robot then asks what it is for (ux-hckf). */
 export function NewRobot({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
   const providersResult = useAtomValue(providersAtom)
   const providers: ProvidersView | undefined = AsyncResult.isSuccess(providersResult) ? providersResult.value : undefined
   const command = useCommand()
-  const [brief, setBrief] = useState('')
   const [chosen, setModel] = useState<ModelChoice>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -21,7 +20,7 @@ export function NewRobot({ onCancel, onCreated }: { onCancel: () => void; onCrea
   const model = chosen ?? (providers === undefined ? undefined : startingModel(providers))
   const create = async () => {
     setBusy(true)
-    const exit = await command((api) => api.createRobot({ ...(brief.trim() === '' ? {} : { brief: brief.trim() }), ...(model === undefined ? {} : { model }) }), [keys.robots])
+    const exit = await command((api) => api.createRobot(model === undefined ? {} : { model }), [keys.robots])
     if (Exit.isSuccess(exit)) onCreated(exit.value.id)
     else {
       setError(exitFailure(exit))
@@ -32,9 +31,6 @@ export function NewRobot({ onCancel, onCreated }: { onCancel: () => void; onCrea
     <div className="modal-backdrop" onClick={onCancel}>
       <div className="modal form" role="dialog" aria-label="New robot" onClick={(event) => event.stopPropagation()}>
         <h2>New robot</h2>
-        <label>What should it do?
-          <textarea rows={4} autoFocus value={brief} placeholder="e.g. Watch flat prices in Warsaw and tell me about good offers" onChange={(event) => setBrief(event.target.value)} />
-        </label>
         {providers !== undefined && providers.models.length === 0 ? (
           <div className="form">
             <div>No Provider is connected yet, so a Robot would have no model to run on.</div>
@@ -45,7 +41,7 @@ export function NewRobot({ onCancel, onCreated }: { onCancel: () => void; onCrea
             <ModelSelect value={model} models={providers.models} unavailable={[]} onChange={(option) => setModel({ provider: option.provider, model: option.model, effort: model.effort })} />
           </label>
         )}
-        <div className="muted">It starts by asking you a few questions and then proposes its name and what it needs; you approve.</div>
+        <div className="muted">It asks you what it is for, then proposes its name and what it needs; you approve.</div>
         {error === undefined ? null : <div className="muted">{error}</div>}
         <div className="question-actions">
           <button type="button" className="button" onClick={onCancel}>Cancel</button>

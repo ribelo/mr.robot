@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Dialog without the brief field, new sentence (component test)
-- [ ] create_robot with a brief still works (existing workerd test passes)
+- [x] Dialog without the brief field, new sentence (component test)
+- [x] create_robot with a brief still works (existing workerd test passes)
