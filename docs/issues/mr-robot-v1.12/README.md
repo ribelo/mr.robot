@@ -6,7 +6,7 @@ Spec: ../mr-robot-v1.12.md. Frontier at the start: 01, 07, 08, 13. Then 02, 04, 
 |---|---|---|---|
 | 01 | [UI primitives: SaveButton, inline edit, select style, Check now](01-ui-primitives.md) | — | done |
 | 02 | [Profile layout, nickname, sidebar foot, Logins](02-profile-layout-nickname.md) | 01 | done |
-| 03 | [Avatars: Member (colour or picture) and Robot (bottts)](03-avatars.md) | 02 | done |
+| 03 | [Avatars: Member (colour or picture) and Robot (animated ball)](03-avatars.md) | 02 | done |
 | 04 | [Workers AI switch and Admin model combobox](04-workers-ai-switch.md) | 01 | done |
 | 05 | [Spend limits as types](05-spend-limits-as-types.md) | 04 | done |
 | 06 | [WireGuard summary](06-wireguard-summary.md) | 04 | done |
