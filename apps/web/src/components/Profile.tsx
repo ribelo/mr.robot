@@ -11,6 +11,8 @@ import { applyTheme } from '../theme/theme.ts'
 import { keys, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
+import { InlineEdit } from './InlineEdit.tsx'
+import { SaveButton } from './SaveButton.tsx'
 
 const PROVIDERS = [
   { id: 'anthropic', name: 'Claude', note: 'Your Claude plans, signed in with Anthropic.', kind: 'oauth' },
@@ -43,17 +45,18 @@ function Preferences({ me }: { me: Me }) {
   const [name, setName] = useState(me.name)
   const [timeZone, setTimeZone] = useState(me.timeZone)
   const [quiet, setQuiet] = useState(me.quietHours ?? { start: '', end: '' })
-  const [saved, setSaved] = useState<string>()
+  const [error, setError] = useState<string>()
   const save = async () => {
     // Only a zone the person typed is sent: it pins the zone, so saving other fields must not.
     const zone = timeZone.trim() !== me.timeZone ? { timeZone: timeZone.trim() } : {}
     const exit = await command((api) => api.updateMe({ name, ...zone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null }), [keys.me, keys.robots, keys.admin])
-    setSaved(exitFailure(exit) ?? 'Saved.')
+    setError(exitFailure(exit))
+    return exit
   }
   const useAppZone = async () => {
     const exit = await command((api) => api.updateMe({ useDetectedTimeZone: true }), [keys.me, keys.robots, keys.admin])
     if (Exit.isSuccess(exit) && me.detectedTimeZone !== null) setTimeZone(me.detectedTimeZone)
-    setSaved(exitFailure(exit) ?? 'Saved.')
+    setError(exitFailure(exit))
   }
   return (
     <>
@@ -69,7 +72,7 @@ function Preferences({ me }: { me: Me }) {
         <label>Quiet from<input type="time" value={quiet.start} onChange={(event) => setQuiet({ ...quiet, start: event.target.value })} /></label>
         <label>until<input type="time" value={quiet.end} onChange={(event) => setQuiet({ ...quiet, end: event.target.value })} /></label>
       </div>
-      <div className="question-actions">{saved === undefined ? null : <span className="muted">{saved}</span>}<button type="button" className="button button-primary" onClick={() => void save()}>Save</button></div>
+      <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} /></div>
     </>
   )
 }
@@ -138,32 +141,55 @@ function UsageBars({ account }: { account: ProviderView }) {
 
 /** A Provider's accounts (v1.10): the person's own with their switches, or ones others share. */
 function AccountList({ accounts, mine }: { accounts: readonly ProviderView[]; mine: boolean }) {
+  if (accounts.length === 0) return null
+  return <ul className="connection-list">{accounts.map((account) => <AccountRow key={account.id} account={account} mine={mine} />)}</ul>
+}
+
+/** Check now (ux-17sq): Checking… on the button while it runs, then when it ran or why it failed. */
+type AccountCheck =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'checking' }
+  | { readonly kind: 'checked'; readonly at: Date }
+  | { readonly kind: 'failed'; readonly message: string }
+
+function AccountRow({ account, mine }: { account: ProviderView; mine: boolean }) {
   const command = useCommand()
   const [error, setError] = useState<string>()
-  const change = async (action: Parameters<typeof command>[0]) => setError(exitFailure(await command(action, [keys.providers])))
-  if (accounts.length === 0) return null
+  const [renaming, setRenaming] = useState(false)
+  const [check, setCheck] = useState<AccountCheck>({ kind: 'idle' })
+  const change = async (action: Parameters<typeof command>[0]) => {
+    const exit = await command(action, [keys.providers])
+    setError(exitFailure(exit))
+    return exit
+  }
+  const checkNow = async () => {
+    setCheck({ kind: 'checking' })
+    const exit = await command((api) => api.checkAccount(account.id), [keys.providers])
+    setCheck(Exit.isSuccess(exit) ? { kind: 'checked', at: new Date() } : { kind: 'failed', message: exitFailure(exit) ?? '' })
+  }
   return (
-    <ul className="connection-list">
-      {accounts.map((account) => (
-        <li key={account.id} className="connection">
-          <div className="connection-name">
-            <b>{account.label}</b>{mine ? null : <span className="muted"> · {account.ownerName}'s, shared</span>}
-            {account.provider === 'anthropic' || account.provider === 'opencode-go' ? <UsageBars account={account} /> : null}
-            {mine && (account.usedBy ?? []).length > 0 ? <div className="muted">Used by {(account.usedBy ?? []).map((use) => `${use.robotName} (${use.ownerName})`).join(', ')}</div> : null}
-            {account.status === 'ok' ? null : <div className="host-log-failed">{account.status === 'limited' ? 'Limited' : 'Needs attention'}{account.note === null ? '' : `: ${account.note}`}{account.until === null ? '' : ` · tried again ${new Date(account.until).toLocaleString()}`}</div>}
-          </div>
-          {mine ? (
-            <div className="connection-actions">
-              <label className="check"><input type="checkbox" checked={account.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateAccount(account.id, { shared })) }} /><span>Shared with the Home</span></label>
-              <button type="button" className="link" onClick={() => void change((api) => api.checkAccount(account.id))}>Check now</button>
-              <button type="button" className="link" onClick={() => { const label = prompt('Name of this account', account.label); if (label !== null && label.trim() !== '') void change((api) => api.updateAccount(account.id, { label })) }}>Rename</button>
-              <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${account.label}? Robots that use it move on to the next entry of their model chain.`)) void change((api) => api.removeAccount(account.id)) }}>Remove</button>
-            </div>
-          ) : null}
-          {error === undefined ? null : <div className="muted">{error}</div>}
-        </li>
-      ))}
-    </ul>
+    <li className="connection">
+      <div className="connection-name">
+        <InlineEdit editing={renaming} value={account.label} label="Name of this account" onSave={(label) => change((api) => api.updateAccount(account.id, { label }))} onClose={() => setRenaming(false)}>
+          <b>{account.label}</b>
+        </InlineEdit>
+        {mine ? null : <span className="muted"> · {account.ownerName}'s, shared</span>}
+        {account.provider === 'anthropic' || account.provider === 'opencode-go' ? <UsageBars account={account} /> : null}
+        {mine && (account.usedBy ?? []).length > 0 ? <div className="muted">Used by {(account.usedBy ?? []).map((use) => `${use.robotName} (${use.ownerName})`).join(', ')}</div> : null}
+        {account.status === 'ok' ? null : <div className="host-log-failed">{account.status === 'limited' ? 'Limited' : 'Needs attention'}{account.note === null ? '' : `: ${account.note}`}{account.until === null ? '' : ` · tried again ${new Date(account.until).toLocaleString()}`}</div>}
+        {check.kind === 'checked' ? <div className="muted">Checked {check.at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div> : null}
+        {check.kind === 'failed' ? <div className="muted">Check failed: {check.message}</div> : null}
+      </div>
+      {mine ? (
+        <div className="connection-actions">
+          <label className="check"><input type="checkbox" checked={account.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateAccount(account.id, { shared })) }} /><span>Shared with the Home</span></label>
+          <button type="button" className="link" disabled={check.kind === 'checking'} onClick={() => void checkNow()}>{check.kind === 'checking' ? 'Checking…' : 'Check now'}</button>
+          <button type="button" className="link" disabled={renaming} onClick={() => setRenaming(true)}>Rename</button>
+          <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${account.label}? Robots that use it move on to the next entry of their model chain.`)) void change((api) => api.removeAccount(account.id)) }}>Remove</button>
+        </div>
+      ) : null}
+      {error === undefined ? null : <div className="muted">{error}</div>}
+    </li>
   )
 }
 
@@ -253,12 +279,22 @@ function MemberFile({ name }: { name: string }) {
 function MemberFileEditor({ name, initial }: { name: string; initial: string }) {
   const command = useCommand()
   const [content, setContent] = useState(initial)
-  const [saved, setSaved] = useState<string>()
+  const [stored, setStored] = useState(initial)
+  const [error, setError] = useState<string>()
+  const save = async () => {
+    const written = content
+    const exit = await command((api) => api.writeMemberFile(name, written), [keys.memberFiles])
+    setError(exitFailure(exit))
+    if (Exit.isSuccess(exit)) setStored(written)
+    return exit
+  }
   return (
-    <label>{name}
-      <textarea rows={8} value={content} placeholder={PLACEHOLDERS[name]} onChange={(event) => { setContent(event.target.value); setSaved(undefined) }} onBlur={() => void command((api) => api.writeMemberFile(name, content), [keys.memberFiles]).then((exit) => setSaved(exitFailure(exit) ?? 'Saved.'))} />
-      {saved === undefined ? null : <span className="muted">{saved}</span>}
-    </label>
+    <>
+      <label>{name}
+        <textarea rows={8} value={content} placeholder={PLACEHOLDERS[name]} onChange={(event) => setContent(event.target.value)} />
+      </label>
+      <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} disabled={content === stored} /></div>
+    </>
   )
 }
 /** Web Push on this device (robot-ajrp, robot-9xoj). On a phone, install the app first. */

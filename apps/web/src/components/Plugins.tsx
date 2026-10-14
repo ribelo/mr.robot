@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/reactivity'
+import * as Exit from 'effect/Exit'
 import type { PluginField, PluginView } from '@mr-robot/protocol'
 import {
   IconAlarmClockOutlineRegular, IconEditOutlineRegular, IconFolderOpenOutlineRegular, IconGlobeOutlineRegular,
@@ -10,6 +11,7 @@ import { siDiscord, siGoogle } from 'simple-icons'
 import { keys, pluginsAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { go } from '../route.ts'
+import { SaveButton } from './SaveButton.tsx'
 import { AtomView, renderResult } from './AtomView.tsx'
 import { Empty } from './States.tsx'
 import { Markdown } from './Markdown.tsx'
@@ -87,29 +89,37 @@ function PluginGroup({ title, plugins, isAdmin }: { title: string; plugins: read
 /** A plugin's own page (reference 13): icon, name, description, the form from its schema, Save. */
 export function PluginDetail({ name, isAdmin }: { name: string; isAdmin: boolean }) {
   const result = useAtomValue(pluginsAtom)
+  // The form starts again from the stored settings when they change, but not after its own save:
+  // it stays mounted so its Save button can say Saved (ux-jefs).
+  const [ownSave, setOwnSave] = useState<{ readonly settings: string; readonly formKey: string }>()
   return (
     <div className="plugin-detail">
       <button type="button" className="link back-link" onClick={() => go({ page: 'plugins' })}>‹ Plugins</button>
       {renderResult(result, { what: 'the plugin' }, (plugins) => {
         const plugin = plugins.find((entry) => entry.name === name)
         if (plugin === undefined) return <Empty title="No such plugin" hint="It may have been removed from this Home." />
-        return <PluginSettings key={JSON.stringify([plugin.values, plugin.secretsSet])} plugin={plugin} isAdmin={isAdmin} />
+        const settings = JSON.stringify([plugin.values, plugin.secretsSet])
+        const formKey = ownSave !== undefined && ownSave.settings === settings ? ownSave.formKey : settings
+        return <PluginSettings key={formKey} plugin={plugin} isAdmin={isAdmin} onSaved={(saved) => setOwnSave({ settings: JSON.stringify([saved.values, saved.secretsSet]), formKey })} />
       })}
     </div>
   )
 }
 
-function PluginSettings({ plugin, isAdmin }: { plugin: PluginView; isAdmin: boolean }) {
+function PluginSettings({ plugin, isAdmin, onSaved }: { plugin: PluginView; isAdmin: boolean; onSaved: (saved: PluginView) => void }) {
   const command = useCommand()
   const [values, setValues] = useState<Record<string, unknown>>(plugin.values)
-  const [message, setMessage] = useState<string>()
-  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string>()
   const dirty = JSON.stringify(values) !== JSON.stringify(plugin.values)
   const save = async () => {
-    setSaving(true)
     const exit = await command((api) => api.savePluginSettings(plugin.name, values), [keys.plugins, keys.admin])
-    setMessage(exitFailure(exit) ?? 'Saved.')
-    setSaving(false)
+    setError(exitFailure(exit))
+    if (Exit.isSuccess(exit)) {
+      // A typed secret is stored now: the field empties and says so.
+      setValues({ ...exit.value.values })
+      onSaved(exit.value)
+    }
+    return exit
   }
   return (
     <>
@@ -128,8 +138,8 @@ function PluginSettings({ plugin, isAdmin }: { plugin: PluginView; isAdmin: bool
           <h3>Settings</h3>
           <SchemaFields fields={plugin.fields} values={values} secretsSet={plugin.secretsSet} onChange={setValues} />
           <div className="question-actions">
-            {message === undefined ? null : <span className="muted">{message}</span>}
-            <button type="button" className="button button-primary" disabled={saving || !dirty} onClick={() => void save()}>Save</button>
+            {error === undefined ? null : <span className="muted">{error}</span>}
+            <SaveButton onSave={save} disabled={!dirty} />
           </div>
         </div>
       )}

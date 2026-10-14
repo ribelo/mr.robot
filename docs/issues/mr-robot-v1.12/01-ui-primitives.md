@@ -6,10 +6,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] SaveButton with the four states and a width that does not change; used by Profile, Admin, Advanced settings, Robot profile, Files editor, Home memory, Member files
-- [ ] No `prompt(` call in the PWA source; a source test asserts it
-- [ ] Inline rename of an account and inline name of a new local skill (component tests)
-- [ ] Check now shows Checking… and the result with a time (component test)
-- [ ] One select style with the app's chevron
+- [x] SaveButton with the four states and a width that does not change; used by Profile, Admin, Advanced settings, Robot profile, Files editor, Home memory, Member files
+- [x] No `prompt(` call in the PWA source; a source test asserts it
+- [x] Inline rename of an account and inline name of a new local skill (component tests)
+- [x] Check now shows Checking… and the result with a time (component test)
+- [x] One select style with the app's chevron

@@ -111,7 +111,7 @@ describe('grant levels in Advanced settings (sk-746n, sk-8llz)', () => {
   const open = (shown: RobotPanel) => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
     const saved: SettingsPatch[] = []
-    render(<RegistryProvider><AdvancedSettings panel={shown} catalog={catalog} onSave={async (patch) => { saved.push(patch) }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
+    render(<RegistryProvider><AdvancedSettings panel={shown} catalog={catalog} onSave={async (patch) => { saved.push(patch); return true }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
     return saved
   }
   const levelOf = (item: string) => screen.getByRole('radiogroup', { name: item }).querySelector('[aria-checked="true"]')?.textContent

@@ -6,6 +6,8 @@ import { fileAtom, filesAtom, keys, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { rawFileUrl } from '../client/mr-robot-api.ts'
 import { AtomView } from './AtomView.tsx'
+import { InlineEdit } from './InlineEdit.tsx'
+import { SaveButton } from './SaveButton.tsx'
 
 const GROUPS: ReadonlyArray<readonly [WorkspaceFileView['group'], string]> = [
   ['persona', 'Persona and memory'],
@@ -28,18 +30,25 @@ export function FilesView({ robotId, path, canEdit, onOpen }: { robotId: string;
 function FileList({ robotId, files, canEdit, onOpen }: { robotId: string; files: readonly WorkspaceFileView[]; canEdit: boolean; onOpen: (path: string | null) => void }) {
   const command = useCommand()
   const [error, setError] = useState<string>()
-  const newSkill = async () => {
-    const name = prompt('Name of the new local skill (lowercase-with-dashes)')?.trim()
-    if (name === undefined || name === '') return
-    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) { setError('A skill name is lowercase letters, digits and dashes.'); return }
+  const [naming, setNaming] = useState(false)
+  /** The new local skill's name comes from an inline field (ux-kjli); true when the skill was created. */
+  const newSkill = async (name: string): Promise<boolean> => {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) { setError('A skill name is lowercase letters, digits and dashes.'); return false }
     const path = `skills/${name}/SKILL.md`
     const exit = await command((api) => api.saveFile(robotId, path, `---\nname: ${name}\ndescription: What this skill is for, in one line.\n---\n\n# ${name}\n\nSteps the Robot follows.\n`), [keys.files(robotId)])
+    setError(exitFailure(exit))
     if (Exit.isSuccess(exit)) onOpen(path)
-    else setError(exitFailure(exit))
+    return Exit.isSuccess(exit)
   }
   return (
     <div className="files">
-      {canEdit ? <div><button type="button" className="button" onClick={() => void newSkill()}>New local skill</button></div> : null}
+      {canEdit ? (
+        <div>
+          <InlineEdit editing={naming} value="" label="Name of the new local skill" placeholder="lowercase-with-dashes" onSave={newSkill} onClose={() => { setNaming(false); setError(undefined) }}>
+            <button type="button" className="button" onClick={() => setNaming(true)}>New local skill</button>
+          </InlineEdit>
+        </div>
+      ) : null}
       {error === undefined ? null : <div className="muted">{error}</div>}
       {GROUPS.map(([group, title]) => {
         const inGroup = files.filter((file) => file.group === group)
@@ -78,7 +87,8 @@ function FileText({ robotId, path, canEdit, file, onBack }: { robotId: string; p
   const [status, setStatus] = useState<string>()
   const save = async () => {
     const exit = await command((api) => api.saveFile(robotId, path, text), [keys.files(robotId)])
-    setStatus(exitFailure(exit) ?? 'Saved. The Robot is told at its next Turn.')
+    setStatus(exitFailure(exit))
+    return exit
   }
   const editable = canEdit && !file.readOnly
   return (
@@ -91,12 +101,13 @@ function FileText({ robotId, path, canEdit, file, onBack }: { robotId: string; p
       <div className="file-actions"><a className="button" href={rawFileUrl(robotId, path, true)} download>Download</a>{previewable(path) ? <a className="button" href={rawFileUrl(robotId, path)} target="_blank" rel="noreferrer">Open</a> : null}</div>
       {previewable(path) ? <FilePreview robotId={robotId} path={path} /> : file.text === null ? <div className="muted">{file.note}</div> : (
         <>
-          <textarea aria-label={`Edit ${path}`} className="file-text" value={text} readOnly={!editable} spellCheck={false} onChange={(event) => { setText(event.target.value); setStatus(undefined) }} />
+          <textarea aria-label={`Edit ${path}`} className="file-text" value={text} readOnly={!editable} spellCheck={false} onChange={(event) => setText(event.target.value)} />
           {editable ? (
             <div className="question-actions">
               {status === undefined ? null : <span className="muted">{status}</span>}
               <button type="button" className="button" onClick={() => { if (confirm(`Delete ${path}?`)) void command((api) => api.deleteFile(robotId, path), [keys.files(robotId)]).then((exit) => { const failure = exitFailure(exit); if (failure === undefined) onBack(); else setStatus(failure) }) }}>Delete</button>
-              <button type="button" className="button button-primary" disabled={text === file.text} onClick={() => void save()}>Save</button>
+              <span className="muted">The Robot is told at its next Turn.</span>
+              <SaveButton onSave={save} disabled={text === file.text} />
             </div>
           ) : <div className="muted">{file.readOnly && file.note !== null ? file.note : canEdit ? file.note : 'Only the owner edits this Robot\'s files.'}</div>}
         </>

@@ -6,6 +6,7 @@ import { PluginDetail, PluginsPage } from './components/Plugins.tsx'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/reactivity'
+import * as Exit from 'effect/Exit'
 import type { Me, RobotSummary, Trajectory } from '@mr-robot/protocol'
 import { catalogAtom, keys, panelAtom, trajectoryAtom, useCommand } from './client/api-atoms.ts'
 import { exitFailure } from './client/api-failure.ts'
@@ -152,6 +153,9 @@ function AdvancedPage({ id }: { id: string }) {
   const catalog = useAtomValue(catalogAtom(id))
   const command = useCommand()
   const [message, setMessage] = useState<string>()
+  // The form starts again from the stored settings when they change, but not after its own save:
+  // it stays mounted so its Save button can say Saved (ux-jefs).
+  const [ownSave, setOwnSave] = useState<{ readonly settings: string; readonly formKey: string }>()
   const act = async (run: Parameters<typeof command>[0], done: string) => {
     setMessage(exitFailure(await command(run, [keys.robot(id), keys.robots])) ?? done)
   }
@@ -160,12 +164,19 @@ function AdvancedPage({ id }: { id: string }) {
     <div className="page">
       <PageHead title={`${name} · Advanced settings`} back={{ page: 'robot', id, panel: true }} />
       {message === undefined ? null : <div className="muted">{message}</div>}
-      {renderResult(AsyncResult.all([panel, catalog]), { what: 'the settings' }, ([loadedPanel, loadedCatalog]) => (
-        <AdvancedSettings
-          key={JSON.stringify(loadedPanel.settings)}
+      {renderResult(AsyncResult.all([panel, catalog]), { what: 'the settings' }, ([loadedPanel, loadedCatalog]) => {
+        const settings = JSON.stringify(loadedPanel.settings)
+        const formKey = ownSave !== undefined && ownSave.settings === settings ? ownSave.formKey : settings
+        return <AdvancedSettings
+          key={formKey}
           panel={loadedPanel}
           catalog={loadedCatalog}
-          onSave={(patch) => act((api) => api.updateSettings(id, patch), 'Saved. Changes apply from the next Turn.')}
+          onSave={async (patch) => {
+            const exit = await command((api) => api.updateSettings(id, patch), [keys.robot(id), keys.robots])
+            setMessage(exitFailure(exit))
+            if (Exit.isSuccess(exit)) setOwnSave({ settings: JSON.stringify(exit.value), formKey })
+            return exit
+          }}
           onPause={() => void act((api) => api.pause(id), 'Paused.')}
           onResume={() => void act((api) => api.resume(id), 'Resumed.')}
           onDelete={async (confirm) => {
@@ -184,7 +195,7 @@ function AdvancedPage({ id }: { id: string }) {
             return exit
           }}
         />
-      ))}
+      })}
     </div>
   )
 }

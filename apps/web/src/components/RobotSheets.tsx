@@ -7,6 +7,7 @@ import { renderResult } from './AtomView.tsx'
 import { Avatar } from './Avatar.tsx'
 import { ClockIcon } from './ChatView.tsx'
 import { ColorPicker } from './ColorPicker.tsx'
+import { SaveButton } from './SaveButton.tsx'
 
 /** Edit profile (robot-lulc, reference 09): avatar, name, title, description, notifications, Routines. */
 export function EditProfileSheet({ robotId, onClose, onOpenRoutine }: {
@@ -27,9 +28,8 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
   const [discordChannel, setDiscordChannel] = useState(panel.settings.discordChannel ?? '')
   const [discordProactive, setDiscordProactive] = useState(panel.settings.discordProactive)
   const [error, setError] = useState<string>()
-  const [saving, setSaving] = useState(false)
+  // A saved profile closes the sheet; a failure stays and shows below.
   const save = async () => {
-    setSaving(true)
     const failure = exitFailure(await command((api) => api.updateSettings(robotId, {
       identity,
       notifications: { ...panel.settings.notifications, enabled: notify },
@@ -37,15 +37,13 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
       discordChannel: discord && discordChannel.trim() !== '' ? discordChannel.trim() : null,
       discordProactive,
     }), [keys.robot(robotId), keys.robots]))
+    setError(failure)
     if (failure === undefined) onClose()
-    else {
-      setError(failure)
-      setSaving(false)
-    }
+    return failure === undefined
   }
   const editable = panel.canEdit
   return (
-    <Sheet onClose={onClose} footer={editable ? <button type="button" className="button button-primary" disabled={saving || identity.name.trim() === ''} onClick={() => void save()}>Save</button> : null}>
+    <Sheet onClose={onClose} footer={editable ? <SaveButton onSave={save} disabled={identity.name.trim() === ''} /> : null}>
       <div className="sheet-avatar"><Avatar color={identity.avatarColor} size={72} /></div>
       {editable ? (
         <ColorPicker value={identity.avatarColor} onChange={(color) => setIdentity({ ...identity, avatarColor: color })} />

@@ -151,7 +151,26 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .usage { margin-top: 10px; }
 
 .settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }
-.settings input, .settings textarea, .settings select, .form input, .form textarea, .form select { background: var(--surface-raised); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; color: var(--text); outline: none; }
+.settings input, .settings textarea, .form input, .form textarea { background: var(--surface-raised); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; color: var(--text); outline: none; }
+/* Every select (ux-5o28): one style, the app's own chevron instead of the browser's. */
+select {
+  appearance: none; -webkit-appearance: none;
+  background-color: var(--surface-raised);
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 55%, calc(100% - 12px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 32px 9px 11px; min-height: 38px; color: var(--text); outline: none; cursor: pointer;
+}
+select:focus-visible { border-color: var(--accent); }
+select:disabled { cursor: default; opacity: .6; }
+/* SaveButton (ux-jefs): every label in one cell, only the current one shown, so the width never changes. */
+.save-button-labels { display: inline-grid; }
+.save-button-labels > span { grid-area: 1 / 1; text-align: center; }
+.save-button-labels > [aria-hidden] { visibility: hidden; }
+.question-actions { align-items: center; }
+/* InlineEdit (ux-h9wl, ux-kjli): the field takes the label's place. */
+.inline-edit { width: 100%; max-width: 320px; }
 .settings input[type=color] { padding: 2px; height: 36px; }
 .settings-avatar { display: grid; place-items: center; margin: 8px 0 16px; }
 .toggle-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
@@ -371,7 +390,7 @@ table.grid td:first-child, table.grid th:first-child { padding-left: 2px; }
 table.grid td:last-child, table.grid th:last-child { padding-right: 2px; text-align: right; }
 table.grid td:last-child .form.inline, table.grid td:last-child .inline { justify-content: flex-end; }
 table.grid button.link { text-align: left; font-size: inherit; color: var(--text); }
-table.grid select { min-height: 32px; padding: 5px 10px; width: auto; }
+table.grid select { min-height: 32px; padding: 5px 28px 5px 10px; width: auto; background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%; }
 table.grid .muted { margin-top: 2px; }
 @media (max-width: 700px) { table.grid { display: block; overflow-x: auto; } }
 

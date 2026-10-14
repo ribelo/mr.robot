@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { hostActionsAtom, keys, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
+import { SaveButton } from './SaveButton.tsx'
 
 /** The desktop app's bridge (apps/host preload); absent in a browser. */
 interface HostState {
@@ -43,6 +44,7 @@ export function ThisComputer() {
   const [name, setName] = useState('')
   const [server, setServer] = useState('')
   const [message, setMessage] = useState<string>()
+  const [nameError, setNameError] = useState<string>()
   useEffect(() => {
     if (bridge === undefined) return
     void bridge.state().then((value) => { setState(value); setName(value.name); setServer(value.server ?? '') })
@@ -61,6 +63,11 @@ export function ThisComputer() {
       if (failure !== undefined) setMessage(failure)
     }
   }
+  const saveName = async () => {
+    const result = await bridge.save({ name: name.trim() })
+    setNameError(result.error)
+    return result.error === undefined
+  }
   const unpair = async () => {
     if (!confirm(`Unpair ${state.name}? Robots stop using it until you pair it again.`)) return
     const hostId = state.hostId
@@ -71,8 +78,9 @@ export function ThisComputer() {
     <div className="form">
       <div className="status-card"><b>{LINES[state.state]}</b>{state.detail === undefined ? null : <div className="muted">{state.detail}</div>}{state.sessions > 0 ? <div className="muted">{state.sessions} robot browser session(s) open</div> : null}</div>
       <label>Name of this computer
-        <input value={name} onChange={(event) => setName(event.target.value)} onBlur={() => { if (name !== state.name) void bridge.save({ name }).then((result) => setMessage(result.error ?? 'Saved.')) }} />
+        <input value={name} onChange={(event) => setName(event.target.value)} />
       </label>
+      <div className="question-actions">{nameError === undefined ? null : <span className="muted">{nameError}</span>}<SaveButton onSave={saveName} disabled={name.trim() === '' || name.trim() === state.name} /></div>
       <label className="check"><input type="checkbox" checked={state.autostart} onChange={(event) => void bridge.save({ autostart: event.target.checked })} /><span>Start when I log in<small>The app starts in the tray and keeps this computer available to your robots.</small></span></label>
       <div className="question-actions">
         {message === undefined ? null : <span className="muted">{message}</span>}

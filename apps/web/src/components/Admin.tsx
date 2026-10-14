@@ -7,6 +7,7 @@ import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
 import { go } from '../route.ts'
 import { ConfirmButton } from './RobotSheets.tsx'
+import { SaveButton } from './SaveButton.tsx'
 
 const usd = (value: number) => `$${value.toFixed(2)}`
 const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value)
@@ -30,10 +31,11 @@ function grantNames(levels: GrantLevels, prefix: string): string[] {
 function AdminPage({ view }: { view: AdminView }) {
   const command = useCommand()
   const [message, setMessage] = useState<string>()
-  /** Run a change; done is the message on success, or a function of the result. */
+  /** Run a change; done is the message on success, or a function of the result; a save has none, its button says Saved. True when it succeeded. */
   const run = async <A,>(action: Parameters<typeof command<A>>[0], done?: string | ((value: A) => string)) => {
     const exit = await command(action, [keys.admin, keys.robots, keys.hosts])
     setMessage(Exit.isSuccess(exit) ? (typeof done === 'function' ? done(exit.value) : done) : exitFailure(exit))
+    return Exit.isSuccess(exit)
   }
   return (
     <div className="form">
@@ -107,7 +109,7 @@ function AdminPage({ view }: { view: AdminView }) {
       <Invite onInvite={(email) => run((api) => api.invite(email), `Invited ${email}. They join on first sign-in.`)} />
 
       <h2>Home settings</h2>
-      <HomeSettings view={view} onSave={(patch) => run((api) => api.updateHomeSettings(patch), 'Saved.')} />
+      <HomeSettings view={view} onSave={(patch) => run((api) => api.updateHomeSettings(patch))} />
       <h2>Hosts</h2>
       {(view.hosts ?? []).length === 0 ? <div className="muted">No computers paired in this Home.</div> : (
         <table className="grid"><tbody>{(view.hosts ?? []).map((host) => (
@@ -122,11 +124,11 @@ function AdminPage({ view }: { view: AdminView }) {
       <h2>Home memory</h2>
       <AtomView atom={homeMemoryAtom}>{(file) => <HomeMemory initial={file.content} />}</AtomView>
       <h2>Proxy</h2>
-      <ProxyConfig configured={view.proxyConfigured === true} onSave={(url) => run((api) => api.setProxy(url), url === null ? 'Removed.' : 'Saved.')} />
+      <ProxyConfig configured={view.proxyConfigured === true} onSave={(url) => run((api) => api.setProxy(url), url === null ? 'Removed.' : undefined)} />
       <h2>Exa</h2>
-      <ExaKey configured={view.exaConfigured === true} onSave={(key) => run((api) => api.setExaKey(key), key === null ? 'Removed.' : 'Saved.')} />
+      <ExaKey configured={view.exaConfigured === true} onSave={(key) => run((api) => api.setExaKey(key), key === null ? 'Removed.' : undefined)} />
       <h2>Proton VPN</h2>
-      <VpnConfig configured={view.vpnConfigured === true} onSave={(config) => run((api) => api.setVpnConfig(config), config === null ? 'Removed.' : 'Saved.')} />
+      <VpnConfig configured={view.vpnConfigured === true} onSave={(config) => run((api) => api.setVpnConfig(config), config === null ? 'Removed.' : undefined)} />
 
       <h2>Model lists</h2>
       <div className="muted">Each Provider's own list of models, fetched with a connected key or subscription and refreshed daily. Robots choose from these.</div>
@@ -150,14 +152,14 @@ function AdminPage({ view }: { view: AdminView }) {
       <SkillLibrary view={view} onMessage={setMessage} />
       <details className="prompt-section">
         <summary>Sync from a Git repository (optional)</summary>
-        <SkillRepository view={view} onSave={(input) => run((api) => api.setSkillRepository(input), 'Saved.')} onSync={() => run((api) => api.syncSkills, (result) => `Synced ${result.synced.length} skills.`)} />
+        <SkillRepository view={view} onSave={(input) => run((api) => api.setSkillRepository(input))} onSync={() => run((api) => api.syncSkills, (result) => `Synced ${result.synced.length} skills.`)} />
         <div className="muted">Imported skills stay editable; a skill you edit here is kept as it is by later syncs.</div>
       </details>
     </div>
   )
 }
 
-function Invite({ onInvite }: { onInvite: (email: string) => Promise<void> }) {
+function Invite({ onInvite }: { onInvite: (email: string) => Promise<boolean> }) {
   const [email, setEmail] = useState('')
   return (
     <div className="form inline">
@@ -167,14 +169,14 @@ function Invite({ onInvite }: { onInvite: (email: string) => Promise<void> }) {
   )
 }
 
-function HomeSettings({ view, onSave }: { view: AdminView; onSave: (patch: Record<string, unknown>) => Promise<void> }) {
+function HomeSettings({ view, onSave }: { view: AdminView; onSave: (patch: Record<string, unknown>) => Promise<boolean> }) {
   const [model, setModel] = useState(`${view.settings.defaultModel.provider}/${view.settings.defaultModel.model}`)
   const [robotLimit, setRobotLimit] = useState(view.settings.robotSpendLimitUsd?.toString() ?? '')
   const [memberLimit, setMemberLimit] = useState(view.settings.memberSpendLimitUsd?.toString() ?? '')
   const [backend, setBackend] = useState(view.settings.defaultBrowserBackend ?? 'browser-run')
   const save = () => {
     const option = view.settings.models.find((entry) => `${entry.provider}/${entry.model}` === model)
-    void onSave({
+    return onSave({
       ...(option === undefined ? {} : { defaultModel: { provider: option.provider, model: option.model, effort: view.settings.defaultModel.effort } }),
       defaultBrowserBackend: backend,
       robotSpendLimitUsd: robotLimit === '' ? null : Number(robotLimit),
@@ -198,12 +200,12 @@ function HomeSettings({ view, onSave }: { view: AdminView; onSave: (patch: Recor
         <label>Robot limit, USD/month<input type="number" min={0} value={robotLimit} onChange={(event) => setRobotLimit(event.target.value)} /></label>
         <label>Member limit, USD/month<input type="number" min={0} value={memberLimit} onChange={(event) => setMemberLimit(event.target.value)} /></label>
       </div>
-      <div className="question-actions"><button type="button" className="button button-primary" onClick={save}>Save</button></div>
+      <div className="question-actions"><SaveButton onSave={save} /></div>
     </>
   )
 }
 
-function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (input: { repo: string; ref: string; path: string; token?: string }) => Promise<void>; onSync: () => Promise<void> }) {
+function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (input: { repo: string; ref: string; path: string; token?: string }) => Promise<boolean>; onSync: () => Promise<boolean> }) {
   const [repo, setRepo] = useState(view.skillRepository?.repo ?? '')
   const [ref, setRef] = useState(view.skillRepository?.ref ?? 'main')
   const [path, setPath] = useState(view.skillRepository?.path ?? 'skills')
@@ -217,7 +219,7 @@ function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (i
         <input type="password" value={token} placeholder="GitHub token (private repos)" onChange={(event) => setToken(event.target.value)} />
       </div>
       <div className="question-actions">
-        <button type="button" className="button" onClick={() => void onSave({ repo, ref, path, ...(token === '' ? {} : { token }) })}>Save</button>
+        <SaveButton secondary onSave={() => onSave({ repo, ref, path, ...(token === '' ? {} : { token }) })} />
         <button type="button" className="button button-primary" disabled={view.skillRepository === null} onClick={() => void onSync()}>Sync now</button>
       </div>
     </div>
@@ -225,7 +227,7 @@ function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (i
 }
 
 /** The Home's Proton VPN WireGuard configuration (rb-rb1x): write-only; robots on "Container Chrome via VPN" use it. */
-function VpnConfig({ configured, onSave }: { configured: boolean; onSave: (config: string | null) => Promise<void> }) {
+function VpnConfig({ configured, onSave }: { configured: boolean; onSave: (config: string | null) => Promise<boolean> }) {
   const [config, setConfig] = useState('')
   return (
     <div className="form">
@@ -233,7 +235,7 @@ function VpnConfig({ configured, onSave }: { configured: boolean; onSave: (confi
       <textarea aria-label="WireGuard configuration" rows={6} value={config} placeholder={'[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nEndpoint = …'} onChange={(event) => setConfig(event.target.value)} />
       <div className="question-actions">
         {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
-        <button type="button" className="button button-primary" disabled={config.trim() === ''} onClick={() => void onSave(config).then(() => setConfig(''))}>Save</button>
+        <SaveButton disabled={config.trim() === ''} onSave={async () => { const saved = await onSave(config); if (saved) setConfig(''); return saved }} />
       </div>
     </div>
   )
@@ -250,13 +252,12 @@ function SkillLibrary({ view, onMessage }: { view: AdminView; onMessage: (messag
     else setError(exitFailure(exit))
   }
   const save = async () => {
-    if (editing === null) return
+    if (editing === null) return false
     const failure = exitFailure(await command((api) => api.saveSkill(editing.name, editing.description, editing.content), [keys.admin]))
     setError(failure)
-    if (failure === undefined) {
-      setEditing(null)
-      onMessage('Saved.')
-    }
+    // A saved skill closes its editor; the table shows it.
+    if (failure === undefined) setEditing(null)
+    return failure === undefined
   }
   return (
     <div className="form">
@@ -283,7 +284,7 @@ function SkillLibrary({ view, onMessage }: { view: AdminView; onMessage: (messag
             <div className="question-actions">
               {error === undefined ? null : <span className="muted">{error}</span>}
               <button type="button" className="button" onClick={() => setEditing(null)}>Cancel</button>
-              <button type="button" className="button button-primary" disabled={editing.name === '' || editing.description === ''} onClick={() => void save()}>Save</button>
+              <SaveButton disabled={editing.name === '' || editing.description === ''} onSave={save} />
             </div>
           </div>
         )}
@@ -292,7 +293,7 @@ function SkillLibrary({ view, onMessage }: { view: AdminView; onMessage: (messag
 }
 
 /** The Home's Exa API key (rb-x8i3): write-only; Robots granted "exa" use it. */
-function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: string | null) => Promise<void> }) {
+function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: string | null) => Promise<boolean> }) {
   const [key, setKey] = useState('')
   return (
     <div className="form">
@@ -300,14 +301,14 @@ function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: str
       <div className="form inline">
         <input type="password" aria-label="Exa API key" value={key} placeholder="Exa API key" onChange={(event) => setKey(event.target.value)} />
         {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
-        <button type="button" className="button button-primary" disabled={key.trim() === ''} onClick={() => void onSave(key).then(() => setKey(''))}>Save</button>
+        <SaveButton disabled={key.trim() === ''} onSave={async () => { const saved = await onSave(key); if (saved) setKey(''); return saved }} />
       </div>
     </div>
   )
 }
 
 /** The proxy address for "Container Chrome via proxy" (v1.2 ticket 05): write-only. */
-function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url: string | null) => Promise<void> }) {
+function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url: string | null) => Promise<boolean> }) {
   const [url, setUrl] = useState('')
   return (
     <div className="form">
@@ -315,7 +316,7 @@ function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url
       <div className="form inline">
         <input type="password" aria-label="Proxy address" value={url} placeholder="http://user:password@host:port" onChange={(event) => setUrl(event.target.value)} />
         {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
-        <button type="button" className="button button-primary" disabled={url.trim() === ''} onClick={() => void onSave(url).then(() => setUrl(''))}>Save</button>
+        <SaveButton disabled={url.trim() === ''} onSave={async () => { const saved = await onSave(url); if (saved) setUrl(''); return saved }} />
       </div>
     </div>
   )
@@ -325,14 +326,22 @@ function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url
 function HomeMemory({ initial }: { initial: string }) {
   const command = useCommand()
   const [content, setContent] = useState(initial)
-  const [saved, setSaved] = useState<string>()
+  const [stored, setStored] = useState(initial)
+  const [error, setError] = useState<string>()
+  const save = async () => {
+    const written = content
+    const exit = await command((api) => api.setHomeMemory(written), [keys.homeMemory])
+    setError(exitFailure(exit))
+    if (Exit.isSuccess(exit)) setStored(written)
+    return exit
+  }
   return (
     <div className="form">
       <div className="muted">Facts for every Robot in the Home: the electricity provider, the building, shared accounts. Each Robot is told when it changes.</div>
       <label>HOME.md
-        <textarea rows={6} value={content} placeholder="# HOME.md" onChange={(event) => { setContent(event.target.value); setSaved(undefined) }} onBlur={() => void command((api) => api.setHomeMemory(content), [keys.homeMemory]).then((exit) => setSaved(exitFailure(exit) ?? 'Saved.'))} />
-        {saved === undefined ? null : <span className="muted">{saved}</span>}
+        <textarea rows={6} value={content} placeholder="# HOME.md" onChange={(event) => setContent(event.target.value)} />
       </label>
+      <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} disabled={content === stored} /></div>
     </div>
   )
 }
