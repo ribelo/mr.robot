@@ -150,7 +150,7 @@ function AdminPage({ view }: { view: AdminView }) {
 
       <h2>Providers</h2>
       {view.providers.length === 0 ? <div className="muted">No Provider connected yet. Connect one on your profile page.</div> : (
-        <table className="grid"><tbody>{view.providers.map((entry) => <tr key={`${entry.provider}-${entry.ownerName}`}><td>{entry.provider}</td><td>{entry.ownerName}</td><td>{entry.shared ? 'shared with the Home' : 'private'}</td></tr>)}</tbody></table>
+        <table className="grid"><tbody>{view.providers.map((entry) => <tr key={entry.id}><td>{entry.provider}</td><td>{entry.label}</td><td>{entry.ownerName}</td><td>{entry.shared ? 'shared with the Home' : 'private'}</td></tr>)}</tbody></table>
       )}
 
       <h2>Skill library</h2>

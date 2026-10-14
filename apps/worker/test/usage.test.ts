@@ -1,6 +1,6 @@
 import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { AccountUsage, Me, ProviderView, ProvidersView } from '@mr-robot/protocol'
+import type { AccountUsage, AdminView, Me, ProviderView, ProvidersView } from '@mr-robot/protocol'
 import { api, stubModels } from './api.ts'
 import { connectorFixtures } from './connector-fixtures.ts'
 import type { Member as TestMember } from './worker.ts'
@@ -46,6 +46,25 @@ describe('Account usage and checks (v1.10 tickets 04, 05)', () => {
     await api(ANNA, `/api/accounts/${claude!.id}`, { method: 'PATCH', body: { shared: true } })
     expect((await usage(BEN, claude!)).body.windows).toHaveLength(3)
     expect(JSON.stringify((await api<ProvidersView>(BEN, '/api/providers')).body.shared)).not.toContain('access-1')
+  })
+
+  it('reads each Claude account with its own token, never another account\'s numbers; the admin list names the accounts', async () => {
+    const anna = (await api<Me>(ANNA, '/api/me')).body
+    await member(anna.id).seedLegacyForTest('anthropic', 'oauth', { access: 'access-1', refresh: 'refresh-1', expires: Date.now() + 3_600_000 }, false)
+    await mine(ANNA)
+    await member(anna.id).seedLegacyForTest('anthropic', 'oauth', { access: 'access-2', refresh: 'refresh-2', expires: Date.now() + 3_600_000 }, false)
+    const [first, second] = await mine(ANNA)
+    await api(ANNA, `/api/accounts/${first!.id}`, { method: 'PATCH', body: { label: 'one@example.com' } })
+    await api(ANNA, `/api/accounts/${second!.id}`, { method: 'PATCH', body: { label: 'two@example.com' } })
+    connectorFixtures.on('GET', 'https://api.anthropic.com/api/oauth/usage', (call: { headers: Record<string, string> }) => ({
+      five_hour: { utilization: call.headers['authorization'] === 'Bearer access-1' ? 10 : 70, resets_at: '2026-10-10T18:59:59Z' },
+    }))
+    expect((await usage(ANNA, first!)).body.windows).toEqual([{ name: 'Current session', percent: 10, resetsAt: '2026-10-10T18:59:59Z' }])
+    expect((await usage(ANNA, second!)).body.windows).toEqual([{ name: 'Current session', percent: 70, resetsAt: '2026-10-10T18:59:59Z' }])
+    expect(calls('https://api.anthropic.com/api/oauth/usage')).toBe(2)
+
+    const listed = (await api<AdminView>(ANNA, '/api/admin')).body.providers.filter((entry) => entry.provider === 'anthropic')
+    expect(listed.map((entry) => entry.label)).toEqual(['one@example.com', 'two@example.com'])
   })
 
   it('shows OpenCode Go windows and no bars for Providers without a usage endpoint (pa-sps4, pa-afb9)', async () => {

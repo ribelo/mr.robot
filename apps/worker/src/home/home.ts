@@ -4,7 +4,7 @@
  * One per deployment, addressed by HOME_ID.
  */
 import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, RobotOwner, SkillLibraryRow } from '@mr-robot/protocol'
-import { HomeSpendLimit, MemberAvatar, robotIdentity, usableNames, type StoredIdentity } from '@mr-robot/protocol'
+import { CHIEF_TITLE, HomeSpendLimit, MemberAvatar, robotIdentity, usableNames, type StoredIdentity } from '@mr-robot/protocol'
 import * as Schema from 'effect/Schema'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
@@ -454,7 +454,7 @@ const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
     ownerId: owner.id,
     ownerName: owner.name,
     kind: 'mr-robot',
-    identity: { name: 'Mr. Robot', title: '', description: `${owner.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR, avatarSeed: id },
+    identity: { name: 'Mr. Robot', title: CHIEF_TITLE, description: `${owner.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR, avatarSeed: id },
     sharing: 'private',
     status: 'active',
     model,
@@ -553,7 +553,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limit: { limit: current.memberSpendLimit, from: 'home' as const } } }
   }), { concurrency: 'unbounded' })
   const providers = (yield* Effect.forEach(everyone.filter((person) => person.status === 'active'), (person) =>
-    Effect.map(remote((env) => env.MEMBER.getByName(person.id).accounts()), (views) => views.map((view) => ({ provider: view.provider, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
+    Effect.map(remote((env) => env.MEMBER.getByName(person.id).accounts()), (views) => views.map((view) => ({ id: view.id, provider: view.provider, label: view.label, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
   return {
     fleet: live.map(({ summary: row, row: admin }) => ({ ...row, fleetState: admin.fleetState, status: admin.status, grants: admin.grants, model: admin.model, usage: admin.usage })),
     routines: live.flatMap(({ summary: row, row: admin }) => admin.routines.map((routine) => ({ ...routine, robotName: row.identity.name, ownerName: row.ownerName })))
@@ -1738,7 +1738,7 @@ function entryFromSql(row: RobotSql): RegistryEntry {
     ownerId: row.owner_id,
     kind: row.kind,
     // An identity stored before avatar seeds existed has none: the Robot's id is its seed (ux-4fgy).
-    identity: robotIdentity(JSON.parse(row.identity) as StoredIdentity, row.id),
+    identity: robotIdentity(JSON.parse(row.identity) as StoredIdentity, row.id, row.kind),
     sharing: row.sharing,
     status: row.status,
     fleetState: row.fleet_state,

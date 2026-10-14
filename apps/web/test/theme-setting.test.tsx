@@ -44,18 +44,16 @@ describe('theme override (ap-itj1)', () => {
 })
 
 describe('colour picker (ap-udc9)', () => {
-  it('offers the palette and a hex field; an old colour stays valid', () => {
+  it('offers the palette and a colour picker; an old colour stays valid', () => {
     const onChange = vi.fn()
     render(<ColorPicker value="#123abc" onChange={onChange} />)
     expect(screen.getAllByRole('radio').length).toBeGreaterThanOrEqual(9)
-    const hex = screen.getByLabelText('Custom colour') as HTMLInputElement
-    expect(hex.value).toBe('#123abc')
+    const picker = screen.getByLabelText('Custom colour') as HTMLInputElement
+    expect(picker.type).toBe('color')
+    expect(picker.value).toBe('#123abc')
     fireEvent.click(screen.getByRole('radio', { name: '#5ec4b6' }))
     expect(onChange).toHaveBeenLastCalledWith('#5ec4b6')
-    fireEvent.change(hex, { target: { value: '#ABCDEF' } })
+    fireEvent.change(picker, { target: { value: '#ABCDEF' } })
     expect(onChange).toHaveBeenLastCalledWith('#abcdef')
-    onChange.mockClear()
-    fireEvent.change(hex, { target: { value: '#abc' } })
-    expect(onChange).not.toHaveBeenCalled()
   })
 })

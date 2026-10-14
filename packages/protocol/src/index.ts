@@ -126,9 +126,16 @@ export type IdentityPatch = typeof IdentityPatch.Type
 /** An identity as storage holds it: written before avatar seeds existed, it has none. */
 export type StoredIdentity = Omit<Identity, 'avatarSeed'> & { readonly avatarSeed?: string }
 
-/** The identity a view shows: a Robot without a stored seed uses its id (ux-4fgy). */
-export const robotIdentity = (stored: StoredIdentity, robotId: string): Identity =>
-  ({ ...stored, avatarSeed: stored.avatarSeed === undefined || stored.avatarSeed === '' ? robotId : stored.avatarSeed })
+/** The title Mr. Robot carries when his owner gave him none (sk-78g5): his role block names it. */
+export const CHIEF_TITLE = 'Chief of Staff'
+
+/** The identity a view shows: a Robot without a stored seed uses its id (ux-4fgy); Mr. Robot without a title is the Chief of Staff. */
+export const robotIdentity = (stored: StoredIdentity, robotId: string, kind?: 'mr-robot' | 'robot'): Identity =>
+  ({
+    ...stored,
+    title: kind === 'mr-robot' && stored.title.trim() === '' ? CHIEF_TITLE : stored.title,
+    avatarSeed: stored.avatarSeed === undefined || stored.avatarSeed === '' ? robotId : stored.avatarSeed,
+  })
 
 export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret', 'host', 'connection'])
 export type GrantKind = typeof GrantKind.Type
@@ -1087,7 +1094,7 @@ export const AdminView = Schema.Struct({
   members: Schema.Array(Schema.Struct({ ...MemberView.fields, usage: UsageView })),
   skills: Schema.Array(SkillView),
   skillRepository: Schema.NullOr(Schema.Struct({ repo: Schema.String, ref: Schema.String, path: Schema.String })),
-  providers: Schema.Array(Schema.Struct({ provider: Schema.String, ownerName: Schema.String, shared: Schema.Boolean })),
+  providers: Schema.Array(Schema.Struct({ id: Schema.String, provider: Schema.String, label: Schema.String, ownerName: Schema.String, shared: Schema.Boolean })),
   /** Each Provider's live model list: how many models, when fetched, and the last error. */
   modelLists: Schema.optional(Schema.Array(Schema.Struct({ provider: Schema.String, count: Schema.Number, fetchedAt: Schema.NullOr(Schema.Number), error: Schema.NullOr(Schema.String) }))),
   settings: HomeSettingsView,

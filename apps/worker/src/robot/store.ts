@@ -270,7 +270,7 @@ export class RobotStore {
     if (row === undefined) return undefined
     // A config stored before avatar seeds existed has none: the Robot's id is its seed (ux-4fgy).
     const stored = JSON.parse(row.v) as Omit<RobotConfig, 'identity'> & { readonly identity: StoredIdentity }
-    return { ...stored, identity: robotIdentity(stored.identity, stored.id) }
+    return { ...stored, identity: robotIdentity(stored.identity, stored.id, stored.kind) }
   }
 
   requireConfig(): RobotConfig {
