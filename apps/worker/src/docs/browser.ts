@@ -37,6 +37,8 @@ Takeover is the owner taking control of the Robot's browser tab from a device. T
 
 Do not guess passwords or codes. Ask for a Takeover.
 
+In the PWA, a Member also connects Slack or Discord as you through a Takeover of Mr. Robot's browser. The platform reads the session, closes the tab and discards its state. Read connections.md.
+
 ## Payments
 
 Prepare a cart or an order and stop before payment. Bank 2FA stays with the owner. Ordinary CAPTCHAs are for the Robot to solve.

@@ -6,7 +6,7 @@ import { api, settle, stubModels } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
-const DOC_NAMES = ['mr-robot', 'robots', 'grants', 'routines', 'asks-and-help', 'memory-and-files', 'connections', 'hosts', 'browser', 'providers']
+const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'routines', 'asks-and-help', 'memory-and-files', 'connections', 'hosts', 'browser', 'providers']
 const DOC_PATHS = DOC_NAMES.map((name) => `docs/${name}.md`)
 
 beforeEach(async () => {
@@ -88,7 +88,7 @@ describe('the product docs (v1.11 ticket 02)', () => {
     expect((await api(ANNA, `/api/robots/${id}/file?path=docs/nothing.md`)).status).toBe(404)
 
     expect((await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'Mr. Robot', memory: true } })).status).toBe(200)
-    expect((await listed()).filter((file) => file.group === 'docs')).toHaveLength(10)
+    expect((await listed()).filter((file) => file.group === 'docs')).toHaveLength(DOC_PATHS.length)
     expect((await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/routines.md`)).body.text).toContain('# Routines')
   })
 

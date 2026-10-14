@@ -6,7 +6,9 @@ Mr. Robot is a platform where each person has Robots. A Robot is a persistent wo
 
 A Home is the group of people in one deployment. A Member is a person who signed in through Cloudflare Access and belongs to the Home. The first Member is the Home admin. The admin invites and removes Members.
 
-Each Member owns Robots, logins, Provider accounts, Connections and Hosts. These are private to the owner. The owner can share some of them with the Home. A Robot can also be shared with the Home. A shared Robot talks to every Member, but only its owner changes it.
+Each Member owns Robots, logins, Provider accounts, Connections and Hosts. These are private to the owner. The owner can share some of them with the Home. Connections that act as the owner (Google, Slack, Discord as you) are never shared. Read connections.md. A Robot can also be shared with the Home. A shared Robot talks to every Member, but only its owner changes it.
+
+Read members.md for the profile, the nickname, avatars and the Robot list with its groups.
 
 ## Robots
 
@@ -52,6 +54,7 @@ A Robot works in code mode by default. It writes a program that calls its tools,
 
 ## More docs
 
+- members.md: the profile, the nickname, avatars and the Robot list.
 - robots.md: Robots and their setup.
 - grants.md: what a Robot may do.
 - routines.md: scheduled work.

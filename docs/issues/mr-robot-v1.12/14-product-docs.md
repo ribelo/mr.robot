@@ -6,7 +6,7 @@
 
 **Blocked by:** 03, 04, 08, 09, 12
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Docs updated; the docs index in the prompt lists them unchanged or with new summaries
-- [ ] Existing docs tests pass
+- [x] Docs updated; the docs index in the prompt lists them unchanged or with new summaries (one new doc, docs/members.md, holds the profile, nickname, avatars and the Robot list)
+- [x] Existing docs tests pass

@@ -8,6 +8,8 @@ The Member opens the app and enters the server address. The app signs in through
 
 A Host is online or offline. The app sends a heartbeat. When the heartbeat stops, the Host is offline. The Member and the Home admin see the Hosts in a list.
 
+The runtime section of a Robot's prompt has a Hosts line. It names each Host that the Robot can get a grant on, with its state, for example "Desk · online" or "Laptop · offline · Anna's". my_capabilities gives the same state for each Host facet. Read the state there. Do not run a command on a Host to find out whether it is online.
+
 ## Private or shared
 
 A Host belongs to the Member who paired it. It is private or shared with the Home. A Member can have many Hosts.
@@ -20,6 +22,8 @@ A Host offers three facets. Each is a separate grant item for a Robot:
 - shell: host_run. It runs a shell command on the Host.
 
 These are the Host tools. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one.
+
+In the Advanced settings of a Robot, the Hosts section has one heading per Host with its state, online or offline. The facets files, shell and browser are under it.
 
 ## Safety
 
@@ -37,7 +41,7 @@ The Host browser needs a graphical session on the Host. A Host without one offer
 
 The Member's Host page keeps a log of Host tool calls: which Robot, which Host, what action.
 
-## Notifications and time zone
+## Notifications, time zone and sign-in
 
-The desktop app shows native notifications. It reports the time zone of the operating system to the profile.
+The desktop app shows native notifications. It reports the time zone of the operating system to the profile. It also connects Slack and Discord as you in a sign-in window. Read connections.md.
 `

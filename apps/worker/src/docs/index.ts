@@ -9,6 +9,7 @@ import { BROWSER } from './browser.ts'
 import { CONNECTIONS } from './connections.ts'
 import { GRANTS } from './grants.ts'
 import { HOSTS } from './hosts.ts'
+import { MEMBERS } from './members.ts'
 import { MEMORY_AND_FILES } from './memory-and-files.ts'
 import { MR_ROBOT } from './mr-robot.ts'
 import { PROVIDERS } from './providers.ts'
@@ -29,15 +30,16 @@ const doc = (name: string, summary: string, text: string): ProductDoc => ({ path
 
 export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('mr-robot', 'What Mr. Robot is: Home, Members, Robots, Turns, and the role of Mr. Robot as chief (Chief of Staff).', MR_ROBOT),
-  doc('robots', 'Robots: creation and setup interview, Persona files, settings, Mr. Robot versus other Robots, skills.', ROBOTS),
-  doc('grants', 'Grant items and the levels allow, ask and deny; tool-call Asks; propose_grants; my_capabilities.', GRANTS),
+  doc('members', 'Members: what they own and share, the profile, the nickname and the Owner line, avatars, the Robot list with its groups and Hidden.', MEMBERS),
+  doc('robots', 'Robots: creation and setup interview, Persona files, settings and the Robot avatar (Another look), Mr. Robot versus other Robots, skills.', ROBOTS),
+  doc('grants', 'Grant items and the levels allow, ask and deny; tool-call Asks; propose_grants; my_capabilities and the Owner line.', GRANTS),
   doc('routines', 'Routines: schedule types, the Routine tools, limits, time zone, unattended Turns.', ROUTINES),
   doc('asks-and-help', 'Asks and their kinds; need_help, the 30-minute escalation to Mr. Robot, urgent requests.', ASKS_AND_HELP),
   doc('memory-and-files', 'Memory files and whose they are, the first message of the context, the Workspace layout, the file tools.', MEMORY_AND_FILES),
-  doc('connections', 'Connectors and Connections: Google, Slack, Discord; sharing, grants, write access.', CONNECTIONS),
-  doc('hosts', 'Hosts: the desktop app, pairing, host_read, host_write, host_run, the Host browser, offline Hosts.', HOSTS),
+  doc('connections', 'Connectors and Connections: Google, Slack, Discord as a bot and as you; connecting as you (sign-in window, Takeover, paste), Sign in again, sharing, grants, write access.', CONNECTIONS),
+  doc('hosts', 'Hosts: the desktop app, pairing, the Hosts line with online state, host_read, host_write, host_run, the Host browser, offline Hosts.', HOSTS),
   doc('browser', 'The browser: backends, logins, Live view, Takeover, payments, screenshots.', BROWSER),
-  doc('providers', 'Providers: accounts, model chains, account states, usage, Spend limits.', PROVIDERS),
+  doc('providers', 'Providers: accounts, model chains, account states, the Workers AI switch, usage, Spend limits (the Home\'s, no limit, an amount).', PROVIDERS),
 ]
 
 const BY_PATH: ReadonlyMap<string, ProductDoc> = new Map(PRODUCT_DOCS.map((entry) => [entry.path, entry]))

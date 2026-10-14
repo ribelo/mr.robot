@@ -8,8 +8,8 @@ A grant item is one of these:
 - a tool group: files, web, browser, routines, messaging, notify, skills, secrets, exa, exa-agent
 - a skill
 - a recipient Robot (a Robot it may message)
-- a Connection, with a separate item for Connection write
-- a Host facet: browser, files or shell
+- a Connection, with a separate item for Connection write. The item names its plugin and account, for example "Google · anna@example.com". Read connections.md.
+- a Host facet: browser, files or shell. The Advanced settings show the facets under one heading per Host with its state, online or offline.
 - a login
 
 Two tool groups belong to Mr. Robot only: robots and deputy.
@@ -50,7 +50,9 @@ The owner can also change levels in the Advanced settings of the Robot. Each ite
 
 ## See your own levels
 
-The tool my_capabilities lists every tool group, Connection, Host, login and skill with its level and a short description. It also lists what is not granted. The runtime section of the prompt and the Advanced settings use the same data. They always agree.
+The tool my_capabilities lists every tool group, Connection, Host, login and skill with its level and a short description. It also lists what is not granted. A Host facet also says whether its Host is online. The runtime section of the prompt and the Advanced settings use the same data and the same labels. They always agree.
+
+The runtime section and my_capabilities also give the Owner line: the name of your owner and, when the owner set a nickname, how to address them. For example: "Anna Kowalska; address them as Ania". Use that form of address. The runtime section also has a Hosts line with the state of each Host. Read hosts.md.
 
 ## For Mr. Robot
 

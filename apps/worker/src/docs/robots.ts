@@ -4,7 +4,7 @@ A Robot is a persistent worker owned by one Member. It is not a chat session and
 
 ## Creating a Robot
 
-A Member creates a Robot with a new Conversation. Mr. Robot can also create Robots for the owner. The new Robot is in setup. In setup, the Robot defines itself:
+A Member creates a Robot with New robot. The dialog asks only for the model. Mr. Robot can also create Robots for the owner. The new Robot is in setup. In setup, the Robot defines itself:
 
 1. It interviews the owner: what it is for, what it watches, how often, how the owner wants to hear from it.
 2. It calls set_identity with a name, a title, a description and an avatar colour.
@@ -27,12 +27,12 @@ When a Robot changes SOUL.md, it tells the owner. Read memory-and-files.md for t
 
 ## Settings the owner controls
 
-- Name, title, description, avatar.
+- Name, title, description, avatar. The avatar is a generated robot picture on the avatar colour. "Another look" in the Robot's profile draws a new picture. The owner sees it before saving. The sidebar, the Conversation header, the Admin fleet table and the Robot's messages show the same avatar.
 - Model chain: an ordered list of accounts and models. Read providers.md.
 - Context budget and the compaction instruction. Compaction shortens a long context. The instruction says what to keep.
 - Code mode or direct tool calls.
 - Grants. Read grants.md.
-- Spend limit.
+- Spend limit: the Home's, no limit, or an amount. Read providers.md.
 - Notifications.
 - Sharing: private or shared with the Home.
 

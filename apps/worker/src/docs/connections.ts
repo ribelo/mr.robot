@@ -1,13 +1,15 @@
 export const CONNECTIONS = `# Connections
 
-A Connector is a plugin that gives Robots tools on an external service. A Connection is one linked account of a Connector. The Connectors are Google, Slack and Discord.
+A Connector is a plugin that gives Robots tools on an external service. A Connection is one linked account of a Connector. The Connectors are Google, Slack, Discord as a bot and Discord as you.
 
 ## Rules for all Connections
 
-- A Connection belongs to the Member who linked it. It is private or shared with the Home.
+- A Connection belongs to the Member who linked it.
+- Google, Slack and Discord as you act as the Member. They are never shared with the Home: another Member's Robot must never act as the owner. They have no "Shared with the Home" checkbox. A Discord bot Connection is private or shared.
 - A Member can have many Connections of one kind.
 - The owner grants a Connection to a Robot, one by one. Mr. Robot is the exception: he holds every Connection his owner can reach, unless the owner lowered one.
 - Write access is a separate grant item: Connection write. A Robot can read with a read grant and cannot write.
+- A Robot's Advanced settings list one item per connected account, for example "Discord bot · Mr. Robot".
 - When a Member has more than one Connection of a kind, each tool takes an account argument. Without it, the tool uses the default Connection.
 - A tool that fails throws an error. A tool that works returns JSON that names the account.
 - Secrets stay in the vault. They never reach the Robot or the Conversation.
@@ -16,19 +18,39 @@ Read grants.md for the levels allow, ask and deny. A new Robot gets deny on Conn
 
 ## Status
 
-A Connection is connected, needs re-consent, or is rejected. The Member fixes it on the Plugins page.
+The Member connects in the Connections section of the profile. A Connection is connected, needs consent again, or is rejected.
+- A Google account that needs consent again shows Reconnect.
+- A rejected Slack or Discord as you Connection shows "Sign in again". The Member signs in again in the same way as the first time.
+- A rejected Discord bot shows "Paste again".
+
+## Connect as you: Slack and Discord
+
+Slack and Discord as you connect with the Member's own session. There are three ways:
+- In the desktop app: Connect opens a sign-in window for the service. The Member signs in there. The app reads the session, connects it and closes the window.
+- In the PWA: Connect opens Mr. Robot's browser on the sign-in page under Takeover. The Member signs in and hands the browser back. The platform reads the session from the browser and connects it. Then it closes the tab and discards the state of that tab. The session lives only in the Connection, not in Mr. Robot's browser.
+- "Paste a session instead" is the fallback: the fields and the steps to copy the session from a browser.
+
+If nobody signs in within 10 minutes, the attempt stops. Nothing is connected. The Member tries again or pastes a session. The session is never shown to the Member or to a Robot.
+
+## Connections that were shared
+
+An update unshared each Slack and Google Connection that was shared before. Robots of other Members lost their grant and got a note at their next Turn. A note in the owner's Connections section names the Connection and the Robots that lost it.
 
 ## Google
 
 The Home admin creates one OAuth client in Google Cloud and pastes it in the Google plugin settings. A guided page shows the steps. Then each Member links accounts with Connect Google. The Member chooses the services at that time. The services are Gmail, Calendar, Drive (with Docs and Sheets), and Contacts. Gmail send is a separate grant. The tool google_accounts lists the accounts and the services each one offers. Files from Google land in the Robot's Workspace.
 
-## Discord
-
-One bot belongs to the Home. The Member invites it to a Discord server. A Discord Connection shows its id next to its name. Discord is also a Channel. A message in a Robot's Discord channel or in a DM wakes the Robot. The Robot's reply goes to the same place.
-
 ## Slack
 
-The Member pastes a session token and a cookie for a Slack workspace. The Robot can read by default. Write access needs the separate grant. When Slack rejects the session, the Connection asks the Member to paste it again.
+Slack connects as you. The Robot can read by default: channels, unread messages, threads, search and people. Write access (post a message, mark read) needs the separate grant.
+
+## Discord
+
+The Discord row has two ways to connect, each with its own Connect: as a bot and as you. A Member can have both.
+
+As a bot: one bot belongs to the Home. The Member invites it to a Discord server. A Discord bot Connection shows its id next to its name. Discord is also a Channel. A message in a Robot's Discord channel or in a DM wakes the Robot. The Robot's reply goes to the same place.
+
+As you: the Member connects their own Discord account. Robots read the servers the Member is on: servers, channels, messages, threads, search and people. They read through Discord's REST API, so a Discord message does not wake a Robot through this Connection. The write tools (send, reply, react, mark read) need the Connection write grant. The connect form says: "Discord forbids automating a user account and may close it. You take that risk." The Member takes that risk knowingly.
 
 ## Skills for Connections
 
