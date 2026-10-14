@@ -12,6 +12,7 @@ import { keys, memberFileAtom, providersAtom, secretsAtom, useCommand } from '..
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
 import { InlineEdit } from './InlineEdit.tsx'
+import { MemberAvatarSetting } from './MemberAvatarSetting.tsx'
 import { SaveButton } from './SaveButton.tsx'
 
 const PROVIDERS = [
@@ -69,6 +70,7 @@ function You({ me }: { me: Me }) {
       <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
       <label>Nickname (optional)<input value={nickname} aria-describedby="nickname-hint" onChange={(event) => setNickname(event.target.value)} /></label>
       <div id="nickname-hint" className="muted">How your Robots address you.</div>
+      <MemberAvatarSetting me={me} />
       <label>Time zone<input value={timeZone} onChange={(event) => setTimeZone(event.target.value)} placeholder="Europe/Warsaw" /></label>
       <div className="muted">
         {me.detectedTimeZone === null ? 'The app has not reported its zone yet.' : `This app reports ${me.detectedTimeZone}.`}{' '}

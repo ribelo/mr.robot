@@ -79,6 +79,7 @@ function SignedIn({ me }: { me: Me }) {
         robots={robots}
         selected={selected}
         meName={me.name}
+        meAvatar={me.avatar}
         isAdmin={me.role === 'admin'}
         onSelect={(id) => go({ page: 'robot', id, panel: false })}
         onCreate={() => void create()}
@@ -165,7 +166,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   const header: ReactNode = (
     <header className="conversation-head">
       <button type="button" className="icon-button back" aria-label="Back" onClick={() => goBack({ page: 'home' })}>‹</button>
-      <Avatar color={identity.avatarColor} size={22} state={robot?.fleetState ?? panel.summary.fleetState} />
+      <Avatar seed={identity.avatarSeed} color={identity.avatarColor} size={22} state={robot?.fleetState ?? panel.summary.fleetState} />
       <span className="conversation-name">{identity.name}</span>
       {panel.summary.status === 'setup' ? <span className="pill">setup</span> : null}
       {panel.summary.status === 'paused' ? <span className="pill">paused</span> : null}

@@ -62,7 +62,7 @@ import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../age
 import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
-import type { ChainEntry, ProviderView } from '@mr-robot/protocol'
+import type { ChainEntry, HomeSpendLimit, ProviderView } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage, type HelpAnswerWake, type ThreadWake } from '../agent/sources.ts'
@@ -2544,8 +2544,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** One row of the admin fleet list, from the DO itself (robot-x26m). */
-  adminRow(): Promise<{ fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] } | null> {
-    return this.program(Views.adminRow)
+  /** `home` is the Home's per-Robot spend limit, which the row's limit in effect may follow. */
+  adminRow(home: HomeSpendLimit): Promise<{ fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] } | null> {
+    return this.program(Views.adminRow(home))
   }
 
 

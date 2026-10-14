@@ -17,14 +17,14 @@ const settings = {
   defaultModel: { provider: kimi.provider, model: kimi.model, effort: 'off' },
   workersAiEnabled: true,
   defaultBrowserBackend: 'browser-run',
-  robotSpendLimitUsd: null,
-  memberSpendLimitUsd: null,
+  robotSpendLimit: { kind: 'none' },
+  memberSpendLimit: { kind: 'none' },
   models: [kimi, sonnet, glm],
 } as const
 const view: AdminView = { fleet: [], routines: [], members: [], skills: [], skillRepository: null, providers: [], settings }
 
 /** The Save button of Home settings: the one right after the spend limits. */
-const saveHomeSettings = () => fireEvent.click(within(screen.getByLabelText('Member limit, USD/month').closest('.form')!.nextElementSibling as HTMLElement).getByRole('button', { name: 'Save' }))
+const saveHomeSettings = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Spend limit per Member' }).closest('.form')!.nextElementSibling as HTMLElement).getByRole('button', { name: 'Save' }))
 
 interface Call { readonly method: string; readonly path: string; readonly body: string }
 

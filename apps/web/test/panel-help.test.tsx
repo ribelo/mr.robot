@@ -10,15 +10,15 @@ const now = Date.parse('2026-10-10T12:00:00Z')
 const panel: RobotPanel = {
   summary: {
     id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'waiting for you',
-    identity: { name: 'Accountant', title: 'Books', description: 'Keeps the books.', avatarColor: '#f4a03a' }, lastLine: '', lastAt: 0, unread: false,
+    identity: { name: 'Accountant', title: 'Books', description: 'Keeps the books.', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }, lastLine: '', lastAt: 0, unread: false,
   },
   settings: {
-    identity: { name: 'Accountant', title: 'Books', description: 'Keeps the books.', avatarColor: '#f4a03a' },
+    identity: { name: 'Accountant', title: 'Books', description: 'Keeps the books.', avatarColor: '#f4a03a', avatarSeed: 'seed-1' },
     sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: null, discordChannel: null, discordProactive: true,
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true,
   },
-  routines: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limitUsd: null }, canEdit: true, takeover: null,
+  routines: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limit: { limit: { kind: 'none' }, from: 'home' } }, canEdit: true, takeover: null,
 }
 
 const handlers = () => ({ onOpenRoutine: vi.fn(), onEditProfile: vi.fn(), onOpenScreen: vi.fn(), onAdvanced: vi.fn(), onTrajectory: vi.fn(), onFiles: vi.fn(), onClose: vi.fn() })

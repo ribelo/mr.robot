@@ -206,7 +206,7 @@ export const fileDelete = (robotId: string, path: string) => Effect.gen(function
 
 const FORBIDDEN: Record<string, string> = {
   grants: 'Grants stay with your owner: propose them with robot_propose_grants',
-  spendLimitUsd: 'the spend limit stays with your owner',
+  spendLimit: 'the spend limit stays with your owner',
   sharing: 'who a Robot is shared with stays with your owner',
   identity: 'use robot_configure for name, title, description and avatar colour',
 }

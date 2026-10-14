@@ -45,6 +45,8 @@ export interface ProjectionInput {
   readonly proposal: (id: string) => ProposalView | undefined
   /** This chief's copy of a Thread (v1.9), for its card and for labelling the messages it sent. */
   readonly thread?: (id: string) => ThreadView | undefined
+  /** This Robot's avatar seed: the messages it sent in a Thread show its avatar (ux-n1mw). */
+  readonly avatarSeed: string
 }
 
 export function projectChat(input: ProjectionInput): ChatItem[] {
@@ -71,7 +73,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
     if (result !== undefined && result['sent'] !== true) return
     const view = input.thread?.(String(args['thread_id'] ?? result?.['threadId'] ?? ''))
     if (view === undefined || typeof args['text'] !== 'string') return
-    items.push({ kind: 'message', id: 'thread-' + id, seq: event.seq, at: event.time, sender: { kind: 'robot', robotId: view.self.robotId, name: view.self.label, avatarColor: view.self.avatarColor }, text: args['text'], attachments: [], reaction: null, thread: { id: view.id, topic: view.topic } })
+    items.push({ kind: 'message', id: 'thread-' + id, seq: event.seq, at: event.time, sender: { kind: 'robot', robotId: view.self.robotId, name: view.self.label, avatarColor: view.self.avatarColor, avatarSeed: input.avatarSeed }, text: args['text'], attachments: [], reaction: null, thread: { id: view.id, topic: view.topic } })
   }
 
   for (const event of input.events) {
@@ -249,7 +251,8 @@ function senderOf(source: Record<string, unknown> | undefined): Sender {
     case 'member':
       return { kind: 'member', memberId: String(source['memberId']), name: String(source['name']) }
     case 'robot':
-      return { kind: 'robot', robotId: String(source['robotId']), name: String(source['name']), avatarColor: String(source['avatarColor']) }
+      // A message stored before avatar seeds existed has none: the sender's id is its seed (ux-4fgy).
+      return { kind: 'robot', robotId: String(source['robotId']), name: String(source['name']), avatarColor: String(source['avatarColor']), avatarSeed: typeof source['avatarSeed'] === 'string' && source['avatarSeed'] !== '' ? source['avatarSeed'] : String(source['robotId']) }
     case 'routine':
       return { kind: 'routine', routineId: String(source['routineId']), name: String(source['name']) }
     case 'channel':

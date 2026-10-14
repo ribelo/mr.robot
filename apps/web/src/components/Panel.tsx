@@ -72,7 +72,7 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
           </div>
           <div className="usage muted">
             {panel.usage.month}: {formatTokens(panel.usage.inputTokens + panel.usage.outputTokens)} tokens{(panel.usage.browser ?? []).map((row) => ` · ${row.minutes} browser min (${BACKEND_LABELS[row.backend] ?? (row.backend.startsWith('host:') ? 'host browser' : row.backend)})`).join('')}{(panel.usage.services ?? []).map((row) => ` · ${row.calls} ${row.service === 'exa' ? 'Exa' : row.service} calls`).join('')} · ${panel.usage.costUsd.toFixed(2)}
-            {panel.usage.limitUsd === null ? '' : ` of $${panel.usage.limitUsd.toFixed(2)}`}
+            {panel.usage.limit.limit.kind === 'usd' ? ` of $${panel.usage.limit.limit.amount.toFixed(2)}` : ''}
           </div>
       </div>
     </aside>

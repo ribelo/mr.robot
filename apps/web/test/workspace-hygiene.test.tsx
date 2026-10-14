@@ -12,7 +12,7 @@ afterEach(() => {
 
 const robot: RobotSummary = {
   id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping',
-  identity: { name: 'Bills', title: '', description: '', avatarColor: '#f4a03a' }, lastLine: '', lastAt: 0, unread: false,
+  identity: { name: 'Bills', title: '', description: '', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }, lastLine: '', lastAt: 0, unread: false,
 }
 
 function list() {
@@ -25,7 +25,7 @@ function list() {
   }))
   render(
     <RegistryProvider>
-      <RobotList robots={[robot]} selected={undefined} meName="Anna" isAdmin={false} meId="m-1" onSelect={vi.fn()} onCreate={vi.fn()} onAdmin={vi.fn()} onProfile={vi.fn()} onListPref={vi.fn()} onEditProfile={vi.fn()} onAdvanced={vi.fn()} onFiles={vi.fn()} />
+      <RobotList robots={[robot]} selected={undefined} meName="Anna" meAvatar={{ kind: 'initials', color: '#6c63ff' }} isAdmin={false} meId="m-1" onSelect={vi.fn()} onCreate={vi.fn()} onAdmin={vi.fn()} onProfile={vi.fn()} onListPref={vi.fn()} onEditProfile={vi.fn()} onAdvanced={vi.fn()} onFiles={vi.fn()} />
     </RegistryProvider>,
   )
   fireEvent.click(screen.getByRole('button', { name: 'Bills menu' }))
@@ -66,7 +66,7 @@ describe('Clear history and Start over in the robot list (sk-8won)', () => {
 describe('Reset everything dialog (sk-gf2e)', () => {
   it('says what is kept: logins, Provider accounts, Hosts, the skill library and Home settings', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({})))
-    const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', home: 'Home', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' }
+    const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' }
     render(<RegistryProvider><Profile me={me as never} /></RegistryProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Reset everything…' }))
     const dialog = screen.getByRole('dialog', { name: 'Reset everything' })

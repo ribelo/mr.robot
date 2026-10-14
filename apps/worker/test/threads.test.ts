@@ -188,8 +188,10 @@ describe('talking (ch-jnet, ch-6ymu, ch-iy16, ch-408z, ch-k2tp, ch-v1p8)', () =>
   })
 
   it('a chief over its spend limit does not run the Thread message as a Turn (ch-k2tp)', async () => {
+    // A dollar per token: Ben's first Turns in the Thread already spend more than the smallest limit.
+    await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { models: [{ provider: 'stub', model: 'stub', label: 'Stub', contextWindow: 128000, price: { input: 1_000_000, output: 1_000_000 } }] } })
     const id = await openThread()
-    await api(BEN, `/api/robots/${ben}/settings`, { method: 'PATCH', body: { spendLimitUsd: 0 } })
+    await api(BEN, `/api/robots/${ben}/settings`, { method: 'PATCH', body: { spendLimit: { kind: 'usd', amount: 1 } } })
     const before = requests.get(ben)?.length ?? 0
     await say(ANNA, anna, [{ calls: [{ name: 'thread_send', args: { thread_id: id, text: 'Still there?', idempotency_key: 'a1' } }] }, { text: 'Asked.' }])
     await settle(ben)

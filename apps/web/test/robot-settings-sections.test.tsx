@@ -9,15 +9,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const identity = { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a' }
+const identity = { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }
 const panel: RobotPanel = {
   summary: { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', identity, lastLine: '', lastAt: 0, unread: false },
   settings: {
     identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: { ...emptyGrants, hosts: { 'h-desk:files': 'ask' } },
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: null, discordChannel: null, discordProactive: true,
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true,
   },
-  routines: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limitUsd: 5 }, canEdit: true, takeover: null,
+  routines: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } }, canEdit: true, takeover: null,
 }
 
 const connection = (id: string, kind: CatalogConnection['kind'], pluginTitle: string, account: string): CatalogConnection => ({

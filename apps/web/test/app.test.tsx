@@ -8,10 +8,10 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', home: 'Home', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' }
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' }
 const robots = [{
   id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'mr-robot', sharing: 'private', status: 'active', fleetState: 'sleeping',
-  identity: { name: 'Mr. Robot', title: '', description: 'Your personal Robot', avatarColor: '#5ec4b6' }, lastLine: 'Hello.', lastAt: 0, unread: false,
+  identity: { name: 'Mr. Robot', title: '', description: 'Your personal Robot', avatarColor: '#5ec4b6', avatarSeed: 'seed-1' }, lastLine: 'Hello.', lastAt: 0, unread: false,
 }]
 
 describe('the app shell', () => {

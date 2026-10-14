@@ -4,7 +4,8 @@
  * One per deployment, addressed by HOME_ID.
  */
 import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, RobotOwner, SkillLibraryRow } from '@mr-robot/protocol'
-import { usableNames } from '@mr-robot/protocol'
+import { HomeSpendLimit, MemberAvatar, robotIdentity, usableNames, type StoredIdentity } from '@mr-robot/protocol'
+import * as Schema from 'effect/Schema'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -29,12 +30,14 @@ import type {
   Sharing,
   SkillView,
   BrowserBackend,
+  VpnSummary,
 } from '@mr-robot/protocol'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { backendOptions } from '../browser/backends.ts'
+import { summarizeWireguard } from '../browser/wireguard-config.ts'
 import { MR_ROBOT_ONLY_GROUPS, TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
 import { connectorOn, connectorPlugin, CONNECTOR_TITLES, disabledToolGroups } from '../plugins/catalog.ts'
@@ -52,6 +55,7 @@ import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/l
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
+import { legacyHomeSpendLimit } from '../platform/spend-limit-migration.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
 export const MR_ROBOT_COLOR = '#5ec4b6'
@@ -69,8 +73,10 @@ export interface HomeSettings {
   readonly workersAiEnabled: boolean
   /** The browser backend new and unset Robots use (rb-ybt4). */
   readonly defaultBrowserBackend: BrowserBackend
-  readonly robotSpendLimitUsd: number | null
-  readonly memberSpendLimitUsd: number | null
+  /** The limit of each Robot that follows the Home's (ux-dbx4). */
+  readonly robotSpendLimit: HomeSpendLimit
+  /** The limit of all Robots of one Member together. */
+  readonly memberSpendLimit: HomeSpendLimit
 }
 
 export interface RegistryEntry {
@@ -91,7 +97,7 @@ export type SignIn =
   | { readonly ok: true; readonly member: MemberView; readonly created: boolean }
   | { readonly ok: false; readonly reason: 'not-invited' | 'removed' }
 
-type MemberSql = { id: string; email: string; name: string; role: MemberRole; status: MemberStatus; created_at: number }
+type MemberSql = { id: string; email: string; name: string; role: MemberRole; status: MemberStatus; created_at: number; avatar: string | null }
 type RobotSql = {
   id: string; owner_id: string; kind: 'mr-robot' | 'robot'; identity: string; sharing: Sharing; status: RobotStatus
   fleet_state: FleetState; last_line: string; last_at: number
@@ -161,8 +167,9 @@ const signIn = (email: string) => Effect.gen(function* () {
   if (existing?.status === 'removed') return { ok: false, reason: 'removed' } as SignIn
   const first = ((yield* sql.first<{ n: number }>('SELECT COUNT(*) AS n FROM member'))?.n ?? 0) === 0
   if (existing === undefined && !first) return { ok: false, reason: 'not-invited' } as SignIn
+  const id = `m-${crypto.randomUUID()}`
   const joined: MemberView = existing === undefined
-    ? { id: `m-${crypto.randomUUID()}`, email: normalized, name: nameFromEmail(normalized), role: 'admin', status: 'active' }
+    ? { id, email: normalized, name: nameFromEmail(normalized), role: 'admin', status: 'active', avatar: defaultAvatar(id) }
     : { ...existing, status: 'active' }
   yield* sql.run(
     `INSERT INTO member (id, email, name, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -180,8 +187,9 @@ const invite = (email: string, role: MemberRole = 'member') => Effect.gen(functi
   const normalized = email.trim().toLowerCase()
   const existing = yield* memberByEmail(normalized)
   if (existing !== undefined && existing.status !== 'removed') return existing
+  const id = `m-${crypto.randomUUID()}`
   const invited: MemberView = existing === undefined
-    ? { id: `m-${crypto.randomUUID()}`, email: normalized, name: nameFromEmail(normalized), role, status: 'invited' }
+    ? { id, email: normalized, name: nameFromEmail(normalized), role, status: 'invited', avatar: defaultAvatar(id) }
     : { ...existing, role, status: 'invited' }
   yield* sql.run(
     `INSERT INTO member (id, email, name, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -207,15 +215,76 @@ const rename = (memberId: string, name: string) => Effect.gen(function* () {
   yield* sql.run('UPDATE member SET name = ? WHERE id = ?', name, memberId)
 })
 
+// ------------------------------------------------------------------ Member avatars (ux-2ft4, ux-s88l, ux-g4l9)
+
+/** Where a Member's avatar picture lives in the files bucket. */
+export const memberAvatarObject = (memberId: string, key: string): string => `members/${memberId}/${key}`
+
+/** A Member who never chose an avatar: their initials on a colour picked from their id. */
+function defaultAvatar(memberId: string): MemberAvatar {
+  let hash = 0
+  for (const char of memberId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return { kind: 'initials', color: AVATAR_COLORS[hash % AVATAR_COLORS.length]! }
+}
+
+const decodeAvatar = Schema.decodeUnknownOption(MemberAvatar)
+
+/** The stored avatar column: absent (never chosen) or unreadable gives the default. */
+function avatarFromSql(memberId: string, stored: string | null): MemberAvatar {
+  if (stored === null) return defaultAvatar(memberId)
+  const decoded = decodeAvatar(JSON.parse(stored))
+  return decoded._tag === 'Some' ? decoded.value : defaultAvatar(memberId)
+}
+
+const storedAvatar = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const row = yield* sql.first<{ avatar: string | null }>('SELECT avatar FROM member WHERE id = ?', memberId)
+  if (row === undefined) return yield* notFound('unknown member')
+  return avatarFromSql(memberId, row.avatar)
+})
+
+/** Save the avatar; a picture it replaces is deleted from the bucket. */
+const putAvatar = (memberId: string, next: MemberAvatar) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const before = yield* storedAvatar(memberId)
+  yield* sql.run('UPDATE member SET avatar = ? WHERE id = ?', JSON.stringify(next), memberId)
+  if (before.kind === 'picture' && (next.kind !== 'picture' || next.key !== before.key)) {
+    yield* remote((env) => env.FILES.delete(memberAvatarObject(memberId, before.key)))
+  }
+  return next
+})
+
+/** A new colour; a picture stays, with the colour behind it. */
+const setAvatarColor = (memberId: string, color: string) => Effect.gen(function* () {
+  return yield* putAvatar(memberId, { ...(yield* storedAvatar(memberId)), color })
+})
+
+/** The picture uploaded to `key` becomes the avatar. */
+const setAvatarPicture = (memberId: string, key: string) => Effect.gen(function* () {
+  return yield* putAvatar(memberId, { kind: 'picture', color: (yield* storedAvatar(memberId)).color, key })
+})
+
+/** Back to initials on the same colour. */
+const removeAvatarPicture = (memberId: string) => Effect.gen(function* () {
+  return yield* putAvatar(memberId, { kind: 'initials', color: (yield* storedAvatar(memberId)).color })
+})
+
 // ------------------------------------------------------------------ settings
+
+/** A stored Home spend limit; absent: no limit. Only decoded patches are stored, so a value that does not decode is a defect. */
+const spendLimitSetting = (key: 'robotSpendLimit' | 'memberSpendLimit') => Effect.gen(function* () {
+  const stored = yield* setting<unknown>(key)
+  if (stored === undefined) return { kind: 'none' } as HomeSpendLimit
+  return yield* Schema.decodeUnknownEffect(HomeSpendLimit)(stored).pipe(Effect.orDie)
+})
 
 const settings = Effect.gen(function* () {
   return {
     defaultModel: (yield* setting<ModelChoice>('defaultModel')) ?? DEFAULT_MODEL,
     workersAiEnabled: (yield* setting<boolean>('workersAiEnabled')) ?? true,
     defaultBrowserBackend: (yield* setting<BrowserBackend>('defaultBrowserBackend')) ?? 'browser-run',
-    robotSpendLimitUsd: (yield* setting<number | null>('robotSpendLimitUsd')) ?? null,
-    memberSpendLimitUsd: (yield* setting<number | null>('memberSpendLimitUsd')) ?? null,
+    robotSpendLimit: yield* spendLimitSetting('robotSpendLimit'),
+    memberSpendLimit: yield* spendLimitSetting('memberSpendLimit'),
   } as HomeSettings
 })
 
@@ -229,7 +298,7 @@ const updateSettings = (patch: Partial<HomeSettings> & { models?: readonly Model
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined) yield* putSetting(key, value)
   }
-  if (patch.robotSpendLimitUsd !== undefined || patch.memberSpendLimitUsd !== undefined) {
+  if (patch.robotSpendLimit !== undefined || patch.memberSpendLimit !== undefined) {
     const blocked = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status = 'blocked'")
     yield* Effect.forEach(blocked, ({ id }) => remote((env) => env.ROBOT.getByName(id).recheckLimits()), { concurrency: 'unbounded', discard: true })
   }
@@ -249,11 +318,17 @@ const moveDefaultOffWorkersAi = (by: string | undefined) => Effect.gen(function*
   return { from: current.defaultModel, to } as DefaultModelMoved
 })
 
-/** Spend limits a Robot's Turns are held to. */
+/** Spend limits a Robot's Turns are held to: the Home's per-Robot limit, the owner's limit and what the owner's Robots spent this month. */
+export interface SpendLimits {
+  readonly robot: HomeSpendLimit
+  readonly member: HomeSpendLimit
+  readonly memberSpentUsd: number
+}
+
 const limitsFor = (memberId: string) => Effect.gen(function* () {
   const current = yield* settings
   const usage = yield* remote((env) => env.MEMBER.getByName(memberId).usage(currentMonth()))
-  return { robotDefaultUsd: current.robotSpendLimitUsd, memberUsd: current.memberSpendLimitUsd, memberSpentUsd: usage.costUsd }
+  return { robot: current.robotSpendLimit, member: current.memberSpendLimit, memberSpentUsd: usage.costUsd } as SpendLimits
 })
 
 // ------------------------------------------------------------------ Robot registry
@@ -353,12 +428,11 @@ const createRobot = (ownerId: string, brief?: string, model?: ModelChoice) => Ef
     ownerName: owner.name,
     ...(profile.nickname === undefined ? {} : { ownerNickname: profile.nickname }),
     kind: 'robot',
-    identity: { name: 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]! },
+    identity: { name: 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]!, avatarSeed: id },
     sharing: 'private',
     status: 'setup',
     model: starting,
     timeZone: profile.timeZone,
-    spendLimitUsd: null,
     ...(brief === undefined || brief.trim() === '' ? {} : { brief }),
   }))
   const created = yield* entry(id)
@@ -380,12 +454,11 @@ const bootstrapMrRobot = (owner: MemberView) => Effect.gen(function* () {
     ownerId: owner.id,
     ownerName: owner.name,
     kind: 'mr-robot',
-    identity: { name: 'Mr. Robot', title: '', description: `${owner.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR },
+    identity: { name: 'Mr. Robot', title: '', description: `${owner.name}'s personal Robot: creates and coordinates the others.`, avatarColor: MR_ROBOT_COLOR, avatarSeed: id },
     sharing: 'private',
     status: 'active',
     model,
     timeZone,
-    spendLimitUsd: null,
   }))
   yield* syncMrRobots
 })
@@ -472,12 +545,12 @@ const adminView = (adminId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const month = currentMonth()
   const current = yield* settings
-  const rows = yield* Effect.forEach(yield* fleet, (row) => Effect.map(remote((env) => env.ROBOT.getByName(row.id).adminRow()), (admin) => (admin === null ? null : { summary: row, row: admin })), { concurrency: 'unbounded' })
+  const rows = yield* Effect.forEach(yield* fleet, (row) => Effect.map(remote((env) => env.ROBOT.getByName(row.id).adminRow(current.robotSpendLimit)), (admin) => (admin === null ? null : { summary: row, row: admin })), { concurrency: 'unbounded' })
   const live = rows.filter((value): value is NonNullable<typeof value> => value !== null)
   const everyone = yield* members
   const memberRows = yield* Effect.forEach(everyone, (person) => Effect.gen(function* () {
     const usage = person.status === 'invited' ? { inputTokens: 0, outputTokens: 0, costUsd: 0 } : yield* remote((env) => env.MEMBER.getByName(person.id).usage(month))
-    return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limitUsd: current.memberSpendLimitUsd } }
+    return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limit: { limit: current.memberSpendLimit, from: 'home' as const } } }
   }), { concurrency: 'unbounded' })
   const providers = (yield* Effect.forEach(everyone.filter((person) => person.status === 'active'), (person) =>
     Effect.map(remote((env) => env.MEMBER.getByName(person.id).accounts()), (views) => views.map((view) => ({ provider: view.provider, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
@@ -492,7 +565,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     modelLists: yield* catalogStatus,
     settings: { ...current, models: yield* models(adminId) },
     browserBackends: yield* browserBackends,
-    vpnConfigured: (yield* setting<string>('vpn-config')) !== undefined,
+    ...(yield* Effect.map(vpnSummary, (summary) => (summary === undefined ? {} : { vpnSummary: summary }))),
     exaConfigured: (yield* setting<string>('exa-key')) !== undefined,
     proxyConfigured: (yield* setting<string>('proxy-config')) !== undefined,
     hosts: yield* allHosts,
@@ -509,12 +582,30 @@ const vpnConfig = Effect.gen(function* () {
   return sealed === undefined ? null : yield* platform.secrets.open(sealed)
 })
 
+/**
+ * Store a pasted configuration (ux-t4wi, ux-a3ec): the whole text sealed, and beside it the public
+ * summary (endpoint, server name, country) parsed from it. Nothing else of the text is kept in the clear.
+ */
 const setVpnConfig = (config: string | null) => Effect.gen(function* () {
   const sql = yield* Sql
   const platform = yield* HomePlatform
-  if (config === null || config.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'vpn-config'")
-  if (!/\[Interface\][\s\S]*PrivateKey[\s\S]*\[Peer\][\s\S]*Endpoint/i.test(config)) return yield* invalid('This is not a WireGuard configuration: it needs [Interface] with PrivateKey and [Peer] with Endpoint.')
+  if (config === null || config.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k IN ('vpn-config', 'vpn-summary')")
+  const parsed = summarizeWireguard(config)
+  if (!parsed.ok) return yield* invalid(parsed.reason)
   yield* putSetting('vpn-config', yield* platform.secrets.seal(config.trim()))
+  yield* putSetting('vpn-summary', parsed.summary)
+})
+
+/** The public summary of the stored configuration; one stored before v1.12 gets its summary on first read. */
+const vpnSummary = Effect.gen(function* () {
+  const stored = yield* setting<VpnSummary>('vpn-summary')
+  if (stored !== undefined) return stored
+  const config = yield* vpnConfig
+  if (config === null) return undefined
+  const parsed = summarizeWireguard(config)
+  if (!parsed.ok) return undefined
+  yield* putSetting('vpn-summary', parsed.summary)
+  return parsed.summary
 })
 
 /** The Home's Exa API key (rb-x8i3), sealed; never shown back. */
@@ -1206,7 +1297,10 @@ export class Home extends DurableObject<Env> {
       last_line TEXT NOT NULL, last_at INTEGER NOT NULL
     )`)
     try { sql.exec("ALTER TABLE robot ADD COLUMN accounts TEXT NOT NULL DEFAULT '[]'") } catch { /* added before */ }
+    // v1.12 (ux-2ft4): the Member's avatar as JSON; NULL until they choose one.
+    try { sql.exec('ALTER TABLE member ADD COLUMN avatar TEXT') } catch { /* added before */ }
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+    this.migrateSpendLimits()
     sql.exec(`CREATE TABLE IF NOT EXISTS skill (
       name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
       owner_id TEXT, updated_at INTEGER NOT NULL
@@ -1253,9 +1347,12 @@ export class Home extends DurableObject<Env> {
   invite(email: string, role: MemberRole = 'member'): Promise<MemberView> { return this.run(invite(email, role)) }
   remove(memberId: string): Promise<void> { return this.run(remove(memberId)) }
   rename(memberId: string, name: string): Promise<void> { return this.run(rename(memberId, name)) }
+  setAvatarColor(memberId: string, color: string): Promise<MemberAvatar> { return this.run(setAvatarColor(memberId, color)) }
+  setAvatarPicture(memberId: string, key: string): Promise<MemberAvatar> { return this.run(setAvatarPicture(memberId, key)) }
+  removeAvatarPicture(memberId: string): Promise<MemberAvatar> { return this.run(removeAvatarPicture(memberId)) }
   settings(): Promise<HomeSettings> { return this.run(settings) }
   updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }, by?: string): Promise<HomeSettings & { defaultModelMoved?: DefaultModelMoved }> { return this.run(updateSettings(patch, by)) }
-  limitsFor(memberId: string): Promise<{ robotDefaultUsd: number | null; memberUsd: number | null; memberSpentUsd: number }> { return this.run(limitsFor(memberId)) }
+  limitsFor(memberId: string): Promise<SpendLimits> { return this.run(limitsFor(memberId)) }
   reachable(memberId: string): Promise<RobotSummary[]> { return this.run(reachable(memberId)) }
   fleet(): Promise<RobotSummary[]> { return this.run(fleet) }
   entry(robotId: string): Promise<RegistryEntry | undefined> { return this.run(entry(robotId)) }
@@ -1302,9 +1399,10 @@ export class Home extends DurableObject<Env> {
         connections.set(memberId, known)
         return known
       }
+      const homeLimit = (await this.settings()).robotSpendLimit
       const robotSkills = await Promise.all(robots.map(async (robot) => {
         if (robot.id === self.id) return self.held
-        const admin = await this.env.ROBOT.getByName(robot.id).adminRow()
+        const admin = await this.env.ROBOT.getByName(robot.id).adminRow(homeLimit)
         return admin === null ? [] : heldSkillNames(admin.grants, await connectionsOf(robot.ownerId), kindsOn)
       }))
       robots.forEach((robot, index) => {
@@ -1442,6 +1540,22 @@ export class Home extends DurableObject<Env> {
   pluginSettings(name: string): Promise<{ values: Record<string, PlainValue>; secrets: Record<string, string> }> { return this.pluginsOf.settings(name) }
 
   connectionShared(ownerId: string, connection: OwnConnection, shared: boolean): void { this.pluginsOf.connectionShared(ownerId, connection, shared) }
+
+  /**
+   * The v1.12 migration of spend limits (ux-ommv): the numbers stored before (null or 0: no limit) become
+   * typed limits under new keys, and the old keys go. It runs at start; with no old key left it does nothing.
+   */
+  protected migrateSpendLimits(): void {
+    const sql = this.ctx.storage.sql
+    this.ctx.storage.transactionSync(() => {
+      for (const [legacy, key] of [['robotSpendLimitUsd', 'robotSpendLimit'], ['memberSpendLimitUsd', 'memberSpendLimit']] as const) {
+        const row = sql.exec<{ v: string }>('SELECT v FROM setting WHERE k = ?', legacy).toArray()[0]
+        if (row === undefined) continue
+        sql.exec('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(legacyHomeSpendLimit(JSON.parse(row.v))))
+        sql.exec('DELETE FROM setting WHERE k = ?', legacy)
+      }
+    })
+  }
 
   /**
    * The v1.12 migration (ux-cop2, ux-dz8p): a connection that acts as a person is never shared with the
@@ -1615,7 +1729,7 @@ function nameFromEmail(email: string): string {
 }
 
 function memberFromSql(row: MemberSql): MemberView {
-  return { id: row.id, email: row.email, name: row.name, role: row.role, status: row.status }
+  return { id: row.id, email: row.email, name: row.name, role: row.role, status: row.status, avatar: avatarFromSql(row.id, row.avatar) }
 }
 
 function entryFromSql(row: RobotSql): RegistryEntry {
@@ -1623,7 +1737,8 @@ function entryFromSql(row: RobotSql): RegistryEntry {
     id: row.id,
     ownerId: row.owner_id,
     kind: row.kind,
-    identity: JSON.parse(row.identity) as Identity,
+    // An identity stored before avatar seeds existed has none: the Robot's id is its seed (ux-4fgy).
+    identity: robotIdentity(JSON.parse(row.identity) as StoredIdentity, row.id),
     sharing: row.sharing,
     status: row.status,
     fleetState: row.fleet_state,

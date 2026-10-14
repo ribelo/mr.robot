@@ -33,6 +33,14 @@ export class Home extends ProductionHome {
     return this.ctx.storage.getAlarm()
   }
 
+  /** The spend limits as stored before v1.12 (a number of USD or null), migrated as at start (ux-ommv). */
+  async legacySpendLimitsForTest(robot: number | null, member: number | null): Promise<void> {
+    const sql = this.ctx.storage.sql
+    sql.exec("DELETE FROM setting WHERE k IN ('robotSpendLimit', 'memberSpendLimit')")
+    sql.exec("INSERT INTO setting (k, v) VALUES ('robotSpendLimitUsd', ?), ('memberSpendLimitUsd', ?)", JSON.stringify(robot), JSON.stringify(member))
+    this.migrateSpendLimits()
+  }
+
   protected override connectorFetch(): typeof globalThis.fetch {
     return connectorFixtures.fetch
   }
@@ -128,6 +136,19 @@ export class Robot extends ProductionRobot {
     const at = this.store.get<number>('chain-resume-at') ?? null
     if (at !== null) this.store.set('chain-resume-at', 1)
     return at
+  }
+
+  /** The config as stored before v1.12 (spendLimitUsd: a number of USD or null), migrated as at start (ux-ommv). */
+  async legacySpendLimitForTest(spendLimitUsd: number | null): Promise<void> {
+    const { spendLimit: _, ...config } = this.store.requireConfig()
+    this.store.sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, spendLimitUsd }))
+    this.store.sql.exec('UPDATE schema_version SET version = 8')
+    this.store.prepare()
+  }
+
+  /** The config exactly as stored. */
+  async storedConfigForTest(): Promise<Record<string, unknown>> {
+    return JSON.parse(this.store.sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").one().v) as Record<string, unknown>
   }
 
   async activateForTest(): Promise<void> {

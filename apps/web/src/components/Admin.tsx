@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useAtomRefresh } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import type { AdminView, GrantLevels, ModelChoice } from '@mr-robot/protocol'
+import { spendLimitText, type AdminView, type GrantLevels, type ModelChoice, type VpnSummary } from '@mr-robot/protocol'
+import * as Option from 'effect/Option'
 import { adminAtom, homeMemoryAtom, keys, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
@@ -9,6 +10,8 @@ import { go } from '../route.ts'
 import { ConfirmButton } from './RobotSheets.tsx'
 import { SaveButton } from './SaveButton.tsx'
 import { ModelSelect } from './ModelSelect.tsx'
+import { parseHomeSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
+import { Avatar, MemberFace } from './Avatar.tsx'
 
 const usd = (value: number) => `$${value.toFixed(2)}`
 const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value)
@@ -43,16 +46,17 @@ function AdminPage({ view }: { view: AdminView }) {
       {message === undefined ? null : <div className="muted">{message}</div>}
       <h2>Robots</h2>
       <table className="grid">
-        <thead><tr><th>Robot</th><th>Owner</th><th>State</th><th>Model</th><th>Grants</th><th>This month</th></tr></thead>
+        <thead><tr><th>Robot</th><th>Owner</th><th>State</th><th>Model</th><th>Grants</th><th>This month</th><th>Limit</th></tr></thead>
         <tbody>
           {view.fleet.map((robot) => (
             <tr key={robot.id}>
-              <td><button type="button" className="link" onClick={() => go({ page: 'robot', id: robot.id, panel: false })}>{robot.identity.name}</button>{robot.sharing === 'home' ? <div className="muted">shared</div> : null}</td>
+              <td><span className="avatar-cell"><Avatar seed={robot.identity.avatarSeed} color={robot.identity.avatarColor} size={22} state={robot.fleetState} /><button type="button" className="link" onClick={() => go({ page: 'robot', id: robot.id, panel: false })}>{robot.identity.name}</button></span>{robot.sharing === 'home' ? <div className="muted">shared</div> : null}</td>
               <td>{robot.ownerName}</td>
               <td><span className={`state state-${robot.fleetState.split(' ')[0]}`}>{robot.fleetState}</span></td>
               <td>{robot.model.model}<div className="muted">{robot.model.effort}</div></td>
               <td className="muted">{[...grantNames(robot.grants.tools, ''), ...grantNames(robot.grants.skills, 'skill:'), ...grantNames(robot.grants.secrets, 'secret:')].join(', ') || 'none'}{Object.keys(robot.grants.recipients).length === 0 ? '' : ` · ${Object.keys(robot.grants.recipients).length} recipients`}</td>
               <td>{usd(robot.usage.costUsd)}<div className="muted">{tokens(robot.usage.inputTokens + robot.usage.outputTokens)} tokens</div></td>
+              <td>{spendLimitText(robot.usage.limit)}</td>
             </tr>
           ))}
         </tbody>
@@ -99,7 +103,7 @@ function AdminPage({ view }: { view: AdminView }) {
         <tbody>
           {view.members.map((member) => (
             <tr key={member.id}>
-              <td>{member.name}<div className="muted">{member.email}</div></td>
+              <td><span className="avatar-cell"><MemberFace memberId={member.id} name={member.name} avatar={member.avatar} size={22} /><span>{member.name}<div className="muted">{member.email}</div></span></span></td>
               <td>{member.role === 'admin' ? 'admin' : member.status}</td>
               <td>{usd(member.usage.costUsd)}<div className="muted">{tokens(member.usage.inputTokens + member.usage.outputTokens)} tokens</div></td>
               <td>{member.role === 'admin' || member.status === 'removed' ? null : <ConfirmButton label="Remove" confirm="Remove and pause their Robots" onConfirm={() => void run((api) => api.removeMember(member.id), 'Removed.')} />}</td>
@@ -129,7 +133,7 @@ function AdminPage({ view }: { view: AdminView }) {
       <h2>Exa</h2>
       <ExaKey configured={view.exaConfigured === true} onSave={(key) => run((api) => api.setExaKey(key), key === null ? 'Removed.' : undefined)} />
       <h2>Proton VPN</h2>
-      <VpnConfig configured={view.vpnConfigured === true} onSave={(config) => run((api) => api.setVpnConfig(config), config === null ? 'Removed.' : undefined)} />
+      <VpnConfig summary={view.vpnSummary} onSave={(config) => run((api) => api.setVpnConfig(config), config === null ? 'Removed.' : undefined)} />
 
       <h2>Model lists</h2>
       <div className="muted">Each Provider's own list of models, fetched with a connected key or subscription and refreshed daily. Robots choose from these.</div>
@@ -179,19 +183,23 @@ function HomeSettings({ view }: { view: AdminView }) {
   const command = useCommand()
   const [model, setModel] = useState<ModelChoice>(view.settings.defaultModel)
   const [workersAi, setWorkersAi] = useState(view.settings.workersAiEnabled)
-  const [robotLimit, setRobotLimit] = useState(view.settings.robotSpendLimitUsd?.toString() ?? '')
-  const [memberLimit, setMemberLimit] = useState(view.settings.memberSpendLimitUsd?.toString() ?? '')
+  const [robotLimit, setRobotLimit] = useState(spendLimitDraft(view.settings.robotSpendLimit))
+  const [memberLimit, setMemberLimit] = useState(spendLimitDraft(view.settings.memberSpendLimit))
+  const robotSpendLimit = parseHomeSpendLimit(robotLimit)
+  const memberSpendLimit = parseHomeSpendLimit(memberLimit)
   const [backend, setBackend] = useState(view.settings.defaultBrowserBackend ?? 'browser-run')
   const [moved, setMoved] = useState<string>()
   const [error, setError] = useState<string>()
   const labelOf = (choice: ModelChoice) => view.settings.models.find((option) => option.provider === choice.provider && option.model === choice.model)?.label ?? choice.model
   const save = async () => {
+    // An amount that is not whole dollars of at least 1 is shown under its field and not sent.
+    if (Option.isNone(robotSpendLimit) || Option.isNone(memberSpendLimit)) return false
     const exit = await command((api) => api.updateHomeSettings({
       defaultModel: model,
       workersAiEnabled: workersAi,
       defaultBrowserBackend: backend,
-      robotSpendLimitUsd: robotLimit === '' ? null : Number(robotLimit),
-      memberSpendLimitUsd: memberLimit === '' ? null : Number(memberLimit),
+      robotSpendLimit: robotSpendLimit.value,
+      memberSpendLimit: memberSpendLimit.value,
     }), [keys.admin, keys.robots, keys.hosts, keys.providers])
     setError(exitFailure(exit))
     if (Exit.isSuccess(exit)) {
@@ -223,9 +231,9 @@ function HomeSettings({ view }: { view: AdminView }) {
         </select>
         <small className="muted">{(view.browserBackends ?? []).find((option) => option.id === backend)?.note ?? ''}</small>
       </label>
-      <div className="form inline">
-        <label>Robot limit, USD/month<input type="number" min={0} value={robotLimit} onChange={(event) => setRobotLimit(event.target.value)} /></label>
-        <label>Member limit, USD/month<input type="number" min={0} value={memberLimit} onChange={(event) => setMemberLimit(event.target.value)} /></label>
+      <div className="form inline spend-limits">
+        <SpendLimitChoice label="Spend limit per Robot" kinds={['none', 'usd']} draft={robotLimit} valid={Option.isSome(robotSpendLimit)} note="Each Robot that follows the Home's limit, per month." onChange={setRobotLimit} />
+        <SpendLimitChoice label="Spend limit per Member" kinds={['none', 'usd']} draft={memberLimit} valid={Option.isSome(memberSpendLimit)} note="All Robots of one Member together, per month." onChange={setMemberLimit} />
       </div>
       <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} /></div>
     </>
@@ -253,11 +261,28 @@ function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (i
   )
 }
 
-/** The Home's Proton VPN WireGuard configuration (rb-rb1x): write-only; robots on "Container Chrome via VPN" use it. */
-function VpnConfig({ configured, onSave }: { configured: boolean; onSave: (config: string | null) => Promise<boolean> }) {
+/** "Poland (PL)" for a country code; the code alone where the browser has no name for it. */
+const countryName = (code: string) => {
+  const name = new Intl.DisplayNames(['en'], { type: 'region' }).of(code)
+  return name === undefined || name === code ? code : `${name} (${code})`
+}
+
+/**
+ * The Home's Proton VPN WireGuard configuration (rb-rb1x): write-only; robots on "Container Chrome via VPN" use it.
+ * Once stored, the card shows its public summary: endpoint, server name and country (ux-t4wi); never a key (ux-a3ec).
+ */
+function VpnConfig({ summary, onSave }: { summary: VpnSummary | undefined; onSave: (config: string | null) => Promise<boolean> }) {
   const [config, setConfig] = useState('')
+  const configured = summary !== undefined
   return (
     <div className="form">
+      {summary === undefined ? null : (
+        <table className="grid" aria-label="Stored VPN"><tbody>
+          <tr><td>Endpoint</td><td>{summary.endpoint}</td></tr>
+          {summary.serverName === undefined ? null : <tr><td>Server</td><td>{summary.serverName}</td></tr>}
+          {summary.country === undefined ? null : <tr><td>Country</td><td>{countryName(summary.country)}</td></tr>}
+        </tbody></table>
+      )}
       <p className="muted">{configured ? 'A WireGuard configuration is stored. Paste a new one to replace it.' : 'Paste the WireGuard configuration of a Proton VPN server in Poland (Proton account → Downloads → WireGuard configuration). It is stored encrypted and never shown again.'}</p>
       <textarea aria-label="WireGuard configuration" rows={6} value={config} placeholder={'[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nEndpoint = …'} onChange={(event) => setConfig(event.target.value)} />
       <div className="question-actions">

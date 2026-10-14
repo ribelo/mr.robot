@@ -29,10 +29,12 @@ import {
   type Attachment,
   type ConnectorKind,
   type Me,
+  type MemberAvatar,
   type MemberView,
   type RobotPanel,
 } from '@mr-robot/protocol'
 import { HOME_ID, type Env } from '../env.ts'
+import { memberAvatarObject } from '../home/home.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import { modelRefusal } from '../robot/model-choice.ts'
@@ -99,10 +101,28 @@ export const api = new Router<ApiContext>()
     return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system' }
   }))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
-    const patch = yield* decodeBody(c.request, MemberPreferences)
+    const { avatarColor, ...patch } = yield* decodeBody(c.request, MemberPreferences)
     yield* call(() => c.env.MEMBER.getByName(c.member.id).updateProfile(patch))
     if (patch.name !== undefined) yield* call(() => home(c.env).rename(c.member.id, patch.name!))
+    if (avatarColor !== undefined) yield* call((): Promise<MemberAvatar> => home(c.env).setAvatarColor(c.member.id, avatarColor))
     return { ok: true }
+  }))
+  // The avatar picture (ux-s88l): the app resizes it to 256 px; the server keeps at most 1 MB of PNG, JPEG or WebP.
+  .on('PUT', '/api/me/avatar', (c) => Effect.gen(function* () {
+    const picture = yield* avatarPicture(c.request)
+    const key = `avatar-${yield* Effect.promise(() => pictureHash(picture.bytes))}`
+    yield* call(() => c.env.FILES.put(memberAvatarObject(c.member.id, key), picture.bytes, { httpMetadata: { contentType: picture.contentType } }))
+    return yield* call((): Promise<MemberAvatar> => home(c.env).setAvatarPicture(c.member.id, key))
+  }))
+  .on('DELETE', '/api/me/avatar', (c) => call((): Promise<MemberAvatar> => home(c.env).removeAvatarPicture(c.member.id)))
+  // Any Member of the Home sees another Member's picture (ux-2ft4); the key changes with the picture.
+  .on('GET', '/api/members/:member/avatar/:key', (c, { member, key }) => Effect.gen(function* () {
+    if (!AVATAR_KEY.test(key)) return yield* Effect.fail(notFound('no such picture'))
+    const object = yield* call(() => c.env.FILES.get(memberAvatarObject(member, key)))
+    if (object === null) return yield* Effect.fail(notFound('no such picture'))
+    return new Response(object.body, {
+      headers: { 'content-type': object.httpMetadata?.contentType ?? 'application/octet-stream', 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' },
+    })
   }))
   .on('GET', '/api/me/files/:name', (c, { name }) => fileName(name).pipe(
     Effect.flatMap((file) => call(() => c.env.MEMBER.getByName(c.member.id).file(file)).pipe(Effect.map((content) => ({ name: file, content })))),
@@ -533,6 +553,48 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).remove(member))
     return { ok: true }
   }))
+
+const MAX_AVATAR_BYTES = 1024 * 1024
+const AVATAR_KEY = /^avatar-[0-9a-f]{24}$/
+
+type AvatarType = 'image/png' | 'image/jpeg' | 'image/webp'
+
+/** The image type the bytes start with; the declared type is not trusted. */
+function avatarType(bytes: Uint8Array): AvatarType | undefined {
+  const starts = (offset: number, ...expected: number[]) => expected.every((byte, index) => bytes[offset + index] === byte)
+  if (starts(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png'
+  if (starts(0, 0xff, 0xd8, 0xff)) return 'image/jpeg'
+  if (starts(0, 0x52, 0x49, 0x46, 0x46) && starts(8, 0x57, 0x45, 0x42, 0x50)) return 'image/webp'
+  return undefined
+}
+
+/** An uploaded avatar picture, sent as the raw image or as the one file of a multipart form. */
+function avatarPicture(request: Request): Effect.Effect<{ readonly bytes: Uint8Array; readonly contentType: AvatarType }, ApiError> {
+  return Effect.gen(function* () {
+    const declared = Number(request.headers.get('content-length'))
+    if (Number.isFinite(declared) && declared > MAX_AVATAR_BYTES + 64 * 1024) return yield* Effect.fail(badRequest('a picture is at most 1 MB'))
+    const multipart = (request.headers.get('content-type') ?? '').startsWith('multipart/form-data')
+    const bytes = yield* Effect.tryPromise({
+      try: async () => {
+        if (!multipart) return new Uint8Array(await request.arrayBuffer())
+        const file = [...(await request.formData()).values()].find((value): value is File => typeof value !== 'string')
+        return file === undefined ? new Uint8Array() : new Uint8Array(await file.arrayBuffer())
+      },
+      catch: () => badRequest('the picture could not be read'),
+    })
+    if (bytes.byteLength === 0) return yield* Effect.fail(badRequest('send a picture'))
+    if (bytes.byteLength > MAX_AVATAR_BYTES) return yield* Effect.fail(badRequest('a picture is at most 1 MB'))
+    const contentType = avatarType(bytes)
+    if (contentType === undefined) return yield* Effect.fail(badRequest('a picture is PNG, JPEG or WebP'))
+    return { bytes, contentType }
+  })
+}
+
+/** The picture's name: the same picture keeps the same key, a new one gets a new key (and a fresh cache). */
+async function pictureHash(bytes: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return [...digest.slice(0, 12)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
 
 function providerName(name: string, allowed: readonly ProviderId[]): Effect.Effect<ProviderId, ApiError> {
   return allowed.includes(name as ProviderId) ? Effect.succeed(name as ProviderId) : Effect.fail(notFound('no such Provider here'))

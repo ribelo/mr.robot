@@ -188,7 +188,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
     expect(after).toMatchObject({
       model: { provider: 'stub', model: 'stub-2', effort: 'high' }, codeMode: true, contextBudget: 40_000, compactionInstruction: 'Keep the invoices.',
       discordProactive: false, notifications: { enabled: true, channels: ['pwa', 'fake'] },
-      grants: before.grants, spendLimitUsd: before.spendLimitUsd, sharing: before.sharing,
+      grants: before.grants, spendLimit: before.spendLimit, sharing: before.sharing,
     })
     // The chain is a setting the deputy may set too, with accounts the owner can use (pa-w81r).
     const account = (await api<{ id: string }>(ANNA, '/api/providers/deepseek/accounts', { body: { key: 'sk-anna-deepseek', shared: false } })).body.id
@@ -206,7 +206,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
 
     const refused = await chief(chiefRobot, [
       { name: 'robot_settings_set', args: { robot_id: accountant, grants: { tools: ['web'], skills: [], recipients: [], secrets: [] } } },
-      { name: 'robot_settings_set', args: { robot_id: accountant, spendLimitUsd: 500 } },
+      { name: 'robot_settings_set', args: { robot_id: accountant, spendLimit: { kind: 'usd', amount: 500 } } },
       { name: 'robot_settings_set', args: { robot_id: accountant, sharing: 'home' } },
       { name: 'robot_settings_set', args: { robot_id: accountant, hosts: [] } },
     ])
@@ -215,7 +215,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
     expect(refused[1]).toContain('spend limit')
     expect(refused[2]).toContain('shared')
     const unchanged = (await panel(accountant)).settings
-    expect(unchanged).toMatchObject({ grants: before.grants, spendLimitUsd: null, sharing: 'private' })
+    expect(unchanged).toMatchObject({ grants: before.grants, spendLimit: { kind: 'home' }, sharing: 'private' })
   })
 
   it('changes the whole identity: name, title, description and avatar colour (cd-28og, cd-2zx9)', async () => {
@@ -227,7 +227,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
     ])
     expect(JSON.parse(done!)).toMatchObject({ id: accountant, identity: { name: 'Ledger', title: 'Bookkeeper', description: 'Keeps the books.', avatarColor: '#112233' } })
     expect(badColour!).toContain('#rrggbb')
-    expect((await panel(accountant)).settings.identity).toEqual({ name: 'Ledger', title: 'Bookkeeper', description: 'Keeps the books.', avatarColor: '#112233' })
+    expect((await panel(accountant)).settings.identity).toEqual({ name: 'Ledger', title: 'Bookkeeper', description: 'Keeps the books.', avatarColor: '#112233', avatarSeed: accountant })
     expect(await notices(accountant)).toEqual(expect.arrayContaining(['Mr. Robot changed the name to "Ledger".', 'Mr. Robot changed the avatar colour to #112233.']))
   })
 })

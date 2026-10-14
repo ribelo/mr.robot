@@ -58,12 +58,12 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
     lastAt = item.at
     const previous = items[index - 1]
     if (item.kind === 'message' && item.sender.kind === 'robot' && !(previous?.kind === 'message' && previous.sender.kind === 'robot')) {
-      const senders: { name: string; color: string }[] = []
+      const senders: { name: string; color: string; seed: string }[] = []
       for (let next = index; next < items.length; next += 1) {
         const candidate = items[next]!
         if (candidate.kind !== 'message' || candidate.sender.kind !== 'robot') break
         if (!senders.some((sender) => sender.name === (candidate.sender as { name: string }).name)) {
-          senders.push({ name: candidate.sender.name, color: candidate.sender.avatarColor })
+          senders.push({ name: candidate.sender.name, color: candidate.sender.avatarColor, seed: candidate.sender.avatarSeed })
         }
       }
       rows.push(
@@ -71,7 +71,7 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
           Messages from {senders.map((sender, position) => (
             <Fragment key={sender.name}>
               {position > 0 ? (position === senders.length - 1 ? ' and ' : ', ') : ''}
-              <span className="inline-robot"><Avatar color={sender.color} size={14} /> {sender.name}</span>
+              <span className="inline-robot"><Avatar seed={sender.seed} color={sender.color} size={14} /> {sender.name}</span>
             </Fragment>
           ))}
         </div>,
@@ -156,7 +156,7 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
     case 'message': {
       const own = item.sender.kind === 'member' && item.sender.memberId === meId
       const label = item.sender.kind === 'robot'
-        ? <span className="inline-robot" style={{ color: item.sender.avatarColor }}><Avatar color={item.sender.avatarColor} size={14} /> {item.sender.name}</span>
+        ? <span className="inline-robot" style={{ color: item.sender.avatarColor }}><Avatar seed={item.sender.avatarSeed} color={item.sender.avatarColor} size={14} /> {item.sender.name}</span>
         : item.sender.kind === 'member' && !own
           ? <span className="sender">{item.sender.name}</span>
           : item.sender.kind === 'channel'

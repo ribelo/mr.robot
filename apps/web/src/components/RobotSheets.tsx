@@ -44,9 +44,13 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
   const editable = panel.canEdit
   return (
     <Sheet onClose={onClose} footer={editable ? <SaveButton onSave={save} disabled={identity.name.trim() === ''} /> : null}>
-      <div className="sheet-avatar"><Avatar color={identity.avatarColor} size={72} /></div>
+      <div className="sheet-avatar"><Avatar seed={identity.avatarSeed} color={identity.avatarColor} size={72} /></div>
       {editable ? (
-        <ColorPicker value={identity.avatarColor} onChange={(color) => setIdentity({ ...identity, avatarColor: color })} />
+        <>
+          {/* A new seed shows at once; it is kept only when the profile is saved (ux-h0s4). */}
+          <div className="sheet-avatar"><button type="button" className="button" onClick={() => setIdentity({ ...identity, avatarSeed: newAvatarSeed() })}>Another look</button></div>
+          <ColorPicker value={identity.avatarColor} onChange={(color) => setIdentity({ ...identity, avatarColor: color })} />
+        </>
       ) : null}
       <label>Name<input value={identity.name} disabled={!editable} onChange={(event) => setIdentity({ ...identity, name: event.target.value })} /></label>
       <label>Title (optional)<input value={identity.title} disabled={!editable} onChange={(event) => setIdentity({ ...identity, title: event.target.value })} /></label>
@@ -87,6 +91,11 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
       {error === undefined ? null : <div className="muted">{error}</div>}
     </Sheet>
   )
+}
+
+/** A random seed for a Robot's generated avatar. */
+function newAvatarSeed(): string {
+  return [...crypto.getRandomValues(new Uint8Array(8))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export function RoutineList({ routines, onOpen }: { routines: readonly RoutineView[]; onOpen: (routine: RoutineView) => void }) {

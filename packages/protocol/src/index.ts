@@ -15,12 +15,31 @@ export type MemberRole = typeof MemberRole.Type
 export const MemberStatus = Schema.Literals(['active', 'invited', 'removed'])
 export type MemberStatus = typeof MemberStatus.Type
 
+/** An avatar colour, "#rrggbb". */
+export const AvatarColor = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/))
+export type AvatarColor = typeof AvatarColor.Type
+
+/**
+ * A Member's avatar (ux-2ft4, ux-s88l): their initials on a colour, or an uploaded picture (the colour
+ * stays behind it). `key` names the picture; it is served at /api/members/<id>/avatar/<key>.
+ */
+export const MemberAvatar = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('initials'), color: AvatarColor }),
+  Schema.Struct({ kind: Schema.Literal('picture'), color: AvatarColor, key: Schema.String }),
+])
+export type MemberAvatar = typeof MemberAvatar.Type
+
+/** The path the API serves a Member's avatar picture at. */
+export const memberAvatarPath = (memberId: string, key: string): string =>
+  `/api/members/${encodeURIComponent(memberId)}/avatar/${encodeURIComponent(key)}`
+
 export const MemberView = Schema.Struct({
   id: Schema.String,
   email: Schema.String,
   name: Schema.String,
   role: MemberRole,
   status: MemberStatus,
+  avatar: MemberAvatar,
 })
 export type MemberView = typeof MemberView.Type
 
@@ -69,6 +88,8 @@ export const MemberPreferences = Schema.Struct({
   quietHours: Schema.optional(Schema.NullOr(QuietHours)),
   workDetails: Schema.optional(Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])),
   theme: Schema.optional(ThemeChoice),
+  /** The avatar colour; a picture keeps it behind (ux-2ft4). The picture itself goes through PUT /api/me/avatar. */
+  avatarColor: Schema.optional(AvatarColor),
 })
 /** What PATCH /api/me accepts. */
 export type MePatch = typeof MemberPreferences.Type
@@ -85,13 +106,29 @@ export type Sharing = typeof Sharing.Type
 export const ThinkingEffort = Schema.Literals(['off', 'low', 'medium', 'high', 'xhigh', 'max'])
 export type ThinkingEffort = typeof ThinkingEffort.Type
 
+/** What a Robot's bottts avatar is drawn from (ux-0zm6); "Another look" draws a new one. */
+export const AvatarSeed = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
+
 export const Identity = Schema.Struct({
   name: Schema.String,
   title: Schema.String,
   description: Schema.String,
   avatarColor: Schema.String,
+  /** Always present in a view: a Robot that never drew one uses its id (ux-4fgy). */
+  avatarSeed: AvatarSeed,
 })
 export type Identity = typeof Identity.Type
+
+/** An identity as a settings change gives it: without a seed the stored one stays. */
+export const IdentityPatch = Schema.Struct({ ...Identity.fields, avatarSeed: Schema.optional(AvatarSeed) })
+export type IdentityPatch = typeof IdentityPatch.Type
+
+/** An identity as storage holds it: written before avatar seeds existed, it has none. */
+export type StoredIdentity = Omit<Identity, 'avatarSeed'> & { readonly avatarSeed?: string }
+
+/** The identity a view shows: a Robot without a stored seed uses its id (ux-4fgy). */
+export const robotIdentity = (stored: StoredIdentity, robotId: string): Identity =>
+  ({ ...stored, avatarSeed: stored.avatarSeed === undefined || stored.avatarSeed === '' ? robotId : stored.avatarSeed })
 
 export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret', 'host', 'connection'])
 export type GrantKind = typeof GrantKind.Type
@@ -315,6 +352,33 @@ export const BrowserBackendOption = Schema.Struct({
 })
 export type BrowserBackendOption = typeof BrowserBackendOption.Type
 
+// ---------------------------------------------------------------- Spend limits (ux-dbx4, ux-q8ve, ux-ommv, ux-en86)
+
+/** A monthly spend limit in whole US dollars, at least 1. */
+export const SpendAmount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+const NoSpendLimit = Schema.Struct({ kind: Schema.Literal('none') })
+const UsdSpendLimit = Schema.Struct({ kind: Schema.Literal('usd'), amount: SpendAmount })
+/** The Home's limit per Robot or per Member: no limit, or an amount. */
+export const HomeSpendLimit = Schema.Union([NoSpendLimit, UsdSpendLimit])
+export type HomeSpendLimit = typeof HomeSpendLimit.Type
+/** A Robot's own choice: the Home's per-Robot limit, no limit, or an amount. */
+export const RobotSpendLimit = Schema.Union([Schema.Struct({ kind: Schema.Literal('home') }), NoSpendLimit, UsdSpendLimit])
+export type RobotSpendLimit = typeof RobotSpendLimit.Type
+/** The limit that applies to a Robot or a Member, and whether it is the Home's or the Robot's own. */
+export const EffectiveSpendLimit = Schema.Struct({ limit: HomeSpendLimit, from: Schema.Literals(['home', 'robot']) })
+export type EffectiveSpendLimit = typeof EffectiveSpendLimit.Type
+
+/** The one resolution of a Robot's limit (ux-en86): the spend check, the Admin table and the settings all use it. */
+export function effectiveSpendLimit(robot: RobotSpendLimit, home: HomeSpendLimit): EffectiveSpendLimit {
+  return robot.kind === 'home' ? { limit: home, from: 'home' } : { limit: robot, from: 'robot' }
+}
+
+/** "$20 (Home)", "no limit (Home)", "$50", "no limit". */
+export function spendLimitText(effective: EffectiveSpendLimit): string {
+  const text = effective.limit.kind === 'usd' ? `$${effective.limit.amount}` : 'no limit'
+  return effective.from === 'home' ? `${text} (Home)` : text
+}
+
 /** Everything the advanced settings page edits. */
 export const RobotSettings = Schema.Struct({
   identity: Identity,
@@ -327,8 +391,10 @@ export const RobotSettings = Schema.Struct({
   compactionInstruction: Schema.String,
   grants: GrantSet,
   notifications: NotificationSettings,
-  /** Monthly limit in USD; null inherits the Home default. */
-  spendLimitUsd: Schema.NullOr(Schema.Number),
+  /** The Robot's monthly spend limit: the Home's, no limit, or an amount. */
+  spendLimit: RobotSpendLimit,
+  /** What "the Home's" is now: the Home's per-Robot limit. */
+  homeSpendLimit: HomeSpendLimit,
   /** Keep the Robot's browser open between Turns and wake it when a page shows a notification (robot-lulc). */
   wakeOnScreenNotifications: Schema.Boolean,
   /** This Robot's browser backend; null follows the Home default (rb-wgtd). */
@@ -368,7 +434,7 @@ export const DeputySettingsPatch = Schema.Struct({
 export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
 
 export const SettingsPatch = Schema.Struct({
-  identity: Schema.optional(Identity),
+  identity: Schema.optional(IdentityPatch),
   sharing: Schema.optional(Schema.Literals(['private', 'home'])),
   model: Schema.optional(ModelChoice),
   chain: Schema.optional(Schema.Array(ChainEntry)),
@@ -380,7 +446,7 @@ export const SettingsPatch = Schema.Struct({
   /** Replaces the whole set; lists of names (before v1.11) are at allow. */
   grants: Schema.optional(GrantSetInput),
   notifications: Schema.optional(NotificationSettings),
-  spendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
+  spendLimit: Schema.optional(RobotSpendLimit),
   discordChannel: Schema.optional(Schema.NullOr(Schema.String)),
   discordProactive: Schema.optional(Schema.Boolean),
 })
@@ -630,7 +696,7 @@ export type Attachment = typeof Attachment.Type
 /** Who sent a message into a Robot's Conversation. */
 export const Sender = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('member'), memberId: Schema.String, name: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('robot'), robotId: Schema.String, name: Schema.String, avatarColor: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('robot'), robotId: Schema.String, name: Schema.String, avatarColor: Schema.String, avatarSeed: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('routine'), routineId: Schema.String, name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('channel'), channel: Schema.String, from: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('platform') }),
@@ -788,7 +854,8 @@ export const UsageView = Schema.Struct({
   inputTokens: Schema.Number,
   outputTokens: Schema.Number,
   costUsd: Schema.Number,
-  limitUsd: Schema.NullOr(Schema.Number),
+  /** The monthly spend limit in effect (ux-en86). */
+  limit: EffectiveSpendLimit,
   /** Browser time this month per backend (rb-y50l); its cost is included in costUsd. */
   browser: Schema.optional(Schema.Array(Schema.Struct({ backend: BrowserBackend, minutes: Schema.Number, costUsd: Schema.Number }))),
   /** Paid services this month (Exa); their cost is included in costUsd (rb-pb26). */
@@ -880,8 +947,8 @@ export const HomeSettingsPatch = Schema.Struct({
   defaultModel: Schema.optional(ModelChoice),
   workersAiEnabled: Schema.optional(Schema.Boolean),
   defaultBrowserBackend: Schema.optional(BrowserBackend),
-  robotSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
-  memberSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
+  robotSpendLimit: Schema.optional(HomeSpendLimit),
+  memberSpendLimit: Schema.optional(HomeSpendLimit),
   models: Schema.optional(Schema.Array(Schema.Struct({
     provider: Schema.String,
     model: Schema.String,
@@ -890,6 +957,7 @@ export const HomeSettingsPatch = Schema.Struct({
     price: Schema.optional(Schema.Struct({ input: Schema.Number, output: Schema.Number, cachedInput: Schema.optional(Schema.Number) })),
   }))),
 })
+export type HomeSettingsPatch = typeof HomeSettingsPatch.Type
 
 // ---------------------------------------------------------------- Skills (robot-7qpi)
 
@@ -941,8 +1009,10 @@ export const HomeSettingsView = Schema.Struct({
   /** Whether the Home's Robots may run on Workers AI (ux-101w); on by default. */
   workersAiEnabled: Schema.Boolean,
   defaultBrowserBackend: BrowserBackend,
-  robotSpendLimitUsd: Schema.NullOr(Schema.Number),
-  memberSpendLimitUsd: Schema.NullOr(Schema.Number),
+  /** The limit of each Robot that follows the Home's (ux-dbx4). */
+  robotSpendLimit: HomeSpendLimit,
+  /** The limit of all Robots of one Member together. */
+  memberSpendLimit: HomeSpendLimit,
   models: Schema.Array(ModelOption),
 })
 export type HomeSettingsView = typeof HomeSettingsView.Type
@@ -958,6 +1028,20 @@ export const HomeSettingsSaved = Schema.Struct({
 })
 export type HomeSettingsSaved = typeof HomeSettingsSaved.Type
 
+/**
+ * The public part of the Home's Proton VPN WireGuard configuration (ux-t4wi): where the VPN goes.
+ * The keys stay in the sealed configuration and never appear here (ux-a3ec).
+ */
+export const VpnSummary = Schema.Struct({
+  /** The [Peer] Endpoint as host:port. */
+  endpoint: Schema.String,
+  /** The server name from Proton's comment line, like "PL#45"; absent when the configuration has none. */
+  serverName: Schema.optional(Schema.String),
+  /** ISO 3166-1 alpha-2 code of the exit country, when the server name carries it ("PL" from "PL#45"). */
+  country: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Z]{2}$/))),
+})
+export type VpnSummary = typeof VpnSummary.Type
+
 export const AdminView = Schema.Struct({
   fleet: Schema.Array(FleetRow),
   routines: Schema.Array(Schema.Struct({ ...RoutineView.fields, robotName: Schema.String, ownerName: Schema.String })),
@@ -969,8 +1053,8 @@ export const AdminView = Schema.Struct({
   modelLists: Schema.optional(Schema.Array(Schema.Struct({ provider: Schema.String, count: Schema.Number, fetchedAt: Schema.NullOr(Schema.Number), error: Schema.NullOr(Schema.String) }))),
   settings: HomeSettingsView,
   browserBackends: Schema.optional(Schema.Array(BrowserBackendOption)),
-  /** Whether the Home's Proton VPN WireGuard configuration is stored (rb-rb1x); the value is never sent. */
-  vpnConfigured: Schema.optional(Schema.Boolean),
+  /** The Home's stored Proton VPN WireGuard configuration (rb-rb1x), as its public summary; absent when none is stored. */
+  vpnSummary: Schema.optional(VpnSummary),
   /** Whether the Home has an Exa API key (rb-x8i3); the key is never sent. */
   exaConfigured: Schema.optional(Schema.Boolean),
   /** Every Host of the Home (hs-w8vi). */

@@ -15,8 +15,8 @@ const proposal: ProposalView = {
 }
 
 const items: ChatItem[] = [
-  { kind: 'message', id: 'a', seq: 1, at, sender: { kind: 'robot', robotId: 'r-2', name: 'Account Manager', avatarColor: '#8b5cf6' }, text: 'sent over the threads', attachments: [], reaction: null },
-  { kind: 'message', id: 'b', seq: 2, at, sender: { kind: 'robot', robotId: 'r-3', name: 'Chief', avatarColor: '#5ec4b6' }, text: 'flagged the accounts', attachments: [], reaction: null },
+  { kind: 'message', id: 'a', seq: 1, at, sender: { kind: 'robot', robotId: 'r-2', name: 'Account Manager', avatarColor: '#8b5cf6', avatarSeed: 'r-2' }, text: 'sent over the threads', attachments: [], reaction: null },
+  { kind: 'message', id: 'b', seq: 2, at, sender: { kind: 'robot', robotId: 'r-3', name: 'Chief', avatarColor: '#5ec4b6', avatarSeed: 'r-3' }, text: 'flagged the accounts', attachments: [], reaction: null },
   { kind: 'reply', id: 'c', seq: 3, at, text: '✓ **Salesforce** → list pulled' },
   { kind: 'message', id: 'd', seq: 4, at, sender: me, text: 'Send it. Run this every week.', attachments: [], reaction: '👍' },
   { kind: 'routine', id: 'e', seq: 5, at, action: 'created', name: 'Overnight outbound' },
@@ -167,7 +167,7 @@ describe('Thread Asks and the Thread card (ch-vrl7, ch-hikl, ch-iy16)', () => {
     }
     const list: ChatItem[] = [
       { kind: 'thread', id: 'c', seq: 1, at, event: 'opened', thread },
-      { kind: 'message', id: 'm', seq: 2, at, sender: { kind: 'robot', robotId: 'r-2', name: 'Ben\'s Mr. Robot', avatarColor: '#5ec4b6' }, text: 'Friday works.', attachments: [], reaction: null, thread: { id: 'th-1', topic: 'Dinner on Friday' } },
+      { kind: 'message', id: 'm', seq: 2, at, sender: { kind: 'robot', robotId: 'r-2', name: 'Ben\'s Mr. Robot', avatarColor: '#5ec4b6', avatarSeed: 'r-2' }, text: 'Friday works.', attachments: [], reaction: null, thread: { id: 'th-1', topic: 'Dinner on Friday' } },
     ]
     render(<ChatView items={list} meId="m-1" working={false} canAnswer={false} now={at} />)
     expect(screen.getByText('Thread opened')).toBeTruthy()

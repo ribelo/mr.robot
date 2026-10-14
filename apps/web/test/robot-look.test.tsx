@@ -16,13 +16,13 @@ const at = Date.parse('2026-10-06T18:00:00Z')
 const me = { id: 'm-1', name: 'Anna', role: 'admin', workDetails: 'compact', theme: 'system' } as Me
 const robot = (id: string, fleetState: FleetState): RobotSummary => ({
   id, ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState,
-  identity: { name: `Robot ${id}`, title: '', description: '', avatarColor: '#f4a03a' }, lastLine: 'ok', lastAt: 0, unread: false,
+  identity: { name: `Robot ${id}`, title: '', description: '', avatarColor: '#f4a03a', avatarSeed: id }, lastLine: 'ok', lastAt: 0, unread: false,
 }) as RobotSummary
 
 describe('Robot message tint (ap-yzs4)', () => {
   const items: ChatItem[] = [
     { kind: 'reply', id: 'a', seq: 1, at, text: 'My own words' },
-    { kind: 'message', id: 'b', seq: 2, at, sender: { kind: 'robot', robotId: 'r-2', name: 'Chief', avatarColor: '#8b5cf6' }, text: 'From another Robot', attachments: [], reaction: null },
+    { kind: 'message', id: 'b', seq: 2, at, sender: { kind: 'robot', robotId: 'r-2', name: 'Chief', avatarColor: '#8b5cf6', avatarSeed: 'r-2' }, text: 'From another Robot', attachments: [], reaction: null },
     { kind: 'message', id: 'c', seq: 3, at, sender: { kind: 'member', memberId: 'm-1', name: 'Anna' }, text: 'Mine', attachments: [], reaction: null },
   ]
 
@@ -49,21 +49,21 @@ describe('state avatar (ap-bxt2)', () => {
     ['working', 'avatar-working'], ['waiting for you', 'avatar-waiting'], ['blocked', 'avatar-blocked'],
     ['paused', 'avatar-paused'], ['sleeping', 'avatar-idle'], ['setup', 'avatar-idle'],
   ] as const)('gives a %s Robot the class %s', (state, className) => {
-    const { container } = render(<Avatar color="#5ec4b6" state={state} />)
+    const { container } = render(<Avatar seed="r-1" color="#5ec4b6" state={state} />)
     expect(container.querySelector('.avatar')?.classList.contains(className)).toBe(true)
   })
 
   it('marks a waiting Robot with a ring and a blocked one with a mark', () => {
-    const waiting = render(<Avatar color="#5ec4b6" state="waiting for you" />)
+    const waiting = render(<Avatar seed="r-1" color="#5ec4b6" state="waiting for you" />)
     expect(waiting.container.querySelector('.avatar-ring')).not.toBeNull()
     cleanup()
-    const blocked = render(<Avatar color="#5ec4b6" state="blocked" />)
+    const blocked = render(<Avatar seed="r-1" color="#5ec4b6" state="blocked" />)
     expect(blocked.container.querySelector('.avatar-mark')).not.toBeNull()
   })
 
   it('shows the state in the robot list and in the conversation header', () => {
     const robots = [robot('1', 'working'), robot('2', 'waiting for you'), robot('3', 'sleeping')]
-    const list = render(<RegistryProvider><RobotList robots={robots} selected={undefined} meName="Anna" isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
+    const list = render(<RegistryProvider><RobotList robots={robots} selected={undefined} meName="Anna" meAvatar={{ kind: 'initials', color: '#6c63ff' }} isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
     expect([...list.container.querySelectorAll('.robot-row .avatar')].map((node) => node.className)).toEqual(['avatar avatar-working', 'avatar avatar-waiting', 'avatar avatar-idle'])
     cleanup()
     const panel = { summary: robot('1', 'working'), canEdit: true } as unknown as RobotPanel
@@ -74,6 +74,6 @@ describe('state avatar (ap-bxt2)', () => {
   it('turns every avatar animation off under reduced motion', () => {
     const css = readFileSync(join(import.meta.dirname, '../src/styles.css'), 'utf8')
     const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
-    expect(reduced).toMatch(/\.avatar svg, \.avatar-ring[^{]*\{ animation: none; \}/)
+    expect(reduced).toMatch(/\.avatar-face, \.avatar-ring[^{]*\{ animation: none; \}/)
   })
 })

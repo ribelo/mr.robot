@@ -11,14 +11,14 @@ afterEach(cleanup)
 const panel: RobotPanel = {
   summary: {
     id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping',
-    identity: { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a' },
+    identity: { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a', avatarSeed: 'seed-1' },
     lastLine: 'Done.', lastAt: 0, unread: false,
   },
   settings: {
-    identity: { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a' },
+    identity: { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a', avatarSeed: 'seed-1' },
     sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: null, discordChannel: null, discordProactive: true,
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true,
   },
   routines: [{
     id: 'rt-1', robotId: 'r-1', name: 'Overnight outbound', prompt: 'Work the queue', schedule: { kind: 'weekly', time: '02:00', weekdays: [7] },
@@ -29,7 +29,7 @@ const panel: RobotPanel = {
     ],
   }],
   screen: { path: 'screens/last.png', url: '/api/robots/r-1/screen', at: 0 },
-  usage: { month: '2026-10', inputTokens: 12000, outputTokens: 3000, costUsd: 0.42, limitUsd: 5 },
+  usage: { month: '2026-10', inputTokens: 12000, outputTokens: 3000, costUsd: 0.42, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } },
   canEdit: true,
   takeover: null,
 }

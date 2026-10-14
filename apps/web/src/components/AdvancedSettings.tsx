@@ -2,9 +2,11 @@ import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS } from './danger-words.ts'
 import { useState, useEffect } from 'react'
-import { capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
+import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
 import { SaveButton, type SaveOutcome } from './SaveButton.tsx'
+import { parseRobotSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
+import * as Option from 'effect/Option'
 import type * as Exit from 'effect/Exit'
 import { keys, promptAtom, useCommand, webhookAtom } from '../client/api-atoms.ts'
 import type { ApiFailure } from '../client/api-failure.ts'
@@ -33,6 +35,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const [danger, setDanger] = useState<'delete' | 'clear' | 'start-over'>()
   const name = panel.summary.identity.name
   const [draft, setDraft] = useState(settings)
+  const [limitDraft, setLimitDraft] = useState(spendLimitDraft(settings.spendLimit))
+  const spendLimit = parseRobotSpendLimit(limitDraft)
   const model = catalog.models.find((option) => option.provider === draft.model.provider && option.model === draft.model.model)
   const maxBudget = model?.contextWindow ?? 1_000_000
   const setLevel = (field: GrantField, name: string, level: GrantLevel) => setDraft({ ...draft, grants: { ...draft.grants, [field]: { ...draft.grants[field], [name]: level } } })
@@ -44,17 +48,21 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
     <GrantItem key={`${entry.field}:${entry.name}`} label={entry.label} shown={entry.field === 'hosts' ? entry.facet : entry.label} detail={entry.description} level={entry.level} onChange={(level) => setLevel(entry.field, entry.name, level)} />
   )
   const hostItems = of('hosts')
-  const save = () => onSave({
-    chain: draft.chain,
-    contextBudget: draft.contextBudget,
-    codeMode: draft.codeMode,
-    browserBackend: draft.browserBackend,
-    compactionInstruction: draft.compactionInstruction,
-    grants: draft.grants,
-    sharing: draft.sharing,
-    notifications: draft.notifications,
-    spendLimitUsd: draft.spendLimitUsd,
-  })
+  const save = async () => {
+    // An amount that is not whole dollars of at least 1 is shown under its field and not sent.
+    if (Option.isNone(spendLimit)) return false
+    return onSave({
+      chain: draft.chain,
+      contextBudget: draft.contextBudget,
+      codeMode: draft.codeMode,
+      browserBackend: draft.browserBackend,
+      compactionInstruction: draft.compactionInstruction,
+      grants: draft.grants,
+      sharing: draft.sharing,
+      notifications: draft.notifications,
+      spendLimit: spendLimit.value,
+    })
+  }
   const mrRobot = panel.summary.kind === 'mr-robot'
   return (
     <div className="form">
@@ -138,9 +146,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           <span>Shared with the Home<small>Other Members can talk to it and use it.</small></span>
         </label>
       )}
-      <label>Monthly spend limit (USD, empty = Home default)
-        <input type="number" min={0} step={1} value={draft.spendLimitUsd ?? ''} onChange={(event) => setDraft({ ...draft, spendLimitUsd: event.target.value === '' ? null : Number(event.target.value) })} />
-      </label>
+      <SpendLimitChoice label="Monthly spend limit" kinds={['home', 'none', 'usd']} draft={limitDraft} valid={Option.isSome(spendLimit)} onChange={setLimitDraft}
+        note={Option.isSome(spendLimit) ? `In effect: ${spendLimitText(effectiveSpendLimit(spendLimit.value, settings.homeSpendLimit))}` : undefined} />
 
       <div className="question-actions">
         {panel.summary.status === 'paused'

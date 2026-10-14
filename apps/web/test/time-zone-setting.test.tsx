@@ -10,7 +10,7 @@ afterEach(() => {
   localStorage.clear()
 })
 
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', home: 'Home', timeZone: 'America/New_York', timeZonePinned: false, detectedTimeZone: 'America/New_York', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' }
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'America/New_York', timeZonePinned: false, detectedTimeZone: 'America/New_York', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' }
 
 interface Call { readonly method: string; readonly path: string; readonly body: string; readonly zone: string | null }
 

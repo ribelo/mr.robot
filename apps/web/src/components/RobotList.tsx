@@ -1,8 +1,8 @@
 import { go } from '../route.ts'
 import { useEffect, useRef, useState } from 'react'
-import type { RobotSummary } from '@mr-robot/protocol'
+import type { MemberAvatar, RobotSummary } from '@mr-robot/protocol'
 import { listTime } from '../time.ts'
-import { Avatar } from './Avatar.tsx'
+import { Avatar, MemberFace } from './Avatar.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS, type DangerAction } from './danger-words.ts'
 import { keys, useCommand } from '../client/api-atoms.ts'
@@ -11,6 +11,8 @@ export interface RobotListProps {
   readonly robots: readonly RobotSummary[]
   readonly selected: string | undefined
   readonly meName: string
+  /** The Member's own avatar in the sidebar foot (ux-2ft4). */
+  readonly meAvatar: MemberAvatar
   readonly isAdmin: boolean
   readonly onSelect: (id: string) => void
   readonly onCreate: () => void
@@ -27,7 +29,7 @@ export interface RobotListProps {
 }
 
 /** The robot list (robot-q4b2, robot-mktj): pinned first, unread marked, a menu on every Robot. */
-export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreate, onAdmin, onProfile, onListPref, onEditProfile, onAdvanced, onFiles, meId, onRemoved }: RobotListProps) {
+export function RobotList({ robots, selected, meName, meAvatar, isAdmin, onSelect, onCreate, onAdmin, onProfile, onListPref, onEditProfile, onAdvanced, onFiles, meId, onRemoved }: RobotListProps) {
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<string>()
   const [danger, setDanger] = useState<{ robot: RobotSummary; action: DangerAction }>()
@@ -39,7 +41,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
   const row = (robot: RobotSummary) => (
     <li key={robot.id} className="robot-item" onContextMenu={(event) => { event.preventDefault(); setMenu(robot.id) }}>
       <button type="button" className={robot.id === selected ? 'robot-row selected' : 'robot-row'} onClick={() => onSelect(robot.id)}>
-        <Avatar color={robot.identity.avatarColor} size={34} state={robot.fleetState} />
+        <Avatar seed={robot.identity.avatarSeed} color={robot.identity.avatarColor} size={34} state={robot.fleetState} />
         <span className="robot-row-text">
           <span className="robot-row-top">
             <span className={robot.unread ? 'robot-name unread' : 'robot-name'}>{robot.pinned === true ? <span className="pin" aria-label="pinned">📌 </span> : null}{robot.identity.name}</span>
@@ -126,7 +128,7 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
       </ul>
       <div className="sidebar-foot">
         <button type="button" className="me" title={meName} onClick={onProfile}>
-          <span className="initials">{initials(meName)}</span><span className="me-name">{meName}</span>
+          <MemberFace memberId={meId ?? ''} name={meName} avatar={meAvatar} /><span className="me-name">{meName}</span>
         </button>
         <button type="button" className="link" onClick={() => go({ page: 'plugins' })}>Plugins</button>
         {isAdmin ? <button type="button" className="link" onClick={onAdmin}>Admin</button> : null}
@@ -174,6 +176,3 @@ function RowMenu({ robot, onClose, onListPref, onEditProfile, onAdvanced, onFile
   )
 }
 
-export function initials(name: string): string {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join('') || '?'
-}

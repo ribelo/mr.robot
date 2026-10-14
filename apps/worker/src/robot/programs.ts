@@ -18,7 +18,7 @@ import type { ScheduleCreateRequest, ScheduleTimingChange } from '@deepseek-ai/d
 import type { RoutineCard, ProposalRow, RobotConfig, RobotStore, RoutineRow, RoutineRun, WakeupKind } from './store.ts'
 import { dueDelivery } from '../agent/schedule.ts'
 import { setupGrants } from '../agent/catalog.ts'
-import { emptyGrants, grantSetFrom, overlayGrants, usableNames } from '@mr-robot/protocol'
+import { effectiveSpendLimit, emptyGrants, grantSetFrom, overlayGrants, usableNames, type HomeSpendLimit } from '@mr-robot/protocol'
 import { THREAD_PAUSE_AT } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -43,7 +43,8 @@ export interface WakeInput {
 /** A message between Robots, as the platform carries it (robot-mv15). */
 interface MessageCommon {
   readonly id: string
-  readonly from: { readonly robotId: string; readonly ownerId: string; readonly name: string; readonly avatarColor: string }
+  /** `avatarSeed` is absent in messages queued before avatar seeds existed: the sender's id is its seed. */
+  readonly from: { readonly robotId: string; readonly ownerId: string; readonly name: string; readonly avatarColor: string; readonly avatarSeed?: string }
   readonly text: string
   readonly requestId: string
   readonly chain: { readonly id: string; readonly hops: number }
@@ -347,7 +348,11 @@ export async function digest(text: string): Promise<string> {
   return [...bytes.slice(0, 12)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-const sender = Effect.map(config, (current) => ({ robotId: current.id, ownerId: current.ownerId, name: current.identity.name, avatarColor: current.identity.avatarColor }))
+const sender = Effect.map(config, (current) => ({ robotId: current.id, ownerId: current.ownerId, name: current.identity.name, avatarColor: current.identity.avatarColor, avatarSeed: current.identity.avatarSeed }))
+
+/** The sender of a Robot message as the receiving Conversation shows it. */
+const robotSender = (from: RobotMessage['from']): Sender =>
+  ({ kind: 'robot', robotId: from.robotId, name: from.name, avatarColor: from.avatarColor, avatarSeed: from.avatarSeed ?? from.robotId })
 
 export const sendRobotMessage = (to: string, text: string, idempotencyKey: string) => Effect.gen(function* () {
   const store = yield* RobotState
@@ -400,7 +405,7 @@ export const receive = (message: RobotMessage) => Effect.gen(function* () {
       const updated = store.threadMessage(copy.view.id, Date.now())!
       store.enqueue(
         'robot',
-        { kind: 'robot', robotId: message.from.robotId, name: message.from.name, avatarColor: message.from.avatarColor },
+        robotSender(message.from),
         message.text,
         { threadId: copy.view.id, thread: { id: copy.view.id, topic: copy.view.topic, scope: copy.view.scope, count: updated.view.messageCount, windowCount: updated.windowCount } },
         Date.now(),
@@ -417,7 +422,7 @@ export const receive = (message: RobotMessage) => Effect.gen(function* () {
     if (handle !== undefined) store.sql.exec('INSERT INTO reply_handle (id, sender_robot, request_id, chain) VALUES (?, ?, ?, ?)', handle, message.from.robotId, message.requestId, message.chain.hops)
     store.enqueue(
       'robot',
-      { kind: 'robot', robotId: message.from.robotId, name: message.from.name, avatarColor: message.from.avatarColor },
+      robotSender(message.from),
       message.text,
       message.kind === 'request' ? { requestId: message.requestId, replyHandle: handle, chain: message.chain } : { replyTo: message.requestId, chain: message.chain },
       Date.now(),
@@ -439,7 +444,14 @@ export const createRobot = (brief: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ settings and Grants (robot-vqtw)
 
-export const settings = Effect.gen(function* () {
+/** What "the Home's" spend limit is for this Robot now: the Home's per-Robot limit. */
+export const homeSpendLimit = Effect.gen(function* () {
+  const platform = yield* RobotPlatform
+  return (yield* promise(() => platform.env.HOME.getByName(HOME_ID).settings())).robotSpendLimit
+})
+
+/** The settings, with the Home's per-Robot limit already read. */
+export const settingsWith = (home: HomeSpendLimit) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = yield* config
   return {
@@ -458,9 +470,12 @@ export const settings = Effect.gen(function* () {
     grants: store.effectiveGrants(),
     // Discord is on by having a channel; an old 'discord' entry in the list means nothing.
     notifications: { ...current.notifications, channels: current.notifications.channels.filter((channel) => channel !== 'discord') },
-    spendLimitUsd: current.spendLimitUsd,
+    spendLimit: current.spendLimit,
+    homeSpendLimit: home,
   } as RobotSettings
 })
+
+export const settings = Effect.flatMap(homeSpendLimit, settingsWith)
 
 /** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
 export const setRecipients = (robotIds: readonly string[]) => Effect.gen(function* () {
@@ -484,12 +499,12 @@ export const checkLimits = Effect.gen(function* () {
   const current = yield* config
   if (current.status !== 'active' && !(current.status === 'blocked' && current.blockedReason === 'limit')) return false
   const limits = yield* promise(() => platform.env.HOME.getByName(HOME_ID).limitsFor(current.ownerId))
-  const robotLimit = current.spendLimitUsd ?? limits.robotDefaultUsd
+  const robotLimit = effectiveSpendLimit(current.spendLimit, limits.robot).limit
   const spent = store.usage(currentMonth()).costUsd
-  const reason = robotLimit !== null && spent >= robotLimit
-    ? `This Robot reached its monthly spend limit (${usd(spent)} of ${usd(robotLimit)}).`
-    : limits.memberUsd !== null && limits.memberSpentUsd >= limits.memberUsd
-      ? `Your Robots reached your monthly spend limit (${usd(limits.memberSpentUsd)} of ${usd(limits.memberUsd)}).`
+  const reason = robotLimit.kind === 'usd' && spent >= robotLimit.amount
+    ? `This Robot reached its monthly spend limit (${usd(spent)} of ${usd(robotLimit.amount)}).`
+    : limits.member.kind === 'usd' && limits.memberSpentUsd >= limits.member.amount
+      ? `Your Robots reached your monthly spend limit (${usd(limits.memberSpentUsd)} of ${usd(limits.member.amount)}).`
       : null
   if (reason !== null && current.status === 'active') {
     store.updateConfig(() => ({ status: 'blocked', blockedReason: 'limit' }), false)
@@ -516,6 +531,7 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(before.identity.title !== after.identity.title, `changed the title to "${short(after.identity.title)}".`)
   note(before.identity.description !== after.identity.description, `changed the description to "${short(after.identity.description)}".`)
   note(before.identity.avatarColor !== after.identity.avatarColor, `changed the avatar colour to ${after.identity.avatarColor}.`)
+  note(before.identity.avatarSeed !== after.identity.avatarSeed, 'gave the avatar another look.')
   note(before.model.provider !== after.model.provider || before.model.model !== after.model.model, `changed model to ${after.model.model} (${after.model.provider}).`)
   note(before.model.effort !== after.model.effort, `changed thinking to ${after.model.effort}.`)
   note(before.codeMode !== after.codeMode, `changed code mode to ${after.codeMode ? 'on' : 'off'}.`)
@@ -547,7 +563,8 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
     if (chain !== undefined) store.set('chain-active', nextActive)
     if (patch.grants !== undefined) store.setGrants(grantSetFrom(patch.grants))
     store.updateConfig((current) => ({
-      ...(patch.identity === undefined ? {} : { identity: patch.identity }),
+      // An identity without a seed keeps the stored one (ux-h0s4).
+      ...(patch.identity === undefined ? {} : { identity: { ...patch.identity, avatarSeed: patch.identity.avatarSeed ?? current.identity.avatarSeed } }),
       ...(patch.sharing === undefined ? {} : { sharing: patch.sharing }),
       ...(chain === undefined ? {} : { chain, model: modelOf(chain[nextActive]!) }),
       ...(patch.contextBudget === undefined ? {} : { contextBudget: Math.max(8_000, Math.round(patch.contextBudget)) }),
@@ -558,7 +575,7 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
       ...(patch.discordChannel === undefined ? {} : { discordChannel: patch.discordChannel === null || patch.discordChannel.trim() === '' ? null : patch.discordChannel.trim() }),
       ...(patch.discordProactive === undefined ? {} : { discordProactive: patch.discordProactive }),
       ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels.filter((channel) => channel !== 'discord')])] } }),
-      ...(patch.spendLimitUsd === undefined ? {} : { spendLimitUsd: patch.spendLimitUsd }),
+      ...(patch.spendLimit === undefined ? {} : { spendLimit: patch.spendLimit }),
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))
   })
@@ -572,7 +589,7 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
     const current = yield* config
     yield* promise(() => platform.env.HOME.getByName(HOME_ID).discordChannelChanged(current.id, current.discordChannel ?? null))
   }
-  if (patch.spendLimitUsd !== undefined) yield* checkLimits
+  if (patch.spendLimit !== undefined) yield* checkLimits
   if (patch.wakeOnScreenNotifications === false) yield* platform.stopWatching()
   return yield* settings
 })
@@ -945,7 +962,6 @@ export interface RobotInit {
   readonly status: RobotStatus
   readonly model: ModelChoice
   readonly timeZone: string
-  readonly spendLimitUsd: number | null
   /** What the owner said the Robot is for ("New robot" form or Mr. Robot's brief). */
   readonly brief?: string
 }
@@ -959,7 +975,7 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   const config: RobotConfig = {
     id: init.id, ownerId: init.ownerId, kind: init.kind, identity: init.identity, sharing: init.sharing, status: init.status,
     blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: init.kind === 'mr-robot' ? MR_ROBOT_COMPACTION : '',
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimitUsd: init.spendLimitUsd, timeZone: init.timeZone,
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, timeZone: init.timeZone,
     liveSessionId: `s-${crypto.randomUUID()}`, revision: 1, createdAt: Date.now(),
   }
   store.transaction(() => {

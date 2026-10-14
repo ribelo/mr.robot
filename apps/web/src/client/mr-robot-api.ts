@@ -11,10 +11,10 @@ import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
-  LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
+  LoginView, Me, MemberAvatar, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
-  type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
+  type HomeSettingsPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
 
@@ -63,6 +63,9 @@ const make = Effect.gen(function* () {
     memberFile: (name: string) => get(NamedText, `/api/me/files/${enc(name)}`),
     writeMemberFile: (name: string, content: string) => send('PUT', `/api/me/files/${enc(name)}`, { content }),
     resetEverything: (confirm: string) => send('POST', '/api/me/reset', { confirm }),
+    /** A picture already resized by the app (ux-s88l); the answer is the avatar now. */
+    uploadAvatar: (picture: { readonly bytes: Uint8Array; readonly type: string }) => request(MemberAvatar, 'PUT', '/api/me/avatar', undefined, { bytes: picture.bytes, contentType: picture.type }),
+    removeAvatar: request(MemberAvatar, 'DELETE', '/api/me/avatar'),
 
     robots: get(Schema.Array(RobotSummary), '/api/robots'),
     createRobot: (input: { readonly brief?: string; readonly model?: ModelChoice }) => request(CreatedRobot, 'POST', '/api/robots', input),
@@ -122,7 +125,7 @@ const make = Effect.gen(function* () {
 
     admin: get(AdminView, '/api/admin'),
     homeSettings: get(HomeSettingsView, '/api/admin/settings'),
-    updateHomeSettings: (patch: Record<string, unknown>) => request(HomeSettingsSaved, 'PATCH', '/api/admin/settings', patch),
+    updateHomeSettings: (patch: HomeSettingsPatch) => request(HomeSettingsSaved, 'PATCH', '/api/admin/settings', patch),
     setSkillRepository: (input: { readonly repo: string; readonly ref: string; readonly path: string; readonly token?: string }) => send('PUT', '/api/admin/skills/repository', input),
     homeMemory: get(TextContent, '/api/home-memory'),
     setHomeMemory: (content: string) => send('PUT', '/api/admin/home-memory', { content }),

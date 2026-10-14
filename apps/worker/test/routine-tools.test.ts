@@ -139,7 +139,7 @@ describe('Conversations stored before the product tools still show their cards (
         ...call(3, 'c2', 'schedule_update', { id: 'schedule-1', title: 'Morning digest' }, { id: 'schedule-1', updated: true, record: { title: 'Morning digest' } }),
         ...call(5, 'c3', 'schedule_delete', { id: 'schedule-1' }, { id: 'schedule-1', deleted: true }),
       ],
-      notices: [], proposal: () => undefined,
+      notices: [], proposal: () => undefined, avatarSeed: 'r-1',
     })
     expect(items.flatMap((item) => (item.kind === 'routine' ? [[item.action, item.name]] : []))).toEqual([['created', 'Digest'], ['updated', 'Morning digest'], ['deleted', 'Routine']])
   })
@@ -153,7 +153,7 @@ describe('Conversations stored before the product tools still show their cards (
         ...call(7, 'c4', 'routine_set', { robot_id: 'robot-2', title: 'Theirs', prompt: 'p', after_seconds: 3600 }, { id: 'r2', name: 'Theirs' }),
         ...call(9, 'c5', 'routine_delete', { robot_id: 'robot-2', id: 'r2' }, { deleted: 'r2' }),
       ],
-      notices: [], proposal: () => undefined,
+      notices: [], proposal: () => undefined, avatarSeed: 'r-1',
     })
     expect(items.flatMap((item) => (item.kind === 'routine' ? [[item.action, item.name]] : []))).toEqual([['created', 'Digest'], ['updated', 'Morning'], ['deleted', 'Morning']])
   })

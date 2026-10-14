@@ -8,7 +8,7 @@ import type { Attachment, Sender } from '@mr-robot/protocol'
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[]; clientId?: string } & ContextFormed
-    robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string } & ContextFormed
+    robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; avatarSeed: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string } & ContextFormed
     routine: { kind: 'routine'; routineId: string; name: string } & ContextFormed
     channel: { kind: 'channel'; channel: string; from: string } & ContextFormed
     platform: { kind: 'platform'; summary: string } & ContextFormed
@@ -136,7 +136,7 @@ function sourceMessage(input: WakeupMessageInput): UserMessage {
       return createUserMessage({
         content: [{ type: 'text', text: `${head}\n${input.text}${files}` }],
         source: {
-          kind: 'robot', robotId: sender.robotId, name: sender.name, avatarColor: sender.avatarColor, form: 'relay',
+          kind: 'robot', robotId: sender.robotId, name: sender.name, avatarColor: sender.avatarColor, avatarSeed: sender.avatarSeed, form: 'relay',
           ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
           ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
           ...(thread === undefined ? {} : { threadId: thread.id, topic: thread.topic }),

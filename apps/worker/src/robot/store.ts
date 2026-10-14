@@ -7,7 +7,8 @@ import { TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import { recordFromLegacy, type ScheduleRecord } from '../agent/schedule.ts'
-import { GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, usableLevel } from '@mr-robot/protocol'
+import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
+import { GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
 import type {
   GrantKind,
   GrantLevel,
@@ -25,6 +26,7 @@ import type {
   RewindView,
   RobotStatus,
   RoutineSchedule,
+  RobotSpendLimit,
   ThreadEvent,
   ThreadView,
   BrowserBackend,
@@ -57,7 +59,8 @@ export interface RobotConfig {
   readonly webhookKey?: string
   readonly compactionInstruction: string
   readonly notifications: NotificationSettings
-  readonly spendLimitUsd: number | null
+  /** The Robot's own monthly spend limit, or the Home's (ux-q8ve). */
+  readonly spendLimit: RobotSpendLimit
   /** The owner's profile zone, kept current by the Member's fan-out (Robot.timeZoneChanged); never set by hand. */
   readonly timeZone: string
   readonly liveSessionId: string
@@ -145,9 +148,23 @@ export interface RoutineRun {
   readonly firstLine: string
 }
 
-const SCHEMA_VERSION = 8
+const SCHEMA_VERSION = 9
 
-const MIGRATIONS: Record<number, readonly string[]> = {
+/** One step of a migration: a statement, or a change SQL cannot say. */
+type MigrationStep = string | ((sql: SqlStorage) => void)
+
+/** The config's spend limit as a typed value (v1.12, ux-ommv): null is the Home's, 0 is no limit. */
+function typedSpendLimit(sql: SqlStorage): void {
+  const row = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  if (row === undefined) return
+  const { spendLimitUsd, ...config } = JSON.parse(row.v) as Record<string, unknown>
+  if ('spendLimit' in config) return
+  sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, spendLimit: legacyRobotSpendLimit(spendLimitUsd) }))
+}
+
+const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Typed spend limits (v1.12, ux-ommv).
+  9: [typedSpendLimit],
   // Grant levels (v1.11, sk-xj5q): every row stored so far was a grant, so it becomes allow.
   8: ["ALTER TABLE grant_item ADD COLUMN level TEXT NOT NULL DEFAULT 'allow'"],
   // This chief's copy of each Thread (v1.9).
@@ -236,7 +253,10 @@ export class RobotStore {
     if (current >= SCHEMA_VERSION) return
     this.transaction(() => {
       for (let version = current + 1; version <= SCHEMA_VERSION; version += 1) {
-        for (const statement of MIGRATIONS[version] ?? []) this.sql.exec(statement)
+        for (const step of MIGRATIONS[version] ?? []) {
+          if (typeof step === 'string') this.sql.exec(step)
+          else step(this.sql)
+        }
       }
       this.sql.exec('DELETE FROM schema_version')
       this.sql.exec('INSERT INTO schema_version (version) VALUES (?)', SCHEMA_VERSION)
@@ -247,7 +267,10 @@ export class RobotStore {
 
   config(): RobotConfig | undefined {
     const row = this.sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
-    return row === undefined ? undefined : (JSON.parse(row.v) as RobotConfig)
+    if (row === undefined) return undefined
+    // A config stored before avatar seeds existed has none: the Robot's id is its seed (ux-4fgy).
+    const stored = JSON.parse(row.v) as Omit<RobotConfig, 'identity'> & { readonly identity: StoredIdentity }
+    return { ...stored, identity: robotIdentity(stored.identity, stored.id) }
   }
 
   requireConfig(): RobotConfig {

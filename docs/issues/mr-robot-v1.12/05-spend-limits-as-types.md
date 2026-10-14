@@ -6,8 +6,8 @@
 
 **Blocked by:** 04 (Workers AI switch)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Typed limits in the protocol; migration of null and 0 (workerd test)
-- [ ] Spend check, Admin table and settings view agree on the effective limit (workerd test)
-- [ ] Segmented controls in Home settings and Advanced settings; amount field only for An amount (component tests)
+- [x] Typed limits in the protocol; migration of null and 0 (workerd test)
+- [x] Spend check, Admin table and settings view agree on the effective limit (workerd test)
+- [x] Segmented controls in Home settings and Advanced settings; amount field only for An amount (component tests)

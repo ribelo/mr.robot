@@ -4,12 +4,13 @@
  * platform; nothing here writes except the registry report.
  */
 import * as Effect from 'effect/Effect'
+import { effectiveSpendLimit, type HomeSpendLimit } from '@mr-robot/protocol'
 import type { ChatItem, Conversation, ConversationPage, ConversationSearchResult, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, RoutineView, ScreenView, Trajectory, TrajectoryEvent, TrajectoryExcerpt, UsageView } from '@mr-robot/protocol'
 import { readStoredEvents } from '../agent/session-log.ts'
 import { HOME_ID } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { invalid, notFound } from '../platform/durable.ts'
-import { proposalView, RobotPlatform, RobotState, routineView, settings } from './programs.ts'
+import { homeSpendLimit, proposalView, RobotPlatform, RobotState, routineView, settingsWith } from './programs.ts'
 import { projectChat } from './projection.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig } from './store.ts'
@@ -63,6 +64,7 @@ export const conversation = (details = false) => Effect.gen(function* () {
     events,
     notices: store.notices(current.liveSessionId),
     thread: (id) => store.thread(id)?.view,
+    avatarSeed: current.identity.avatarSeed,
     proposal: (id) => {
       const row = store.proposal(id)
       return row === undefined ? undefined : proposalView(row)
@@ -238,12 +240,13 @@ const screen = Effect.gen(function* () {
   return { path: saved.path, at: saved.at, url: `/api/robots/${encodeURIComponent(id)}/screen?at=${saved.at}` } as ScreenView | null
 })
 
-const usage = Effect.gen(function* () {
+/** This month's usage and the spend limit in effect; `home` is the Home's per-Robot limit. */
+const usage = (home: HomeSpendLimit) => Effect.gen(function* () {
   const store = yield* RobotState
   const month = currentMonth()
   const browser = store.browserUsage(month).map((row) => ({ backend: row.backend, minutes: Math.round(row.ms / 6_000) / 10, costUsd: row.costUsd }))
   const services = store.serviceUsage(month)
-  return { month, ...store.usage(month), limitUsd: (yield* config).spendLimitUsd, ...(browser.length === 0 ? {} : { browser }), ...(services.length === 0 ? {} : { services }) } as UsageView
+  return { month, ...store.usage(month), limit: effectiveSpendLimit((yield* config).spendLimit, home), ...(browser.length === 0 ? {} : { browser }), ...(services.length === 0 ? {} : { services }) } as UsageView
 })
 
 interface TakeoverRow { readonly reason: string; readonly claimedBy: string | null }
@@ -252,12 +255,13 @@ interface TakeoverRow { readonly reason: string; readonly claimedBy: string | nu
 export const panel = (canEdit: boolean, summary: RobotSummary) => Effect.gen(function* () {
   const store = yield* RobotState
   const takeover = store.get<TakeoverRow>('takeover')
+  const home = yield* homeSpendLimit
   return {
     summary,
-    settings: yield* settings,
+    settings: yield* settingsWith(home),
     routines: yield* routineViews,
     screen: yield* screen,
-    usage: yield* usage,
+    usage: yield* usage(home),
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
     ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),
@@ -266,12 +270,12 @@ export const panel = (canEdit: boolean, summary: RobotSummary) => Effect.gen(fun
   } as RobotPanel
 })
 
-/** One row of the admin fleet list, from the DO itself (robot-x26m). */
-export const adminRow = Effect.gen(function* () {
+/** One row of the admin fleet list, from the DO itself (robot-x26m); `home` is the Home's per-Robot limit. */
+export const adminRow = (home: HomeSpendLimit) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = store.config()
   if (current === undefined) return null
-  return { fleetState: yield* fleetState, status: current.status, grants: store.grants(), model: current.model, usage: yield* usage, routines: yield* routineViews } as { fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] }
+  return { fleetState: yield* fleetState, status: current.status, grants: store.grants(), model: current.model, usage: yield* usage(home), routines: yield* routineViews } as { fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] }
 })
 
 export const status = Effect.gen(function* () {

@@ -11,12 +11,11 @@ export async function robot(id: string, init: Partial<RobotInit> = {}) {
     ownerId: OWNER.memberId,
     ownerName: OWNER.name,
     kind: 'robot',
-    identity: { name: id, title: '', description: '', avatarColor: '#f4a03a' },
+    identity: { name: id, title: '', description: '', avatarColor: '#f4a03a', avatarSeed: id },
     sharing: 'private',
     status: 'active',
     model: { provider: 'stub', model: 'stub', effort: 'off' },
     timeZone: 'Europe/Warsaw',
-    spendLimitUsd: null,
     ...init,
   })
   return stub

@@ -6,8 +6,8 @@
 
 **Blocked by:** 02 (Profile layout)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Member avatar: colour, upload, serve, remove (workerd test through the API)
-- [ ] Robot avatarSeed default from id and change through the Robot profile (workerd test)
-- [ ] Avatar rendered in sidebar, header, Admin and messages; Another look changes the preview (component tests)
+- [x] Member avatar: colour, upload, serve, remove (workerd test through the API)
+- [x] Robot avatarSeed default from id and change through the Robot profile (workerd test)
+- [x] Avatar rendered in sidebar, header, Admin and messages; Another look changes the preview (component tests)

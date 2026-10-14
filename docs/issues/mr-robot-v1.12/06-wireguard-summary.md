@@ -6,7 +6,7 @@
 
 **Blocked by:** 04 (Workers AI switch)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Summary parsed from a recorded Proton configuration (fixture) and returned in the Admin view; no secret in the view (workerd test)
-- [ ] Card shows the summary when configured
+- [x] Summary parsed from a recorded Proton configuration (fixture) and returned in the Admin view; no secret in the view (workerd test)
+- [x] Card shows the summary when configured

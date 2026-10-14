@@ -84,7 +84,7 @@ export const send = (threadId: string, text: string, idempotencyKey: string) => 
   const masked = yield* platform.mask(text)
   yield* enqueueOutbox(copy.view.other.robotId, {
     id, kind: 'thread', threadId, text: masked, requestId: id, chain: { id: threadId, hops: 0 },
-    from: { robotId: current.id, ownerId: current.ownerId, name: copy.view.self.label, avatarColor: copy.view.self.avatarColor },
+    from: { robotId: current.id, ownerId: current.ownerId, name: copy.view.self.label, avatarColor: copy.view.self.avatarColor, avatarSeed: current.identity.avatarSeed },
   })
   const sent = store.threadMessage(threadId, Date.now())!
   yield* platform.background(deliverOutbox)

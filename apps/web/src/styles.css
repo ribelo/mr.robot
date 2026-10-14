@@ -40,19 +40,24 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .me { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
 .me-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .initials { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--fill); font-size: 11px; color: var(--muted); }
+/* A Member's avatar (ux-2ft4): initials in white on their colour, or their picture over it. */
+.member-face { display: inline-grid; place-items: center; flex: none; border-radius: 50%; object-fit: cover; color: #fff; font-weight: 600; line-height: 1; }
+.member-face.initials { color: #fff; }
+.avatar-cell { display: inline-flex; align-items: center; gap: 8px; }
+.avatar-picker { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .link { color: var(--muted); font-size: 13.5px; }
 .link:hover { color: var(--text); }
 
 .avatar { position: relative; display: inline-flex; flex: none; }
-.avatar svg { display: block; }
+.avatar-face { display: block; border-radius: 50%; }
 .avatar-ring { position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--accent); animation: avatar-ring 1.8s ease-out infinite; }
 .avatar-mark { position: absolute; right: -3px; bottom: -3px; min-width: 14px; height: 14px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; line-height: 1; background: var(--danger); color: #fff; border: 2px solid var(--surface-sunken); box-sizing: content-box; }
-.avatar-working svg { animation: avatar-pulse 1.4s ease-in-out infinite; }
-.avatar-blocked svg, .avatar-paused svg { opacity: .45; filter: grayscale(.8); }
+.avatar-working .avatar-face { animation: avatar-pulse 1.4s ease-in-out infinite; }
+.avatar-blocked .avatar-face, .avatar-paused .avatar-face { opacity: .45; filter: grayscale(.8); }
 @keyframes avatar-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.9); opacity: .65; } }
 @keyframes avatar-ring { 0% { transform: scale(.9); opacity: 1; } 100% { transform: scale(1.12); opacity: .25; } }
 @media (prefers-reduced-motion: reduce) {
-  .avatar svg, .avatar-ring, .spinner, .typing span { animation: none; }
+  .avatar-face, .avatar-ring, .spinner, .typing span { animation: none; }
 }
 
 /* ---------------------------------------------------------------- conversation */
@@ -429,6 +434,10 @@ table.grid .muted { margin-top: 2px; }
 .segmented { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; align-self: flex-start; }
 .segment { padding: 6px 12px; border-radius: 8px; font-size: 13.5px; color: var(--muted); }
 .segment.active { background: var(--fill); color: var(--text); }
+/* A monthly spend limit: its name, No limit / Amount segments and the amount field (ux-dbx4). */
+.spend-limit { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; color: var(--muted); font-size: 13.5px; }
+.spend-limit input { width: 140px; }
+.form .inline.spend-limits { align-items: flex-start; gap: 24px; }
 /* A grant item in Advanced settings: its name over an allow / ask / deny switch (sk-746n). */
 .grant-item { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; color: var(--text); font-size: 13.5px; }
 .grant-item small { display: block; color: var(--faint); }
