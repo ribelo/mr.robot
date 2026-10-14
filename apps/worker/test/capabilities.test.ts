@@ -4,7 +4,7 @@
  */
 import { env, reset, runDurableObjectAlarm, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { CapabilitiesView, Conversation, GrantSet, RobotPanel, RobotSummary, SettingsCatalog } from '@mr-robot/protocol'
+import type { CapabilitiesView, Conversation, GrantSet, Me, RobotPanel, RobotSummary, SettingsCatalog } from '@mr-robot/protocol'
 import { docsIndex } from '../src/agent/docs-index.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
@@ -232,6 +232,41 @@ describe('labels of plugin tools and Hosts (ux-5g3w, ux-q8o6, ux-qm6u, ux-ywxa, 
     expect(runtime).toContain('\nallow: tools web; connections Google · anna@gmail.test\nask: hosts Desk · files\n')
     const toolRules = platform.slice(platform.indexOf('## Tools'), platform.indexOf('## Routines'))
     expect(toolRules).toContain('- Host online state is in the runtime section and in my_capabilities; never probe a Host with a command to find out.')
+  })
+})
+
+describe('the owner line (ux-i8ff, ux-nwi1, ux-xzdh)', () => {
+  const runtimeOf = async (id: string) => {
+    const platform = (await api<{ sections: Array<{ name: string; text: string }> }>(ANNA, `/api/robots/${id}/prompt`)).body.sections.find((section) => section.name === 'Platform')!.text
+    return platform.slice(platform.indexOf('## Runtime'))
+  }
+  const me = async () => (await api<Me>(ANNA, '/api/me')).body
+
+  it('the profile keeps an optional nickname; the prompt preview, the system prompt and my_capabilities name the owner the same way', async () => {
+    const id = await activeRobot({})
+    const mr = await mrRobot()
+    expect(await me()).not.toHaveProperty('nickname')
+    expect(await runtimeOf(id)).toContain('\n- Owner: Anna\n')
+    expect((await toolList(id)).view.owner).toBe('Anna')
+
+    expect((await api(ANNA, '/api/me', { method: 'PATCH', body: { nickname: '  Ania ' } })).status).toBe(200)
+    expect((await me()).nickname).toBe('Ania')
+    for (const robot of [id, mr]) expect(await runtimeOf(robot)).toContain('\n- Owner: Anna; address them as Ania\n')
+    expect((await toolList(id)).view.owner).toBe('Anna; address them as Ania')
+    // The model reads it in the Turn after the change, not only in the preview.
+    expect(systemOf(id)).toContain('- Owner: Anna; address them as Ania')
+
+    // A Robot created now names the owner the same way from the start.
+    const later = await activeRobot({})
+    expect(await runtimeOf(later)).toContain('\n- Owner: Anna; address them as Ania\n')
+
+    // A rename reaches every Robot; a blank nickname removes it; null is not a nickname.
+    expect((await api(ANNA, '/api/me', { method: 'PATCH', body: { nickname: null } })).status).toBe(400)
+    await api(ANNA, '/api/me', { method: 'PATCH', body: { name: 'Anna Kowalska', nickname: ' ' } })
+    expect(await me()).toMatchObject({ name: 'Anna Kowalska' })
+    expect(await me()).not.toHaveProperty('nickname')
+    for (const robot of [id, mr, later]) expect(await runtimeOf(robot)).toContain('\n- Owner: Anna Kowalska\n')
+    expect((await toolList(id)).view.owner).toBe('Anna Kowalska')
   })
 })
 

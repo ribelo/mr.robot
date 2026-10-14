@@ -13,6 +13,7 @@ const providers = {
   shared: [],
   models: [{ provider: 'workers-ai', model: '@cf/moonshotai/kimi-k2.6', label: 'Kimi K2.6', contextWindow: 128_000 }],
   defaultModel: { provider: 'workers-ai', model: '@cf/moonshotai/kimi-k2.6', effort: 'off' },
+  workersAiEnabled: true,
 }
 
 interface Call { readonly method: string; readonly path: string; readonly body: string }

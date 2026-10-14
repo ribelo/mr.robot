@@ -6,8 +6,8 @@
 
 **Blocked by:** 01 (UI primitives)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Section order as above; desktop sentence instead of the card (component test)
-- [ ] Nickname saved and returned by the profile API; Owner line in the prompt preview and in my_capabilities (workerd test)
-- [ ] Name in the sidebar foot does not wrap; Logins gap gone
+- [x] Section order as above; desktop sentence instead of the card (component test)
+- [x] Nickname saved and returned by the profile API; Owner line in the prompt preview and in my_capabilities (workerd test)
+- [x] Name in the sidebar foot does not wrap; Logins gap gone

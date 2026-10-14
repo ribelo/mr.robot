@@ -129,8 +129,8 @@ function PluginSettings({ plugin, isAdmin, onSaved }: { plugin: PluginView; isAd
         <div className="muted">{plugin.description}</div>
       </div>
       {plugin.setupNeeded === null ? null : <div className="note">{plugin.setupNeeded}</div>}
-      {plugin.connector !== null && plugin.enabled ? <YourAccounts plugin={plugin} /> : null}
-      {plugin.guide === null ? null : plugin.setupNeeded === null && plugin.connector !== null
+      {plugin.connectors.length > 0 && plugin.enabled ? <YourAccounts plugin={plugin} /> : null}
+      {plugin.guide === null ? null : plugin.setupNeeded === null && plugin.connectors.length > 0
         ? <details className="plugin-guide"><summary><h3>Home setup <span className="muted">(done once by the admin)</span></h3></summary><Markdown text={plugin.guide} /></details>
         : <div className="plugin-guide"><h3>Setup</h3><Markdown text={plugin.guide} /></div>}
       {!isAdmin ? <div className="muted">Only the Home admin changes this plugin's settings.</div> : plugin.fields.length === 0 ? <div className="muted">This plugin has no settings.</div> : (
@@ -154,7 +154,12 @@ function YourAccounts({ plugin }: { plugin: PluginView }) {
     <section className="form">
       <h3>Your {plugin.title} accounts</h3>
       {renderResult(connections, { what: 'your accounts' }, (list) => (
-        <ConnectorPanel plugin={plugin} connections={list.filter((connection) => connection.kind === plugin.connector!.kind)} />
+        plugin.connectors.map((way) => (
+          <div key={way.kind}>
+            {plugin.connectors.length > 1 ? <h4>{way.way}</h4> : null}
+            <ConnectorPanel plugin={plugin} way={way} connections={list.filter((connection) => connection.kind === way.kind)} />
+          </div>
+        ))
       ))}
     </section>
   )

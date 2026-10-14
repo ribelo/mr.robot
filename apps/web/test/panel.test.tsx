@@ -105,7 +105,7 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
 describe('grant levels in Advanced settings (sk-746n, sk-8llz)', () => {
   const catalog: SettingsCatalog = {
     toolGroups: [{ name: 'web', description: 'Fetch web pages' }, { name: 'files', description: 'Its Workspace' }, { name: 'deputy', description: 'Mr. Robot only' }],
-    skills: [], robots: [{ id: 'r-2', name: 'Accountant' }], secrets: [{ name: 'shop', scope: 'member' }], models: [],
+    skills: [], robots: [{ id: 'r-2', name: 'Accountant' }], secrets: [{ name: 'shop', scope: 'member' }], models: [], workersAiEnabled: true,
   }
   const settingsOf = (patch: Partial<RobotPanel['settings']>, kind: 'robot' | 'mr-robot'): RobotPanel => ({ ...panel, summary: { ...panel.summary, kind }, settings: { ...panel.settings, ...patch } })
   const open = (shown: RobotPanel) => {

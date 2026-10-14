@@ -16,12 +16,14 @@ const key = (option: { provider: string; model: string }) => `${option.provider}
 /**
  * A searchable model combobox grouped by Provider (rb-…, v1.1 ticket 07): typing filters by model
  * name and Provider. A Provider the person has not connected stays visible but disabled, labelled
- * with where to connect it, so a missing model explains itself.
+ * with where to connect it, so a missing model explains itself. A Provider the Home admin switched
+ * off (`disabledProviders`, ux-xsnr) is not offered; a value on it says so.
  */
-export function ModelSelect({ value, models, unavailable, onChange }: {
+export function ModelSelect({ value, models, unavailable, disabledProviders = [], onChange }: {
   value: ModelChoice
   models: readonly ModelOption[]
   unavailable: readonly ModelOption[]
+  disabledProviders?: readonly string[]
   onChange: (option: ModelOption) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -39,13 +41,15 @@ export function ModelSelect({ value, models, unavailable, onChange }: {
   const current = models.find((option) => key(option) === key(value))
   // The Provider is connected (it offers other models) but no longer lists this one.
   const gone = current === undefined && models.some((option) => option.provider === value.provider)
+  const switchedOff = current === undefined && disabledProviders.includes(value.provider)
+  const missing = switchedOff ? 'disabled by the admin' : gone ? 'no longer offered' : 'not connected'
   const label = (option: ModelOption) => option.label.replace(/ \([^)]*\)$/, '')
   const shown = groups(models)
   const off = groups(unavailable)
   return (
     <div className="model-combo" ref={box}>
       <button type="button" className="model-combo-current" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span>{current === undefined ? `${providerName(value.provider)}: ${value.model} (${gone ? 'no longer offered' : 'not connected'})` : `${label(current)}`}</span>
+        <span>{current === undefined ? `${providerName(value.provider)}: ${value.model} (${missing})` : `${label(current)}`}</span>
         <span className="muted">{providerName(value.provider)} ▾</span>
       </button>
       {open ? (
@@ -77,7 +81,7 @@ export function ModelSelect({ value, models, unavailable, onChange }: {
           </div>
         </div>
       ) : null}
-      {current === undefined ? <small className="muted">{gone ? `${providerName(value.provider)} no longer lists this model; pick another one.` : 'This model\'s Provider is not connected; the Robot cannot run until you connect it or pick another model.'}</small> : null}
+      {current === undefined ? <small className="muted">{switchedOff ? `${providerName(value.provider)} is disabled by the admin; pick another model.` : gone ? `${providerName(value.provider)} no longer lists this model; pick another one.` : 'This model\'s Provider is not connected; the Robot cannot run until you connect it or pick another model.'}</small> : null}
     </div>
   )
 }

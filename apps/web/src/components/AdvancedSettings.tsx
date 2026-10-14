@@ -59,7 +59,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   return (
     <div className="form">
       <h2>Model chain</h2>
-      <ChainEditor chain={draft.chain} models={catalog.models} unavailable={catalog.unavailableModels ?? []} accounts={catalog.accounts ?? []}
+      <ChainEditor chain={draft.chain} models={catalog.models} unavailable={catalog.unavailableModels ?? []} accounts={catalog.accounts ?? []} workersAiEnabled={catalog.workersAiEnabled}
         onChange={(chain) => setDraft({ ...draft, chain, model: { provider: chain[0]!.provider, model: chain[0]!.model, effort: chain[0]!.effort } })} />
       <label>Context budget: {Math.round(draft.contextBudget / 1000)}k tokens
         <input type="range" min={8000} max={maxBudget} step={8000} value={Math.min(draft.contextBudget, maxBudget)} onChange={(event) => setDraft({ ...draft, contextBudget: Number(event.target.value) })} />

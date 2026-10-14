@@ -6,8 +6,8 @@
 
 **Blocked by:** 08 (Person connections are never shared)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Read tools and write tools against stubbed Discord REST; write tools absent without the write grant (workerd test)
-- [ ] 401 sets Sign in again (workerd test)
-- [ ] Row shows both ways with the warning sentence and no shared checkbox for as-you (component test)
+- [x] Read tools and write tools against stubbed Discord REST; write tools absent without the write grant (workerd test)
+- [x] 401 sets Sign in again (workerd test)
+- [x] Row shows both ways with the warning sentence and no shared checkbox for as-you (component test)

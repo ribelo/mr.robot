@@ -9,6 +9,8 @@ export type StubReply =
 
 /** Per-robot scripts, shared by the test and the Robot DO (same isolate under vitest-plugin). */
 export const scripts = new Map<string, StubReply[]>()
+/** Providers whose Turns run on this stub; a test may add one (Workers AI has no binding in tests). */
+export const scriptedProviders = new Set<string>(['stub'])
 export const requests = new Map<string, GenerateOptions[]>()
 
 export class StubLlm extends LlmAdapter {

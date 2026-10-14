@@ -53,7 +53,7 @@ describe('plugins and their settings (cn-dbm9, cn-s1pd, cn-a1i0)', () => {
     const google = plugins.find((plugin) => plugin.name === 'google')!
     expect(google.fields.map((field) => [field.key, field.kind])).toEqual([['clientId', 'text'], ['clientSecret', 'secret']])
     expect(google.setupNeeded).toContain('Google OAuth client')
-    expect(google.connector).toMatchObject({ kind: 'google', connect: { method: 'oauth' } })
+    expect(google.connectors).toMatchObject([{ kind: 'google', connect: { method: 'oauth' } }])
     expect((await api<PluginView[]>(BEN, '/api/plugins')).body.find((plugin) => plugin.name === 'google')!.fields).toEqual([])
 
     const saved = await api<PluginView>(ANNA, '/api/admin/plugins/google/settings', { method: 'PUT', body: { values: { clientId: 'client-123.apps.googleusercontent.com', clientSecret: 'GOCSPX-very-secret' } } })

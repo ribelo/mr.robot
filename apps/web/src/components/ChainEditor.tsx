@@ -7,12 +7,14 @@ const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'xhi
 /**
  * A Robot's model chain (v1.10, pa-mho0): ordered account + model rows, reordered by dragging. The
  * Robot runs on the first usable row and moves down only when an account hits a limit or breaks.
+ * While the Home admin has Workers AI off, its rows stay and say that the Robot skips them (ux-zh1l).
  */
-export function ChainEditor({ chain, models, unavailable, accounts, onChange }: {
+export function ChainEditor({ chain, models, unavailable, accounts, workersAiEnabled = true, onChange }: {
   chain: readonly ChainEntry[]
   models: readonly ModelOption[]
   unavailable: readonly ModelOption[]
   accounts: readonly ProviderView[]
+  workersAiEnabled?: boolean
   onChange: (chain: ChainEntry[]) => void
 }) {
   const [dragged, setDragged] = useState<number>()
@@ -41,9 +43,9 @@ export function ChainEditor({ chain, models, unavailable, accounts, onChange }: 
             <span className="chain-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
             <span className="chain-index">{index + 1}</span>
             <div className="chain-fields">
-              <ModelSelect value={{ provider: entry.provider, model: entry.model, effort: entry.effort }} models={models} unavailable={unavailable}
+              <ModelSelect value={{ provider: entry.provider, model: entry.model, effort: entry.effort }} models={models} unavailable={unavailable} disabledProviders={workersAiEnabled ? [] : ['workers-ai']}
                 onChange={(option) => set(index, option.provider === entry.provider ? { ...entry, model: option.model } : { ...entry, ...firstAccount(option.provider), provider: option.provider, model: option.model })} />
-              {entry.provider === 'workers-ai' ? <span className="muted">Workers AI · this Cloudflare account</span> : (
+              {entry.provider === 'workers-ai' ? <span className="muted">{workersAiEnabled ? 'Workers AI · this Cloudflare account' : 'Workers AI · disabled by the admin; the Robot skips this entry'}</span> : (
                 <select aria-label={`Account for entry ${index + 1}`} value={entry.account} onChange={(event) => {
                   const account = usable(entry.provider).find((candidate) => candidate.id === event.target.value)
                   set(index, { ...entry, account: account?.id ?? '', owner: account?.ownerId ?? '' })

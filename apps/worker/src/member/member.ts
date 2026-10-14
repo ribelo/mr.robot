@@ -7,6 +7,7 @@ import { HostHub, type HostEntry, type HostAction } from './hosts.ts'
 import { GoogleConsents } from './google-consent.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
 import { describeConnectorFailure } from '../connectors/connector.ts'
+import { actsAsPerson } from '../plugins/catalog.ts'
 import { ConnectionStore, type ConnectionChange, type ConnectionMeta, type NewConnection, type OwnConnection } from './connections.ts'
 import { metaOf, parseEntry, type LoginMeta } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -15,7 +16,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
 import { probeAccount, type Probe } from '../providers/usage.ts'
-import type { AccountStatus, AccountUsage, ConnectorKind, NotificationKind, ProviderView, QuietHours, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
+import type { AccountStatus, AccountUsage, ConnectorKind, NotificationKind, ProviderView, QuietHours, RobotOwner, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -33,6 +34,8 @@ export interface MemberProfile {
   readonly id: string
   readonly email: string
   readonly name: string
+  /** How the Member's Robots address them (ux-i8ff); trimmed, never empty. Absent: by their name. */
+  readonly nickname?: string
   /** The zone the owner's Robots work in: the app's zone, unless pinned. */
   readonly timeZone: string
   /** The person set the zone by hand; the app's zone no longer replaces it. Absent: not pinned. */
@@ -90,9 +93,13 @@ const init = (input: { id: string; email: string; name: string }) => Effect.gen(
   return created
 })
 
-/** What a person can change on the profile. A `timeZone` is typed by hand and pins; `useDetectedTimeZone` unpins. */
+/**
+ * What a person can change on the profile. A `timeZone` is typed by hand and pins; `useDetectedTimeZone`
+ * unpins. A `nickname` replaces the stored one; a blank one removes it.
+ */
 export interface ProfilePatch {
   readonly name?: string
+  readonly nickname?: string
   readonly timeZone?: string
   readonly useDetectedTimeZone?: true
   readonly quietHours?: QuietHours | null
@@ -102,7 +109,7 @@ export interface ProfilePatch {
 
 const updateProfile = (patch: ProfilePatch) => Effect.gen(function* () {
   const current = yield* profile
-  const { timeZone, useDetectedTimeZone, ...rest } = patch
+  const { timeZone, useDetectedTimeZone, nickname, ...rest } = patch
   if (timeZone !== undefined && useDetectedTimeZone === true) return yield* invalid('give a time zone or ask for the app\'s zone, not both')
   const typed = timeZone === undefined ? undefined : parseTimeZone(timeZone)
   if (timeZone !== undefined && typed === undefined) return yield* invalid(`"${timeZone}" is not a time zone; use a name like Europe/Warsaw`)
@@ -110,10 +117,16 @@ const updateProfile = (patch: ProfilePatch) => Effect.gen(function* () {
     typed !== undefined ? { timeZone: typed, timeZonePinned: true }
       : useDetectedTimeZone === true ? { timeZonePinned: false, ...(current.detectedTimeZone === undefined ? {} : { timeZone: current.detectedTimeZone }) }
         : {}
-  const next = { ...current, ...rest, ...zone }
+  const { nickname: kept, ...others } = current
+  const named = nickname === undefined ? kept : nickname.trim()
+  const next: MemberProfile = { ...others, ...(named === undefined || named === '' ? {} : { nickname: named }), ...rest, ...zone }
   yield* kvSet('profile', next)
   return next
 })
+
+/** The Member as their Robots name them (ux-nwi1). */
+export const robotOwner = (profile: MemberProfile): RobotOwner =>
+  profile.nickname === undefined ? { name: profile.name } : { name: profile.name, nickname: profile.nickname }
 
 /** The app reported its zone: it becomes the profile zone unless the person pinned one. */
 const detectTimeZone = (zone: string) => Effect.gen(function* () {
@@ -593,6 +606,7 @@ export class Member extends DurableObject<Env> {
     const before = await this.run(profile)
     const after = await this.run(updateProfile(patch))
     await this.zoneMoved(before, after)
+    await this.ownerRenamed(before, after)
     return after
   }
   /** The app opened and reported its zone (an IANA zone, already parsed). */
@@ -601,6 +615,11 @@ export class Member extends DurableObject<Env> {
     const after = await this.run(detectTimeZone(zone))
     await this.zoneMoved(before, after)
     return after
+  }
+  /** The name or the nickname changed: every Robot of this Member names its owner the new way (ux-nwi1). */
+  private async ownerRenamed(before: MemberProfile, after: MemberProfile): Promise<void> {
+    if (before.name === after.name && before.nickname === after.nickname) return
+    await this.env.HOME.getByName(HOME_ID).ownerChanged(after.id, robotOwner(after)).catch((error: unknown) => console.warn('owner change not delivered', error))
   }
   /** The profile zone changed: every Robot of this Member follows it and is told (v1.11 ticket 08). */
   private async zoneMoved(before: MemberProfile, after: MemberProfile): Promise<void> {
@@ -723,6 +742,16 @@ export class Member extends DurableObject<Env> {
     if (connector?.verifyPasted === undefined) throw new Error(`${input.kind} is not available yet`)
     const outcome = await Effect.runPromise(Effect.result(connector.verifyPasted(input.secrets, this.connectorFetch())))
     if (outcome._tag === 'Failure') throw new Error(outcome.failure._tag === 'ConnectorUnauthorized' ? `the pasted values were refused: ${outcome.failure.message}` : describeConnectorFailure(outcome.failure))
+    // Signing in again (ux-cbo3): a person connection for an account the Member already has takes the new
+    // session and is connected again, keeping its id and so every Robot's grant on it.
+    const again = actsAsPerson(input.kind) ? this.connectionsOf.list().find((known) => known.kind === input.kind && known.account === outcome.success.account) : undefined
+    if (again !== undefined) {
+      const renewed = await this.connectionsOf.update(again.id, {
+        status: 'connected', statusNote: null, meta: outcome.success.meta, secrets: input.secrets,
+        ...(input.label === null || input.label.trim() === '' ? {} : { label: input.label.trim() }),
+      })
+      if (renewed !== undefined) return renewed
+    }
     const added = await this.connectionsOf.add({
       kind: input.kind,
       label: input.label === null || input.label.trim() === '' ? outcome.success.label : input.label.trim(),

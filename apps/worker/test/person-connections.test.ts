@@ -53,8 +53,8 @@ const byName = <T extends { name: string }>(list: readonly T[]) => [...list].sor
 describe('the server refuses sharing a person connection (ux-bk91, ux-ro7d)', () => {
   it('marks Slack and Google as acting as a person, Discord not', async () => {
     const plugins = (await api<PluginView[]>(ANNA, '/api/plugins')).body
-    const flag = (name: string) => plugins.find((plugin) => plugin.name === name)!.connector!.actsAsPerson
-    expect([flag('slack'), flag('google'), flag('discord')]).toEqual([true, true, false])
+    const flags = (name: string) => plugins.find((plugin) => plugin.name === name)!.connectors.map((way) => [way.kind, way.actsAsPerson])
+    expect([...flags('slack'), ...flags('google'), ...flags('discord')]).toEqual([['slack', true], ['google', true], ['discord', false], ['discord-user', true]])
   })
 
   it('refuses shared on create and update for Slack and Google; a Discord bot still shares', async () => {

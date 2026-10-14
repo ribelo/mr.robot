@@ -22,34 +22,39 @@ const PROVIDERS = [
   { id: 'openrouter', name: 'OpenRouter', note: 'Hundreds of models with one API key.', kind: 'api-key' },
 ] as const
 
-/** A Member's own settings: profile, quiet hours, Provider credentials, Member files. */
+/**
+ * A Member's own settings (ux-ag0j): You, Appearance, Providers, Connections, Logins, Hosts, the Member
+ * files, and the dangerous action last.
+ */
 export function Profile({ me }: { me: Me }) {
   return (
     <div className="form">
-      <Preferences me={me} />
-      <ThemeSetting me={me} />
-      <WorkDetailsSetting me={me} />
-      <ResetEverything me={me} />
-      <DeviceNotifications vapidPublicKey={me.vapidPublicKey} />
+      <You me={me} />
+      <Appearance me={me} />
       <Providers />
       <Connections />
       <Secrets />
       <Hosts />
       <MemberFiles />
+      <ResetEverything me={me} />
     </div>
   )
 }
 
-function Preferences({ me }: { me: Me }) {
+/** Name, nickname, time zone, quiet hours and the notifications of this device (ux-etwn, ux-i8ff). */
+function You({ me }: { me: Me }) {
   const command = useCommand()
   const [name, setName] = useState(me.name)
+  const [nickname, setNickname] = useState(me.nickname ?? '')
   const [timeZone, setTimeZone] = useState(me.timeZone)
   const [quiet, setQuiet] = useState(me.quietHours ?? { start: '', end: '' })
   const [error, setError] = useState<string>()
+  const nativeNotifications = hostBridge()?.nativeNotifications === true
   const save = async () => {
     // Only a zone the person typed is sent: it pins the zone, so saving other fields must not.
     const zone = timeZone.trim() !== me.timeZone ? { timeZone: timeZone.trim() } : {}
-    const exit = await command((api) => api.updateMe({ name, ...zone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null }), [keys.me, keys.robots, keys.admin])
+    // A blank nickname removes it.
+    const exit = await command((api) => api.updateMe({ name, nickname, ...zone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null }), [keys.me, keys.robots, keys.admin])
     setError(exitFailure(exit))
     return exit
   }
@@ -62,6 +67,8 @@ function Preferences({ me }: { me: Me }) {
     <>
       <h2>You</h2>
       <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+      <label>Nickname (optional)<input value={nickname} aria-describedby="nickname-hint" onChange={(event) => setNickname(event.target.value)} /></label>
+      <div id="nickname-hint" className="muted">How your Robots address you.</div>
       <label>Time zone<input value={timeZone} onChange={(event) => setTimeZone(event.target.value)} placeholder="Europe/Warsaw" /></label>
       <div className="muted">
         {me.detectedTimeZone === null ? 'The app has not reported its zone yet.' : `This app reports ${me.detectedTimeZone}.`}{' '}
@@ -72,7 +79,10 @@ function Preferences({ me }: { me: Me }) {
         <label>Quiet from<input type="time" value={quiet.start} onChange={(event) => setQuiet({ ...quiet, start: event.target.value })} /></label>
         <label>until<input type="time" value={quiet.end} onChange={(event) => setQuiet({ ...quiet, end: event.target.value })} /></label>
       </div>
+      {/* In the desktop app notifications arrive over its own connection, natively (pl-b5vp): nothing to switch (ux-bune). */}
+      {nativeNotifications ? <div className="muted">The Mr. Robot app shows notifications on this computer; quiet hours hold them until morning.</div> : null}
       <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} /></div>
+      {nativeNotifications ? null : <WebPushSwitch vapidPublicKey={me.vapidPublicKey} />}
     </>
   )
 }
@@ -101,7 +111,7 @@ function ProviderList({ view }: { view: ProvidersView }) {
         ))}
         <div className="provider">
           <div className="provider-name"><div>Workers AI</div><div className="muted">Models on Cloudflare, billed to this Cloudflare account.</div></div>
-          <div className="provider-action"><span className="muted">Included</span></div>
+          <div className="provider-action"><span className="muted">{view.workersAiEnabled ? 'Included' : 'Disabled by the admin'}</span></div>
         </div>
       </div>
     </>
@@ -297,17 +307,7 @@ function MemberFileEditor({ name, initial }: { name: string; initial: string }) 
     </>
   )
 }
-/** Web Push on this device (robot-ajrp, robot-9xoj). On a phone, install the app first. */
-function DeviceNotifications({ vapidPublicKey }: { vapidPublicKey: string }) {
-  // In the desktop app notifications arrive over its own connection, natively (pl-b5vp).
-  if (hostBridge()?.nativeNotifications === true) {
-    return (
-      <div className="toggle-card"><div><div>Notifications on this computer</div><div className="muted">The Mr. Robot app shows them as system notifications while this computer is paired. Quiet hours hold them until morning.</div></div></div>
-    )
-  }
-  return <WebPushSwitch vapidPublicKey={vapidPublicKey} />
-}
-
+/** Web Push on this device (robot-ajrp, robot-9xoj), in the You section next to quiet hours. On a phone, install the app first. */
 function WebPushSwitch({ vapidPublicKey }: { vapidPublicKey: string }) {
   const command = useCommand()
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
@@ -317,7 +317,7 @@ function WebPushSwitch({ vapidPublicKey }: { vapidPublicKey: string }) {
     if (!supported) return
     void navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription()).then(setSubscription)
   }, [supported])
-  if (!supported) return <><h2>Notifications</h2><div className="muted">This browser cannot receive push notifications. On a phone, add Mr. Robot to the home screen first.</div></>
+  if (!supported) return <div className="muted">This browser cannot receive push notifications. On a phone, add Mr. Robot to the home screen first.</div>
   const enable = async () => {
     try {
       if ((await Notification.requestPermission()) !== 'granted') throw new Error('notifications are blocked for this site')
@@ -338,7 +338,6 @@ function WebPushSwitch({ vapidPublicKey }: { vapidPublicKey: string }) {
   }
   return (
     <>
-      <h2>Notifications</h2>
       <div className="toggle-card">
         <div>
           <div>Notifications on this device</div>
@@ -386,7 +385,7 @@ function Secrets() {
     <>
       <h2>Logins</h2>
       <div className="muted">Accounts your Robots may use once you grant them in a Robot's Advanced settings. A Robot fills the username and password into the matching website without seeing the password; "allow reading" lets it read the value (for API keys).</div>
-      <div className="login-list">
+      {(list ?? []).length === 0 ? null : <div className="login-list">
         {(list ?? []).map((login) => (
           <div key={`${login.scope}-${login.name}`} className="login-row">
             <div className="login-main">
@@ -406,7 +405,7 @@ function Secrets() {
             ) : null}
           </div>
         ))}
-      </div>
+      </div>}
       {editing === null
         ? <button type="button" className="button" onClick={() => setEditing({ name: '', username: '', password: '', websites: '', notes: '', allowRead: false, shared: false, existing: false })}>Add login</button>
         : <LoginForm draft={editing} onChange={setEditing} onSave={save} onCancel={() => setEditing(null)} />}
@@ -446,13 +445,24 @@ function LoginForm({ draft, onChange, onSave, onCancel }: { draft: LoginDraft; o
 
 const THEMES = [{ id: 'system', label: 'System' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }] as const
 
+/** How the app looks to this person: theme and work details. */
+function Appearance({ me }: { me: Me }) {
+  return (
+    <>
+      <h2>Appearance</h2>
+      <ThemeSetting me={me} />
+      <WorkDetailsSetting me={me} />
+    </>
+  )
+}
+
 /** Theme (ap-itj1): follow the system or pin light or dark; per person, applied at once. */
 function ThemeSetting({ me }: { me: Me }) {
   const command = useCommand()
   const [value, setValue] = useState<ThemeChoice>(me.theme ?? 'system')
   return (
     <>
-      <h2>Theme</h2>
+      <h3 className="panel-section">Theme</h3>
       <div className="muted">System follows your device's light or dark setting.</div>
       <div className="segmented" role="radiogroup" aria-label="Theme">
         {THEMES.map((option) => (
@@ -470,7 +480,7 @@ function WorkDetailsSetting({ me }: { me: Me }) {
   const [value, setValue] = useState(me.workDetails ?? 'compact')
   return (
     <>
-      <h2>Work details</h2>
+      <h3 className="panel-section">Work details</h3>
       <div className="muted">How much of a Robot's work you see in a conversation. The trajectory stays available as the full debug view.</div>
       <div className="segmented" role="radiogroup" aria-label="Work details">
         {WORK_DETAILS.map((option) => (

@@ -122,12 +122,20 @@ export interface HttpCall {
 export type UnauthorizedTest = (status: number, body: unknown) => string | null
 
 const RETRY_LIMIT = 2
+/** The longest Retry-After a call waits for; a longer one fails as ConnectorRateLimited. */
+const RETRY_AFTER_LIMIT_SECONDS = 30
+
+/**
+ * How a 429 is retried: 'spaced' tries twice more a second apart; 'retry-after-once' waits as long as
+ * the service's Retry-After says and tries once more (Discord as you).
+ */
+export type RateLimitRetry = 'spaced' | 'retry-after-once'
 
 /**
  * One request through Effect HttpClient: the body decoded with schema; 401/403 become
- * ConnectorUnauthorized, 429 is retried after Retry-After (at most twice), other errors carry the status.
+ * ConnectorUnauthorized, 429 is retried by the rateLimit policy, other errors carry the status.
  */
-export function request<S extends Schema.Top>(fetch: typeof globalThis.fetch, call: HttpCall, schema: S, unauthorized?: UnauthorizedTest): Effect.Effect<S['Type'], ConnectorFailure> {
+export function request<S extends Schema.Top>(fetch: typeof globalThis.fetch, call: HttpCall, schema: S, unauthorized?: UnauthorizedTest, rateLimit: RateLimitRetry = 'spaced'): Effect.Effect<S['Type'], ConnectorFailure> {
   const once = Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     let req = HttpClientRequest.make(call.method)(call.url)
@@ -148,14 +156,16 @@ export function request<S extends Schema.Top>(fetch: typeof globalThis.fetch, ca
     if (response.status < 200 || response.status >= 300) return yield* new ConnectorRequestFailed({ status: response.status, message: errorText(body, response.status) })
     return yield* Schema.decodeUnknownEffect(schema)(body).pipe(Effect.mapError((issue) => new ConnectorResponseInvalid({ message: String(issue).slice(0, 300) })))
   })
-  return once.pipe(
-    Effect.retry({
-      while: (failure: ConnectorFailure) => failure._tag === 'ConnectorRateLimited' && failure.retryAfterSeconds <= 30,
+  const retried = rateLimit === 'retry-after-once'
+    ? once.pipe(Effect.catchTag('ConnectorRateLimited', (limited) => (limited.retryAfterSeconds <= RETRY_AFTER_LIMIT_SECONDS
+      ? Effect.andThen(Effect.sleep(Duration.seconds(Math.max(limited.retryAfterSeconds, 0))), once)
+      : Effect.fail(limited))))
+    : once.pipe(Effect.retry({
+      while: (failure: ConnectorFailure) => failure._tag === 'ConnectorRateLimited' && failure.retryAfterSeconds <= RETRY_AFTER_LIMIT_SECONDS,
       times: RETRY_LIMIT,
       schedule: Schedule.spaced(Duration.seconds(1)),
-    }),
-    Effect.provide(httpLayer(fetch)),
-  ) as Effect.Effect<S['Type'], ConnectorFailure>
+    }))
+  return retried.pipe(Effect.provide(httpLayer(fetch))) as Effect.Effect<S['Type'], ConnectorFailure>
 }
 
 /** Raw bytes of a response (attachments, downloads). */
@@ -285,7 +295,8 @@ export function connectorTools(host: ConnectorHost, specs: ReadonlyArray<Connect
 /** A tool listing the granted accounts of a connector, so the model knows what it can act on. */
 export function accountsTool(host: ConnectorHost, defaultServices: readonly string[] = [], listedServices: (services: readonly string[]) => readonly string[] = (services) => [...services]): ToolDefinition {
   return tool<Record<string, never>>({
-    name: `${host.kind}_accounts`,
+    // A tool name has no hyphen: discord-user lists its accounts with discord_user_accounts.
+    name: `${host.kind.replace(/-/g, '_')}_accounts`,
     description: `List the ${host.kind} accounts granted to you: label, account, services, whether writing is granted, and the default.`,
     parameters: { properties: {} },
     execute: async () => host.accounts.map(({ label, account, services, write, isDefault }) => ({ label, account, services: listedServices(services.length === 0 ? defaultServices : services), write, isDefault })),

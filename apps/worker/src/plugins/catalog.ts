@@ -10,6 +10,8 @@ import { TOOL_GROUPS, type ToolGroup } from '../agent/catalog.ts'
 
 export interface ConnectorSpec {
   readonly kind: ConnectorKind
+  /** Who a connection of this way acts as, as the plugin's row names the way ("As you", "As a bot"). */
+  readonly way: string
   readonly connect: ConnectSpec
   /**
    * A connection of this connector acts as the person who connected it (a Slack session, a Google
@@ -21,7 +23,7 @@ export interface ConnectorSpec {
 /** Connect by OAuth consent with a service choice, or by pasting values described by a schema. */
 export type ConnectSpec =
   | { readonly method: 'oauth'; readonly services: Extract<ConnectMethod, { method: 'oauth' }>['services'] }
-  | { readonly method: 'paste'; readonly schema: z<unknown>; readonly instructions: string }
+  | { readonly method: 'paste'; readonly schema: z<unknown>; readonly instructions: string; readonly warning?: string }
 
 export interface PluginEntry {
   readonly name: string
@@ -38,11 +40,12 @@ export interface PluginEntry {
   readonly guide?: (origin: string) => string
   /** What the admin still has to set up, given the saved values and which secrets are stored. */
   readonly setupNeeded?: (values: Readonly<Record<string, unknown>>, secretsSet: ReadonlySet<string>) => string | null
-  readonly connector?: ConnectorSpec
+  /** Connectors only: the ways to connect an account, each a connector kind (Discord: a bot, or the person's own account). */
+  readonly connectors: readonly ConnectorSpec[]
 }
 
 const capability = (name: ToolGroup, title: string, icon: string, extra: Partial<PluginEntry> = {}): PluginEntry => ({
-  name, title, description: TOOL_GROUPS[name], icon, group: 'capability', toolGroups: [name], ...extra,
+  name, title, description: TOOL_GROUPS[name], icon, group: 'capability', toolGroups: [name], connectors: [], ...extra,
 })
 
 export const PLUGINS: readonly PluginEntry[] = [
@@ -82,8 +85,9 @@ export const PLUGINS: readonly PluginEntry[] = [
       '',
       'Then each person connects their own Google accounts under their name → Connections → Google, choosing which services each account grants.',
     ].join('\n'),
-    connector: {
+    connectors: [{
       kind: 'google',
+      way: 'As you',
       actsAsPerson: true,
       connect: {
         method: 'oauth',
@@ -95,13 +99,14 @@ export const PLUGINS: readonly PluginEntry[] = [
           { value: 'contacts', label: 'Contacts' },
         ],
       },
-    },
+    }],
   },
   {
     name: 'slack', title: 'Slack', icon: 'slack', group: 'connector', toolGroups: [],
     description: 'Read a Slack workspace (channels, unread, threads, search, people) and, with a write grant, post and mark read.',
-    connector: {
+    connectors: [{
       kind: 'slack',
+      way: 'As you',
       actsAsPerson: true,
       connect: {
         method: 'paste',
@@ -111,11 +116,11 @@ export const PLUGINS: readonly PluginEntry[] = [
         }) as never,
         instructions: 'Open the workspace in the browser and sign in. Press F12 → Console and run: JSON.parse(localStorage.getItem("localConfig_v2")).teams — copy the token starting with xoxc- . Then open Application → Cookies → https://app.slack.com and copy the cookie named d (it starts with xoxd-). Paste both here. If you sign out of Slack in that browser, paste them again.',
       },
-    },
+    }],
   },
   {
     name: 'discord', title: 'Discord', icon: 'discord', group: 'connector', toolGroups: [],
-    description: 'A Discord bot on your server: Robots read and post in channels and DMs, and talk to you through their own channel.',
+    description: 'As a bot on your server: Robots read and post in channels and DMs, and talk to you through their own channel. As you: Robots read the servers you are on and, with a write grant, send, reply, react and mark read.',
     guide: () => [
       'Do this once for the Home. The bot belongs to you, not to Mr. Robot: nothing is published anywhere.',
       '',
@@ -125,8 +130,9 @@ export const PLUGINS: readonly PluginEntry[] = [
       '4. Your Discord connection then shows **Invite the bot to a server**: open it, pick your server and allow. The bot appears in the member list.',
       '5. Give a robot its channel: open the robot → ⚙ profile → *Talk to this Robot on Discord*, and paste the channel id (right-click the channel → Copy Channel ID with Developer Mode on).',
     ].join('\n'),
-    connector: {
+    connectors: [{
       kind: 'discord',
+      way: 'As a bot',
       connect: {
         method: 'paste',
         schema: z.object({
@@ -134,7 +140,20 @@ export const PLUGINS: readonly PluginEntry[] = [
         }) as never,
         instructions: 'Set up the bot once: open discord.com/developers/applications → New Application, name it Mr. Robot. In Bot, press Reset Token and copy it, and switch on Message Content Intent. Paste the token here; the row then shows the link that invites the bot to your server.',
       },
-    },
+    }, {
+      // Discord as you (ux-urf8): the person's own user token on Discord's REST API, no gateway.
+      kind: 'discord-user',
+      way: 'As you',
+      actsAsPerson: true,
+      connect: {
+        method: 'paste',
+        schema: z.object({
+          token: z.string().role('secret').required().description('User token'),
+        }) as never,
+        instructions: 'Open discord.com in the browser and sign in. Press F12, then Ctrl+Shift+M (device toolbar) and reload the page. Open Application → Local Storage → https://discord.com and copy the value of token. Paste it here. If you sign out of Discord in that browser, sign in and paste it again.',
+        warning: 'Discord forbids automating a user account and may close it. You take that risk.',
+      },
+    }],
   },
 ]
 
@@ -145,13 +164,26 @@ export const CONNECTOR_TITLES: Readonly<Record<ConnectorKind, string>> = {
   google: 'Google',
   slack: 'Slack',
   discord: 'Discord bot',
+  'discord-user': 'Discord',
+}
+
+/** The connector of a kind with its plugin; undefined for a kind the catalogue does not have (a path segment). */
+export function connectorOf(kind: string): { readonly plugin: PluginEntry; readonly connector: ConnectorSpec } | undefined {
+  for (const plugin of PLUGINS) {
+    const connector = plugin.connectors.find((entry) => entry.kind === kind)
+    if (connector !== undefined) return { plugin, connector }
+  }
+  return undefined
 }
 
 /** The connector plugin of a kind. */
-export const connectorPlugin = (kind: ConnectorKind): PluginEntry | undefined => PLUGINS.find((plugin) => plugin.connector?.kind === kind)
+export const connectorPlugin = (kind: ConnectorKind): PluginEntry | undefined => connectorOf(kind)?.plugin
 
 /** Whether connections of a kind act as a person and so are never shared with the Home (ux-bk91). */
-export const actsAsPerson = (kind: ConnectorKind): boolean => connectorPlugin(kind)?.connector?.actsAsPerson === true
+export const actsAsPerson = (kind: ConnectorKind): boolean => connectorOf(kind)?.connector.actsAsPerson === true
+
+/** Whether the Home has the plugin of a connector kind on (both Discord kinds follow the Discord plugin). */
+export const connectorOn = (enabled: Readonly<Record<string, boolean>>, kind: ConnectorKind): boolean => enabled[connectorPlugin(kind)?.name ?? kind] !== false
 
 /** Tool groups of the plugins the Home switched off. */
 export function disabledToolGroups(enabled: Readonly<Record<string, boolean>>): Set<string> {

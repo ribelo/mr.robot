@@ -61,9 +61,9 @@ import { maskSecrets, type SecretHost } from '../agent/tools/secrets.ts'
 import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
 import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
-import { chainOf, clock, failureKind, modelOf } from './chain.ts'
+import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { ChainEntry, ProviderView } from '@mr-robot/protocol'
-import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type SettingsCatalog } from '@mr-robot/protocol'
+import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { wakeupMessage, type HelpAnswerWake, type ThreadWake } from '../agent/sources.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
@@ -88,7 +88,7 @@ import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Help } from '../plugins/help.ts'
 import { Host } from '../plugins/host.ts'
 import { connectorCapability } from '../plugins/connector.ts'
-import { disabledToolGroups } from '../plugins/catalog.ts'
+import { connectorOn, disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
 import { heldSkillNames } from '../connectors/skills.ts'
 import type { ConnectorHost, ConnectorPlugin, GrantedConnection } from '../connectors/connector.ts'
@@ -338,7 +338,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const identity = this.providerIdentity(config)
     const sections = [
       ...(identity === null ? [] : [{ name: 'Provider identity', text: identity }]),
-      { name: 'Platform', text: platformPrompt({ config, ownerName: owner.name, afterProviderIdentity: identity !== null, ...this.capabilityInput() }) },
+      { name: 'Platform', text: platformPrompt({ config, owner, afterProviderIdentity: identity !== null, ...this.capabilityInput() }) },
       // The rules each mounted capability adds, which reach the model as their own sections (sk-xsat).
       ...this.mounts(config).flatMap(({ plugin, config: options }) => {
         const text = plugin.rules(options as never)
@@ -748,18 +748,23 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return Math.min(this.store.get<number>('chain-active') ?? 0, chain.length - 1)
   }
 
-  /** Each entry's account state now; unbound entries and Workers AI are always usable. */
-  private async entryStates(chain: readonly ChainEntry[]): Promise<Array<{ usable: boolean; until: number | null; label: string }>> {
+  /**
+   * Each entry's account state now; unbound entries are always usable, Workers AI entries while the
+   * Home admin leaves Workers AI on (ux-zh1l). `disabled`: unusable because the admin switched it off.
+   */
+  private async entryStates(chain: readonly ChainEntry[]): Promise<Array<{ usable: boolean; until: number | null; label: string; disabled: boolean }>> {
     const config = this.store.requireConfig()
     const bound = chain.some((entry) => entry.account !== '' && entry.account !== 'workers-ai')
     const { mine, shared } = bound ? await this.home().accountsFor(config.ownerId) : { mine: [], shared: [] }
+    const workersAiOn = chain.some((entry) => entry.provider === 'workers-ai') ? (await this.home().settings()).workersAiEnabled : true
     this.chainStates = new Map([...mine, ...shared].map((account) => [account.id, account]))
     const now = Date.now()
     return chain.map((entry) => {
-      if (entry.account === '' || entry.account === 'workers-ai') return { usable: true, until: null, label: entry.account === 'workers-ai' ? 'Workers AI' : entry.provider }
+      if (entry.provider === 'workers-ai') return { usable: workersAiOn, until: null, label: 'Workers AI', disabled: !workersAiOn }
+      if (entry.account === '') return { usable: true, until: null, label: entry.provider, disabled: false }
       const account = this.chainStates.get(entry.account)
-      if (account === undefined) return { usable: false, until: null, label: 'an account that is gone' }
-      return { usable: account.status === 'ok' || (account.until ?? 0) <= now, until: account.until, label: account.label }
+      if (account === undefined) return { usable: false, until: null, label: 'an account that is gone', disabled: false }
+      return { usable: account.status === 'ok' || (account.until ?? 0) <= now, until: account.until, label: account.label, disabled: false }
     })
   }
 
@@ -773,24 +778,31 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const states = await this.entryStates(chain)
     const index = states.findIndex((state) => state.usable)
     if (index < 0) {
+      // Nothing to wait for but the admin's switch: the alarm looks again every hour (ux-mz3h).
       const earliest = Math.min(...states.map((state) => state.until ?? Date.now() + 3_600_000))
-      if (this.store.get<number>('chain-resume-at') !== earliest) {
-        this.store.set('chain-resume-at', earliest)
-        this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Every model in the chain is unavailable${reason === undefined ? '' : ` (${reason})`}. ${config.identity.name} continues by itself at ${clock(earliest, config.timeZone)}, or sooner when you add another entry.`, Date.now())
-        this.ctx.waitUntil(this.notifyMembers('blocked', `Every model in its chain is unavailable; it continues at ${clock(earliest, config.timeZone)}.`).catch(() => 0))
+      const why = reason ?? (states.some((state) => state.disabled) ? WORKERS_AI_OFF : undefined)
+      const blocked = why ?? 'unavailable'
+      this.store.set('chain-resume-at', earliest)
+      // A Robot that stays blocked for the same reason says so once, not at every look.
+      if (this.store.get<string>('chain-blocked') !== blocked) {
+        this.store.set('chain-blocked', blocked)
+        const waits = states.every((state) => state.disabled) ? 'after the admin switches Workers AI on again' : `by itself at ${clock(earliest, config.timeZone)}`
+        this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Every model in the chain is unavailable${why === undefined ? '' : ` (${why})`}. ${config.identity.name} continues ${waits}, or sooner when you add another entry.`, Date.now())
+        this.ctx.waitUntil(this.notifyMembers('blocked', `Every model in its chain is unavailable${states.some((state) => state.disabled) ? ` (${WORKERS_AI_OFF})` : ''}; it continues ${waits}.`).catch(() => 0))
         await this.changed()
       }
       await this.rearm()
       return false
     }
     this.store.delete('chain-resume-at')
+    this.store.delete('chain-blocked')
     const active = this.activeIndex(chain)
     if (index === active) return true
     const entry = chain[index]!
     const was = states[active]!
     const line = index < active
       ? `Back to ${entry.model} on ${states[index]!.label}: it works again.`
-      : `Switched to ${entry.model} on ${states[index]!.label}: ${reason ?? `${was.label} is unavailable${was.until === null ? '' : ` until ${clock(was.until, config.timeZone)}`}`}.`
+      : `Switched to ${entry.model} on ${states[index]!.label}: ${reason ?? (was.disabled ? WORKERS_AI_OFF : `${was.label} is unavailable${was.until === null ? '' : ` until ${clock(was.until, config.timeZone)}`}`)}.`
     this.store.set('chain-active', index)
     this.store.updateConfig(() => ({ model: modelOf(entry) }))
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), line, Date.now())
@@ -912,7 +924,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     if (this.composition?.revision === config.revision) return this.composition.value
     await this.releaseComposition()
-    const owner = this.owner()
     const brief = this.store.get<string>('brief') ?? null
     const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
     const chosen = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)
@@ -921,8 +932,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // The bridge follows the adapter that runs this composition (sk-74ym); every text is read at each request.
     const afterProviderIdentity = prependedIdentity(adapter) !== null
     const prompt = [
-      ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), ownerName: owner.name, afterProviderIdentity, ...this.capabilityInput() }) })),
-      ...(config.status === 'setup' ? [{ name: 'setup', text: () => setupPrompt(owner.name, brief) }] : []),
+      // The owner is read with every text too: a rename or a new nickname reaches the next request (ux-nwi1).
+      ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), owner: this.owner(), afterProviderIdentity, ...this.capabilityInput() }) })),
+      ...(config.status === 'setup' ? [{ name: 'setup', text: () => setupPrompt(this.owner().name, brief) }] : []),
     ]
     const scope = await Effect.runPromise(Scope.make())
     const value = await Effect.runPromise(Scope.provide(scope)(composeScoped({
@@ -1050,7 +1062,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
     if (names('files').length > 0 || names('shell').length > 0) mounts.push(mount(Host, { host: this, files: names('files'), shell: names('shell') }, gate(items.hosts)))
     for (const [kind, plugin] of Object.entries(this.connectorPlugins()) as Array<[ConnectorKind, ConnectorPlugin]>) {
-      if (this.pluginsOn[kind] === false) continue
+      if (!connectorOn(this.pluginsOn, kind)) continue
       const accounts = this.grantedConnections(kind)
       // Each connector tool names the Connection a call acts on (connectors/connector.ts).
       if (accounts.length > 0) mounts.push(mount(connectorCapability(kind), { plugin, host: this.connectorHost(kind, accounts) }, gate(() => NO_ITEMS)))
@@ -1117,7 +1129,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Connector kinds with an implementation whose plugin the Home has on. */
   private connectorKindsOn(): ConnectorKind[] {
-    return (Object.keys(this.connectorPlugins()) as ConnectorKind[]).filter((kind) => this.pluginsOn[kind] !== false)
+    return (Object.keys(this.connectorPlugins()) as ConnectorKind[]).filter((kind) => connectorOn(this.pluginsOn, kind))
   }
 
   /** The connector implementations; tests substitute fakes. */
@@ -1638,8 +1650,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- reporting and live updates
 
-  protected owner(): { id: string; name: string } {
-    return this.store.get<{ id: string; name: string }>('owner') ?? { id: this.store.requireConfig().ownerId, name: 'your owner' }
+  protected owner(): { readonly id: string } & RobotOwner {
+    return this.store.get<{ readonly id: string } & RobotOwner>('owner') ?? { id: this.store.requireConfig().ownerId, name: 'your owner' }
   }
 
   protected home() {
@@ -2280,6 +2292,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return true
   }
 
+  /** The owner's name or nickname changed (ux-nwi1): the prompt and my_capabilities name them the new way from the next request. */
+  async ownerChanged(owner: RobotOwner): Promise<void> {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted') return
+    this.store.set('owner', { id: config.ownerId, ...owner })
+  }
+
   /**
    * The owner's profile zone changed (v1.11 ticket 08). The Robot's zone is the owner's, so the
    * next Turn, daily notes and Routines use the new one; wall-clock Routines in the old zone keep
@@ -2486,7 +2505,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The my_capabilities tool: the list as it is now, read fresh. */
   async capabilities(): Promise<CapabilitiesView> {
     await this.refreshReach()
-    return capabilitiesView(this.capabilityItems() ?? [])
+    return capabilitiesView(this.capabilityItems() ?? [], this.owner())
   }
 
   async settings(): Promise<RobotSettings> {

@@ -31,7 +31,7 @@ const host = (id: string, name: string, online: boolean, owner: { mine: true } |
 
 const catalog: SettingsCatalog = {
   toolGroups: [{ name: 'web', description: 'Fetch pages by address (web_fetch, free; searching the web is the exa group).' }],
-  skills: [], robots: [], secrets: [], models: [],
+  skills: [], robots: [], secrets: [], models: [], workersAiEnabled: true,
   connections: [connection('c-google', 'google', 'Google', 'r.krzywaznia@gmail.com'), connection('c-discord', 'discord', 'Discord bot', 'Mr. Robot')],
   hosts: [host('h-desk', 'Desk', true, { mine: true }), host('h-studio', 'Studio', false, { mine: false, ownerName: 'Ben' })],
 }

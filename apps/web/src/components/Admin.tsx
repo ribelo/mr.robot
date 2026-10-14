@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useAtomRefresh } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import type { AdminView, GrantLevels } from '@mr-robot/protocol'
+import type { AdminView, GrantLevels, ModelChoice } from '@mr-robot/protocol'
 import { adminAtom, homeMemoryAtom, keys, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
 import { go } from '../route.ts'
 import { ConfirmButton } from './RobotSheets.tsx'
 import { SaveButton } from './SaveButton.tsx'
+import { ModelSelect } from './ModelSelect.tsx'
 
 const usd = (value: number) => `$${value.toFixed(2)}`
 const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value)
@@ -109,7 +110,7 @@ function AdminPage({ view }: { view: AdminView }) {
       <Invite onInvite={(email) => run((api) => api.invite(email), `Invited ${email}. They join on first sign-in.`)} />
 
       <h2>Home settings</h2>
-      <HomeSettings view={view} onSave={(patch) => run((api) => api.updateHomeSettings(patch))} />
+      <HomeSettings view={view} />
       <h2>Hosts</h2>
       {(view.hosts ?? []).length === 0 ? <div className="muted">No computers paired in this Home.</div> : (
         <table className="grid"><tbody>{(view.hosts ?? []).map((host) => (
@@ -169,27 +170,53 @@ function Invite({ onInvite }: { onInvite: (email: string) => Promise<boolean> })
   )
 }
 
-function HomeSettings({ view, onSave }: { view: AdminView; onSave: (patch: Record<string, unknown>) => Promise<boolean> }) {
-  const [model, setModel] = useState(`${view.settings.defaultModel.provider}/${view.settings.defaultModel.model}`)
+/**
+ * Home settings: the Workers AI switch (ux-101w), the default model chosen with the Provider-grouped
+ * combobox (ux-3l7i), the default browser and the spend limits. Switching Workers AI off can move the
+ * default model; the save answer says where, and a note tells the admin (ux-jseo).
+ */
+function HomeSettings({ view }: { view: AdminView }) {
+  const command = useCommand()
+  const [model, setModel] = useState<ModelChoice>(view.settings.defaultModel)
+  const [workersAi, setWorkersAi] = useState(view.settings.workersAiEnabled)
   const [robotLimit, setRobotLimit] = useState(view.settings.robotSpendLimitUsd?.toString() ?? '')
   const [memberLimit, setMemberLimit] = useState(view.settings.memberSpendLimitUsd?.toString() ?? '')
   const [backend, setBackend] = useState(view.settings.defaultBrowserBackend ?? 'browser-run')
-  const save = () => {
-    const option = view.settings.models.find((entry) => `${entry.provider}/${entry.model}` === model)
-    return onSave({
-      ...(option === undefined ? {} : { defaultModel: { provider: option.provider, model: option.model, effort: view.settings.defaultModel.effort } }),
+  const [moved, setMoved] = useState<string>()
+  const [error, setError] = useState<string>()
+  const labelOf = (choice: ModelChoice) => view.settings.models.find((option) => option.provider === choice.provider && option.model === choice.model)?.label ?? choice.model
+  const save = async () => {
+    const exit = await command((api) => api.updateHomeSettings({
+      defaultModel: model,
+      workersAiEnabled: workersAi,
       defaultBrowserBackend: backend,
       robotSpendLimitUsd: robotLimit === '' ? null : Number(robotLimit),
       memberSpendLimitUsd: memberLimit === '' ? null : Number(memberLimit),
-    })
+    }), [keys.admin, keys.robots, keys.hosts, keys.providers])
+    setError(exitFailure(exit))
+    if (Exit.isSuccess(exit)) {
+      setModel(exit.value.defaultModel)
+      setMoved(exit.value.defaultModelMoved === undefined ? undefined : `Default model moved to ${labelOf(exit.value.defaultModelMoved.to)}.`)
+    }
+    return exit
   }
+  // Workers AI is off but no other model is usable: the default stays where it was.
+  const stuck = !view.settings.workersAiEnabled && view.settings.defaultModel.provider === 'workers-ai'
   return (
     <>
+      <div className="toggle-card">
+        <div>
+          <div>Workers AI</div>
+          <div className="muted">Models on this Cloudflare account, free of charge. Off: nobody in the Home can pick them and chains skip them.</div>
+        </div>
+        <button type="button" role="switch" aria-checked={workersAi} aria-label="Workers AI" className={workersAi ? 'switch on' : 'switch'} onClick={() => setWorkersAi(!workersAi)}><span /></button>
+      </div>
       <label>Default model for new Robots
-        <select value={model} onChange={(event) => setModel(event.target.value)}>
-          {view.settings.models.map((option) => <option key={`${option.provider}/${option.model}`} value={`${option.provider}/${option.model}`}>{option.label}</option>)}
-        </select>
+        <ModelSelect value={model} models={view.settings.models} unavailable={[]} disabledProviders={view.settings.workersAiEnabled ? [] : ['workers-ai']}
+          onChange={(option) => setModel({ provider: option.provider, model: option.model, effort: model.effort })} />
       </label>
+      {moved === undefined ? null : <div className="muted">{moved}</div>}
+      {stuck ? <div className="muted">No other model is usable, so the default model stays on Workers AI. Connect a Provider on your profile.</div> : null}
       <label>Default browser for Robots
         <select aria-label="Default browser backend" value={backend} onChange={(event) => setBackend(event.target.value as typeof backend)}>
           {(view.browserBackends ?? []).map((option) => <option key={option.id} value={option.id} disabled={!option.available}>{option.label}{option.available ? '' : ' (not available)'}</option>)}
@@ -200,7 +227,7 @@ function HomeSettings({ view, onSave }: { view: AdminView; onSave: (patch: Recor
         <label>Robot limit, USD/month<input type="number" min={0} value={robotLimit} onChange={(event) => setRobotLimit(event.target.value)} /></label>
         <label>Member limit, USD/month<input type="number" min={0} value={memberLimit} onChange={(event) => setMemberLimit(event.target.value)} /></label>
       </div>
-      <div className="question-actions"><SaveButton onSave={save} /></div>
+      <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} /></div>
     </>
   )
 }

@@ -6,9 +6,9 @@
 
 **Blocked by:** 01 (UI primitives)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Switch off filters providers view, settings catalogue and Home settings models (workerd test)
-- [ ] Chain skips Workers AI with the reason; all-unusable blocks with it; resume after switch on (workerd test with the scripted model)
-- [ ] Default model moved on switch off, returned in the response and shown as a note
-- [ ] Admin uses ModelSelect for the default model (component test)
+- [x] Switch off filters providers view, settings catalogue and Home settings models (workerd test)
+- [x] Chain skips Workers AI with the reason; all-unusable blocks with it; resume after switch on (workerd test with the scripted model)
+- [x] Default model moved on switch off, returned in the response and shown as a note
+- [x] Admin uses ModelSelect for the default model (component test)

@@ -3,12 +3,13 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
+import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, RobotOwner, SkillLibraryRow } from '@mr-robot/protocol'
 import { usableNames } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import type {
+  DefaultModelMoved,
   FleetState,
   Identity,
   MemberRole,
@@ -36,7 +37,7 @@ import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/du
 import { backendOptions } from '../browser/backends.ts'
 import { MR_ROBOT_ONLY_GROUPS, TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
-import { connectorPlugin, CONNECTOR_TITLES, disabledToolGroups } from '../plugins/catalog.ts'
+import { connectorOn, connectorPlugin, CONNECTOR_TITLES, disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
 import { abandoned, answered, closed, invited, lapsed, messaged, ThreadRegistry, type AnswerOutcome, type Side, type Step, type ThreadRow } from './threads.ts'
@@ -64,6 +65,8 @@ const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#
 
 export interface HomeSettings {
   readonly defaultModel: ModelChoice
+  /** Off: no Workers AI model is offered in the Home and chains skip Workers AI entries (ux-101w). */
+  readonly workersAiEnabled: boolean
   /** The browser backend new and unset Robots use (rb-ybt4). */
   readonly defaultBrowserBackend: BrowserBackend
   readonly robotSpendLimitUsd: number | null
@@ -209,14 +212,19 @@ const rename = (memberId: string, name: string) => Effect.gen(function* () {
 const settings = Effect.gen(function* () {
   return {
     defaultModel: (yield* setting<ModelChoice>('defaultModel')) ?? DEFAULT_MODEL,
+    workersAiEnabled: (yield* setting<boolean>('workersAiEnabled')) ?? true,
     defaultBrowserBackend: (yield* setting<BrowserBackend>('defaultBrowserBackend')) ?? 'browser-run',
     robotSpendLimitUsd: (yield* setting<number | null>('robotSpendLimitUsd')) ?? null,
     memberSpendLimitUsd: (yield* setting<number | null>('memberSpendLimitUsd')) ?? null,
   } as HomeSettings
 })
 
-/** Admin settings; a raised spend limit unblocks Robots stopped by the old one (robot-8gag). */
-const updateSettings = (patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }) => Effect.gen(function* () {
+/**
+ * Admin settings; a raised spend limit unblocks Robots stopped by the old one (robot-8gag). With Workers AI
+ * off, a default model on Workers AI moves to the first model the admin can use (ux-jseo); `by` is the
+ * admin who saves, else the first active admin.
+ */
+const updateSettings = (patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }, by?: string) => Effect.gen(function* () {
   const sql = yield* Sql
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined) yield* putSetting(key, value)
@@ -225,7 +233,20 @@ const updateSettings = (patch: Partial<HomeSettings> & { models?: readonly Model
     const blocked = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status = 'blocked'")
     yield* Effect.forEach(blocked, ({ id }) => remote((env) => env.ROBOT.getByName(id).recheckLimits()), { concurrency: 'unbounded', discard: true })
   }
-  return yield* settings
+  const moved = yield* moveDefaultOffWorkersAi(by)
+  return { ...(yield* settings), ...(moved === undefined ? {} : { defaultModelMoved: moved }) }
+})
+
+/** The Home default is on Workers AI while it is off: it moves to the admin's first usable model, or stays when there is none. */
+const moveDefaultOffWorkersAi = (by: string | undefined) => Effect.gen(function* () {
+  const current = yield* settings
+  if (current.workersAiEnabled || current.defaultModel.provider !== 'workers-ai') return undefined
+  const adminId = by ?? (yield* members).find((person) => person.role === 'admin' && person.status === 'active')?.id
+  if (adminId === undefined) return undefined
+  const to = firstUsable(yield* models(adminId))
+  if (to === undefined) return undefined
+  yield* putSetting('defaultModel', to)
+  return { from: current.defaultModel, to } as DefaultModelMoved
 })
 
 /** Spend limits a Robot's Turns are held to. */
@@ -305,11 +326,16 @@ const startingModel = (memberId: string, wanted?: ModelChoice) => Effect.gen(fun
   const pick = wanted ?? (yield* settings).defaultModel
   // Only a known Provider can be missing a connection; anything else (an admin's own entry) is kept.
   if (!(PROVIDER_IDS as readonly string[]).includes(pick.provider) || usable.some((option) => option.provider === pick.provider && option.model === pick.model)) return pick
-  // A Provider the person connected themselves comes first; Workers AI is the fallback that is always there.
-  const fallback = FALLBACK_ORDER.map((provider) => usable.find((option) => option.provider === provider)).find((option) => option !== undefined) ?? usable[0]
+  const fallback = firstUsable(usable)
   if (fallback === undefined) return yield* invalid('Connect a Provider first: open your name → Providers and add a key or a subscription.')
-  return { provider: fallback.provider, model: fallback.model, effort: 'off' } as ModelChoice
+  return fallback
 })
+
+/** A Provider the person connected themselves comes first; Workers AI, while the admin leaves it on, is the last fallback. */
+const firstUsable = (usable: readonly ModelOption[]): ModelChoice | undefined => {
+  const first = FALLBACK_ORDER.map((provider) => usable.find((option) => option.provider === provider)).find((option) => option !== undefined) ?? usable[0]
+  return first === undefined ? undefined : { provider: first.provider, model: first.model, effort: 'off' }
+}
 
 /**
  * Create a Robot in setup (robot-btct): its Conversation opens with the kickoff Turn in
@@ -325,6 +351,7 @@ const createRobot = (ownerId: string, brief?: string, model?: ModelChoice) => Ef
     id,
     ownerId,
     ownerName: owner.name,
+    ...(profile.nickname === undefined ? {} : { ownerNickname: profile.nickname }),
     kind: 'robot',
     identity: { name: 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]! },
     sharing: 'private',
@@ -635,6 +662,7 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
     browserBackends: yield* browserBackendsFor(memberId),
     hosts: yield* hostsFor(memberId),
     defaultBrowserBackend: (yield* settings).defaultBrowserBackend,
+    workersAiEnabled: (yield* settings).workersAiEnabled,
     accounts: yield* Effect.map(accountsFor(memberId), ({ mine, shared }) => [...mine, ...shared]),
   } as SettingsCatalog
 })
@@ -812,10 +840,10 @@ const secretsView = (memberId: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ live model lists (robot-82r5, robot-d994)
 
-/** Providers this Member's Robots can run on: Workers AI, their own credentials, Home-shared ones. */
+/** Providers this Member's Robots can run on: Workers AI unless the admin switched it off, their own credentials, Home-shared ones. */
 const usableProviders = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  const usable = new Set<string>(['workers-ai'])
+  const usable = new Set<string>((yield* settings).workersAiEnabled ? ['workers-ai'] : [])
   for (const view of yield* remote((env) => env.MEMBER.getByName(memberId).accounts())) usable.add(view.provider)
   for (const row of yield* sql.all<{ provider: string }>('SELECT DISTINCT provider FROM shared_credential')) usable.add(row.provider)
   return usable
@@ -945,9 +973,16 @@ const models = (memberId: string): Effect.Effect<ModelOption[], never, R> => Eff
   return (yield* modelList).filter((option) => usable.has(option.provider))
 })
 
+/** Models of Providers this Member has not connected; Workers AI, when the admin switched it off, is not offered at all. */
 const unavailableModels = (memberId: string) => Effect.gen(function* () {
   const usable = yield* models(memberId)
-  return (yield* modelList).filter((option) => !usable.some((entry) => entry.provider === option.provider && entry.model === option.model))
+  return (yield* offeredModelList).filter((option) => !usable.some((entry) => entry.provider === option.provider && entry.model === option.model))
+})
+
+/** The Home's model list as the admin edits it: without Workers AI while it is off (ux-xsnr). */
+const offeredModelList = Effect.gen(function* () {
+  const enabled = (yield* settings).workersAiEnabled
+  return (yield* modelList).filter((option) => enabled || option.provider !== 'workers-ai')
 })
 
 /** Each Provider's list status, for the admin view. */
@@ -978,7 +1013,8 @@ const providersView = (memberId: string) => Effect.gen(function* () {
   const robots = yield* sql.all<{ id: string; owner_id: string; identity: string; accounts: string }>("SELECT id, owner_id, identity, accounts FROM robot WHERE status != 'deleted' AND accounts != '[]'")
   const names = new Map((yield* members).map((person) => [person.id, person.name]))
   const mine = own.map((account) => ({ ...account, usedBy: robots.filter((robot) => (JSON.parse(robot.accounts) as string[]).includes(account.id)).map((robot) => ({ robotId: robot.id, robotName: (JSON.parse(robot.identity) as Identity).name, ownerName: names.get(robot.owner_id) ?? '' })) }))
-  return { mine, shared, models: yield* models(memberId), defaultModel: (yield* settings).defaultModel } as ProvidersView
+  const current = yield* settings
+  return { mine, shared, models: yield* models(memberId), defaultModel: current.defaultModel, workersAiEnabled: current.workersAiEnabled } as ProvidersView
 })
 
 // ------------------------------------------------------------------ Threads between chiefs (v1.9)
@@ -1218,7 +1254,7 @@ export class Home extends DurableObject<Env> {
   remove(memberId: string): Promise<void> { return this.run(remove(memberId)) }
   rename(memberId: string, name: string): Promise<void> { return this.run(rename(memberId, name)) }
   settings(): Promise<HomeSettings> { return this.run(settings) }
-  updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }): Promise<HomeSettings> { return this.run(updateSettings(patch)) }
+  updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }, by?: string): Promise<HomeSettings & { defaultModelMoved?: DefaultModelMoved }> { return this.run(updateSettings(patch, by)) }
   limitsFor(memberId: string): Promise<{ robotDefaultUsd: number | null; memberUsd: number | null; memberSpentUsd: number }> { return this.run(limitsFor(memberId)) }
   reachable(memberId: string): Promise<RobotSummary[]> { return this.run(reachable(memberId)) }
   fleet(): Promise<RobotSummary[]> { return this.run(fleet) }
@@ -1240,7 +1276,7 @@ export class Home extends DurableObject<Env> {
     const base = await this.run(catalog(memberId, robotId))
     const off = disabledToolGroups(this.pluginsOf.enabled())
     const enabled = this.pluginsOf.enabled()
-    const connections = (await this.connectionsFor(memberId)).filter((connection) => enabled[connection.kind] !== false)
+    const connections = (await this.connectionsFor(memberId)).filter((connection) => connectorOn(enabled, connection.kind))
       .map((connection) => ({ ...connection, pluginTitle: CONNECTOR_TITLES[connection.kind] }))
     return { ...base, toolGroups: base.toolGroups.filter((group) => !off.has(group.name)), connections }
   }
@@ -1259,7 +1295,7 @@ export class Home extends DurableObject<Env> {
     if (holders) {
       const robots = await this.run(reachable(ownerId))
       const enabled = this.pluginsOf.enabled()
-      const kindsOn = (Object.keys(CONNECTOR_SKILLS) as ConnectorKind[]).filter((kind) => enabled[kind] !== false)
+      const kindsOn = (Object.keys(CONNECTOR_SKILLS) as ConnectorKind[]).filter((kind) => connectorOn(enabled, kind))
       const connections = new Map<string, Promise<ConnectionView[]>>()
       const connectionsOf = (memberId: string) => {
         const known = connections.get(memberId) ?? this.connectionsFor(memberId)
@@ -1307,6 +1343,7 @@ export class Home extends DurableObject<Env> {
   refreshCatalogs(memberId: string): Promise<Array<{ provider: string; count: number; error: string | null }>> { return this.run(refreshCatalogs(memberId)) }
   unavailableModels(memberId: string): Promise<ModelOption[]> { return this.run(unavailableModels(memberId)) }
   modelList(): Promise<ModelOption[]> { return this.run(modelList) }
+  offeredModelList(): Promise<ModelOption[]> { return this.run(offeredModelList) }
   vpnConfig(): Promise<string | null> { return this.run(vpnConfig) }
   /** The Exa plugin's key (its detail page), or the key saved before plugins had settings. */
   async exaKey(): Promise<string | null> { return (await this.pluginsOf.settings('exa')).secrets['apiKey'] ?? await this.run(exaKey) }
@@ -1319,6 +1356,12 @@ export class Home extends DurableObject<Env> {
   async setHomeMemory(content: string, by: string, exceptRobot: string | null): Promise<void> {
     this.ctx.storage.sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(content))
     await this.memoryChanged(null, 'HOME.md', by, exceptRobot)
+  }
+
+  /** A Member's name or nickname changed: each of their Robots names its owner the new way (ux-nwi1). */
+  async ownerChanged(memberId: string, owner: RobotOwner): Promise<void> {
+    const robots = this.ctx.storage.sql.exec<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId).toArray()
+    await Promise.all(robots.map((robot) => this.env.ROBOT.getByName(robot.id).ownerChanged(owner).catch((error: unknown) => console.warn('owner change not delivered', robot.id, error))))
   }
 
   /** A Member's profile zone changed: each of their Robots follows it, recomputes its Routines and notes it. */

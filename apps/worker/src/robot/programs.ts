@@ -937,6 +937,8 @@ export interface RobotInit {
   readonly id: string
   readonly ownerId: string
   readonly ownerName: string
+  /** How the owner wants to be addressed (ux-i8ff); absent: by their name. */
+  readonly ownerNickname?: string
   readonly kind: 'mr-robot' | 'robot'
   readonly identity: Identity
   readonly sharing: Sharing
@@ -962,7 +964,7 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   }
   store.transaction(() => {
     store.saveConfig(config)
-    store.set('owner', { id: init.ownerId, name: init.ownerName })
+    store.set('owner', { id: init.ownerId, name: init.ownerName, ...(init.ownerNickname === undefined ? {} : { nickname: init.ownerNickname }) })
     if (init.brief !== undefined) store.set('brief', init.brief)
   })
   yield* platform.seedWorkspace()

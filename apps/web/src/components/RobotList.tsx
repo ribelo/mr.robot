@@ -125,8 +125,8 @@ export function RobotList({ robots, selected, meName, isAdmin, onSelect, onCreat
         {showHidden ? hidden.map(row) : null}
       </ul>
       <div className="sidebar-foot">
-        <button type="button" className="me" onClick={onProfile}>
-          <span className="initials">{initials(meName)}</span> {meName}
+        <button type="button" className="me" title={meName} onClick={onProfile}>
+          <span className="initials">{initials(meName)}</span><span className="me-name">{meName}</span>
         </button>
         <button type="button" className="link" onClick={() => go({ page: 'plugins' })}>Plugins</button>
         {isAdmin ? <button type="button" className="link" onClick={onAdmin}>Admin</button> : null}

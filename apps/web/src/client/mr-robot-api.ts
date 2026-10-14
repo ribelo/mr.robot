@@ -10,11 +10,11 @@ import * as FetchHttpClient from 'effect/http/FetchHttpClient'
 import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
-  AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
+  AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
-  type ModelChoice, type SendMessage, type SettingsPatch,
+  type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
 
@@ -27,7 +27,6 @@ const enc = encodeURIComponent
 
 export type LoginChange = { readonly username?: string; readonly password?: string; readonly websites?: readonly string[]; readonly notes?: string; readonly allowRead?: boolean; readonly shared: boolean }
 export type ListPrefChange = { readonly pinned?: boolean; readonly hidden?: boolean; readonly unread?: boolean }
-export type MePatch = Partial<Pick<Me, 'name' | 'timeZone' | 'quietHours' | 'workDetails' | 'theme'>> & { readonly useDetectedTimeZone?: true }
 
 /** The zone this app runs in: the browser's in the PWA, the system's in the desktop app (its renderer is a browser). */
 const appTimeZone = (): string | undefined => {
@@ -123,7 +122,7 @@ const make = Effect.gen(function* () {
 
     admin: get(AdminView, '/api/admin'),
     homeSettings: get(HomeSettingsView, '/api/admin/settings'),
-    updateHomeSettings: (patch: Record<string, unknown>) => send('PATCH', '/api/admin/settings', patch),
+    updateHomeSettings: (patch: Record<string, unknown>) => request(HomeSettingsSaved, 'PATCH', '/api/admin/settings', patch),
     setSkillRepository: (input: { readonly repo: string; readonly ref: string; readonly path: string; readonly token?: string }) => send('PUT', '/api/admin/skills/repository', input),
     homeMemory: get(TextContent, '/api/home-memory'),
     setHomeMemory: (content: string) => send('PUT', '/api/admin/home-memory', { content }),

@@ -1,7 +1,7 @@
 import type { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { Robot as ProductionRobot } from '../src/robot/robot.ts'
 import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
-import { StubLlm } from './stub-llm.ts'
+import { scriptedProviders, StubLlm } from './stub-llm.ts'
 import { StubDriver } from './stub-browser.ts'
 import { FakeChannel } from './fake-channel.ts'
 import { fakeConnectors, fakeService } from './fake-connector.ts'
@@ -99,7 +99,7 @@ export class Robot extends ProductionRobot {
   }
 
   protected override adapter(provider: string, contextWindow?: number, model?: string, wire?: 'chat' | 'anthropic' | 'responses'): LlmAdapter {
-    return provider === 'stub' ? new StubLlm(this.store.requireConfig().id) : super.adapter(provider, contextWindow, model, wire)
+    return scriptedProviders.has(provider) ? new StubLlm(this.store.requireConfig().id) : super.adapter(provider, contextWindow, model, wire)
   }
 
   /** The credential this Robot's Turns would use for a Provider. */

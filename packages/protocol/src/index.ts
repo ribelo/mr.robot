@@ -40,6 +40,8 @@ export type QuietHours = typeof QuietHours.Type
 
 export const Me = Schema.Struct({
   ...MemberView.fields,
+  /** How the person's Robots address them (ux-i8ff); absent: by their name. */
+  nickname: Schema.optional(Schema.String),
   home: Schema.String,
   /** The zone the person's Robots work in: the app's zone, unless the person pinned one by hand. */
   timeZone: Schema.String,
@@ -58,6 +60,8 @@ export type Me = typeof Me.Type
 
 export const MemberPreferences = Schema.Struct({
   name: Schema.optional(Schema.String),
+  /** The nickname to keep; an empty or blank text removes it (ux-i8ff). */
+  nickname: Schema.optional(Schema.String),
   /** An IANA zone typed by the person; setting it pins the zone. */
   timeZone: Schema.optional(Schema.String),
   /** Unpin: adopt the zone the app detected. */
@@ -66,6 +70,8 @@ export const MemberPreferences = Schema.Struct({
   workDetails: Schema.optional(Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])),
   theme: Schema.optional(ThemeChoice),
 })
+/** What PATCH /api/me accepts. */
+export type MePatch = typeof MemberPreferences.Type
 
 // ---------------------------------------------------------------- Robots
 
@@ -856,6 +862,8 @@ export const ProvidersView = Schema.Struct({
   shared: Schema.Array(ProviderView),
   models: Schema.Array(ModelOption),
   defaultModel: ModelChoice,
+  /** The Home admin's Workers AI switch (ux-101w); off: no Workers AI model is offered (ux-xsnr). */
+  workersAiEnabled: Schema.Boolean,
 })
 export type ProvidersView = typeof ProvidersView.Type
 
@@ -870,6 +878,7 @@ export const OAuthFinish = Schema.Struct({ pasted: Schema.optional(Schema.String
 export const ShareInput = Schema.Struct({ shared: Schema.Boolean })
 export const HomeSettingsPatch = Schema.Struct({
   defaultModel: Schema.optional(ModelChoice),
+  workersAiEnabled: Schema.optional(Schema.Boolean),
   defaultBrowserBackend: Schema.optional(BrowserBackend),
   robotSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
   memberSpendLimitUsd: Schema.optional(Schema.NullOr(Schema.Number)),
@@ -929,12 +938,25 @@ export type FleetRow = typeof FleetRow.Type
 
 export const HomeSettingsView = Schema.Struct({
   defaultModel: ModelChoice,
+  /** Whether the Home's Robots may run on Workers AI (ux-101w); on by default. */
+  workersAiEnabled: Schema.Boolean,
   defaultBrowserBackend: BrowserBackend,
   robotSpendLimitUsd: Schema.NullOr(Schema.Number),
   memberSpendLimitUsd: Schema.NullOr(Schema.Number),
   models: Schema.Array(ModelOption),
 })
 export type HomeSettingsView = typeof HomeSettingsView.Type
+
+/** Switching Workers AI off moved the Home default model off it (ux-jseo). */
+export const DefaultModelMoved = Schema.Struct({ from: ModelChoice, to: ModelChoice })
+export type DefaultModelMoved = typeof DefaultModelMoved.Type
+
+/** The answer to a Home settings save: the settings now, and the default model's move when the save made one. */
+export const HomeSettingsSaved = Schema.Struct({
+  ...HomeSettingsView.fields,
+  defaultModelMoved: Schema.optional(DefaultModelMoved),
+})
+export type HomeSettingsSaved = typeof HomeSettingsSaved.Type
 
 export const AdminView = Schema.Struct({
   fleet: Schema.Array(FleetRow),
@@ -979,15 +1001,27 @@ export const PluginField = Schema.Struct({
 })
 export type PluginField = typeof PluginField.Type
 
-export const ConnectorKind = Schema.Literals(['google', 'slack', 'discord'])
+/** Connector kinds: Discord has two, a bot ('discord') and the person's own account ('discord-user'). */
+export const ConnectorKind = Schema.Literals(['google', 'slack', 'discord', 'discord-user'])
 export type ConnectorKind = typeof ConnectorKind.Type
 
-/** How a person adds a connection of a connector: an OAuth consent, or pasted values. */
+/**
+ * How a person adds a connection of a connector: an OAuth consent, or pasted values. A paste form may
+ * carry a warning the person reads before connecting (Discord as you, ux-gdg3).
+ */
 export const ConnectMethod = Schema.Union([
   Schema.Struct({ method: Schema.Literal('oauth'), services: Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })) }),
-  Schema.Struct({ method: Schema.Literal('paste'), fields: Schema.Array(PluginField), instructions: Schema.String }),
+  Schema.Struct({ method: Schema.Literal('paste'), fields: Schema.Array(PluginField), instructions: Schema.String, warning: Schema.optional(Schema.String) }),
 ])
 export type ConnectMethod = typeof ConnectMethod.Type
+
+/**
+ * One way to connect an account of a connector plugin (ux-s8rx): its kind, who the connection acts as
+ * ("As you", "As a bot"), how to connect, and whether it acts as the person: those are never shared
+ * with the Home (ux-bk91).
+ */
+export const ConnectorWay = Schema.Struct({ kind: ConnectorKind, way: Schema.String, connect: ConnectMethod, actsAsPerson: Schema.Boolean })
+export type ConnectorWay = typeof ConnectorWay.Type
 
 /** A plugin as the Plugins page, its detail page and the settings rows show it (cn-dbm9, cn-s1pd). */
 export const PluginView = Schema.Struct({
@@ -1005,11 +1039,8 @@ export const PluginView = Schema.Struct({
   setupNeeded: Schema.NullOr(Schema.String),
   /** Step-by-step setup in Markdown, shown on the plugin page (cn-fpyt, cn-csae). */
   guide: Schema.NullOr(Schema.String),
-  /**
-   * Connectors only: how a person connects an account, and whether its connections act as that
-   * person (Slack, Google): those are never shared with the Home (ux-bk91).
-   */
-  connector: Schema.NullOr(Schema.Struct({ kind: ConnectorKind, connect: ConnectMethod, actsAsPerson: Schema.Boolean })),
+  /** Connectors only: the ways a person connects an account, each with its own Connect (Discord: as a bot, as you); empty for a capability. */
+  connectors: Schema.Array(ConnectorWay),
 })
 export type PluginView = typeof PluginView.Type
 
@@ -1077,6 +1108,8 @@ export const SettingsCatalog = Schema.Struct({
   models: Schema.Array(ModelOption),
   /** Models of Providers this Member has not connected; shown so the list explains itself. */
   unavailableModels: Schema.optional(Schema.Array(ModelOption)),
+  /** The Home admin's Workers AI switch (ux-101w); off: chains skip their Workers AI entries (ux-zh1l). */
+  workersAiEnabled: Schema.Boolean,
   /** Browser backends and whether this Home can use them (rb-wgtd). */
   browserBackends: Schema.optional(Schema.Array(BrowserBackendOption)),
   defaultBrowserBackend: Schema.optional(BrowserBackend),

@@ -23,6 +23,9 @@ export function withModel(chain: readonly ChainEntry[], active: number, model: M
   return chain.map((entry, index) => index !== active ? entry : entry.provider === model.provider ? { ...entry, model: model.model, effort: model.effort } : unbound(model))
 }
 
+/** Why a Workers AI entry is skipped while the Home admin has Workers AI off (ux-zh1l). */
+export const WORKERS_AI_OFF = 'Workers AI is disabled by the admin'
+
 /** The Provider accounts a chain names, for "used by" (pa-f59m). */
 export function chainAccounts(chain: readonly ChainEntry[]): string[] {
   return [...new Set(chain.map((entry) => entry.account).filter((account) => account !== '' && account !== 'workers-ai'))]

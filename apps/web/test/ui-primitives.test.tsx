@@ -34,7 +34,7 @@ function stubApi(answer: (method: string, path: string) => Response | Promise<Re
 }
 
 const providersApi = (check: (method: string) => Response | Promise<Response> = () => Response.json({})) => stubApi((method, path) =>
-  path === '/api/providers' ? Response.json({ mine: [account], shared: [], models: [], defaultModel: { provider: 'deepseek', model: 'deepseek-chat', effort: 'medium' } })
+  path === '/api/providers' ? Response.json({ mine: [account], shared: [], models: [], defaultModel: { provider: 'deepseek', model: 'deepseek-chat', effort: 'medium' }, workersAiEnabled: true })
     : path === '/api/accounts/a-1/check' ? check(method)
     : Response.json({}))
 

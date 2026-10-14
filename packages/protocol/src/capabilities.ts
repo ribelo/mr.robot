@@ -59,9 +59,12 @@ const HOST_FACET_TEXT: Readonly<Record<HostFacet, string>> = {
 const levelIn = (levels: Readonly<Record<string, GrantLevel>>, name: string): GrantLevel =>
   Object.hasOwn(levels, name) ? levels[name]! : 'deny'
 
-/** Whether a connection can also write (Gmail send, Slack post): it has a separate "write" grant. */
+/** Whether a connection can also write (Gmail send, Slack post, Discord as you): it has a separate "write" grant. */
 const canWrite = (connection: { readonly kind: string; readonly services: readonly string[] }): boolean =>
-  connection.kind === 'slack' || (connection.kind === 'google' && connection.services.includes('gmail-send'))
+  connection.kind === 'slack' || connection.kind === 'discord-user' || (connection.kind === 'google' && connection.services.includes('gmail-send'))
+
+/** What a connection's write grant allows, as its item names it. */
+const WRITE_TEXT: Readonly<Record<string, string>> = { google: 'send e-mail', 'discord-user': 'send, reply, react and mark read' }
 
 /** A Host's state as the settings heading, my_capabilities and the runtime section show it: "online", "offline · Anna's". */
 export const hostState = (host: CapabilityHost): string => `${host.online ? 'online' : 'offline'}${host.mine ? '' : ` · ${host.ownerName}'s`}`
@@ -96,7 +99,7 @@ export function capabilityItems(catalog: CapabilityCatalog, grants: GrantSet): C
       ].filter((part) => part !== undefined).join(' · ')
       const read = item('connections', connection.id, label, description)
       return canWrite(connection)
-        ? [read, item('connections', `${connection.id}:write`, `${label}: ${connection.kind === 'google' ? 'send e-mail' : 'post and mark read'}`, 'A separate grant: without it the Robot only reads')]
+        ? [read, item('connections', `${connection.id}:write`, `${label}: ${WRITE_TEXT[connection.kind] ?? 'post and mark read'}`, 'A separate grant: without it the Robot only reads')]
         : [read]
     }),
     ...(catalog.hosts ?? []).flatMap((host) => HOST_FACETS.map((name) => facet(host, name))),
@@ -105,20 +108,33 @@ export function capabilityItems(catalog: CapabilityCatalog, grants: GrantSet): C
   ]
 }
 
+/** A Robot's owner: their name and, when they set one, the nickname to address them by (ux-i8ff). */
+export interface RobotOwner {
+  readonly name: string
+  readonly nickname?: string
+}
+
+/** The owner line the runtime section and my_capabilities share (ux-nwi1, ux-xzdh): "Anna Kowalska; address them as Ania". */
+export const ownerLine = (owner: RobotOwner): string =>
+  owner.nickname === undefined ? owner.name : `${owner.name}; address them as ${owner.nickname}`
+
 const kindOf = (field: CapabilityField): string => CAPABILITY_SECTIONS.find((section) => section.field === field)!.kind
 
 export interface CapabilitiesView {
+  /** Who the Robot works for, as the runtime section says it. */
+  readonly owner: string
   readonly allow: ReadonlyArray<{ readonly kind: string; readonly name: string; readonly grant: string; readonly description: string }>
   readonly ask: CapabilitiesView['allow']
   readonly deny: CapabilitiesView['allow']
   readonly note: string
 }
 
-/** What my_capabilities returns: the items grouped by level, and how a level changes. A host facet says whether its Host is online. */
-export function capabilitiesView(items: readonly CapabilityItem[]): CapabilitiesView {
+/** What my_capabilities returns: the owner line, the items grouped by level, and how a level changes. A host facet says whether its Host is online. */
+export function capabilitiesView(items: readonly CapabilityItem[], owner: RobotOwner): CapabilitiesView {
   const described = (entry: CapabilityItem) => (entry.field === 'hosts' ? `${entry.description} · ${hostState(entry.host)}` : entry.description)
   const at = (level: GrantLevel) => items.filter((entry) => entry.level === level).map((entry) => ({ kind: kindOf(entry.field), name: entry.label, grant: entry.name, description: described(entry) }))
   return {
+    owner: ownerLine(owner),
     allow: at('allow'),
     ask: at('ask'),
     deny: at('deny'),

@@ -40,7 +40,6 @@ export class HomePlugins {
   view(plugin: PluginEntry, isAdmin: boolean, origin: string): PluginView {
     const values = this.values(plugin.name)
     const secretsSet = this.secretsSet(plugin.name)
-    const connect = plugin.connector?.connect
     return {
       name: plugin.name, title: plugin.title, description: plugin.description, icon: plugin.icon, group: plugin.group,
       enabled: this.enabled()[plugin.name] ?? true,
@@ -50,13 +49,14 @@ export class HomePlugins {
       secretsSet: isAdmin ? [...secretsSet] : [],
       setupNeeded: plugin.setupNeeded?.(values, secretsSet) ?? null,
       guide: isAdmin ? plugin.guide?.(origin) ?? null : null,
-      connector: plugin.connector === undefined || connect === undefined ? null : {
-        kind: plugin.connector.kind,
-        actsAsPerson: plugin.connector.actsAsPerson === true,
+      connectors: plugin.connectors.map(({ kind, way, actsAsPerson: person, connect }) => ({
+        kind,
+        way,
+        actsAsPerson: person === true,
         connect: connect.method === 'oauth'
           ? { method: 'oauth', services: connect.services }
-          : { method: 'paste', fields: describeSchema(connect.schema), instructions: connect.instructions },
-      },
+          : { method: 'paste', fields: describeSchema(connect.schema), instructions: connect.instructions, ...(connect.warning === undefined ? {} : { warning: connect.warning }) },
+      })),
     }
   }
 

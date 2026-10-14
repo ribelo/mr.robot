@@ -111,6 +111,7 @@ export const CONNECTOR_SKILLS: Readonly<Record<ConnectorKind, readonly Connector
   google: [GOOGLE, MBANK],
   slack: [SLACK],
   discord: [DISCORD],
+  'discord-user': [],
 }
 
 export const CONNECTOR_SKILL_NAMES: ReadonlySet<string> = new Set(Object.values(CONNECTOR_SKILLS).flat().map((entry) => entry.name))

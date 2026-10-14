@@ -39,7 +39,7 @@ import { modelRefusal } from '../robot/model-choice.ts'
 import type { AnswerResult, HelpAnswerResult } from '../robot/robot.ts'
 import { parseTimeZone } from '../robot/time-zone.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
-import { actsAsPerson, connectorPlugin, PLUGINS, pluginByName } from '../plugins/catalog.ts'
+import { actsAsPerson, connectorOf, connectorPlugin, pluginByName } from '../plugins/catalog.ts'
 import { parseForm } from '../connectors/schema-form.ts'
 
 export interface ApiContext {
@@ -96,7 +96,7 @@ export const api = new Router<ApiContext>()
     // The app tells its zone each time it opens; anything that is not a zone is ignored.
     const reported = parseTimeZone(c.request.headers.get(TIME_ZONE_HEADER) ?? '')
     const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))
-    return { ...c.member, home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system' }
+    return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system' }
   }))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
     const patch = yield* decodeBody(c.request, MemberPreferences)
@@ -190,14 +190,14 @@ export const api = new Router<ApiContext>()
   }))
   .on('POST', '/api/connections/:kind', (c, { kind }) => Effect.gen(function* () {
     const body = yield* decodeBody(c.request, ConnectionPaste)
-    const plugin = PLUGINS.find((entry) => entry.connector?.kind === kind)
-    const connect = plugin?.connector?.connect
-    if (plugin === undefined || connect === undefined || connect.method !== 'paste') return yield* Effect.fail(notFound('this connector does not connect by pasting'))
-    yield* shareable(plugin.connector!.kind, body.shared)
-    const parsed = parseForm(plugin.name, connect.schema, body.values, new Set())
+    const found = connectorOf(kind)
+    const connect = found?.connector.connect
+    if (found === undefined || connect === undefined || connect.method !== 'paste') return yield* Effect.fail(notFound('this connector does not connect by pasting'))
+    yield* shareable(found.connector.kind, body.shared)
+    const parsed = parseForm(found.plugin.name, connect.schema, body.values, new Set())
     if (!parsed.ok) return yield* Effect.fail(badRequest(parsed.error.message))
     const added = yield* call(() => c.env.MEMBER.getByName(c.member.id).connectPasted({
-      kind: plugin.connector!.kind, label: body.label ?? null, shared: body.shared, services: [], secrets: parsed.secrets,
+      kind: found.connector.kind, label: body.label ?? null, shared: body.shared, services: [], secrets: parsed.secrets,
     })).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return yield* connectionView(c, added.id)
   }))
@@ -312,11 +312,13 @@ export const api = new Router<ApiContext>()
     return yield* call(() => c.env.MEMBER.getByName(owner).accountUsage(id, true))
   }))
   .on('POST', '/api/accounts/:id/check', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).checkAccount(id)))
-  .on('GET', '/api/admin/settings', (c) => admin(c).pipe(Effect.andThen(call(async () => ({ ...(await home(c.env).settings()), models: await home(c.env).modelList() })))))
+  .on('GET', '/api/admin/settings', (c) => admin(c).pipe(Effect.andThen(call(async () => ({ ...(await home(c.env).settings()), models: await home(c.env).offeredModelList() })))))
+  // Switching Workers AI off may move the default model; the answer says so for the admin's note (ux-jseo).
   .on('PATCH', '/api/admin/settings', (c) => Effect.gen(function* () {
     yield* admin(c)
     const patch = yield* decodeBody(c.request, HomeSettingsPatch)
-    return yield* call(() => home(c.env).updateSettings(patch))
+    const saved = yield* call(() => home(c.env).updateSettings(patch, c.member.id))
+    return { ...saved, models: yield* call(() => home(c.env).offeredModelList()) }
   }))
 
   // ------------------------------------------------------------ robots

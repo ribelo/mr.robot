@@ -12,9 +12,9 @@ const newcomer: PluginView = {
   name: 'notion', title: 'Notion', description: 'Pages and databases.', icon: 'notion', group: 'connector', enabled: true,
   fields: [{ key: 'workspace', label: 'Workspace name', description: 'As shown in Notion.', kind: 'text', options: [], required: true }, { key: 'apiKey', label: 'Integration secret', description: null, kind: 'secret', options: [], required: true }],
   values: { workspace: 'Home' }, secretsSet: ['apiKey'], setupNeeded: null, guide: null,
-  connector: { kind: 'slack', actsAsPerson: false, connect: { method: 'paste', fields: [{ key: 'token', label: 'Token', description: null, kind: 'secret', options: [], required: true }], instructions: 'Paste the token from Notion.' } },
+  connectors: [{ kind: 'slack', way: 'As you', actsAsPerson: false, connect: { method: 'paste', fields: [{ key: 'token', label: 'Token', description: null, kind: 'secret', options: [], required: true }], instructions: 'Paste the token from Notion.' } }],
 }
-const files: PluginView = { ...newcomer, name: 'files', title: 'Files', description: 'Workspace files.', icon: 'folder', group: 'capability', fields: [], values: {}, secretsSet: [], connector: null }
+const files: PluginView = { ...newcomer, name: 'files', title: 'Files', description: 'Workspace files.', icon: 'folder', group: 'capability', fields: [], values: {}, secretsSet: [], connectors: [] }
 
 function serve(plugins: PluginView[], connections: ConnectionView[] = [], notes: ConnectionNote[] = []) {
   const calls: Array<{ method: string; path: string; body: unknown }> = []
@@ -69,9 +69,9 @@ describe('plugins from their descriptions (cn-dbm9, cn-s1pd)', () => {
 
 describe('person connections are never shared (ux-bk91, ux-cop2, ux-ro7d)', () => {
   const tokenField = { key: 'token', label: 'Token', description: null, kind: 'secret' as const, options: [], required: true }
-  const slack: PluginView = { ...newcomer, name: 'slack', title: 'Slack', description: 'A Slack workspace.', icon: 'slack', fields: [], values: {}, secretsSet: [], connector: { kind: 'slack', actsAsPerson: true, connect: { method: 'paste', fields: [tokenField], instructions: 'Paste the Slack session.' } } }
-  const google: PluginView = { ...newcomer, name: 'google', title: 'Google', description: 'Gmail and more.', icon: 'google', fields: [], values: {}, secretsSet: [], connector: { kind: 'google', actsAsPerson: true, connect: { method: 'oauth', services: [{ value: 'gmail', label: 'Gmail' }] } } }
-  const discord: PluginView = { ...newcomer, name: 'discord', title: 'Discord', description: 'A Discord bot.', icon: 'discord', fields: [], values: {}, secretsSet: [], connector: { kind: 'discord', actsAsPerson: false, connect: { method: 'paste', fields: [tokenField], instructions: 'Paste the bot token.' } } }
+  const slack: PluginView = { ...newcomer, name: 'slack', title: 'Slack', description: 'A Slack workspace.', icon: 'slack', fields: [], values: {}, secretsSet: [], connectors: [{ kind: 'slack', way: 'As you', actsAsPerson: true, connect: { method: 'paste', fields: [tokenField], instructions: 'Paste the Slack session.' } }] }
+  const google: PluginView = { ...newcomer, name: 'google', title: 'Google', description: 'Gmail and more.', icon: 'google', fields: [], values: {}, secretsSet: [], connectors: [{ kind: 'google', way: 'As you', actsAsPerson: true, connect: { method: 'oauth', services: [{ value: 'gmail', label: 'Gmail' }] } }] }
+  const discord: PluginView = { ...newcomer, name: 'discord', title: 'Discord', description: 'A Discord bot.', icon: 'discord', fields: [], values: {}, secretsSet: [], connectors: [{ kind: 'discord', way: 'As a bot', actsAsPerson: false, connect: { method: 'paste', fields: [tokenField], instructions: 'Paste the bot token.' } }] }
   const connection = (id: string, kind: ConnectionView['kind'], label: string): ConnectionView => ({
     id, kind, label, account: `${label.toLowerCase()}-account`, ownerId: 'm-anna', ownerName: 'Anna', shared: false, mine: true, isDefault: true,
     services: [], status: 'connected', statusNote: null, setupLink: null, setupLabel: null, createdAt: 1,
@@ -101,5 +101,54 @@ describe('person connections are never shared (ux-bk91, ux-cop2, ux-ro7d)', () =
     expect(screen.getByText(/acts as you, so it is no longer shared with the Home/)).toBeTruthy()
     fireEvent.click(screen.getByText('Dismiss'))
     await vi.waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.path === '/api/connections/notes/n-1')).toBe(true))
+  })
+})
+
+describe('Discord as you on the Discord row (ux-s8rx, ux-gdg3, ux-bk91, ux-cbo3)', () => {
+  const tokenField = { key: 'token', label: 'Token', description: null, kind: 'secret' as const, options: [], required: true }
+  const warning = 'Discord forbids automating a user account and may close it. You take that risk.'
+  const discord: PluginView = {
+    ...newcomer, name: 'discord', title: 'Discord', description: 'As a bot, or as you.', icon: 'discord', fields: [], values: {}, secretsSet: [],
+    connectors: [
+      { kind: 'discord', way: 'As a bot', actsAsPerson: false, connect: { method: 'paste', fields: [tokenField], instructions: 'Paste the bot token.' } },
+      { kind: 'discord-user', way: 'As you', actsAsPerson: true, connect: { method: 'paste', fields: [{ ...tokenField, label: 'User token' }], instructions: 'Copy the token from Discord in the browser.', warning } },
+    ],
+  }
+  const rowOf = () => screen.getByText('Discord').closest('.connector-row') as HTMLElement
+  const wayOf = (way: string) => within(rowOf()).getByText(way).closest('.connector-way') as HTMLElement
+
+  it('shows both ways with their own Connect; the as-you form carries the warning and no "Shared with the Home"', async () => {
+    const calls = serve([discord])
+    render(<RegistryProvider><Connections /></RegistryProvider>)
+    await screen.findByText('Discord')
+    expect(within(rowOf()).getAllByText('Not connected')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Discord as a bot' }))
+    expect(within(wayOf('As a bot')).getByText('Paste the bot token.')).toBeTruthy()
+    expect(within(wayOf('As a bot')).getByText('Shared with the Home')).toBeTruthy()
+    expect(within(wayOf('As a bot')).queryByText(warning)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Discord as you' }))
+    const asYou = wayOf('As you')
+    expect(within(asYou).getByText('Copy the token from Discord in the browser.')).toBeTruthy()
+    expect(within(asYou).getByText(warning)).toBeTruthy()
+    expect(within(asYou).queryByText('Shared with the Home')).toBeNull()
+    fireEvent.change(within(asYou).getByLabelText(/User token/), { target: { value: 'user-token' } })
+    fireEvent.click(within(asYou).getAllByText('Connect').at(-1)!)
+    await vi.waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.path === '/api/connections/discord-user')).toBe(true))
+    expect(calls.find((call) => call.method === 'POST')!.body).toEqual({ shared: false, values: { token: 'user-token' } })
+  })
+
+  it('a refused as-you connection says "Sign in again"; a refused bot says "Paste again"', async () => {
+    const refused = (id: string, kind: ConnectionView['kind'], label: string): ConnectionView => ({
+      id, kind, label, account: label.toLowerCase(), ownerId: 'm-anna', ownerName: 'Anna', shared: false, mine: true, isDefault: true,
+      services: [], status: 'rejected', statusNote: 'Discord refused the token', setupLink: null, setupLabel: null, createdAt: 1,
+    })
+    serve([discord], [refused('c-me', 'discord-user', 'Anna'), refused('c-bot', 'discord', 'Bot')])
+    render(<RegistryProvider><Connections /></RegistryProvider>)
+    await screen.findByText('Discord')
+    expect(within(wayOf('As you')).getByText('Sign in again')).toBeTruthy()
+    expect(within(wayOf('As a bot')).getByText('Paste again')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Discord as you' }))
+    expect(within(wayOf('As you')).getByText('Sign in again: Discord refused the token')).toBeTruthy()
+    expect(within(wayOf('As you')).queryByText('Shared with the Home')).toBeNull()
   })
 })
