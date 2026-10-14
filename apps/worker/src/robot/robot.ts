@@ -2257,6 +2257,30 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /**
+   * Another Member's connection stopped being shared with the Home (v1.12, ux-dz8p): its grant rows go,
+   * and a Robot that held it hears the notice at its next Turn. Mr. Robot held it unless his owner
+   * lowered it to deny. Returns whether this Robot held it.
+   */
+  async connectionWithdrawn(connectionId: string, notice: string): Promise<boolean> {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted') return false
+    const names = [connectionId, `${connectionId}:write`]
+    const grants = this.store.grants()
+    const held = config.kind === 'mr-robot'
+      ? grants.connections[connectionId] !== 'deny'
+      : names.some((name) => usableLevel(grants.connections[name] ?? 'deny'))
+    const connections = Object.fromEntries(Object.entries(grants.connections).filter(([name]) => !names.includes(name)))
+    if (Object.keys(connections).length !== Object.keys(grants.connections).length) this.store.setGrants({ ...grants, connections })
+    if (!held) return false
+    const pending = this.store.get<MemoryChange[]>('memory-changes') ?? []
+    this.store.set('memory-changes', [...pending, { path: 'connections', by: 'the platform', notice }].slice(-50))
+    // The next Turn composes again without the connection's tools.
+    this.store.updateConfig(() => ({}))
+    await this.changed()
+    return true
+  }
+
+  /**
    * The owner's profile zone changed (v1.11 ticket 08). The Robot's zone is the owner's, so the
    * next Turn, daily notes and Routines use the new one; wall-clock Routines in the old zone keep
    * their local time in the new one, and the model hears it once with its next step.

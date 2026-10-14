@@ -10,7 +10,7 @@ import * as FetchHttpClient from 'effect/http/FetchHttpClient'
 import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
-  AdminView, Attachment, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
+  AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
@@ -150,6 +150,8 @@ const make = Effect.gen(function* () {
     pasteConnection: (kind: string, input: { readonly label?: string; readonly shared: boolean; readonly values: Record<string, string> }) => request(ConnectionView, 'POST', `/api/connections/${enc(kind)}`, input),
     updateConnection: (id: string, change: { readonly label?: string; readonly shared?: boolean; readonly isDefault?: boolean }) => request(ConnectionView, 'PATCH', `/api/connections/${enc(id)}`, change),
     removeConnection: (id: string) => send('DELETE', `/api/connections/${enc(id)}`),
+    connectionNotes: get(Schema.Array(ConnectionNote), '/api/connections/notes'),
+    dismissConnectionNote: (id: string) => send('DELETE', `/api/connections/notes/${enc(id)}`),
   }
 })
 

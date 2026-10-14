@@ -78,7 +78,7 @@ async function settingsList(id: string): Promise<Array<{ kind: string; grant: st
     ...catalog.skills.map((skill) => ({ kind: 'skill', grant: skill.name, description: skill.description, level: level(grants.skills, skill.name) })),
     ...catalog.robots.map((robot) => ({ kind: 'recipient', grant: robot.id, description: 'A Robot you may message.', level: level(grants.recipients, robot.id) })),
     ...(catalog.connections ?? []).flatMap((connection) => [
-      { kind: 'connection', grant: connection.id, description: expect.stringContaining(connection.account) as unknown as string, level: level(grants.connections, connection.id) },
+      { kind: 'connection', grant: connection.id, description: expect.stringContaining('as this account') as unknown as string, level: level(grants.connections, connection.id) },
       ...(connection.kind === 'slack' ? [{ kind: 'connection', grant: `${connection.id}:write`, description: 'A separate grant: without it the Robot only reads', level: level(grants.connections, `${connection.id}:write`) }] : []),
     ]),
     ...(catalog.hosts ?? []).flatMap((host) => ['browser', 'files', 'shell'].map((facet) => ({ kind: 'host', grant: `${host.id}:${facet}`, description: expect.stringContaining('') as unknown as string, level: level(grants.hosts, `${host.id}:${facet}`) }))),
@@ -191,6 +191,47 @@ describe('docs index and runtime section (sk-xseb, sk-ixvp, sk-xsat)', () => {
     const runtime = (await preview(body.id)).find((section) => section.name === 'Platform')!.text.split('## Runtime')[1]!
     expect(runtime).toContain(`Time zone: ${WARSAW}.`)
     expect(runtime).not.toContain('allow:')
+  })
+})
+
+describe('labels of plugin tools and Hosts (ux-5g3w, ux-q8o6, ux-qm6u, ux-ywxa, ux-czg2)', () => {
+  it('the catalog, my_capabilities and the prompt preview name a connection by plugin and account, and a Host facet by its Host and state', async () => {
+    await reachableThings()
+    const annaId = (await api<{ id: string }>(ANNA, '/api/me')).body.id
+    const google = await env.MEMBER.getByName(annaId).addConnection({ kind: 'google', label: 'anna@gmail.test', account: 'anna@gmail.test', services: ['gmail', 'gmail-send'], shared: false, meta: { expiresAt: Date.now() + 3_600_000 }, secrets: { token: 't' } })
+    await env.MEMBER.getByName(annaId).addConnection({ kind: 'discord', label: 'Mr. Robot', account: 'Mr. Robot', services: [], shared: false, meta: {}, secrets: { token: 't' } })
+    scripts.set('*', [{ text: 'Hello.' }])
+    const id = (await api<{ id: string }>(ANNA, '/api/robots', { body: {} })).body.id
+    await settle(id)
+
+    // The catalog carries the plugin title of each connection and the Host of each facet.
+    const catalog = (await api<SettingsCatalog>(ANNA, `/api/robots/${id}/catalog`)).body
+    expect((catalog.connections ?? []).map((connection) => `${connection.pluginTitle} · ${connection.account}`).sort()).toEqual(['Discord bot · Mr. Robot', 'Google · anna@gmail.test', 'Slack · acme.slack.com'])
+    const host = (catalog.hosts ?? [])[0]!
+    expect(catalog.hosts).toEqual([expect.objectContaining({ id: host.id, name: 'Desk', online: false, mine: true })])
+    expect(catalog.toolGroups.find((group) => group.name === 'web')!.description).toBe('Fetch pages by address (web_fetch, free; searching the web is the exa group).')
+
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { web: 'allow' }, connections: { [google.id]: 'allow' }, hosts: { [`${host.id}:files`]: 'ask' } } } })
+    await testRobot(id).activateForTest()
+
+    // my_capabilities names the items the same way.
+    const { view } = await toolList(id)
+    const entries = [...view.allow, ...view.ask, ...view.deny]
+    const named = (grant: string) => entries.find((entry) => entry.grant === grant)!
+    expect(view.allow.map((entry) => entry.name)).toEqual(['web', 'Google · anna@gmail.test'])
+    expect(named(`${google.id}:write`).name).toBe('Google · anna@gmail.test: send e-mail')
+    expect(entries.filter((entry) => entry.kind === 'connection').map((entry) => entry.name)).toEqual(expect.arrayContaining(['Slack · acme.slack.com', 'Slack · acme.slack.com: post and mark read', 'Discord bot · Mr. Robot']))
+    expect(entries.filter((entry) => entry.kind === 'host').map((entry) => entry.name)).toEqual(['Desk · files', 'Desk · shell', 'Desk · browser'])
+    expect(view.ask).toEqual([expect.objectContaining({ name: 'Desk · files', grant: `${host.id}:files`, description: expect.stringContaining('offline') as unknown as string })])
+    expect(named('web').description).toBe('Fetch pages by address (web_fetch, free; searching the web is the exa group).')
+
+    // The prompt preview: the same labels and the Host state in the runtime section, and the rule not to probe a Host.
+    const platform = (await api<{ sections: Array<{ name: string; text: string }> }>(ANNA, `/api/robots/${id}/prompt`)).body.sections.find((section) => section.name === 'Platform')!.text
+    const runtime = platform.slice(platform.indexOf('## Runtime'))
+    expect(runtime).toContain('\n- Hosts: Desk · offline.\n')
+    expect(runtime).toContain('\nallow: tools web; connections Google · anna@gmail.test\nask: hosts Desk · files\n')
+    const toolRules = platform.slice(platform.indexOf('## Tools'), platform.indexOf('## Routines'))
+    expect(toolRules).toContain('- Host online state is in the runtime section and in my_capabilities; never probe a Host with a command to find out.')
   })
 })
 

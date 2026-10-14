@@ -1,4 +1,4 @@
-import { levelSummary, type CapabilityItem } from '@mr-robot/protocol'
+import { hostHeading, hostsOf, levelSummary, type CapabilityItem } from '@mr-robot/protocol'
 import type { RobotConfig } from '../robot/store.ts'
 import { docsIndex } from './docs-index.ts'
 
@@ -140,6 +140,7 @@ const toolRules: PlatformSection = {
     `- Prepare purchases and orders but stop before payment or bank 2FA: paying stays with ${owner}.`,
     '- External effects (messages sent, carts filled, orders placed) are real. After a rewind they still stand; never repeat or contradict them blindly. Before you repeat an action whose outcome is unknown, find out whether it already happened.',
     `- Some calls put an Ask to ${owner} (a Grant proposal, a file edit). Their answer reaches you later and is final.`,
+    '- Host online state is in the runtime section and in my_capabilities; never probe a Host with a command to find out.',
   ),
 }
 
@@ -186,9 +187,10 @@ const threads: PlatformSection = {
 const docs: PlatformSection = { name: 'docs', render: () => `## ${docsIndex()}` }
 
 /**
- * What is true of this Robot now (sk-ixvp): name, owner, model, time zone, the language rule and the
- * levels of its grants, names only. The text holds no clock, so it stays the same between Turns and
- * the prompt cache keeps working; the time of a Wake-up is in its label.
+ * What is true of this Robot now (sk-ixvp): name, owner, model, time zone, the language rule, whether
+ * each Host is online (ux-czg2) and the levels of its grants, names only. The text holds no clock, so it
+ * stays the same between Turns (until a Host goes on- or offline) and the prompt cache keeps working;
+ * the time of a Wake-up is in its label.
  */
 const runtime: PlatformSection = {
   name: 'runtime',
@@ -197,6 +199,7 @@ const runtime: PlatformSection = {
     `- You are ${config.identity.name}, a Robot of ${owner}. Your model is ${config.model.model} on ${config.model.provider}, thinking ${config.model.effort}.`,
     `- Time zone: ${config.timeZone}.`,
     `- Language: answer in the language ${owner} writes in; write files, notes and skills in English; USER.md may override this.`,
+    capabilities !== undefined && config.status !== 'setup' && hostsOf(capabilities).length > 0 && `- Hosts: ${hostsOf(capabilities).map(hostHeading).join('; ')}.`,
     capabilities !== undefined && config.status !== 'setup' && '- Your levels (call my_capabilities for what each item does):',
     capabilities !== undefined && config.status !== 'setup' && levelSummary(capabilities),
   ),

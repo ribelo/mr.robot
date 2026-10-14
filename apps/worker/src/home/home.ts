@@ -3,7 +3,7 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { AccountStatus, ChainEntry, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
+import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, SkillLibraryRow } from '@mr-robot/protocol'
 import { usableNames } from '@mr-robot/protocol'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
@@ -36,7 +36,7 @@ import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/du
 import { backendOptions } from '../browser/backends.ts'
 import { MR_ROBOT_ONLY_GROUPS, TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
-import { disabledToolGroups } from '../plugins/catalog.ts'
+import { connectorPlugin, CONNECTOR_TITLES, disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
 import { abandoned, answered, closed, invited, lapsed, messaged, ThreadRegistry, type AnswerOutcome, type Side, type Step, type ThreadRow } from './threads.ts'
@@ -1202,6 +1202,7 @@ export class Home extends DurableObject<Env> {
     })
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
     ctx.waitUntil(this.destroyOrphans().catch((error: unknown) => console.warn('orphans not destroyed', error)))
+    ctx.waitUntil(this.unsharePersonConnections().catch((error: unknown) => console.warn('person connections not unshared', error)))
     // A restart (a deploy, an eviction) loses the gateway socket: listen again at once, within the gateway's limits.
     ctx.waitUntil(this.ensureDiscordGateway())
   }
@@ -1240,6 +1241,7 @@ export class Home extends DurableObject<Env> {
     const off = disabledToolGroups(this.pluginsOf.enabled())
     const enabled = this.pluginsOf.enabled()
     const connections = (await this.connectionsFor(memberId)).filter((connection) => enabled[connection.kind] !== false)
+      .map((connection) => ({ ...connection, pluginTitle: CONNECTOR_TITLES[connection.kind] }))
     return { ...base, toolGroups: base.toolGroups.filter((group) => !off.has(group.name)), connections }
   }
   skills(memberId: string): Promise<SkillView[]> { return this.run(skills(memberId)) }
@@ -1397,6 +1399,30 @@ export class Home extends DurableObject<Env> {
   pluginSettings(name: string): Promise<{ values: Record<string, PlainValue>; secrets: Record<string, string> }> { return this.pluginsOf.settings(name) }
 
   connectionShared(ownerId: string, connection: OwnConnection, shared: boolean): void { this.pluginsOf.connectionShared(ownerId, connection, shared) }
+
+  /**
+   * The v1.12 migration (ux-cop2, ux-dz8p): a connection that acts as a person is never shared with the
+   * Home. Each one still shared is unshared; Robots of other Members that held a grant on it lose the
+   * grant and are told at their next Turn; its owner gets a note on the Connections section naming them.
+   * It runs at start and is safe to call again: nothing can share such a connection any more.
+   */
+  async unsharePersonConnections(): Promise<void> {
+    for (const { ownerId, connection } of this.pluginsOf.sharedPersonConnections()) {
+      const ownerName = this.memberName(ownerId)
+      const title = connectorPlugin(connection.kind)?.title ?? connection.kind
+      const notice = `${ownerName}'s ${title} connection "${connection.label}" (${connection.account}) acts as ${ownerName}, so it is no longer shared with the Home and your grant on it was removed. Its tools are gone; if your work needs it, tell your owner.`
+      const robots = this.ctx.storage.sql.exec<{ id: string; owner_id: string; identity: string }>("SELECT id, owner_id, identity FROM robot WHERE owner_id <> ? AND status <> 'deleted' ORDER BY id", ownerId).toArray()
+      const held = await Promise.all(robots.map((robot) => this.env.ROBOT.getByName(robot.id).connectionWithdrawn(connection.id, notice)))
+      const lost = robots.filter((_, index) => held[index] === true).map((robot) => ({ name: (JSON.parse(robot.identity) as Identity).name, ownerName: this.memberName(robot.owner_id) }))
+      this.pluginsOf.addNote(ownerId, { kind: connection.kind, label: connection.label, account: connection.account, robots: lost })
+      this.pluginsOf.connectionShared(ownerId, connection, false)
+      await this.env.MEMBER.getByName(ownerId).updateConnection(connection.id, { shared: false })
+    }
+  }
+
+  /** Notes on the Member's Connections section until dismissed (ux-cop2). */
+  connectionNotes(memberId: string): ConnectionNote[] { return this.pluginsOf.notes(memberId) }
+  dismissConnectionNote(memberId: string, id: string): boolean { return this.pluginsOf.dismissNote(memberId, id) }
 
   // ---------------------------------------------------------------- Discord (v1.5 ticket 05)
 

@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] POST/PATCH refuse shared for Slack and Google (workerd test)
-- [ ] Migration unshares, revokes grants, queues the owner note and the Robot memory note (workerd test)
-- [ ] No checkbox for person connections; checkbox present for Discord bot (component test)
+- [x] POST/PATCH refuse shared for Slack and Google (workerd test)
+- [x] Migration unshares, revokes grants, queues the owner note and the Robot memory note (workerd test)
+- [x] No checkbox for person connections; checkbox present for Discord bot (component test)

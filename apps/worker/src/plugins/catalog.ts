@@ -11,6 +11,11 @@ import { TOOL_GROUPS, type ToolGroup } from '../agent/catalog.ts'
 export interface ConnectorSpec {
   readonly kind: ConnectorKind
   readonly connect: ConnectSpec
+  /**
+   * A connection of this connector acts as the person who connected it (a Slack session, a Google
+   * account): it is never shared with the Home, so no other Member's Robot acts as them (ux-bk91).
+   */
+  readonly actsAsPerson?: true
 }
 
 /** Connect by OAuth consent with a service choice, or by pasting values described by a schema. */
@@ -79,6 +84,7 @@ export const PLUGINS: readonly PluginEntry[] = [
     ].join('\n'),
     connector: {
       kind: 'google',
+      actsAsPerson: true,
       connect: {
         method: 'oauth',
         services: [
@@ -96,6 +102,7 @@ export const PLUGINS: readonly PluginEntry[] = [
     description: 'Read a Slack workspace (channels, unread, threads, search, people) and, with a write grant, post and mark read.',
     connector: {
       kind: 'slack',
+      actsAsPerson: true,
       connect: {
         method: 'paste',
         schema: z.object({
@@ -132,6 +139,19 @@ export const PLUGINS: readonly PluginEntry[] = [
 ]
 
 export const pluginByName = (name: string): PluginEntry | undefined => PLUGINS.find((plugin) => plugin.name === name)
+
+/** What a Robot's settings put before a connection's account (ux-5g3w): the plugin, and for Discord the way it connects. */
+export const CONNECTOR_TITLES: Readonly<Record<ConnectorKind, string>> = {
+  google: 'Google',
+  slack: 'Slack',
+  discord: 'Discord bot',
+}
+
+/** The connector plugin of a kind. */
+export const connectorPlugin = (kind: ConnectorKind): PluginEntry | undefined => PLUGINS.find((plugin) => plugin.connector?.kind === kind)
+
+/** Whether connections of a kind act as a person and so are never shared with the Home (ux-bk91). */
+export const actsAsPerson = (kind: ConnectorKind): boolean => connectorPlugin(kind)?.connector?.actsAsPerson === true
 
 /** Tool groups of the plugins the Home switched off. */
 export function disabledToolGroups(enabled: Readonly<Record<string, boolean>>): Set<string> {

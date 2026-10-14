@@ -12,17 +12,32 @@ export type CapabilityField = 'tools' | 'skills' | 'recipients' | 'connections' 
 /** The part of the settings catalog that holds grantable items. */
 export type CapabilityCatalog = Pick<SettingsCatalog, 'toolGroups' | 'skills' | 'robots' | 'secrets'> & Partial<Pick<SettingsCatalog, 'connections' | 'hosts'>>
 
-export interface CapabilityItem {
-  /** The GrantSet field the item belongs to. */
-  readonly field: CapabilityField
+export const HOST_FACETS = ['files', 'shell', 'browser'] as const
+export type HostFacet = (typeof HOST_FACETS)[number]
+
+/** The Host a host item belongs to: Advanced settings shows one heading per Host (ux-q8o6). */
+export interface CapabilityHost {
+  readonly id: string
+  readonly name: string
+  readonly online: boolean
+  readonly mine: boolean
+  readonly ownerName: string
+}
+
+interface ItemFields {
   /** The name a Grant uses: a tool group, a skill, a Robot id, "<connectionId>" or "<connectionId>:write", "<hostId>:<facet>", a login name. */
   readonly name: string
-  /** What a person reads: the name, or the account's or computer's name. */
+  /** What a person and the Robot read: the name, "<plugin> · <account>" for a connection, "<host> · <facet>" for a host facet (ux-5g3w, ux-ywxa). */
   readonly label: string
   /** One line. */
   readonly description: string
   readonly level: GrantLevel
 }
+
+/** One grantable item; a host facet also names its Host and facet, so that a view can group it under the Host. */
+export type CapabilityItem =
+  | (ItemFields & { readonly field: Exclude<CapabilityField, 'hosts'> })
+  | (ItemFields & { readonly field: 'hosts'; readonly host: CapabilityHost; readonly facet: HostFacet })
 
 /** The sections of the list, in the order Advanced settings shows them. */
 export const CAPABILITY_SECTIONS: ReadonlyArray<{ readonly field: CapabilityField; readonly title: string; readonly kind: string }> = [
@@ -34,8 +49,7 @@ export const CAPABILITY_SECTIONS: ReadonlyArray<{ readonly field: CapabilityFiel
   { field: 'secrets', title: 'Logins', kind: 'login' },
 ]
 
-const HOST_FACETS = ['browser', 'files', 'shell'] as const
-const HOST_FACET_TEXT: Readonly<Record<(typeof HOST_FACETS)[number], string>> = {
+const HOST_FACET_TEXT: Readonly<Record<HostFacet, string>> = {
   browser: "Its Chrome, when chosen as this Robot's browser",
   files: 'host_read, host_write as the host owner',
   shell: "host_run as the host owner, in their shell",
@@ -49,21 +63,43 @@ const levelIn = (levels: Readonly<Record<string, GrantLevel>>, name: string): Gr
 const canWrite = (connection: { readonly kind: string; readonly services: readonly string[] }): boolean =>
   connection.kind === 'slack' || (connection.kind === 'google' && connection.services.includes('gmail-send'))
 
+/** A Host's state as the settings heading, my_capabilities and the runtime section show it: "online", "offline · Anna's". */
+export const hostState = (host: CapabilityHost): string => `${host.online ? 'online' : 'offline'}${host.mine ? '' : ` · ${host.ownerName}'s`}`
+
+/** The heading of a Host's facets: "Desk · online". */
+export const hostHeading = (host: CapabilityHost): string => `${host.name} · ${hostState(host)}`
+
+/** The Hosts the host items belong to, each once, in the order of the items. */
+export function hostsOf(items: readonly CapabilityItem[]): CapabilityHost[] {
+  return items.flatMap((entry) => (entry.field === 'hosts' ? [entry.host] : [])).filter((host, index, all) => all.findIndex((other) => other.id === host.id) === index)
+}
+
 /** Every grantable item of the catalog with its level under `grants`, section by section. */
 export function capabilityItems(catalog: CapabilityCatalog, grants: GrantSet): CapabilityItem[] {
-  const item = (field: CapabilityField, name: string, label: string, description: string): CapabilityItem => ({ field, name, label, description, level: levelIn(grants[field], name) })
+  const item = (field: Exclude<CapabilityField, 'hosts'>, name: string, label: string, description: string): CapabilityItem => ({ field, name, label, description, level: levelIn(grants[field], name) })
+  const facet = (host: CapabilityHost, facet: HostFacet): CapabilityItem => {
+    const name = `${host.id}:${facet}`
+    return { field: 'hosts', name, label: `${host.name} · ${facet}`, description: HOST_FACET_TEXT[facet], level: levelIn(grants.hosts, name), host, facet }
+  }
   return [
     ...catalog.toolGroups.map((group) => item('tools', group.name, group.name, group.description)),
     ...catalog.skills.map((skill) => item('skills', skill.name, skill.name, skill.description)),
     ...catalog.robots.map((robot) => item('recipients', robot.id, robot.name, 'A Robot you may message.')),
+    // Plugin tools, one item per connected account, labelled with its plugin (ux-5g3w): "Google · anna@example.com".
     ...(catalog.connections ?? []).flatMap((connection) => {
-      const read = item('connections', connection.id, connection.label, `${connection.kind} · ${connection.account}${connection.mine ? '' : ` · ${connection.ownerName}'s`}${connection.status === 'connected' ? '' : ' · needs attention'}`)
+      const label = `${connection.pluginTitle} · ${connection.account}`
+      const description = [
+        canWrite(connection) ? 'Read tools as this account' : 'Plugin tools as this account',
+        connection.label === connection.account ? undefined : `named "${connection.label}"`,
+        connection.mine ? undefined : `${connection.ownerName}'s`,
+        connection.status === 'connected' ? undefined : 'needs attention',
+      ].filter((part) => part !== undefined).join(' · ')
+      const read = item('connections', connection.id, label, description)
       return canWrite(connection)
-        ? [read, item('connections', `${connection.id}:write`, `${connection.label}: ${connection.kind === 'google' ? 'send e-mail' : 'post and mark read'}`, 'A separate grant: without it the Robot only reads')]
+        ? [read, item('connections', `${connection.id}:write`, `${label}: ${connection.kind === 'google' ? 'send e-mail' : 'post and mark read'}`, 'A separate grant: without it the Robot only reads')]
         : [read]
     }),
-    ...(catalog.hosts ?? []).flatMap((host) => HOST_FACETS.map((facet) =>
-      item('hosts', `${host.id}:${facet}`, `${host.name}: ${facet}`, `${HOST_FACET_TEXT[facet]} · ${host.online ? 'online' : 'offline'}${host.mine ? '' : ` · ${host.ownerName}'s`}`))),
+    ...(catalog.hosts ?? []).flatMap((host) => HOST_FACETS.map((name) => facet(host, name))),
     ...catalog.secrets.map((secret) => item('secrets', secret.name, secret.name,
       [secret.username, (secret.websites ?? []).join(', '), secret.scope === 'home' ? 'shared with the Home' : 'yours'].filter((part) => part !== undefined && part !== '').join(' · '))),
   ]
@@ -78,9 +114,10 @@ export interface CapabilitiesView {
   readonly note: string
 }
 
-/** What my_capabilities returns: the items grouped by level, and how a level changes. */
+/** What my_capabilities returns: the items grouped by level, and how a level changes. A host facet says whether its Host is online. */
 export function capabilitiesView(items: readonly CapabilityItem[]): CapabilitiesView {
-  const at = (level: GrantLevel) => items.filter((entry) => entry.level === level).map((entry) => ({ kind: kindOf(entry.field), name: entry.label, grant: entry.name, description: entry.description }))
+  const described = (entry: CapabilityItem) => (entry.field === 'hosts' ? `${entry.description} · ${hostState(entry.host)}` : entry.description)
+  const at = (level: GrantLevel) => items.filter((entry) => entry.level === level).map((entry) => ({ kind: kindOf(entry.field), name: entry.label, grant: entry.name, description: described(entry) }))
   return {
     allow: at('allow'),
     ask: at('ask'),

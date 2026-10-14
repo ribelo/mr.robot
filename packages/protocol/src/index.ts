@@ -1005,8 +1005,11 @@ export const PluginView = Schema.Struct({
   setupNeeded: Schema.NullOr(Schema.String),
   /** Step-by-step setup in Markdown, shown on the plugin page (cn-fpyt, cn-csae). */
   guide: Schema.NullOr(Schema.String),
-  /** Connectors only: how a person connects an account. */
-  connector: Schema.NullOr(Schema.Struct({ kind: ConnectorKind, connect: ConnectMethod })),
+  /**
+   * Connectors only: how a person connects an account, and whether its connections act as that
+   * person (Slack, Google): those are never shared with the Home (ux-bk91).
+   */
+  connector: Schema.NullOr(Schema.Struct({ kind: ConnectorKind, connect: ConnectMethod, actsAsPerson: Schema.Boolean })),
 })
 export type PluginView = typeof PluginView.Type
 
@@ -1042,7 +1045,29 @@ export const PluginSettingsInput = Schema.Struct({ values: Schema.Record(Schema.
 export const ConnectionPaste = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.Boolean, values: Schema.Record(Schema.String, Schema.String) })
 export const ConnectionPatch = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.optional(Schema.Boolean), isDefault: Schema.optional(Schema.Boolean) })
 
+/**
+ * A connection of the Member's that acts as them and was shared with the Home, unshared by the v1.12
+ * update (ux-cop2): shown on the Connections section until the Member dismisses it.
+ */
+export const ConnectionNote = Schema.Struct({
+  id: Schema.String,
+  kind: ConnectorKind,
+  label: Schema.String,
+  account: Schema.String,
+  /** Robots of other Members that held a grant on it and lost it (ux-dz8p). */
+  robots: Schema.Array(Schema.Struct({ name: Schema.String, ownerName: Schema.String })),
+  createdAt: Schema.Number,
+})
+export type ConnectionNote = typeof ConnectionNote.Type
+
 // ---------------------------------------------------------------- What a Robot's settings can choose from
+
+/** A Connection as a Robot's settings offer it, with the title of its plugin for the item label (ux-5g3w): "Google", "Discord bot". */
+export const CatalogConnection = Schema.Struct({
+  ...ConnectionView.fields,
+  pluginTitle: Schema.String,
+})
+export type CatalogConnection = typeof CatalogConnection.Type
 
 export const SettingsCatalog = Schema.Struct({
   toolGroups: Schema.Array(Schema.Struct({ name: Schema.String, description: Schema.String })),
@@ -1060,7 +1085,7 @@ export const SettingsCatalog = Schema.Struct({
   /** Provider accounts the owner's Robots may put in a model chain: their own and the Home's shared ones (pa-mho0). */
   accounts: Schema.optional(Schema.Array(ProviderView)),
   /** Connections the owner can grant: their own and the Home's shared ones (cn-xezx). */
-  connections: Schema.optional(Schema.Array(ConnectionView)),
+  connections: Schema.optional(Schema.Array(CatalogConnection)),
 })
 export type SettingsCatalog = typeof SettingsCatalog.Type
 

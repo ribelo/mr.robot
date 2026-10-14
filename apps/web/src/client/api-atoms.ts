@@ -69,6 +69,7 @@ export const hostActionsAtom = Atom.family((hostId: string) => query((api) => ap
 export const pairingAtom = Atom.family((code: string) => query((api) => api.pairing(code), [keys.hosts]))
 export const pluginsAtom = query((api) => api.plugins, [keys.plugins])
 export const connectionsAtom = query((api) => api.connections, [keys.connections])
+export const connectionNotesAtom = query((api) => api.connectionNotes, [keys.connections])
 export const skillAtom = Atom.family((name: string) => query((api) => api.skill(name), [keys.admin]))
 
 /** A change to make through the API, and the keys whose atoms must read again after it succeeds. */

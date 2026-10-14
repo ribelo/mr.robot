@@ -7,7 +7,7 @@ import { emptyGrants, overlayGrants, type GrantSet } from '@mr-robot/protocol'
 
 export const TOOL_GROUPS = {
   files: 'Read, write, edit, glob and grep files in its own Workspace.',
-  web: 'Fetch web pages by address (searching the web is the exa group).',
+  web: 'Fetch pages by address (web_fetch, free; searching the web is the exa group).',
   browser: 'Use a headless browser: open, observe, act, screenshot; ask the owner for a takeover.',
   routines: 'Create, list, update, pause and delete Routines: its own, and for Mr. Robot those of other Robots too.',
   messaging: 'List and message the Robots it has recipient Grants for.',

@@ -2,8 +2,9 @@ import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS } from './danger-words.ts'
 import { useState, useEffect } from 'react'
-import { capabilityItems, GRANT_LEVELS, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
+import { capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
+import { SaveButton, type SaveOutcome } from './SaveButton.tsx'
 import type * as Exit from 'effect/Exit'
 import { keys, promptAtom, useCommand, webhookAtom } from '../client/api-atoms.ts'
 import type { ApiFailure } from '../client/api-failure.ts'
@@ -14,7 +15,7 @@ import { useAtomValue } from '@effect/atom-react'
 export interface AdvancedSettingsProps {
   readonly panel: RobotPanel
   readonly catalog: SettingsCatalog
-  readonly onSave: (patch: SettingsPatch) => Promise<void>
+  readonly onSave: (patch: SettingsPatch) => Promise<SaveOutcome>
   readonly onPause: () => void
   readonly onResume: () => void
   readonly onDelete: (confirm: string) => Promise<Exit.Exit<void, ApiFailure>>
@@ -32,7 +33,6 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const [danger, setDanger] = useState<'delete' | 'clear' | 'start-over'>()
   const name = panel.summary.identity.name
   const [draft, setDraft] = useState(settings)
-  const [saving, setSaving] = useState(false)
   const model = catalog.models.find((option) => option.provider === draft.model.provider && option.model === draft.model.model)
   const maxBudget = model?.contextWindow ?? 1_000_000
   const setLevel = (field: GrantField, name: string, level: GrantLevel) => setDraft({ ...draft, grants: { ...draft.grants, [field]: { ...draft.grants[field], [name]: level } } })
@@ -41,26 +41,20 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const of = (field: CapabilityField) => capabilities.filter((entry) => entry.field === field)
   /** One grant item's three-state control (sk-746n). */
   const item = (entry: CapabilityItem) => (
-    <GrantItem key={`${entry.field}:${entry.name}`} label={entry.label} detail={entry.description} level={entry.level} onChange={(level) => setLevel(entry.field, entry.name, level)} />
+    <GrantItem key={`${entry.field}:${entry.name}`} label={entry.label} shown={entry.field === 'hosts' ? entry.facet : entry.label} detail={entry.description} level={entry.level} onChange={(level) => setLevel(entry.field, entry.name, level)} />
   )
-  const save = async () => {
-    setSaving(true)
-    try {
-      await onSave({
-        chain: draft.chain,
-        contextBudget: draft.contextBudget,
-        codeMode: draft.codeMode,
-        browserBackend: draft.browserBackend,
-        compactionInstruction: draft.compactionInstruction,
-        grants: draft.grants,
-        sharing: draft.sharing,
-        notifications: draft.notifications,
-        spendLimitUsd: draft.spendLimitUsd,
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
+  const hostItems = of('hosts')
+  const save = () => onSave({
+    chain: draft.chain,
+    contextBudget: draft.contextBudget,
+    codeMode: draft.codeMode,
+    browserBackend: draft.browserBackend,
+    compactionInstruction: draft.compactionInstruction,
+    grants: draft.grants,
+    sharing: draft.sharing,
+    notifications: draft.notifications,
+    spendLimitUsd: draft.spendLimitUsd,
+  })
   const mrRobot = panel.summary.kind === 'mr-robot'
   return (
     <div className="form">
@@ -85,7 +79,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </label>
 
       <h2>Tools</h2>
-      <div className="muted">Allow: the Robot uses it freely. Ask: each use waits for your answer. Deny: the Robot does not have it.{mrRobot ? ' Mr. Robot holds everything you can reach at allow unless you lower it here.' : ''}</div>
+      <div className="muted">Platform tools: one item per tool group. Allow: the Robot uses it freely. Ask: each use waits for your answer. Deny: the Robot does not have it.{mrRobot ? ' Mr. Robot holds everything you can reach at allow unless you lower it here.' : ''}</div>
       <div className="check-grid scroll-box">
         {of('tools').map(item)}
       </div>
@@ -102,17 +96,22 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         </div>
       )}
       <h2>Connections</h2>
+      <div className="muted">Plugin tools: one item per connected account. Each Robot gets only the accounts you grant here.</div>
       {(catalog.connections ?? []).length === 0 ? <div className="muted">No connections yet: connect accounts under your name → Connections.</div> : (
         <div className="check-grid">
           {of('connections').map(item)}
         </div>
       )}
       <h2>Hosts</h2>
-      {(catalog.hosts ?? []).length === 0 ? <div className="muted">No computers yet: install the Mr. Robot app on one and pair it (your name → Hosts).</div> : (
-        <div className="check-grid">
-          {of('hosts').map(item)}
-        </div>
-      )}
+      <div className="muted">Computers that run the Mr. Robot app: yours and the ones shared with the Home. Grant files, shell and browser of each computer on their own.</div>
+      {hostItems.length === 0 ? <div className="muted">No computers yet: install the Mr. Robot app on one and pair it (your name → Hosts).</div> : hostsOf(hostItems).map((host) => (
+        <section key={host.id} className="host-grants" aria-label={host.name}>
+          <h3 className="panel-section">{hostHeading(host)}</h3>
+          <div className="check-grid">
+            {hostItems.filter((entry) => entry.field === 'hosts' && entry.host.id === host.id).map(item)}
+          </div>
+        </section>
+      ))}
       <h2>Logins</h2>
       {catalog.secrets.length === 0 ? <div className="muted">No logins yet: add them under your name → Logins.</div> : (
         <div className="check-grid">
@@ -151,7 +150,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         {panel.canEdit ? <button type="button" className="button button-danger" onClick={() => setDanger('start-over')}>Start over…</button> : null}
         {mrRobot || !panel.canEdit ? null : <button type="button" className="button button-danger" onClick={() => setDanger('delete')}>Delete…</button>}
         <span className="spacer" />
-        <button type="button" className="button button-primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
+        <span className="muted">Changes apply from the next Turn.</span>
+        <SaveButton onSave={save} />
       </div>
       {danger === 'delete' ? (
         <ConfirmByName title={`Delete ${name}`} name={name} action="Delete robot"
@@ -173,11 +173,11 @@ function levelIn(levels: GrantLevels, name: string): GrantLevel {
   return Object.hasOwn(levels, name) ? levels[name]! : 'deny'
 }
 
-/** A grant item with allow, ask and deny (sk-746n). */
-export function GrantItem({ label, detail, level, onChange }: { label: string; detail?: string; level: GrantLevel; onChange: (level: GrantLevel) => void }) {
+/** A grant item with allow, ask and deny (sk-746n); `shown` is the visible text when a heading already names part of the label. */
+export function GrantItem({ label, shown = label, detail, level, onChange }: { label: string; shown?: string; detail?: string; level: GrantLevel; onChange: (level: GrantLevel) => void }) {
   return (
     <div className="grant-item">
-      <span>{label}{detail === undefined || detail === '' ? null : <small>{detail}</small>}</span>
+      <span>{shown}{detail === undefined || detail === '' ? null : <small>{detail}</small>}</span>
       <div className="segmented compact" role="radiogroup" aria-label={label}>
         {GRANT_LEVELS.map((option) => (
           <button key={option} type="button" role="radio" aria-checked={level === option} className={level === option ? `segment active level-${option}` : 'segment'} onClick={() => onChange(option)}>{option}</button>

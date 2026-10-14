@@ -10,8 +10,8 @@ Spec: ../mr-robot-v1.12.md. Frontier at the start: 01, 07, 08, 13. Then 02, 04, 
 | 04 | [Workers AI switch and Admin model combobox](04-workers-ai-switch.md) | 01 | ready-for-agent |
 | 05 | [Spend limits as types](05-spend-limits-as-types.md) | 04 | ready-for-agent |
 | 06 | [WireGuard summary](06-wireguard-summary.md) | 04 | ready-for-agent |
-| 07 | [Robot settings labels: plugin tools, Hosts per host, web group; Host sentence in the prompt](07-robot-settings-labels.md) | — | ready-for-agent |
-| 08 | [Person connections are never shared](08-person-connections-not-shared.md) | — | ready-for-agent |
+| 07 | [Robot settings labels: plugin tools, Hosts per host, web group; Host sentence in the prompt](07-robot-settings-labels.md) | — | done |
+| 08 | [Person connections are never shared](08-person-connections-not-shared.md) | — | done |
 | 09 | [Discord as you: REST reader, write grant, two ways on the row](09-discord-as-you.md) | 08 | ready-for-agent |
 | 10 | [Session capture in the desktop app (Slack, Discord)](10-session-capture-desktop.md) | 09 | ready-for-agent |
 | 11 | [Session capture through Takeover (PWA)](11-session-capture-takeover.md) | 09 | ready-for-agent |

@@ -27,6 +27,7 @@ import {
   SendMessage,
   SettingsPatch,
   type Attachment,
+  type ConnectorKind,
   type Me,
   type MemberView,
   type RobotPanel,
@@ -38,7 +39,7 @@ import { modelRefusal } from '../robot/model-choice.ts'
 import type { AnswerResult, HelpAnswerResult } from '../robot/robot.ts'
 import { parseTimeZone } from '../robot/time-zone.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
-import { PLUGINS, pluginByName } from '../plugins/catalog.ts'
+import { actsAsPerson, connectorPlugin, PLUGINS, pluginByName } from '../plugins/catalog.ts'
 import { parseForm } from '../connectors/schema-form.ts'
 
 export interface ApiContext {
@@ -70,6 +71,13 @@ function connectionView(c: ApiContext, id: string) {
       return view === undefined ? Effect.fail(notFound('no such connection of yours')) : Effect.succeed(view)
     }),
   )
+}
+
+/** A connection that acts as a person (Slack, Google) is never shared with the Home (ux-bk91). */
+function shareable(kind: ConnectorKind, shared: boolean): Effect.Effect<void, ApiError> {
+  return shared && actsAsPerson(kind)
+    ? Effect.fail(badRequest(`a ${connectorPlugin(kind)?.title ?? kind} connection acts as you, so it cannot be shared with the Home`))
+    : Effect.void
 }
 
 function admin(c: ApiContext): Effect.Effect<void, ApiError> {
@@ -162,10 +170,17 @@ export const api = new Router<ApiContext>()
     return yield* Effect.tryPromise({ try: () => home(c.env).setPluginConfig(name, body.values, new URL(c.request.url).origin), catch: (error) => badRequest(error instanceof Error ? error.message.replace(/^PluginConfigInvalid: /, '') : 'the settings are not valid') })
   }))
   .on('GET', '/api/connections', (c) => call(() => home(c.env).connectionsFor(c.member.id)))
+  .on('GET', '/api/connections/notes', (c) => call(() => home(c.env).connectionNotes(c.member.id)))
+  .on('DELETE', '/api/connections/notes/:id', (c, { id }) => Effect.gen(function* () {
+    const dismissed = yield* call(() => home(c.env).dismissConnectionNote(c.member.id, id))
+    return dismissed ? { ok: true } : yield* Effect.fail(notFound('no such note'))
+  }))
   // Google consent (v1.5 ticket 02): the browser navigates here, so both answer with a redirect.
   .on('GET', '/api/connections/google/oauth/start', (c) => Effect.promise(async () => {
     const url = new URL(c.request.url)
     const services = (url.searchParams.get('services') ?? '').split(',').filter(Boolean)
+    // A Google account acts as the person, so it is never shared with the Home (ux-bk91).
+    if (url.searchParams.get('shared') === '1' && actsAsPerson('google')) return Response.redirect(`${url.origin}/#/me?connection-error=${encodeURIComponent('a Google connection acts as you, so it cannot be shared with the Home')}`, 302)
     try {
       const consent = await c.env.MEMBER.getByName(c.member.id).startGoogleConsent(url.origin, services, url.searchParams.get('shared') === '1', url.searchParams.get('reconnect'), url.searchParams.get('external') === '1')
       return Response.redirect(consent, 302)
@@ -178,6 +193,7 @@ export const api = new Router<ApiContext>()
     const plugin = PLUGINS.find((entry) => entry.connector?.kind === kind)
     const connect = plugin?.connector?.connect
     if (plugin === undefined || connect === undefined || connect.method !== 'paste') return yield* Effect.fail(notFound('this connector does not connect by pasting'))
+    yield* shareable(plugin.connector!.kind, body.shared)
     const parsed = parseForm(plugin.name, connect.schema, body.values, new Set())
     if (!parsed.ok) return yield* Effect.fail(badRequest(parsed.error.message))
     const added = yield* call(() => c.env.MEMBER.getByName(c.member.id).connectPasted({
@@ -187,6 +203,9 @@ export const api = new Router<ApiContext>()
   }))
   .on('PATCH', '/api/connections/:id', (c, { id }) => Effect.gen(function* () {
     const body = yield* decodeBody(c.request, ConnectionPatch)
+    const current = yield* call(() => c.env.MEMBER.getByName(c.member.id).connection(id))
+    if (current === undefined) return yield* Effect.fail(notFound('no such connection of yours'))
+    yield* shareable(current.kind, body.shared === true)
     const updated = yield* call(() => c.env.MEMBER.getByName(c.member.id).updateConnection(id, {
       ...(body.label === undefined || body.label.trim() === '' ? {} : { label: body.label.trim() }),
       ...(body.shared === undefined ? {} : { shared: body.shared }),

@@ -4,10 +4,10 @@
  * of connections Members share with the Home (cn-qs78).
  */
 import * as Effect from 'effect/Effect'
-import type { ConnectionView, PluginView } from '@mr-robot/protocol'
+import type { ConnectionNote, ConnectionView, PluginView } from '@mr-robot/protocol'
 import { describeSchema, parseForm, PluginConfigInvalid, type PlainValue } from '../connectors/schema-form.ts'
 import type { OwnConnection } from '../member/connections.ts'
-import { PLUGINS, pluginByName, type PluginEntry } from '../plugins/catalog.ts'
+import { actsAsPerson, PLUGINS, pluginByName, type PluginEntry } from '../plugins/catalog.ts'
 import type { VaultShape } from '../platform/vault.ts'
 
 export class PluginNotFound extends Error {}
@@ -17,6 +17,7 @@ export class HomePlugins {
     sql.exec('CREATE TABLE IF NOT EXISTS plugin (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL, config TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS plugin_secret (name TEXT NOT NULL, field TEXT NOT NULL, sealed TEXT NOT NULL, PRIMARY KEY (name, field)) WITHOUT ROWID')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_connection (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, view TEXT NOT NULL)')
+    sql.exec('CREATE TABLE IF NOT EXISTS connection_note (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, note TEXT NOT NULL, created_at INTEGER NOT NULL)')
   }
 
   // ---------------------------------------------------------------- plugins
@@ -51,6 +52,7 @@ export class HomePlugins {
       guide: isAdmin ? plugin.guide?.(origin) ?? null : null,
       connector: plugin.connector === undefined || connect === undefined ? null : {
         kind: plugin.connector.kind,
+        actsAsPerson: plugin.connector.actsAsPerson === true,
         connect: connect.method === 'oauth'
           ? { method: 'oauth', services: connect.services }
           : { method: 'paste', fields: describeSchema(connect.schema), instructions: connect.instructions },
@@ -118,6 +120,33 @@ export class HomePlugins {
 
   forgetOwner(ownerId: string): void {
     this.sql.exec('DELETE FROM shared_connection WHERE owner_id = ?', ownerId)
+    this.sql.exec('DELETE FROM connection_note WHERE owner_id = ?', ownerId)
+  }
+
+  /** Shared connections that act as a person (shared before v1.12): what the unshare migration finds. */
+  sharedPersonConnections(): Array<{ ownerId: string; connection: OwnConnection }> {
+    return this.sql.exec<{ owner_id: string; view: string }>('SELECT owner_id, view FROM shared_connection ORDER BY owner_id, id').toArray()
+      .map((row) => ({ ownerId: row.owner_id, connection: JSON.parse(row.view) as OwnConnection }))
+      .filter(({ connection }) => actsAsPerson(connection.kind))
+  }
+
+  // ---------------------------------------------------------------- notes on the owner's Connections section (ux-cop2)
+
+  addNote(ownerId: string, note: Omit<ConnectionNote, 'id' | 'createdAt'>): void {
+    const id = `n-${crypto.randomUUID()}`
+    const createdAt = Date.now()
+    this.sql.exec('INSERT INTO connection_note (id, owner_id, note, created_at) VALUES (?, ?, ?, ?)', id, ownerId, JSON.stringify({ ...note, id, createdAt }), createdAt)
+  }
+
+  notes(ownerId: string): ConnectionNote[] {
+    return this.sql.exec<{ note: string }>('SELECT note FROM connection_note WHERE owner_id = ? ORDER BY created_at, id', ownerId).toArray().map((row) => JSON.parse(row.note) as ConnectionNote)
+  }
+
+  /** Whether the owner had this note. */
+  dismissNote(ownerId: string, id: string): boolean {
+    const known = this.sql.exec<{ id: string }>('SELECT id FROM connection_note WHERE id = ? AND owner_id = ?', id, ownerId).toArray().length > 0
+    this.sql.exec('DELETE FROM connection_note WHERE id = ? AND owner_id = ?', id, ownerId)
+    return known
   }
 }
 

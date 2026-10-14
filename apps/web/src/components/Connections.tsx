@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
 import { AsyncResult } from 'effect/reactivity'
-import type { ConnectionView, PluginView } from '@mr-robot/protocol'
-import { connectionsAtom, keys, pluginsAtom, useCommand } from '../client/api-atoms.ts'
+import type { ConnectionNote, ConnectionView, PluginView } from '@mr-robot/protocol'
+import { connectionNotesAtom, connectionsAtom, keys, pluginsAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { go } from '../route.ts'
 import { renderResult } from './AtomView.tsx'
@@ -16,6 +16,7 @@ import { SchemaFields } from './Plugins.tsx'
 export function Connections() {
   const plugins = useAtomValue(pluginsAtom)
   const connections = useAtomValue(connectionsAtom)
+  const notes = AsyncResult.getOrElse(useAtomValue(connectionNotesAtom), () => [])
   // A Google consent comes back to #/me?connected=… or ?connection-error=… (v1.5 ticket 02).
   const outcome = new URLSearchParams(location.hash.split('?')[1] ?? '')
   const connected = outcome.get('connected')
@@ -28,12 +29,28 @@ export function Connections() {
       <div className="muted">Accounts your Robots can act on. Each Robot gets only the connections you grant it in its settings. <button type="button" className="link" onClick={() => go({ page: 'plugins' })}>All plugins</button></div>
       {renderResult(AsyncResult.all([plugins, connections]), { what: 'your connections' }, ([pluginList, connectionList]) => (
         <div className="providers">
+          {notes.map((note) => <UnsharedNote key={note.id} note={note} title={pluginList.find((plugin) => plugin.connector?.kind === note.kind)?.title ?? note.kind} />)}
           {pluginList.filter((plugin) => plugin.connector !== null && plugin.enabled).map((plugin) => (
             <ConnectorRow key={plugin.name} plugin={plugin} connections={connectionList.filter((connection) => connection.kind === plugin.connector!.kind)} />
           ))}
         </div>
       ))}
     </>
+  )
+}
+
+/** A person connection the update unshared (ux-cop2): what changed and which Robots lost it, until dismissed. */
+function UnsharedNote({ note, title }: { note: ConnectionNote; title: string }) {
+  const command = useCommand()
+  const [message, setMessage] = useState<string>()
+  const robots = note.robots.map((robot) => `${robot.name} (${robot.ownerName})`).join(', ')
+  return (
+    <div className="note">
+      Your {title} connection <b>{note.label}</b> ({note.account}) acts as you, so it is no longer shared with the Home.{' '}
+      {note.robots.length === 0 ? 'No Robot of another Member had it.' : `Robots of other Members lost it: ${robots}.`}{' '}
+      <button type="button" className="link" onClick={() => void command((api) => api.dismissConnectionNote(note.id), [keys.connections]).then((exit) => setMessage(exitFailure(exit)))}>Dismiss</button>
+      {message === undefined ? null : <div className="muted">{message}</div>}
+    </div>
   )
 }
 
@@ -86,7 +103,7 @@ export function ConnectorPanel({ plugin, connections }: { plugin: PluginView; co
               {connection.mine ? (
                 <div className="connection-actions">
                   <label className="check"><input type="radio" name={`default-${connector.kind}`} checked={connection.isDefault} onChange={() => void change((api) => api.updateConnection(connection.id, { isDefault: true }))} /><span>Default</span></label>
-                  <label className="check"><input type="checkbox" checked={connection.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateConnection(connection.id, { shared })) }} /><span>Shared with the Home</span></label>
+                  {connector.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={connection.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateConnection(connection.id, { shared })) }} /><span>Shared with the Home</span></label>}
                   <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${connection.label}? Robots granted it lose it.`)) void change((api) => api.removeConnection(connection.id)) }}>Remove</button>
                 </div>
               ) : null}
@@ -122,7 +139,7 @@ function PasteConnect({ plugin, fields, instructions }: { plugin: PluginView; fi
       <div className="muted">{instructions}</div>
       <SchemaFields fields={fields} values={values} secretsSet={[]} onChange={setValues} />
       <label><span>Name <span className="muted">(optional)</span></span><input value={label} placeholder="Shown to your Robots, e.g. Work" onChange={(event) => setLabel(event.target.value)} /></label>
-      <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Home</span></label>
+      {plugin.connector!.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Home</span></label>}
       <div className="question-actions">{message === undefined ? null : <span className="muted">{message}</span>}<button type="button" className="button button-primary" disabled={busy} onClick={() => void connect()}>Connect</button></div>
     </div>
   )
@@ -140,7 +157,7 @@ function OAuthConnect({ plugin, services }: { plugin: PluginView; services: Read
       <div className="check-grid">{services.map((service) => (
         <label key={service.value} className="check"><input type="checkbox" checked={chosen.includes(service.value)} onChange={() => setChosen(chosen.includes(service.value) ? chosen.filter((value) => value !== service.value) : [...chosen, service.value])} /><span>{service.label}</span></label>
       ))}</div>
-      <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Home</span></label>
+      {plugin.connector!.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Home</span></label>}
       <div className="question-actions"><a className={chosen.length === 0 ? 'button button-primary disabled' : 'button button-primary'} href={chosen.length === 0 ? undefined : start}>Connect {plugin.title}</a></div>
     </div>
   )

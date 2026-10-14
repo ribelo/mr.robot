@@ -6,8 +6,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Capability items carry the plugin title and the host grouping data; my_capabilities and the prompt preview show the same labels (workerd test)
-- [ ] Settings sections render as described (component test)
-- [ ] Host sentence present in the prompt preview
+- [x] Capability items carry the plugin title and the host grouping data; my_capabilities and the prompt preview show the same labels (workerd test)
+- [x] Settings sections render as described (component test)
+- [x] Host sentence present in the prompt preview
