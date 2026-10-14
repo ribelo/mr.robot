@@ -48,17 +48,51 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .link { color: var(--muted); font-size: 13.5px; }
 .link:hover { color: var(--text); }
 
+/* ---------------------------------------------------------------- robot ball */
+/* A Robot's ball (ux-0zm6), drawn in Avatar.tsx. Only a .ball-live ball moves: its pupils follow --lx/--ly (written by
+   robot-ball-life.ts, -1..1) within --ax/--ay, it blinks on .ball-blinking, bobs while working and breathes asleep. */
 .avatar { position: relative; display: inline-flex; flex: none; }
-.avatar-face { display: block; border-radius: 50%; }
+.avatar-face {
+  --lx: 0;
+  --ly: 0;
+  display: block; overflow: visible;
+}
 .avatar-ring { position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--accent); animation: avatar-ring 1.8s ease-out infinite; }
-.avatar-mark { position: absolute; right: -3px; bottom: -3px; min-width: 14px; height: 14px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; line-height: 1; background: var(--danger); color: #fff; border: 2px solid var(--surface-sunken); box-sizing: content-box; }
-.avatar-working .avatar-face { animation: avatar-pulse 1.4s ease-in-out infinite; }
-.avatar-blocked .avatar-face, .avatar-paused .avatar-face { opacity: .45; filter: grayscale(.8); }
-@keyframes avatar-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.9); opacity: .65; } }
+.avatar-paused .avatar-face { opacity: .8; filter: saturate(.4); }
+.ball-eye, .ball-prop, .ball-body, .ball-spin, .ball-z { transform-box: fill-box; transform-origin: center; }
+.ball-look {
+  --ax: 0px;
+  --ay: 0px;
+  transform: translate(calc(var(--lx) * var(--ax)), calc(var(--ly) * var(--ay))); transition: transform .18s ease-out; }
+/* Pixel and LED pupils jump in half steps, like a screen. */
+.ball-look-pixel { transform: translate(calc(round(var(--lx) * 2, 1) / 2 * var(--ax)), calc(round(var(--ly) * 2, 1) / 2 * var(--ay))); transition: none; }
+.ball-eye { transition: transform .07s ease-in; }
+.ball-blinking .ball-eye { transform: scaleY(.1); }
+.ball-tip { opacity: .55; }
+.ball-live.ball-focused .ball-body { animation: ball-bob 1.3s ease-in-out infinite; }
+.ball-live.ball-asleep .ball-body { transform-origin: 50% 100%; animation: ball-breathe 4s ease-in-out infinite; }
+.ball-live .ball-dot { animation: ball-dot 1.2s ease-in-out infinite; }
+.ball-live .ball-dot:nth-of-type(2) { animation-delay: .2s; }
+.ball-live .ball-dot:nth-of-type(3) { animation-delay: .4s; }
+.ball-live .ball-z { animation: ball-z 2.8s ease-in-out infinite; }
+.ball-live .ball-z + .ball-z { animation-delay: 1.4s; }
+.ball-live .avatar-mark, .ball-live .ball-alert { transform-origin: 50% 100%; animation: ball-nudge 1.8s ease-in-out infinite; }
+.ball-live .ball-tip { animation: ball-tip 2.4s steps(1) infinite; }
+.ball-live.ball-focused .ball-tip { animation-duration: .8s; }
+.ball-live.ball-focused .ball-spin { animation: ball-spin .45s linear infinite; }
+@keyframes ball-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes ball-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.02, .97); } }
+@keyframes ball-dot { 0%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@keyframes ball-z { 0% { opacity: 0; transform: translate(-2px, 3px); } 30%, 70% { opacity: 1; } 100% { opacity: 0; transform: translate(3px, -4px); } }
+@keyframes ball-nudge { 0%, 60%, 100% { transform: rotate(0); } 70% { transform: rotate(-12deg); } 85% { transform: rotate(10deg); } }
+@keyframes ball-tip { 0%, 100% { opacity: .15; } 50% { opacity: 1; } }
+@keyframes ball-spin { 0%, 100% { transform: scaleX(1); } 50% { transform: scaleX(-1); } }
 @keyframes avatar-ring { 0% { transform: scale(.9); opacity: 1; } 100% { transform: scale(1.12); opacity: .25; } }
 @media (prefers-reduced-motion: reduce) {
-  .avatar-face, .avatar-ring, .spinner, .typing span { animation: none; }
+  .avatar-face, .avatar-ring, .avatar-face *, .spinner, .typing span { animation: none; }
+  .avatar-face * { transition: none; }
 }
+/* ---------------------------------------------------------------- end robot ball */
 
 /* ---------------------------------------------------------------- conversation */
 .conversation { display: grid; grid-template-columns: 1fr; height: 100%; min-height: 0; }

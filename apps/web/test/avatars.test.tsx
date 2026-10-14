@@ -33,8 +33,8 @@ const panel: RobotPanel = {
 }
 const me = { id: 'm-1', email: 'a@example.com', name: 'Anna Nowak', role: 'admin', status: 'active', avatar: { kind: 'picture', color: '#6c63ff', key: 'avatar-0123456789abcdef01234567' } } as Me
 
-/** The seed each rendered Robot avatar is drawn from, and the image drawn. */
-const faces = (root: ParentNode) => [...root.querySelectorAll('.avatar-face')].map((node) => ({ seed: node.getAttribute('data-seed'), src: node.getAttribute('src') }))
+/** The seed each rendered Robot avatar is drawn from, and the ball drawn. */
+const faces = (root: ParentNode) => [...root.querySelectorAll('.avatar-face')].map((node) => ({ seed: node.getAttribute('data-seed'), look: node.innerHTML }))
 
 interface Call { readonly method: string; readonly path: string; readonly body: string }
 
@@ -61,9 +61,8 @@ describe('Robot avatars (ux-0zm6, ux-n1mw)', () => {
     // The header line names both senders, then each message carries its sender's avatar.
     const drawn = faces(container)
     expect(drawn.map((face) => face.seed)).toEqual(['seed-chief', 'seed-clerk', 'seed-chief', 'seed-clerk'])
-    expect(drawn[0]!.src).toMatch(/^data:image\/svg\+xml/)
-    expect(drawn[0]!.src).toBe(drawn[2]!.src)
-    expect(drawn[0]!.src).not.toBe(drawn[1]!.src)
+    expect(drawn[0]!.look).toBe(drawn[2]!.look)
+    expect(drawn[0]!.look).not.toBe(drawn[1]!.look)
   })
 
   it('shows the avatar in the sidebar and the conversation header, and the Member in the sidebar foot', () => {
@@ -108,7 +107,7 @@ describe('Another look (ux-h0s4)', () => {
     fireEvent.click(screen.getByText('Another look'))
     const after = preview()
     expect(after.seed).not.toBe('seed-sales')
-    expect(after.src).not.toBe(before.src)
+    expect(after.look).not.toBe(before.look)
     // Nothing is saved until Save.
     expect(calls.filter((call) => call.method === 'PATCH')).toEqual([])
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))

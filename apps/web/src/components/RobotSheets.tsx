@@ -44,7 +44,7 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
   const editable = panel.canEdit
   return (
     <Sheet onClose={onClose} footer={editable ? <SaveButton onSave={save} disabled={identity.name.trim() === ''} /> : null}>
-      <div className="sheet-avatar"><Avatar seed={identity.avatarSeed} color={identity.avatarColor} size={72} /></div>
+      <div className="sheet-avatar"><Avatar seed={identity.avatarSeed} color={identity.avatarColor} size={96} /></div>
       {editable ? (
         <>
           {/* A new seed shows at once; it is kept only when the profile is saved (ux-h0s4). */}

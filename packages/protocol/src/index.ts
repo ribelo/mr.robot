@@ -106,7 +106,7 @@ export type Sharing = typeof Sharing.Type
 export const ThinkingEffort = Schema.Literals(['off', 'low', 'medium', 'high', 'xhigh', 'max'])
 export type ThinkingEffort = typeof ThinkingEffort.Type
 
-/** What a Robot's bottts avatar is drawn from (ux-0zm6); "Another look" draws a new one. */
+/** What a Robot's ball avatar is drawn from (ux-0zm6); "Another look" draws a new one. */
 export const AvatarSeed = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
 
 export const Identity = Schema.Struct({
