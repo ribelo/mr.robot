@@ -9,6 +9,8 @@ import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, shell, Tr
 import { HostChrome } from './chrome.ts'
 import { ConfigFile, normalizeServer, type HostConfig } from './config.ts'
 import { HostLink, startPairing, waitForApproval, type LinkState } from './connection.ts'
+import { isSignInKind } from './sign-in.ts'
+import { connectThroughSignIn } from './sign-in-window.ts'
 
 const VERSION = '0.1.0'
 // A small green robot dot for the tray (16x16 PNG).
@@ -103,6 +105,11 @@ function trusted(event: { senderFrame?: { url: string } | null }): boolean {
   return url.startsWith('file://') || (config.server !== null && url.startsWith(`${config.server}/`))
 }
 
+/** The sign-in window hands session values to the page that asked, so only pages of the configured server may ask. */
+function fromServer(event: { senderFrame?: { url: string } | null }): boolean {
+  return config.server !== null && (event.senderFrame?.url ?? '').startsWith(`${config.server}/`)
+}
+
 function connect(): void {
   link?.stop()
   link = undefined
@@ -158,6 +165,13 @@ ipcMain.handle('unread', (event, count: number) => {
   unread = count
   changed()
   return { ok: true }
+})
+
+/** Slack or Discord as you (v1.12 ticket 10): the person signs in in a window of this app; the page gets the values. */
+ipcMain.handle('connectThroughSignIn', (event, kind: unknown) => {
+  if (!fromServer(event)) return { error: 'not allowed' }
+  if (!isSignInKind(kind)) return { error: 'That service has no sign-in window.' }
+  return connectThroughSignIn(kind)
 })
 
 ipcMain.handle('save', (event, change: { server?: string; name?: string; autostart?: boolean }) => {

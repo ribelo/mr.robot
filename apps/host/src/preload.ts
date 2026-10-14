@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('mrRobotHost', {
   unpair: () => ipcRenderer.invoke('unpair'),
   /** The number of robots with unread messages, for the tray badge. */
   setUnread: (count: number) => ipcRenderer.invoke('unread', count),
+  /**
+   * Open a sign-in window for 'slack' or 'discord-user' in an isolated session and resolve with the
+   * session values (the same fields the paste form asks for), { timedOut: true } after ten minutes,
+   * { cancelled: true } when the window is closed, or { error }. Older apps lack this command.
+   */
+  connectThroughSignIn: (kind: 'slack' | 'discord-user') => ipcRenderer.invoke('connectThroughSignIn', kind),
   /** Notifications reach the app over the host channel, not Web Push. */
   nativeNotifications: true,
   onChange: (listener: (state: unknown) => void) => ipcRenderer.on('changed', (_event, state) => listener(state)),

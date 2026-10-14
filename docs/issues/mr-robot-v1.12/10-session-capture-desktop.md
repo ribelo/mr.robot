@@ -6,8 +6,8 @@
 
 **Blocked by:** 09 (Discord as you)
 
-**Status:** ready-for-agent
+**Status:** in-progress (code and tests done; only the manual check on heisenbug remains)
 
-- [ ] Host app IPC captureSession(kind) with timeout and session clearing; page uses it when the bridge is present, else shows paste
-- [ ] Paste fallback visible in both apps (component test)
+- [x] Host app IPC with timeout and session clearing (built as `connectThroughSignIn(kind)` on the `mrRobotHost` bridge: apps/host/src/sign-in.ts, sign-in-window.ts); page uses it when the bridge is present, else shows paste
+- [x] Paste fallback visible in both apps (component test apps/web/test/session-sign-in.test.tsx)
 - [ ] Manual on heisenbug: Slack and Discord connect, timeout, sign in again (recorded in the ticket on completion)

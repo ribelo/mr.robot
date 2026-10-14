@@ -8,6 +8,7 @@ import { exitFailure } from '../client/api-failure.ts'
 import { go } from '../route.ts'
 import { renderResult } from './AtomView.tsx'
 import { SchemaFields } from './Plugins.tsx'
+import { SignInConnect, useSignInAttempt, useSignInWay } from './SignInConnect.tsx'
 
 /**
  * Connections (cn-s1pd, reference 11): one row per connector plugin with its status and
@@ -110,6 +111,10 @@ export function ConnectorPanel({ plugin, way, connections }: { plugin: PluginVie
   const [message, setMessage] = useState<string>()
   const change = async (run: Parameters<typeof command>[0]) => setMessage(exitFailure(await command(run, [keys.connections])))
   const connector = way
+  // In the desktop app Slack and Discord as you connect by signing in; the paste form is the fallback (ux-jpwz).
+  const signIn = useSignInWay(plugin, way)
+  const attempt = useSignInAttempt(way, signIn)
+  const paste = connector.connect.method === 'paste' ? <PasteConnect way={way} form={connector.connect} /> : null
   return (
     <div className="connector-panel">
       {connections.length === 0 ? null : (
@@ -121,6 +126,7 @@ export function ConnectorPanel({ plugin, way, connections }: { plugin: PluginVie
                 {connection.services.length > 0 ? <div className="muted">{connection.services.join(', ')}</div> : null}
                 {connection.status === 'connected' ? null : <div className="host-log-failed">{connection.status === 'needs-reconsent' ? 'Needs consent again' : rejectedText(way)}{connection.statusNote === null ? '' : `: ${connection.statusNote}`}</div>}
                 {connection.mine && connection.status === 'needs-reconsent' && connector.connect.method === 'oauth' ? <a className="button" href={`/api/connections/${connector.kind}/oauth/start?reconnect=${encodeURIComponent(connection.id)}${'mrRobotHost' in window ? '&external=1' : ''}`}>Reconnect</a> : null}
+                {connection.mine && connection.status === 'rejected' && signIn !== undefined ? <button type="button" className="button" disabled={attempt.busy} onClick={attempt.run}>Sign in again</button> : null}
                 {connection.setupLink === null ? null : <a className="button" href={connection.setupLink} target="_blank" rel="noreferrer">{connection.setupLabel ?? 'Finish setup'}</a>}
               </div>
               {connection.mine ? (
@@ -137,7 +143,8 @@ export function ConnectorPanel({ plugin, way, connections }: { plugin: PluginVie
       {message === undefined ? null : <div className="muted">{message}</div>}
       {plugin.setupNeeded === null && connections.some((connection) => connection.mine) ? <h4>Add another account</h4> : null}
       {plugin.setupNeeded !== null ? <div className="note">{plugin.setupNeeded}</div>
-        : connector.connect.method === 'paste' ? <PasteConnect way={way} form={connector.connect} />
+        : signIn !== undefined ? <SignInConnect way={way} signIn={signIn} attempt={attempt}>{paste}</SignInConnect>
+          : connector.connect.method === 'paste' ? paste
           : <OAuthConnect plugin={plugin} way={way} services={connector.connect.services} />}
     </div>
   )

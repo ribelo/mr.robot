@@ -23,6 +23,8 @@ interface HostBridge {
   onChange(listener: (state: HostState) => void): void
   /** Older apps lack these. */
   setUnread?(count: number): Promise<unknown>
+  /** Opens a sign-in window for a service and resolves with the session values or why there are none (v1.12 ticket 10). */
+  connectThroughSignIn?(kind: string): Promise<unknown>
   readonly nativeNotifications?: boolean
 }
 

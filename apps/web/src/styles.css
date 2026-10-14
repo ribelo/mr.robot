@@ -533,6 +533,7 @@ a.button { text-decoration: none; color: var(--text); }
 .connection { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }
 .connection-actions { display: flex; align-items: center; gap: 14px; }
 .connect-form { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.paste-fallback > summary { cursor: pointer; color: var(--muted); margin-bottom: 8px; }
 a.button { text-decoration: none; display: inline-flex; align-items: center; }
 a.button.button-primary { color: var(--on-bubble-own); }
 a.button.disabled { opacity: 0.5; pointer-events: none; }
