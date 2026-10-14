@@ -18,7 +18,11 @@ import {
   ApiKeyInput,
   HomeSettingsPatch,
   OAuthFinish,
+  GroupInput,
+  GroupOrder,
+  GroupPatch,
   HelpAnswer,
+  ListPrefPatch,
   ProposalAnswer,
   PushSubscriptionInput,
   ShareInput,
@@ -343,20 +347,37 @@ export const api = new Router<ApiContext>()
 
   // ------------------------------------------------------------ robots
   .on('GET', '/api/robots', (c) => call(async () => {
-    const [robots, prefs] = await Promise.all([home(c.env).reachable(c.member.id), c.env.MEMBER.getByName(c.member.id).listPrefs()])
+    const robots = await home(c.env).reachable(c.member.id)
+    // Read with what this person reaches now: a Robot that left their reach leaves its group (ux-lywk).
+    const prefs = await c.env.MEMBER.getByName(c.member.id).listPrefs(robots.map((summary) => summary.id))
     return robots.map((summary) => {
       const pref = prefs[summary.id]
       // Unread: newer than when this person last opened it, or marked unread by them (robot-mktj).
       const unread = pref?.markedUnread === true || (pref?.seenAt != null && summary.lastAt > pref.seenAt)
-      return { ...summary, unread, pinned: pref?.pinned === true, hidden: pref?.hidden === true }
+      return { ...summary, unread, pinned: pref?.pinned === true, hidden: pref?.hidden === true, ...(pref?.groupId === undefined ? {} : { groupId: pref.groupId }) }
     })
   }))
   .on('POST', '/api/robots/:id/list', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
-    const change = yield* decodeBody(c.request, Schema.Struct({ pinned: Schema.optional(Schema.Boolean), hidden: Schema.optional(Schema.Boolean), unread: Schema.optional(Schema.Boolean) }))
+    const change = yield* decodeBody(c.request, ListPrefPatch)
     yield* call(() => c.env.MEMBER.getByName(c.member.id).setListPref(id, change))
     return { ok: true }
   }))
+  // The person's own sidebar groups (ux-wxbm, ux-o7po, ux-xbvi, ux-oltg): nobody else sees or changes them.
+  .on('GET', '/api/robot-groups', (c) => call(() => c.env.MEMBER.getByName(c.member.id).groups()))
+  .on('POST', '/api/robot-groups', (c) => Effect.gen(function* () {
+    const { name } = yield* decodeBody(c.request, GroupInput)
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).createGroup(name))
+  }))
+  .on('PUT', '/api/robot-groups/order', (c) => Effect.gen(function* () {
+    const { ids } = yield* decodeBody(c.request, GroupOrder)
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).orderGroups(ids))
+  }))
+  .on('PATCH', '/api/robot-groups/:id', (c, { id }) => Effect.gen(function* () {
+    const patch = yield* decodeBody(c.request, GroupPatch)
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).updateGroup(id, patch))
+  }))
+  .on('DELETE', '/api/robot-groups/:id', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).removeGroup(id)).pipe(Effect.as({ ok: true })))
   .on('POST', '/api/robots/:id/routines/:routine/pause', (c, { id, routine }) => Effect.gen(function* () {
     yield* owner(c, id)
     const { paused } = yield* decodeBody(c.request, Schema.Struct({ paused: Schema.Boolean }))

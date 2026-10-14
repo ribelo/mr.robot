@@ -63,7 +63,7 @@ describe('state avatar (ap-bxt2)', () => {
 
   it('shows the state in the robot list and in the conversation header', () => {
     const robots = [robot('1', 'working'), robot('2', 'waiting for you'), robot('3', 'sleeping')]
-    const list = render(<RegistryProvider><RobotList robots={robots} selected={undefined} meName="Anna" meAvatar={{ kind: 'initials', color: '#6c63ff' }} isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
+    const list = render(<RegistryProvider><RobotList robots={robots} selected={undefined} meName="Anna" meAvatar={{ kind: 'initials', color: '#6c63ff' }} isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} groups={[]} onGroupChange={async () => true} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
     expect([...list.container.querySelectorAll('.robot-row .avatar')].map((node) => node.className)).toEqual(['avatar avatar-working', 'avatar avatar-waiting', 'avatar avatar-idle'])
     cleanup()
     const panel = { summary: robot('1', 'working'), canEdit: true } as unknown as RobotPanel

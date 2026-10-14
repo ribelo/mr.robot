@@ -67,11 +67,11 @@ describe('Robot avatars (ux-0zm6, ux-n1mw)', () => {
   })
 
   it('shows the avatar in the sidebar and the conversation header, and the Member in the sidebar foot', () => {
-    const list = render(<RegistryProvider><RobotList robots={[summary]} selected={undefined} meName={me.name} meAvatar={me.avatar} meId={me.id} isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
+    const list = render(<RegistryProvider><RobotList robots={[summary]} selected={undefined} meName={me.name} meAvatar={me.avatar} meId={me.id} isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} groups={[]} onGroupChange={async () => true} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
     expect(faces(list.container.querySelector('.robot-row')!).map((face) => face.seed)).toEqual(['seed-sales'])
     expect(list.container.querySelector('.sidebar-foot img.member-face')?.getAttribute('src')).toBe('/api/members/m-1/avatar/avatar-0123456789abcdef01234567')
     cleanup()
-    const initials = render(<RegistryProvider><RobotList robots={[]} selected={undefined} meName="Anna Nowak" meAvatar={{ kind: 'initials', color: '#10b981' }} meId="m-1" isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
+    const initials = render(<RegistryProvider><RobotList robots={[]} selected={undefined} meName="Anna Nowak" meAvatar={{ kind: 'initials', color: '#10b981' }} meId="m-1" isAdmin={false} onSelect={() => {}} onCreate={() => {}} onAdmin={() => {}} onProfile={() => {}} groups={[]} onGroupChange={async () => true} onListPref={() => {}} onEditProfile={() => {}} onAdvanced={() => {}} onFiles={() => {}} /></RegistryProvider>)
     const face = initials.getByRole('img', { name: 'Anna Nowak' })
     expect(face.textContent).toBe('AN')
     expect(face.style.background).toBe('rgb(16, 185, 129)')

@@ -17,6 +17,7 @@ export const apiRuntime = Atom.runtime(MrRobotApi.layer)
 export const keys = {
   me: 'me',
   robots: 'robots',
+  groups: 'groups',
   robot: (id: string) => `robot:${id}`,
   files: (id: string) => `files:${id}`,
   admin: 'admin',
@@ -42,6 +43,7 @@ function query<A>(read: Read<A>, refreshOn: ReadonlyArray<string>) {
 
 export const meAtom = query((api) => api.me, [keys.me])
 export const robotsAtom = query((api) => api.robots, [keys.robots])
+export const groupsAtom = query((api) => api.robotGroups, [keys.groups])
 /** Keyed "<robot id>" or "<robot id>|details" (Work details above Compact, pl-6eir). */
 export const conversationAtom = Atom.family((key: string) => {
   const [id = '', details] = key.split('|')

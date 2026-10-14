@@ -468,8 +468,47 @@ export const RobotSummary = Schema.Struct({
   /** This person's list settings (robot-mktj). */
   pinned: Schema.optional(Schema.Boolean),
   hidden: Schema.optional(Schema.Boolean),
+  /** The person's own group this Robot is in (ux-wxbm); absent: ungrouped. */
+  groupId: Schema.optional(Schema.String),
 })
 export type RobotSummary = typeof RobotSummary.Type
+
+// ---------------------------------------------------------------- Sidebar groups (ux-wxbm, ux-o7po, ux-xbvi, ux-oltg)
+
+/** A group name as typed: trimmed, 1 to 60 characters. */
+export const GroupName = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(60))
+
+/** One of a Member's own sidebar groups; the list they come in is their order. */
+export const RobotGroup = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  collapsed: Schema.Boolean,
+})
+export type RobotGroup = typeof RobotGroup.Type
+
+export const GroupInput = Schema.Struct({ name: GroupName })
+export type GroupInput = typeof GroupInput.Type
+export const GroupPatch = Schema.Struct({ name: Schema.optional(GroupName), collapsed: Schema.optional(Schema.Boolean) })
+export type GroupPatch = typeof GroupPatch.Type
+/** The new order: every group id once. */
+export const GroupOrder = Schema.Struct({ ids: Schema.Array(Schema.String) })
+export type GroupOrder = typeof GroupOrder.Type
+
+/** Where a Robot sits in the person's sidebar: out of every group, or in one of theirs. */
+export const GroupPlace = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('ungrouped') }),
+  Schema.Struct({ kind: Schema.Literal('group'), groupId: Schema.String }),
+])
+export type GroupPlace = typeof GroupPlace.Type
+
+/** A change to one Robot's place in the person's list (robot-mktj, ux-sj2f); absent fields stay. */
+export const ListPrefPatch = Schema.Struct({
+  pinned: Schema.optional(Schema.Boolean),
+  hidden: Schema.optional(Schema.Boolean),
+  unread: Schema.optional(Schema.Boolean),
+  group: Schema.optional(GroupPlace),
+})
+export type ListPrefPatch = typeof ListPrefPatch.Type
 
 export const ScreenView = Schema.Struct({
   /** Workspace path of the last screenshot. */

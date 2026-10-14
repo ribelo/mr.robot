@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
 import * as Effect from 'effect/Effect'
 import { AsyncResult } from 'effect/reactivity'
-import type { Conversation as ConversationData, Me, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
-import { conversationAtom, keys, meAtom, panelAtom, robotsAtom, useCommand } from './client/api-atoms.ts'
+import type { Conversation as ConversationData, Me, ProposalView, RobotGroup, RobotPanel, RobotSummary } from '@mr-robot/protocol'
+import { conversationAtom, groupsAtom, keys, meAtom, panelAtom, robotsAtom, useCommand } from './client/api-atoms.ts'
 import { exitFailure } from './client/api-failure.ts'
 import { robotFeedAtom } from './client/robot-feed.ts'
 import { renderResult } from './components/AtomView.tsx'
@@ -17,7 +17,8 @@ import { ChatScroll } from './components/ChatScroll.tsx'
 import { usePendingSends, type OutgoingMessage } from './components/use-pending-sends.ts'
 import { AskBar } from './components/AskBar.tsx'
 import { Panel } from './components/Panel.tsx'
-import { RobotList } from './components/RobotList.tsx'
+import { RobotList, type GroupChange } from './components/RobotList.tsx'
+import type { SaveOutcome } from './components/SaveButton.tsx'
 import { Pages } from './pages.tsx'
 import { applyTheme } from './theme/theme.ts'
 import { NewRobot } from './components/NewRobot.tsx'
@@ -33,6 +34,7 @@ function SignedIn({ me }: { me: Me }) {
   const robotsResult = useAtomValue(robotsAtom)
   const refreshRobots = useAtomRefresh(robotsAtom)
   const robots: readonly RobotSummary[] = AsyncResult.getOrElse(robotsResult, () => [])
+  const groups = AsyncResult.getOrElse(useAtomValue(groupsAtom), () => NO_GROUPS)
   const command = useCommand()
   // The Member's stored theme wins over this device's remembered one (ap-itj1).
   useEffect(() => { applyTheme(me.theme ?? 'system') }, [me.theme])
@@ -77,6 +79,7 @@ function SignedIn({ me }: { me: Me }) {
       ) : null}
       <RobotList
         robots={robots}
+        groups={groups}
         selected={selected}
         meName={me.name}
         meAvatar={me.avatar}
@@ -86,6 +89,7 @@ function SignedIn({ me }: { me: Me }) {
         onAdmin={() => go({ page: 'admin' })}
         onProfile={() => go({ page: 'profile' })}
         onListPref={(id, change) => void command((api) => api.listPref(id, change), [keys.robots])}
+        onGroupChange={(change) => changeGroups(command, change)}
         onEditProfile={(id) => setSheet({ kind: 'profile', robotId: id })}
         onAdvanced={(id) => go({ page: 'advanced', id })}
         onFiles={(id) => go({ page: 'files', id, path: null })}
@@ -101,6 +105,25 @@ function SignedIn({ me }: { me: Me }) {
       </main>
     </div>
   )
+}
+
+/** One empty list while the groups load, so the sidebar sees the same value on every render. */
+const NO_GROUPS: readonly RobotGroup[] = []
+
+/** A sidebar group change through the API (ux-wxbm, ux-o7po, ux-xbvi); the robot list reads again when Robots change group. */
+function changeGroups(command: ReturnType<typeof useCommand>, change: GroupChange): Promise<SaveOutcome> {
+  switch (change.kind) {
+    case 'create': {
+      const { name, robotId } = change
+      return command((api) => robotId === undefined
+        ? api.createGroup(name)
+        : api.createGroup(name).pipe(Effect.flatMap((group) => api.listPref(robotId, { group: { kind: 'group', groupId: group.id }, hidden: false }))), [keys.groups, keys.robots])
+    }
+    case 'rename': return command((api) => api.updateGroup(change.id, { name: change.name }), [keys.groups])
+    case 'collapse': return command((api) => api.updateGroup(change.id, { collapsed: change.collapsed }), [keys.groups])
+    case 'order': return command((api) => api.orderGroups(change.ids), [keys.groups])
+    case 'delete': return command((api) => api.deleteGroup(change.id), [keys.groups, keys.robots])
+  }
 }
 
 function Empty() {

@@ -12,9 +12,9 @@ import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberAvatar, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
-  AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
+  AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
   TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
-  type HomeSettingsPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
+  type GroupPatch, type HomeSettingsPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
 
@@ -26,7 +26,6 @@ const ErrorBody = Schema.Struct({ error: Schema.optional(Schema.String) })
 const enc = encodeURIComponent
 
 export type LoginChange = { readonly username?: string; readonly password?: string; readonly websites?: readonly string[]; readonly notes?: string; readonly allowRead?: boolean; readonly shared: boolean }
-export type ListPrefChange = { readonly pinned?: boolean; readonly hidden?: boolean; readonly unread?: boolean }
 
 /** The zone this app runs in: the browser's in the PWA, the system's in the desktop app (its renderer is a browser). */
 const appTimeZone = (): string | undefined => {
@@ -89,7 +88,13 @@ const make = Effect.gen(function* () {
     remove: (id: string, confirm: string) => send('DELETE', `/api/robots/${enc(id)}`, { confirm }),
     clearHistory: (id: string, confirm: string) => send('POST', `/api/robots/${enc(id)}/clear`, { confirm }),
     startOver: (id: string, confirm: string) => send('POST', `/api/robots/${enc(id)}/start-over`, { confirm }),
-    listPref: (id: string, change: ListPrefChange) => send('POST', `/api/robots/${enc(id)}/list`, change),
+    listPref: (id: string, change: ListPrefPatch) => send('POST', `/api/robots/${enc(id)}/list`, change),
+    /** The person's own sidebar groups (ux-wxbm). */
+    robotGroups: get(Schema.Array(RobotGroup), '/api/robot-groups'),
+    createGroup: (name: string) => request(RobotGroup, 'POST', '/api/robot-groups', { name }),
+    updateGroup: (id: string, patch: GroupPatch) => request(RobotGroup, 'PATCH', `/api/robot-groups/${enc(id)}`, patch),
+    orderGroups: (ids: readonly string[]) => request(Schema.Array(RobotGroup), 'PUT', '/api/robot-groups/order', { ids }),
+    deleteGroup: (id: string) => send('DELETE', `/api/robot-groups/${enc(id)}`),
     pauseRoutine: (id: string, routine: string, paused: boolean) => request(RoutineView, 'POST', `/api/robots/${enc(id)}/routines/${enc(routine)}/pause`, { paused }),
     deleteRoutine: (id: string, routine: string) => send('DELETE', `/api/robots/${enc(id)}/routines/${enc(routine)}`),
     rewind: (id: string, atSeq: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { atSeq }),

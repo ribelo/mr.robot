@@ -6,8 +6,8 @@
 
 **Blocked by:** 03 (Avatars)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Group preferences round trip and cleanup on lost reach (workerd test)
-- [ ] Create, rename, collapse, move by menu, drag, hidden group, pinned order, search across groups (component tests)
-- [ ] Another Member sees their own groups
+- [x] Group preferences round trip and cleanup on lost reach (workerd test)
+- [x] Create, rename, collapse, move by menu, drag, hidden group, pinned order, search across groups (component tests)
+- [x] Another Member sees their own groups

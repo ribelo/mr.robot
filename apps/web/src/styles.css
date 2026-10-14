@@ -272,7 +272,28 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .robot-name.unread { font-weight: 700; }
 .unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--link); margin-left: 6px; vertical-align: middle; }
 .robot-last.blocked { color: var(--danger-text); }
-.hidden-group { padding: 6px 14px; }
+
+/* Sidebar groups (ux-wxbm, ux-xbvi, ux-0qjq, ux-dice, ux-gieb) */
+.robot-group { border-radius: 12px; }
+.robot-group > ul { list-style: none; margin: 0; padding: 0; }
+.robot-group.drop-target { background: var(--hover); box-shadow: inset 0 0 0 1px var(--line); }
+.group-head { position: relative; display: flex; align-items: center; gap: 4px; padding: 10px 10px 4px; min-height: 34px; }
+.group-toggle, .group-label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; text-align: left; font-size: 12.5px; font-weight: 600; letter-spacing: .02em; color: var(--muted); }
+.group-toggle:hover { color: var(--text); }
+.group-caret { width: 10px; flex: none; color: var(--faint); }
+.group-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-count { color: var(--faint); font-weight: 500; flex: none; }
+.group-toggle .unread-dot { margin-left: 0; }
+.group-menu-button { flex: none; width: 26px; height: 22px; border-radius: 6px; color: var(--muted); opacity: 0; background: var(--hover-strong); font-size: 15px; line-height: 1; }
+.group-head:hover .group-menu-button, .group-menu-button:focus-visible { opacity: 1; }
+@media (pointer: coarse) { .group-menu-button { opacity: 1; background: transparent; } }
+.group-head .inline-edit { flex: 1; max-width: none; font-size: 13px; }
+.group-head .row-menu { top: 32px; }
+.row-submenu { display: flex; flex-direction: column; margin: 0 0 2px 12px; padding-left: 6px; border-left: 1px solid var(--line); }
+.row-submenu .inline-edit { margin: 4px 0; max-width: none; }
+.robot-place { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.new-group { padding: 8px 12px 12px; }
+.new-group .inline-edit { max-width: none; }
 
 /* Sheets (references 08, 09) */
 .modal.sheet { padding: 0; display: flex; flex-direction: column; max-height: min(88vh, 760px); width: min(500px, 100%); border-radius: 22px; }

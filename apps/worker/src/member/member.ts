@@ -16,7 +16,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
 import { probeAccount, type Probe } from '../providers/usage.ts'
-import type { AccountStatus, AccountUsage, ConnectorKind, NotificationKind, ProviderView, QuietHours, RobotOwner, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
+import type { AccountStatus, AccountUsage, ConnectorKind, GroupPatch, ListPrefPatch, NotificationKind, ProviderView, QuietHours, RobotGroup, RobotOwner, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -376,18 +376,99 @@ const credential = (provider: ProviderId, forHome: boolean) => Effect.gen(functi
 
 // ------------------------------------------------------------------ the robot list, per person (robot-mktj)
 
-const listPrefs = Effect.gen(function* () {
-  const sql = yield* Sql
-  const rows = yield* sql.all<{ robot_id: string; pinned: number; hidden: number; marked_unread: number; seen_at: number | null }>('SELECT * FROM list_pref')
-  return Object.fromEntries(rows.map((row) => [row.robot_id, { pinned: row.pinned === 1, hidden: row.hidden === 1, markedUnread: row.marked_unread === 1, seenAt: row.seen_at }])) as Record<string, { pinned: boolean; hidden: boolean; markedUnread: boolean; seenAt: number | null }>
+/** One Robot's row in this person's list; `groupId` absent: ungrouped (ux-wxbm). */
+export interface ListPref {
+  readonly pinned: boolean
+  readonly hidden: boolean
+  readonly markedUnread: boolean
+  readonly seenAt: number | null
+  readonly groupId?: string
+}
+
+type ListPrefRow = { robot_id: string; pinned: number; hidden: number; marked_unread: number; seen_at: number | null; group_id: string | null }
+
+const listPref = (row: ListPrefRow): ListPref => ({
+  pinned: row.pinned === 1, hidden: row.hidden === 1, markedUnread: row.marked_unread === 1, seenAt: row.seen_at,
+  ...(row.group_id === null ? {} : { groupId: row.group_id }),
 })
 
-const setListPref = (robotId: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }) => Effect.gen(function* () {
+/**
+ * The person's list settings for the Robots they reach now (`reach`). A Robot out of reach (deleted,
+ * no longer shared, its owner gone) leaves its group here, so no group keeps a Robot that is gone (ux-lywk).
+ */
+const listPrefs = (reach: readonly string[]) => Effect.gen(function* () {
   const sql = yield* Sql
+  const reachable = new Set(reach)
+  const rows = yield* sql.all<ListPrefRow>('SELECT * FROM list_pref')
+  for (const row of rows) {
+    if (row.group_id !== null && !reachable.has(row.robot_id)) yield* sql.run('UPDATE list_pref SET group_id = NULL WHERE robot_id = ?', row.robot_id)
+  }
+  return Object.fromEntries(rows.filter((row) => reachable.has(row.robot_id)).map((row) => [row.robot_id, listPref(row)])) as Record<string, ListPref>
+})
+
+const setListPref = (robotId: string, change: ListPrefPatch) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const { group } = change
+  if (group?.kind === 'group') yield* groupRow(group.groupId)
   yield* sql.run('INSERT INTO list_pref (robot_id) VALUES (?) ON CONFLICT (robot_id) DO NOTHING', robotId)
   if (change.pinned !== undefined) yield* sql.run('UPDATE list_pref SET pinned = ? WHERE robot_id = ?', change.pinned ? 1 : 0, robotId)
   if (change.hidden !== undefined) yield* sql.run('UPDATE list_pref SET hidden = ? WHERE robot_id = ?', change.hidden ? 1 : 0, robotId)
   if (change.unread !== undefined) yield* sql.run('UPDATE list_pref SET marked_unread = ? WHERE robot_id = ?', change.unread ? 1 : 0, robotId)
+  if (group !== undefined) yield* sql.run('UPDATE list_pref SET group_id = ? WHERE robot_id = ?', group.kind === 'group' ? group.groupId : null, robotId)
+})
+
+// ------------------------------------------------------------------ sidebar groups, the person's own (ux-wxbm, ux-o7po, ux-xbvi, ux-oltg)
+
+type GroupRow = { id: string; name: string; collapsed: number; position: number }
+
+const groupView = (row: GroupRow): RobotGroup => ({ id: row.id, name: row.name, collapsed: row.collapsed === 1 })
+
+const groupRow = (id: string) => Effect.gen(function* () {
+  const row = yield* (yield* Sql).first<GroupRow>('SELECT * FROM list_group WHERE id = ?', id)
+  if (row === undefined) return yield* notFound('no such group')
+  return row
+})
+
+/** The person's groups in their order. */
+const groups = Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.all<GroupRow>('SELECT * FROM list_group ORDER BY position, rowid')).map(groupView)
+})
+
+/** A new group goes last, expanded. */
+const createGroup = (name: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const id = crypto.randomUUID()
+  const last = (yield* sql.first<{ at: number | null }>('SELECT MAX(position) AS at FROM list_group'))?.at ?? -1
+  yield* sql.run('INSERT INTO list_group (id, name, collapsed, position) VALUES (?, ?, 0, ?)', id, name, last + 1)
+  return groupView({ id, name, collapsed: 0, position: last + 1 })
+})
+
+const updateGroup = (id: string, patch: GroupPatch) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* groupRow(id)
+  if (patch.name !== undefined) yield* sql.run('UPDATE list_group SET name = ? WHERE id = ?', patch.name, id)
+  if (patch.collapsed !== undefined) yield* sql.run('UPDATE list_group SET collapsed = ? WHERE id = ?', patch.collapsed ? 1 : 0, id)
+  return groupView(yield* groupRow(id))
+})
+
+/** The group goes; its Robots return to the ungrouped list (ux-o7po). */
+const removeGroup = (id: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* groupRow(id)
+  yield* sql.transaction(() => {
+    sql.raw.exec('UPDATE list_pref SET group_id = NULL WHERE group_id = ?', id)
+    sql.raw.exec('DELETE FROM list_group WHERE id = ?', id)
+  })
+})
+
+/** The groups in a new order: every group exactly once. */
+const orderGroups = (ids: readonly string[]) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const known = new Set((yield* groups).map((group) => group.id))
+  if (ids.length !== known.size || new Set(ids).size !== ids.length || !ids.every((id) => known.has(id))) return yield* invalid('give every group once, in the new order')
+  yield* sql.transaction(() => ids.forEach((id, position) => sql.raw.exec('UPDATE list_group SET position = ? WHERE id = ?', position, id)))
+  return yield* groups
 })
 
 /** The person opened this Robot's conversation: everything up to now is read. */
@@ -547,7 +628,7 @@ const deliverDue = (now: number) => Effect.gen(function* () {
 /** The Member's programs, as run by the Durable Object. */
 export const MemberProgram = {
   profile, init, updateProfile, file, files, writeFile, accounts, addApiKey, startOAuth, finishOAuth, updateAccount, removeAccount, credential, accountCredential,
-  listPrefs, setListPref, markSeen, setSecret, secret, takeSecret, secretNames, logins, addUsage, usage,
+  listPrefs, setListPref, markSeen, groups, createGroup, updateGroup, removeGroup, orderGroups, setSecret, secret, takeSecret, secretNames, logins, addUsage, usage,
   addPushDevice, removePushDevice, pushDevices, notify, deliver, deliverDue,
 }
 
@@ -564,6 +645,8 @@ export class Member extends DurableObject<Env> {
     sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS member_file (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS list_pref (robot_id TEXT PRIMARY KEY, pinned INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, marked_unread INTEGER NOT NULL DEFAULT 0, seen_at INTEGER)')
+    if (!sql.exec<{ name: string }>('PRAGMA table_info(list_pref)').toArray().some((column) => column.name === 'group_id')) sql.exec('ALTER TABLE list_pref ADD COLUMN group_id TEXT')
+    sql.exec('CREATE TABLE IF NOT EXISTS list_group (id TEXT PRIMARY KEY, name TEXT NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS secret (name TEXT PRIMARY KEY, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS usage (month TEXT NOT NULL, robot_id TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, robot_id)) WITHOUT ROWID')
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
@@ -665,15 +748,22 @@ export class Member extends DurableObject<Env> {
     return this.run(applyProbe(id, await probeAccount(provider, credential, this.connectorFetch())))
   }
   markAccount(id: string, change: { status: AccountStatus; until: number | null; note: string | null }, robot: { id: string; name: string }): Promise<string | null> { return this.run(markAccount(id, change, robot)) }
-  listPrefs(): Promise<Record<string, { pinned: boolean; hidden: boolean; markedUnread: boolean; seenAt: number | null }>> { return this.run(listPrefs) }
-  setListPref(robotId: string, change: { pinned?: boolean; hidden?: boolean; unread?: boolean }): Promise<void> { return this.run(setListPref(robotId, change)) }
+  /** List settings of the Robots in `reach`; Robots out of reach leave their group (ux-lywk). */
+  listPrefs(reach: readonly string[]): Promise<Record<string, ListPref>> { return this.run(listPrefs(reach)) }
+  setListPref(robotId: string, change: ListPrefPatch): Promise<void> { return this.run(setListPref(robotId, change)) }
   markSeen(robotId: string, at: number): Promise<void> { return this.run(markSeen(robotId, at)) }
+  groups(): Promise<RobotGroup[]> { return this.run(groups) }
+  createGroup(name: string): Promise<RobotGroup> { return this.run(createGroup(name)) }
+  updateGroup(id: string, patch: GroupPatch): Promise<RobotGroup> { return this.run(updateGroup(id, patch)) }
+  removeGroup(id: string): Promise<void> { return this.run(removeGroup(id)) }
+  orderGroups(ids: readonly string[]): Promise<RobotGroup[]> { return this.run(orderGroups(ids)) }
 
   /** Reset everything (pl-062x): memory files back to templates, usage and list preferences gone; credentials, logins and devices stay. */
   async resetData(): Promise<void> {
     const sql = this.ctx.storage.sql
     sql.exec('DELETE FROM usage')
     sql.exec('DELETE FROM list_pref')
+    sql.exec('DELETE FROM list_group')
     sql.exec('DELETE FROM pending_notification')
     for (const [name, content] of Object.entries(MEMBER_FILES)) sql.exec('INSERT INTO member_file (name, content, updated_at) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at', name, content, Date.now())
   }

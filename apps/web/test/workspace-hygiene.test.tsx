@@ -25,7 +25,7 @@ function list() {
   }))
   render(
     <RegistryProvider>
-      <RobotList robots={[robot]} selected={undefined} meName="Anna" meAvatar={{ kind: 'initials', color: '#6c63ff' }} isAdmin={false} meId="m-1" onSelect={vi.fn()} onCreate={vi.fn()} onAdmin={vi.fn()} onProfile={vi.fn()} onListPref={vi.fn()} onEditProfile={vi.fn()} onAdvanced={vi.fn()} onFiles={vi.fn()} />
+      <RobotList robots={[robot]} selected={undefined} meName="Anna" meAvatar={{ kind: 'initials', color: '#6c63ff' }} isAdmin={false} meId="m-1" onSelect={vi.fn()} onCreate={vi.fn()} onAdmin={vi.fn()} onProfile={vi.fn()} groups={[]} onGroupChange={async () => true} onListPref={vi.fn()} onEditProfile={vi.fn()} onAdvanced={vi.fn()} onFiles={vi.fn()} />
     </RegistryProvider>,
   )
   fireEvent.click(screen.getByRole('button', { name: 'Bills menu' }))
