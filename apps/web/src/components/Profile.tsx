@@ -185,6 +185,7 @@ function AccountRow({ account, mine }: { account: ProviderView; mine: boolean })
         <InlineEdit editing={renaming} value={account.label} label="Name of this account" onSave={(label) => change((api) => api.updateAccount(account.id, { label }))} onClose={() => setRenaming(false)}>
           <b>{account.label}</b>
         </InlineEdit>
+        {account.signedInAs === undefined || account.signedInAs === account.label ? null : <span className="muted"> · signed in as {account.signedInAs}</span>}
         {mine ? null : <span className="muted"> · {account.ownerName}'s, shared</span>}
         {account.provider === 'anthropic' || account.provider === 'opencode-go' ? <UsageBars account={account} /> : null}
         {mine && (account.usedBy ?? []).length > 0 ? <div className="muted">Used by {(account.usedBy ?? []).map((use) => `${use.robotName} (${use.ownerName})`).join(', ')}</div> : null}

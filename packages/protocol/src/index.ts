@@ -965,6 +965,8 @@ export const ProviderView = Schema.Struct({
   until: Schema.NullOr(Schema.Number),
   /** Robots whose model chain holds this account; filled for the account's owner (pa-f59m). */
   usedBy: Schema.optional(Schema.Array(Schema.Struct({ robotId: Schema.String, robotName: Schema.String, ownerName: Schema.String }))),
+  /** The address the subscription's token was issued for; for the owner's own OAuth accounts when the Provider reports it. */
+  signedInAs: Schema.optional(Schema.String),
 })
 export type ProviderView = typeof ProviderView.Type
 

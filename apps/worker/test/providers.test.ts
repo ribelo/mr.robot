@@ -115,7 +115,7 @@ describe('Providers and credentials', () => {
       if (!url.startsWith('https://platform.claude.com/v1/oauth/token')) return undefined
       const request = JSON.parse(body) as { grant_type: string; code?: string; refresh_token?: string }
       if (request.grant_type === 'authorization_code' && request.code === 'the-code') {
-        return Response.json({ access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600 })
+        return Response.json({ access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 3600, account: { email_address: 'anna@claude.test' } })
       }
       if (request.grant_type === 'refresh_token' && request.refresh_token === 'refresh-1') {
         refreshes += 1
@@ -131,6 +131,15 @@ describe('Providers and credentials', () => {
     expect(finished.body).toEqual({ connected: true })
     const id = await robotOf(ANNA)
     expect(await testRobot(id).credentialForTest('anthropic')).toMatchObject({ kind: 'oauth', access: 'access-1' })
+
+    // The owner sees whose address the token carries, and a renamed account still renews instead of doubling.
+    const mine = (await api<ProvidersView>(ANNA, '/api/providers')).body.mine.filter((account) => account.provider === 'anthropic')
+    expect(mine).toEqual([expect.objectContaining({ label: 'anna@claude.test', signedInAs: 'anna@claude.test' })])
+    await api(ANNA, `/api/accounts/${mine[0]!.id}`, { method: 'PATCH', body: { label: 'Work' } })
+    const again = (await api<{ url: string }>(ANNA, '/api/providers/anthropic/oauth/start', { body: {} })).body
+    await api(ANNA, '/api/providers/anthropic/oauth/finish', { body: { pasted: `http://localhost:53692/callback?code=the-code&state=${new URL(again.url).searchParams.get('state')}`, shared: false } })
+    const after = (await api<ProvidersView>(ANNA, '/api/providers')).body.mine.filter((account) => account.provider === 'anthropic')
+    expect(after).toEqual([expect.objectContaining({ id: mine[0]!.id, label: 'Work', signedInAs: 'anna@claude.test' })])
 
     const anna = (await api<Me>(ANNA, '/api/me')).body
     await member(anna.id).expireCredentialsForTest()

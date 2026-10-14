@@ -207,18 +207,27 @@ const insertAccount = (provider: ProviderId, label: string, kind: 'api-key' | 'o
   return id
 })
 
-const accountView = (row: AccountRow, me: MemberProfile): ProviderView => ({
+const accountView = (row: AccountRow, me: MemberProfile, signedInAs?: string): ProviderView => ({
   id: row.id, provider: row.provider, label: row.label, kind: row.kind, shared: row.shared === 1, connectedAt: row.created_at,
   ownerId: me.id, ownerName: me.name, status: row.status, note: row.note, until: row.until,
+  ...(signedInAs === undefined ? {} : { signedInAs }),
 })
 
-/** The Member's accounts, oldest first; `sharedOnly` for another Member's view (pa-f281). */
+/** The address inside a sealed OAuth token, when the Provider reported one. */
+const tokenEmail = (sealed: string) => Effect.map(
+  Effect.flatMap(MemberPlatform, (platform) => platform.credentials.open(sealed)),
+  (text) => { const email = (JSON.parse(text) as { email?: unknown }).email; return typeof email === 'string' && email !== '' ? email : undefined },
+)
+
+/** The Member's accounts, oldest first; `sharedOnly` for another Member's view (pa-f281). The owner also sees whose address each subscription token carries. */
 const accounts = (sharedOnly = false) => Effect.gen(function* () {
   yield* migrateAccounts
   const sql = yield* Sql
   const me = yield* profile
   const rows = yield* sql.all<AccountRow>(`SELECT * FROM account ${sharedOnly ? 'WHERE shared = 1 ' : ''}ORDER BY created_at, rowid`)
-  return rows.map((row) => accountView(row, me))
+  const views: ProviderView[] = []
+  for (const row of rows) views.push(accountView(row, me, sharedOnly || row.kind !== 'oauth' ? undefined : yield* tokenEmail(row.sealed)))
+  return views
 })
 
 /** Keys are checked for shape only; a wrong key shows up as a broken account at its first use. */
@@ -254,7 +263,13 @@ const finishOAuth = (provider: 'openai' | 'anthropic', pasted: string | undefine
   const tokens = flow.provider === 'openai' ? yield* pollDevice(platform.oauthClients, flow) : yield* finishPasted(platform.oauthClients, flow, pasted ?? '')
   if (tokens === undefined) return false
   const sealed = yield* platform.credentials.seal(JSON.stringify(tokens))
-  const same = tokens.email === undefined ? undefined : yield* sql.first<{ id: string }>('SELECT id FROM account WHERE provider = ? AND label = ?', provider, tokens.email)
+  // The same address renews its account whatever the owner renamed it to: the match is the address inside the stored token.
+  let same: { id: string } | undefined
+  if (tokens.email !== undefined) {
+    for (const row of yield* sql.all<{ id: string; label: string; sealed: string }>("SELECT id, label, sealed FROM account WHERE provider = ? AND kind = 'oauth'", provider)) {
+      if (row.label === tokens.email || (yield* tokenEmail(row.sealed)) === tokens.email) { same = { id: row.id }; break }
+    }
+  }
   if (same !== undefined) {
     yield* sql.run("UPDATE account SET sealed = ?, expires = ?, status = 'ok', note = NULL, until = NULL, notified = 0, updated_at = ? WHERE id = ?", sealed, tokens.expires, Date.now(), same.id)
   } else {
