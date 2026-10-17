@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 
 export type Route =
   | { readonly page: 'home' }
-  | { readonly page: 'robot'; readonly id: string; readonly panel: boolean }
+  /** `from`: opened from Mission Control, which is where Back goes when the tab has no earlier entry (mc-m8hh). */
+  | { readonly page: 'robot'; readonly id: string; readonly panel: boolean; readonly from?: 'mission' }
+  | { readonly page: 'mission' }
   | { readonly page: 'trajectory'; readonly id: string }
   | { readonly page: 'advanced'; readonly id: string }
   | { readonly page: 'takeover'; readonly id: string }
@@ -15,17 +17,20 @@ export type Route =
   | { readonly page: 'plugin'; readonly name: string }
 
 export function parse(hash: string): Route {
-  // A query after the path (#/me?connected=…) is for the page, not the route.
-  const parts = hash.replace(/^#\/?/, '').split('?')[0]!.split('/').filter(Boolean)
+  // A query after the path (#/me?connected=…) is for the page, not the route; from=mission is the route's.
+  const [path = '', search = ''] = hash.replace(/^#\/?/, '').split('?')
+  const parts = path.split('/').filter(Boolean)
+  const fromMission = new URLSearchParams(search).get('from') === 'mission'
   if (parts[0] === 'r' && parts[1] !== undefined) {
     const id = decodeURIComponent(parts[1])
     if (parts[2] === 'trajectory') return { page: 'trajectory', id }
     if (parts[2] === 'settings') return { page: 'advanced', id }
     if (parts[2] === 'takeover') return { page: 'takeover', id }
     if (parts[2] === 'files') return { page: 'files', id, path: parts.length > 3 ? parts.slice(3).map(decodeURIComponent).join('/') : null }
-    return { page: 'robot', id, panel: parts[2] === 'panel' }
+    return { page: 'robot', id, panel: parts[2] === 'panel', ...(fromMission ? { from: 'mission' as const } : {}) }
   }
   if (parts[0] === 'admin') return { page: 'admin' }
+  if (parts[0] === 'mission') return { page: 'mission' }
   if (parts[0] === 'me') return { page: 'profile' }
   if (parts[0] === 'this-computer') return { page: 'this-computer' }
   if (parts[0] === 'plugins') return parts[1] === undefined ? { page: 'plugins' } : { page: 'plugin', name: decodeURIComponent(parts[1]) }
@@ -36,12 +41,13 @@ export function parse(hash: string): Route {
 export function href(route: Route): string {
   switch (route.page) {
     case 'home': return '#/'
-    case 'robot': return `#/r/${encodeURIComponent(route.id)}${route.panel ? '/panel' : ''}`
+    case 'robot': return `#/r/${encodeURIComponent(route.id)}${route.panel ? '/panel' : ''}${route.from === 'mission' ? '?from=mission' : ''}`
     case 'trajectory': return `#/r/${encodeURIComponent(route.id)}/trajectory`
     case 'advanced': return `#/r/${encodeURIComponent(route.id)}/settings`
     case 'takeover': return `#/r/${encodeURIComponent(route.id)}/takeover`
     case 'files': return `#/r/${encodeURIComponent(route.id)}/files${route.path === null ? '' : `/${route.path.split('/').map(encodeURIComponent).join('/')}`}`
     case 'admin': return '#/admin'
+    case 'mission': return '#/mission'
     case 'profile': return '#/me'
     case 'this-computer': return '#/this-computer'
     case 'pair': return `#/pair/${encodeURIComponent(route.code)}`

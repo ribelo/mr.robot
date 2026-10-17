@@ -303,6 +303,7 @@ export function RobotList({ robots, groups, selected, meName, meAvatar, isAdmin,
         <button type="button" className="me" title={meName} onClick={onProfile}>
           <MemberFace memberId={meId ?? ''} name={meName} avatar={meAvatar} /><span className="me-name">{meName}</span>
         </button>
+        <button type="button" className="link" onClick={() => go({ page: 'mission' })}>Mission Control</button>
         <button type="button" className="link" onClick={() => go({ page: 'plugins' })}>Plugins</button>
         {isAdmin ? <button type="button" className="link" onClick={onAdmin}>Admin</button> : null}
       </div>

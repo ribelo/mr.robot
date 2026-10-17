@@ -12,7 +12,7 @@ import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberAvatar, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
-  AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView,
+  AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
   SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
@@ -95,6 +95,8 @@ const make = Effect.gen(function* () {
     updateGroup: (id: string, patch: GroupPatch) => request(RobotGroup, 'PATCH', `/api/robot-groups/${enc(id)}`, patch),
     orderGroups: (ids: readonly string[]) => request(Schema.Array(RobotGroup), 'PUT', '/api/robot-groups/order', { ids }),
     deleteGroup: (id: string) => send('DELETE', `/api/robot-groups/${enc(id)}`),
+    /** One page of Mission Control (v1.13 ticket 06), by query ("scope=home&state=open&fleetPage=2"). */
+    mission: (query: string) => get(MissionView, `/api/mission?${query}`),
     /** The active Members of the Home, for a Task's doer (v1.13). */
     homeMembers: get(Schema.Array(MemberView), '/api/members'),
     /** Tasks (v1.13): a page by query ("state=all&parent=t-…"), one Task, and its changes. */

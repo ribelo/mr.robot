@@ -1,0 +1,228 @@
+/**
+ * Mission Control (v1.13 ticket 06, mc-m1aa…mc-m9ii): the Fleet (who works, why, on what) and the Tasks a Member
+ * sees, as two dense windowed tables. Grouping, the state filter and Whole Home are remembered in the Member's
+ * preferences; a Fleet row opens the Robot, a Task row opens its detail in place.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
+import { AsyncResult } from 'effect/reactivity'
+import type { LastWakeup, Me, MissionGroup, MissionPrefs, MissionState, MissionView, RobotSummary, TaskView, WakeupCause } from '@mr-robot/protocol'
+import { keys, missionAtom, useCommand, type MissionQuery } from '../client/api-atoms.ts'
+import { go } from '../route.ts'
+import { renderResult } from './AtomView.tsx'
+import { Avatar } from './Avatar.tsx'
+import { TaskSheet, stateText, useNames } from './TaskSheets.tsx'
+import { WindowedTable } from './WindowedTable.tsx'
+import { assigneeKey, assigneeText, lastAttemptText, momentOf, whenText, type Names } from './task-words.ts'
+
+const ROW_HEIGHT = 28
+
+const STATES: ReadonlyArray<{ id: MissionState; label: string }> = [
+  { id: 'open', label: 'Open' }, { id: 'done', label: 'Done' }, { id: 'cancelled', label: 'Cancelled' }, { id: 'all', label: 'All' },
+]
+const GROUPS: ReadonlyArray<{ id: MissionGroup; label: string }> = [
+  { id: 'assignee', label: 'By doer' }, { id: 'parent', label: 'By parent' }, { id: 'time', label: 'By time' },
+]
+
+const WAKEUP_WORDS: Record<WakeupCause['kind'], string> = { member: 'message', task: 'task', robot: 'robot', channel: 'channel', takeover: 'takeover', platform: 'platform' }
+
+/** What woke the Robot, in a few words: "message · Anna", "task · schedule". */
+export function wokeText(wakeup: WakeupCause): string {
+  return `${WAKEUP_WORDS[wakeup.kind]} · ${wakeup.from}`
+}
+
+/** How long ago, short: "40 s", "12 min", "3 h", "2 d". */
+export function sinceText(at: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  if (seconds < 60) return `${seconds} s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.round(minutes / 60)
+  return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`
+}
+
+export type TaskRow =
+  | { readonly kind: 'group'; readonly key: string; readonly label: string; readonly count: number }
+  | { readonly kind: 'task'; readonly task: TaskView }
+
+function timeBucket(task: TaskView, now: number): { key: string; label: string; order: number } {
+  if (task.overdue) return { key: 'overdue', label: 'Overdue', order: 0 }
+  const at = momentOf(task.timing)
+  if (at === null) return { key: 'none', label: 'No date', order: 5 }
+  const day = new Date(now)
+  day.setHours(0, 0, 0, 0)
+  const startOfToday = day.getTime()
+  if (at < startOfToday + 86_400_000) return { key: 'today', label: at < now ? 'Earlier' : 'Today', order: 1 }
+  if (at < startOfToday + 2 * 86_400_000) return { key: 'tomorrow', label: 'Tomorrow', order: 2 }
+  if (at < startOfToday + 7 * 86_400_000) return { key: 'week', label: 'This week', order: 3 }
+  return { key: 'later', label: 'Later', order: 4 }
+}
+
+/**
+ * The loaded Tasks folded into groups with a header each (mc-m5ee): by doer, by parent (a Task with children heads
+ * its own group), or by time (overdue, today, tomorrow, this week, later, no date). Groups keep the server's order
+ * of their first Task; time groups are in time order.
+ */
+export function groupTasks(tasks: readonly TaskView[], group: MissionGroup, names: Names, now: number): TaskRow[] {
+  const titles = new Map(tasks.map((task) => [task.id, task.title]))
+  const groups = new Map<string, { label: string; order: number; tasks: TaskView[] }>()
+  for (const task of tasks) {
+    const { key, label, order } = group === 'assignee'
+      ? { key: assigneeKey(task.assignee), label: assigneeText(task.assignee, names), order: 0 }
+      : group === 'parent'
+        ? task.parentId !== null ? { key: task.parentId, label: titles.get(task.parentId) ?? 'Part of another task', order: 0 }
+          : task.children > 0 ? { key: task.id, label: task.title, order: 0 } : { key: 'none', label: 'Without a parent', order: 1 }
+        : timeBucket(task, now)
+    const entry = groups.get(key) ?? { label, order, tasks: [] }
+    entry.tasks.push(task)
+    groups.set(key, entry)
+  }
+  return [...groups.entries()]
+    .map(([key, entry], index) => ({ key, ...entry, index }))
+    .sort((a, b) => a.order - b.order || a.index - b.index)
+    .flatMap((entry): TaskRow[] => [{ kind: 'group', key: entry.key, label: entry.label, count: entry.tasks.length }, ...entry.tasks.map((task): TaskRow => ({ kind: 'task', task }))])
+}
+
+export function MissionControl({ me }: { me: Me }) {
+  const command = useCommand()
+  const [prefs, setPrefs] = useState<MissionPrefs>(me.mission)
+  const [q, setQ] = useState('')
+  const [pages, setPages] = useState({ fleet: 1, tasks: 1 })
+  const [openTask, setOpenTask] = useState<string>()
+  const admin = me.role === 'admin'
+  const remember = (patch: Partial<MissionPrefs>) => {
+    setPrefs((current) => ({ ...current, ...patch }))
+    setPages({ fleet: 1, tasks: 1 })
+    void command((api) => api.updateMe({ mission: patch }), [keys.me])
+  }
+  const wanted: MissionQuery = { scope: admin && prefs.wholeHome ? 'home' : 'mine', state: prefs.state, group: prefs.group, q: q.trim(), fleetPages: pages.fleet, taskPages: pages.tasks }
+  const key = JSON.stringify(wanted)
+  const result = useAtomValue(missionAtom(key))
+  const refresh = useAtomRefresh(missionAtom(key))
+  // The Fleet changes while it is on screen; it reads again every ten seconds.
+  useEffect(() => {
+    const timer = setInterval(refresh, 10_000)
+    return () => clearInterval(timer)
+  }, [refresh])
+  // A new query keeps the last tables on screen until its answer comes.
+  const [shown, setShown] = useState<MissionView>()
+  useEffect(() => { if (AsyncResult.isSuccess(result)) setShown(result.value) }, [result])
+
+  return (
+    <div className="page mission">
+      <h1>
+        <button type="button" className="icon-button" aria-label="Back" onClick={() => go({ page: 'home' })}>‹</button>
+        Mission Control
+      </h1>
+      <div className="mission-bar">
+        <input type="search" aria-label="Search" placeholder="Search robots and tasks" value={q} onChange={(event) => { setQ(event.target.value); setPages({ fleet: 1, tasks: 1 }) }} />
+        <div className="segmented compact" role="radiogroup" aria-label="Show tasks">
+          {STATES.map((option) => <button key={option.id} type="button" role="radio" aria-checked={prefs.state === option.id} className={prefs.state === option.id ? 'segment active' : 'segment'} onClick={() => remember({ state: option.id })}>{option.label}</button>)}
+        </div>
+        <div className="segmented compact" role="radiogroup" aria-label="Group tasks">
+          {GROUPS.map((option) => <button key={option.id} type="button" role="radio" aria-checked={prefs.group === option.id} className={prefs.group === option.id ? 'segment active' : 'segment'} onClick={() => remember({ group: option.id })}>{option.label}</button>)}
+        </div>
+        <span className="spacer" />
+        {admin ? (
+          <label className="inline">
+            Whole Home
+            <button type="button" role="switch" aria-checked={prefs.wholeHome} aria-label="Whole Home" className={prefs.wholeHome ? 'switch on' : 'switch'} onClick={() => remember({ wholeHome: !prefs.wholeHome })}><span /></button>
+          </label>
+        ) : null}
+      </div>
+      <div className="mission-body">
+        <div className="mission-tables">
+          {shown === undefined
+            ? renderResult(result, { what: 'Mission Control', retry: refresh }, () => null)
+            : <MissionTables view={shown} prefs={prefs} wholeHome={wanted.scope === 'home'} onOpenTask={setOpenTask}
+              onMoreFleet={() => setPages((current) => ({ ...current, fleet: current.fleet + 1 }))}
+              onMoreTasks={() => setPages((current) => ({ ...current, tasks: current.tasks + 1 }))} />}
+        </div>
+      </div>
+      {openTask === undefined ? null : <TaskSheet taskId={openTask} onClose={() => setOpenTask(undefined)} onOpenTask={setOpenTask} />}
+    </div>
+  )
+}
+
+function MissionTables({ view, prefs, wholeHome, onOpenTask, onMoreFleet, onMoreTasks }: {
+  view: MissionView
+  prefs: MissionPrefs
+  wholeHome: boolean
+  onOpenTask: (id: string) => void
+  onMoreFleet: () => void
+  onMoreTasks: () => void
+}) {
+  const names = useNames()
+  const now = Date.now()
+  const rows = useMemo(() => groupTasks(view.tasks, prefs.group, names, now), [view.tasks, prefs.group, names, now])
+  const titles = useMemo(() => new Map(view.tasks.map((task) => [task.id, task.title])), [view.tasks])
+  const moreFleet = useCallback(() => { if (view.fleetNext !== null) onMoreFleet() }, [view.fleetNext, onMoreFleet])
+  const moreTasks = useCallback(() => { if (view.tasksNext !== null) onMoreTasks() }, [view.tasksNext, onMoreTasks])
+  const fleetColumns = `22px minmax(110px, 1.3fr) 108px minmax(110px, 1.2fr) minmax(100px, 1.2fr) minmax(80px, 0.9fr) 56px minmax(140px, 2.2fr)${wholeHome ? ' minmax(80px, 0.8fr)' : ''}`
+  const taskColumns = '84px minmax(160px, 2.4fr) minmax(90px, 1fr) minmax(130px, 1.5fr) minmax(130px, 1.8fr) 46px'
+  return (
+    <>
+      <section className="mission-section" aria-label="Fleet">
+        <h2>Fleet · {view.counts.robots} robots · {view.counts.working} working · {view.counts.waiting} waiting for you</h2>
+        <WindowedTable<RobotSummary>
+          label="Fleet"
+          rows={view.fleet}
+          rowKey={(robot) => robot.id}
+          rowHeight={ROW_HEIGHT}
+          columns={fleetColumns}
+          header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Last line</span>{wholeHome ? <span>Owner</span> : null}</>}
+          renderRow={(robot) => <FleetCells robot={robot} now={now} wholeHome={wholeHome} />}
+          onRowClick={(robot) => go({ page: 'robot', id: robot.id, panel: false, from: 'mission' })}
+          onEnd={moreFleet}
+        />
+      </section>
+      <section className="mission-section" aria-label="Tasks">
+        <h2>Tasks · {view.counts.openTasks} open</h2>
+        <WindowedTable<TaskRow>
+          label="Tasks"
+          rows={rows}
+          rowKey={(row) => (row.kind === 'group' ? `group:${row.key}` : row.task.id)}
+          rowHeight={ROW_HEIGHT}
+          columns={taskColumns}
+          header={<><span>State</span><span>Title</span><span>Doer</span><span>When</span><span>Last attempt</span><span>Sub</span></>}
+          rowClass={(row) => (row.kind === 'group' ? 'wt-group' : row.task.overdue ? 'wt-overdue' : '')}
+          renderRow={(row) => (row.kind === 'group'
+            ? <span style={{ gridColumn: '1 / -1' }}>{row.label} · {row.count}</span>
+            : <TaskCells task={row.task} names={names} parentTitle={row.task.parentId === null ? undefined : titles.get(row.task.parentId)} />)}
+          onRowClick={(row) => { if (row.kind === 'task') onOpenTask(row.task.id) }}
+          onEnd={moreTasks}
+        />
+      </section>
+    </>
+  )
+}
+
+function FleetCells({ robot, now, wholeHome }: { robot: RobotSummary; now: number; wholeHome: boolean }) {
+  const cause: LastWakeup | null = robot.turn ?? robot.lastWakeup
+  return (
+    <>
+      <Avatar seed={robot.identity.avatarSeed} color={robot.identity.avatarColor} size={18} state={robot.fleetState} />
+      <span className="wt-cell-name">{robot.identity.name}</span>
+      <span><span className={`state state-${robot.fleetState.split(' ')[0]}`}>{robot.fleetState}</span></span>
+      <span className={robot.turn === null ? 'muted' : ''}>{cause === null ? '' : wokeText(cause.wakeup)}</span>
+      <span className={robot.turn === null ? 'muted' : ''}>{cause?.task?.title ?? (robot.turn === null ? '' : 'no task')}</span>
+      <span>{robot.turn?.activity ?? ''}</span>
+      <span>{robot.turn === null ? '' : sinceText(robot.turn.since, now)}</span>
+      <span className="muted">{robot.lastLine}</span>
+      {wholeHome ? <span className="muted">{robot.ownerName}</span> : null}
+    </>
+  )
+}
+
+function TaskCells({ task, names, parentTitle }: { task: TaskView; names: Names; parentTitle: string | undefined }) {
+  return (
+    <>
+      <span>{stateText(task)}</span>
+      <span>{parentTitle === undefined ? null : <span className="muted">{parentTitle} › </span>}{task.title}</span>
+      <span>{assigneeText(task.assignee, names)}</span>
+      <span className="task-when">{whenText(task.timing)}</span>
+      <span className="muted">{lastAttemptText(task)}</span>
+      <span className="muted">{task.children === 0 ? '' : task.children}</span>
+    </>
+  )
+}

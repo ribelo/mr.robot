@@ -30,12 +30,14 @@ import {
   RewindRequest,
   SendMessage,
   SettingsPatch,
+  DEFAULT_MISSION_PREFS,
   TaskAssign,
   TaskInput,
   TaskPatch,
   TaskPause,
   TaskState,
   type Attachment,
+  type MissionView,
   type TaskAssignee,
   type TaskPage,
   type TaskView,
@@ -119,7 +121,7 @@ const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
  * The caller of a Task route: the Member, recorded as themselves. The Home admin sees every Task with Whole Home
  * (mc-m7gg): a list asks for it with scope=home; one Task's routes reach any Task of the Home for the admin.
  */
-function taskCaller(c: ApiContext, wholeHome: boolean): TaskCaller {
+function taskCaller(c: ApiContext, wholeHome: boolean): Extract<TaskCaller, { kind: 'member' }> {
   return { kind: 'member', memberId: c.member.id, wholeHome: wholeHome && c.member.role === 'admin', actor: { kind: 'member', memberId: c.member.id, name: c.member.name } }
 }
 
@@ -158,10 +160,13 @@ export const api = new Router<ApiContext>()
     // The app tells its zone each time it opens; anything that is not a zone is ignored.
     const reported = parseTimeZone(c.request.headers.get(TIME_ZONE_HEADER) ?? '')
     const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))
-    return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system' }
+    return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system', mission: { ...DEFAULT_MISSION_PREFS, ...profile.mission }, acceptTasksFrom: [...(profile.acceptTasksFrom ?? [])] }
   }))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
-    const { avatarColor, ...patch } = yield* decodeBody(c.request, MemberPreferences)
+    const { avatarColor, acceptTasksFrom, ...rest } = yield* decodeBody(c.request, MemberPreferences)
+    // Only other active Members of the Home can be named (mc-a1aa).
+    const others = acceptTasksFrom === undefined ? undefined : new Set((yield* call(() => home(c.env).members())).filter((member) => member.status === 'active' && member.id !== c.member.id).map((member) => member.id))
+    const patch = { ...rest, ...(acceptTasksFrom === undefined || others === undefined ? {} : { acceptTasksFrom: [...new Set(acceptTasksFrom)].filter((id) => others.has(id)) }) }
     yield* call(() => c.env.MEMBER.getByName(c.member.id).updateProfile(patch))
     if (patch.name !== undefined) yield* call(() => home(c.env).rename(c.member.id, patch.name!))
     if (avatarColor !== undefined) yield* call((): Promise<MemberAvatar> => home(c.env).setAvatarColor(c.member.id, avatarColor))
@@ -625,6 +630,14 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).resetMember(c.member.id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
+
+  // ------------------------------------------------------------ Mission Control (v1.13 ticket 06)
+  .on('GET', '/api/mission', (c) => {
+    const query = new URL(c.request.url).searchParams
+    const page = Number(query.get('fleetPage') ?? '1')
+    const caller = taskCaller(c, query.get('scope') === 'home') as Extract<TaskCaller, { kind: 'member' }>
+    return call((): Promise<MissionView> => home(c.env).mission(caller, { q: query.get('q') ?? '', fleetPage: Number.isInteger(page) && page >= 1 ? page : 1, tasks: (({ q: _q, ...filter }) => filter)(taskFilter(query)) }))
+  })
 
   // ------------------------------------------------------------ Tasks (v1.13)
   // The active Members of the Home: who a Task can be given to (mc-n2bb).

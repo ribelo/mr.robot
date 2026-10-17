@@ -74,6 +74,43 @@ export const pluginsAtom = query((api) => api.plugins, [keys.plugins])
 export const connectionsAtom = query((api) => api.connections, [keys.connections])
 export const connectionNotesAtom = query((api) => api.connectionNotes, [keys.connections])
 export const homeMembersAtom = query((api) => api.homeMembers, [keys.me])
+/** What Mission Control shows: its filters, and how many pages of each table are loaded. */
+export interface MissionQuery {
+  readonly scope: 'mine' | 'home'
+  readonly state: string
+  readonly group: string
+  readonly q: string
+  readonly fleetPages: number
+  readonly taskPages: number
+}
+
+/**
+ * Mission Control's tables, keyed by a MissionQuery as JSON: the first `fleetPages` and `taskPages` pages, read
+ * from the server one page at a time and joined (mc-m3cc). Robots and Tasks changing make it read again.
+ */
+export const missionAtom = Atom.family((key: string) => {
+  const wanted = JSON.parse(key) as MissionQuery
+  return query((api) => Effect.gen(function* () {
+    const base = new URLSearchParams({ scope: wanted.scope, state: wanted.state, group: wanted.group, q: wanted.q })
+    const first = yield* api.mission(base.toString())
+    let view = first
+    for (let page = 2; page <= Math.max(wanted.fleetPages, wanted.taskPages); page += 1) {
+      const more = new URLSearchParams(base)
+      more.set('fleetPage', String(Math.min(page, wanted.fleetPages)))
+      more.set('taskPage', String(Math.min(page, wanted.taskPages)))
+      const next = yield* api.mission(more.toString())
+      view = {
+        ...next,
+        fleet: page <= wanted.fleetPages && view.fleetNext !== null ? [...view.fleet, ...next.fleet] : view.fleet,
+        fleetNext: page <= wanted.fleetPages ? next.fleetNext : view.fleetNext,
+        tasks: page <= wanted.taskPages && view.tasksNext !== null ? [...view.tasks, ...next.tasks] : view.tasks,
+        tasksNext: page <= wanted.taskPages ? next.tasksNext : view.tasksNext,
+      }
+    }
+    return view
+  }), [keys.robots, keys.tasks])
+})
+
 /** Keyed by the list's query string ("state=all&parent=t-…"). */
 export const tasksAtom = Atom.family((search: string) => query((api) => api.tasks(search), [keys.tasks]))
 export const taskAtom = Atom.family((id: string) => query((api) => api.task(id), [keys.tasks]))

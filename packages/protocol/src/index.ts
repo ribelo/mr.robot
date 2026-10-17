@@ -57,6 +57,18 @@ export const QuietHours = Schema.Struct({
 })
 export type QuietHours = typeof QuietHours.Type
 
+/** How Mission Control's Tasks table is grouped (mc-m5ee). */
+export const MissionGroup = Schema.Literals(['assignee', 'parent', 'time'])
+export type MissionGroup = typeof MissionGroup.Type
+/** Which Tasks the table shows (mc-m6ff); open by default. */
+export const MissionState = Schema.Literals(['open', 'done', 'cancelled', 'all'])
+export type MissionState = typeof MissionState.Type
+
+/** Mission Control as the Member left it (mc-m5ee, mc-m7gg, mc-n4dd): grouping, state filter, Whole Home, the Mr. Robot drawer. */
+export const MissionPrefs = Schema.Struct({ group: MissionGroup, state: MissionState, wholeHome: Schema.Boolean, drawer: Schema.Boolean })
+export type MissionPrefs = typeof MissionPrefs.Type
+export const DEFAULT_MISSION_PREFS: MissionPrefs = { group: 'assignee', state: 'open', wholeHome: false, drawer: false }
+
 export const Me = Schema.Struct({
   ...MemberView.fields,
   /** How the person's Robots address them (ux-i8ff); absent: by their name. */
@@ -74,6 +86,10 @@ export const Me = Schema.Struct({
   workDetails: WorkDetails,
   /** System, light or dark (ap-itj1). */
   theme: ThemeChoice,
+  /** Mission Control as the Member left it. */
+  mission: MissionPrefs,
+  /** The Members whose Robots may give this Member Tasks (mc-a1aa). */
+  acceptTasksFrom: Schema.Array(Schema.String),
 })
 export type Me = typeof Me.Type
 
@@ -90,6 +106,10 @@ export const MemberPreferences = Schema.Struct({
   theme: Schema.optional(ThemeChoice),
   /** The avatar colour; a picture keeps it behind (ux-2ft4). The picture itself goes through PUT /api/me/avatar. */
   avatarColor: Schema.optional(AvatarColor),
+  /** Mission Control's remembered choices; fields left out stay. */
+  mission: Schema.optional(Schema.Struct({ group: Schema.optional(MissionGroup), state: Schema.optional(MissionState), wholeHome: Schema.optional(Schema.Boolean), drawer: Schema.optional(Schema.Boolean) })),
+  /** Replaces the whole list (mc-a1aa). */
+  acceptTasksFrom: Schema.optional(Schema.Array(Schema.String)),
 })
 /** What PATCH /api/me accepts. */
 export type MePatch = typeof MemberPreferences.Type
@@ -869,6 +889,19 @@ export const TaskView = Schema.Struct({
   overdue: Schema.Boolean,
 })
 export type TaskView = typeof TaskView.Type
+
+/**
+ * Mission Control (mc-m1aa): a page of the Fleet (working first, then waiting for you, then by last activity) and a
+ * page of the Tasks the Member sees; `fleetNext` and `tasksNext` are the pages to ask for next, null on the last.
+ */
+export const MissionView = Schema.Struct({
+  fleet: Schema.Array(RobotSummary),
+  fleetNext: Schema.NullOr(Schema.Number),
+  tasks: Schema.Array(TaskView),
+  tasksNext: Schema.NullOr(Schema.Number),
+  counts: Schema.Struct({ robots: Schema.Number, working: Schema.Number, waiting: Schema.Number, openTasks: Schema.Number }),
+})
+export type MissionView = typeof MissionView.Type
 
 /** One page of Tasks, open ones first; `next` is the page to ask for next (1-based), null on the last. */
 export const TaskPage = Schema.Struct({ tasks: Schema.Array(TaskView), next: Schema.NullOr(Schema.Number) })

@@ -241,6 +241,13 @@ export const listTasks = (caller: TaskCaller, filter: TaskFilter) => Effect.gen(
   return { tasks, next: rows.length > TASK_PAGE_SIZE ? page + 1 : null } as TaskPage
 })
 
+/** How many open Tasks the caller sees (Mission Control's count). */
+export const countOpenTasks = (caller: TaskCaller) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const { where, bindings } = visibility(caller)
+  return (yield* sql.first<{ n: number }>(`SELECT COUNT(*) AS n FROM task t WHERE ${where} AND t.state = 'open'`, ...bindings))?.n ?? 0
+})
+
 export const getTask = (caller: TaskCaller, id: string) => Effect.flatMap(visibleTask(caller, id), view)
 
 // ------------------------------------------------------------------ rules for a change

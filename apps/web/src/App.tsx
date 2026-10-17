@@ -127,7 +127,12 @@ function changeGroups(command: ReturnType<typeof useCommand>, change: GroupChang
 }
 
 function Empty() {
-  return <div className="empty-main"><EmptyState title="Pick a robot" hint="Choose one on the left, or tap + to make a new one." /></div>
+  return (
+    <div className="empty-main">
+      <EmptyState title="Pick a robot" hint="Choose one on the left, or tap + to make a new one."
+        action={<button type="button" className="button" onClick={() => go({ page: 'mission' })}>Open Mission Control</button>} />
+    </div>
+  )
 }
 
 /** The sheet open over the app: a Robot's profile, or a Task (opened from that profile, or from the panel). */
@@ -188,7 +193,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   }
   const header: ReactNode = (
     <header className="conversation-head">
-      <button type="button" className="icon-button back" aria-label="Back" onClick={() => goBack({ page: 'home' })}>‹</button>
+      <button type="button" className="icon-button back" aria-label="Back" onClick={() => goBack(route.from === 'mission' ? { page: 'mission' } : { page: 'home' })}>‹</button>
       <Avatar seed={identity.avatarSeed} color={identity.avatarColor} size={22} state={robot?.fleetState ?? panel.summary.fleetState} />
       <span className="conversation-name">{identity.name}</span>
       {panel.summary.status === 'setup' ? <span className="pill">setup</span> : null}
@@ -213,7 +218,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
         type="button"
         className={route.panel ? 'icon-button active' : 'icon-button'}
         aria-label="Robot panel"
-        onClick={() => go({ page: 'robot', id, panel: !route.panel })}
+        onClick={() => go({ page: 'robot', id, panel: !route.panel, ...(route.from === undefined ? {} : { from: route.from }) })}
       >
         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" /><path d="M5.5 14h5M8 11.5V14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>
       </button>

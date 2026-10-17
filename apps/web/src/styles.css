@@ -631,3 +631,26 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .page > h1:first-child { position: sticky; top: calc(-16px - env(safe-area-inset-top)); z-index: 5; background: var(--surface); margin-top: calc(-16px - env(safe-area-inset-top)); padding: calc(16px + env(safe-area-inset-top)) 0 10px; border-bottom: 1px solid transparent; }
 .chain-note { display: block; margin-top: 6px; }
 .prompt-files { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 4px 0 10px; }
+
+/* Mission Control (v1.13 ticket 06): two dense tables, one line per row, fixed columns (mc-m2bb). */
+.page.mission { max-width: none; display: flex; flex-direction: column; height: 100%; padding-bottom: 12px; }
+.mission-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
+.mission-tables { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 0; min-height: 0; }
+.mission-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.mission-bar input[type="search"] { width: 220px; }
+.mission-bar .spacer { flex: 1; }
+.mission-section { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.mission-section h2 { margin: 6px 0 4px; font-size: 13.5px; }
+.wt { display: flex; flex-direction: column; min-height: 0; flex: 1; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.wt-head, .wt-row { display: grid; align-items: center; gap: 8px; padding: 0 8px; }
+.wt-head { height: 26px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); }
+.wt-scroll { overflow-y: auto; flex: 1; min-height: 120px; }
+.wt-space { position: relative; }
+.wt-row { position: absolute; left: 0; right: 0; border-bottom: 1px solid var(--line); cursor: default; }
+.wt-row[tabindex] { cursor: pointer; }
+.wt-row[tabindex]:hover { background: var(--hover); }
+.wt-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-row.wt-group { background: var(--surface-raised); color: var(--muted); font-weight: 600; cursor: default; }
+.wt-row.wt-overdue .task-when { color: var(--danger-text); }
+.wt-cell-name { display: flex; align-items: center; gap: 6px; }
+.mission-drawer { width: 380px; flex: none; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

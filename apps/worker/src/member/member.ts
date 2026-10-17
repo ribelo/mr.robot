@@ -16,7 +16,8 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
 import { probeAccount, type Probe } from '../providers/usage.ts'
-import type { AccountStatus, AccountUsage, ConnectorKind, GroupPatch, ListPrefPatch, NotificationKind, ProviderView, QuietHours, RobotGroup, RobotOwner, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
+import type { AccountStatus, AccountUsage, ConnectorKind, GroupPatch, ListPrefPatch, MissionPrefs, NotificationKind, ProviderView, QuietHours, RobotGroup, RobotOwner, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
+import { DEFAULT_MISSION_PREFS } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -47,6 +48,8 @@ export interface MemberProfile {
   readonly theme?: ThemeChoice
   /** The Members whose Robots may give this Member Tasks (mc-a1aa); absent: nobody's. */
   readonly acceptTasksFrom?: readonly string[]
+  /** Mission Control as the Member left it; absent: the defaults. */
+  readonly mission?: MissionPrefs
 }
 
 /** What a Member's programs need besides its SQLite: vaults, sign-in clients, push, the Home and its alarm. */
@@ -107,11 +110,13 @@ export interface ProfilePatch {
   readonly quietHours?: QuietHours | null
   readonly workDetails?: WorkDetails
   readonly theme?: ThemeChoice
+  readonly mission?: Partial<MissionPrefs>
+  readonly acceptTasksFrom?: readonly string[]
 }
 
 const updateProfile = (patch: ProfilePatch) => Effect.gen(function* () {
   const current = yield* profile
-  const { timeZone, useDetectedTimeZone, nickname, ...rest } = patch
+  const { timeZone, useDetectedTimeZone, nickname, mission, ...rest } = patch
   if (timeZone !== undefined && useDetectedTimeZone === true) return yield* invalid('give a time zone or ask for the app\'s zone, not both')
   const typed = timeZone === undefined ? undefined : parseTimeZone(timeZone)
   if (timeZone !== undefined && typed === undefined) return yield* invalid(`"${timeZone}" is not a time zone; use a name like Europe/Warsaw`)
@@ -121,7 +126,10 @@ const updateProfile = (patch: ProfilePatch) => Effect.gen(function* () {
         : {}
   const { nickname: kept, ...others } = current
   const named = nickname === undefined ? kept : nickname.trim()
-  const next: MemberProfile = { ...others, ...(named === undefined || named === '' ? {} : { nickname: named }), ...rest, ...zone }
+  const next: MemberProfile = {
+    ...others, ...(named === undefined || named === '' ? {} : { nickname: named }), ...rest, ...zone,
+    ...(mission === undefined ? {} : { mission: { ...DEFAULT_MISSION_PREFS, ...current.mission, ...mission } }),
+  }
   yield* kvSet('profile', next)
   return next
 })

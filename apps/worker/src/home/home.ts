@@ -56,7 +56,7 @@ import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
 import * as Tasks from './tasks.ts'
-import type { LastWakeup, RobotTurn, TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
+import type { LastWakeup, MissionView, RobotTurn, TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
 import { legacyHomeSpendLimit } from '../platform/spend-limit-migration.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
@@ -349,6 +349,45 @@ const reachable = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const rows = yield* sql.all<RobotSql>("SELECT * FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home') ORDER BY last_at DESC", memberId)
   return yield* Effect.forEach(rows, summary)
+})
+
+/** Fleet rows per page of Mission Control (mc-m3cc). */
+export const FLEET_PAGE_SIZE = 200
+
+/**
+ * One page of Mission Control's Fleet (mc-m4dd, mc-m6ff): the Robots a Member reaches, or every Robot for Whole
+ * Home; working first, then waiting for you, then by last activity; `q` finds a name.
+ */
+const fleetPage = (memberId: string, wholeHome: boolean, q: string, page: number) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const reach = wholeHome ? '' : "AND (r.owner_id = ? OR r.sharing = 'home')"
+  const words = q.trim()
+  const named = words === '' ? '' : "AND json_extract(r.identity, '$.name') LIKE ? ESCAPE '\\'"
+  const bindings = [...(wholeHome ? [] : [memberId]), ...(words === '' ? [] : [`%${words.replace(/[\\%_]/g, (character) => `\\${character}`)}%`])]
+  const rows = yield* sql.all<RobotSql & { owner_name: string | null }>(
+    `SELECT r.*, m.name AS owner_name FROM robot r LEFT JOIN member m ON m.id = r.owner_id WHERE r.status != 'deleted' ${reach} ${named}
+     ORDER BY CASE r.fleet_state WHEN 'working' THEN 0 WHEN 'waiting for you' THEN 1 ELSE 2 END, r.last_at DESC, r.id LIMIT ? OFFSET ?`,
+    ...bindings, FLEET_PAGE_SIZE + 1, (page - 1) * FLEET_PAGE_SIZE,
+  )
+  const counts = yield* sql.first<{ robots: number; working: number | null; waiting: number | null }>(
+    `SELECT COUNT(*) AS robots, SUM(r.fleet_state = 'working') AS working, SUM(r.fleet_state = 'waiting for you') AS waiting FROM robot r WHERE r.status != 'deleted' ${reach}`,
+    ...(wholeHome ? [] : [memberId]),
+  )
+  return {
+    fleet: rows.slice(0, FLEET_PAGE_SIZE).map((row): RobotSummary => ({ ...entryFromSql(row), ownerName: row.owner_name ?? '', unread: false })),
+    next: rows.length > FLEET_PAGE_SIZE ? page + 1 : null,
+    counts: { robots: counts?.robots ?? 0, working: counts?.working ?? 0, waiting: counts?.waiting ?? 0 },
+  }
+})
+
+/** Mission Control (mc-m1aa): a page of the Fleet and a page of the Tasks, for a Member or, with Whole Home, the admin. */
+const mission = (caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, query: { readonly q: string; readonly fleetPage: number; readonly tasks: Tasks.TaskFilter }) => Effect.gen(function* () {
+  const fleet = yield* fleetPage(caller.memberId, caller.wholeHome, query.q, query.fleetPage)
+  const tasks = yield* Tasks.listTasks(caller, { ...query.tasks, ...(query.q.trim() === '' ? {} : { q: query.q }) })
+  return {
+    fleet: fleet.fleet, fleetNext: fleet.next, tasks: tasks.tasks, tasksNext: tasks.next,
+    counts: { ...fleet.counts, openTasks: yield* Tasks.countOpenTasks(caller) },
+  } as MissionView
 })
 
 /** Every Robot, for the admin fleet view. */
@@ -1495,6 +1534,7 @@ export class Home extends DurableObject<Env> {
     await this.run(this.planned([]))
   }
 
+  mission(caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, query: { readonly q: string; readonly fleetPage: number; readonly tasks: Tasks.TaskFilter }): Promise<MissionView> { return this.run(mission(caller, query)) }
   listTasks(caller: Tasks.TaskCaller, filter: Tasks.TaskFilter): Promise<TaskPage> { return this.run(Tasks.listTasks(caller, filter)) }
   task(caller: Tasks.TaskCaller, id: string): Promise<TaskView> { return this.run(Tasks.getTask(caller, id)) }
   createTask(caller: Tasks.TaskCaller, input: TaskInput): Promise<TaskView> { return this.run(Tasks.createTask(this.taskPorts, caller, input)) }
