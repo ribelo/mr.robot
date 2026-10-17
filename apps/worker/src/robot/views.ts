@@ -13,7 +13,38 @@ import { invalid, notFound } from '../platform/durable.ts'
 import { homeSpendLimit, proposalView, RobotPlatform, RobotState, routineView, settingsWith } from './programs.ts'
 import { projectChat } from './projection.ts'
 import { chainAccounts, chainOf } from './chain.ts'
-import type { RobotConfig } from './store.ts'
+import type { RobotConfig, Wakeup } from './store.ts'
+import type { LastWakeup, RobotTurn, WakeupCause } from '@mr-robot/protocol'
+
+/** What woke the Robot, as its fleet row names it (mc-w1aa): a Routine of before v1.13 is a Task its schedule woke. */
+export function causeOf(wakeup: Wakeup): WakeupCause {
+  const sender = wakeup.sender
+  switch (wakeup.kind) {
+    case 'routine': return { kind: 'task', from: 'schedule' }
+    case 'task': {
+      const who = typeof wakeup.payload['who'] === 'string' ? wakeup.payload['who'] : undefined
+      return { kind: 'task', from: wakeup.payload['by'] === 'member' || wakeup.payload['by'] === 'robot' ? who ?? 'run now' : 'schedule' }
+    }
+    default:
+      return {
+        kind: wakeup.kind,
+        from: sender.kind === 'member' || sender.kind === 'robot' ? sender.name : sender.kind === 'channel' ? `${sender.channel} ${sender.from}` : wakeup.kind === 'takeover' ? 'takeover' : 'platform',
+      }
+  }
+}
+
+/** The kv key of the last Turn's cause and subject. */
+export const LAST_WAKEUP = 'last-wakeup'
+
+/** The running Turn as the registry row shows it: cause, subject, the tool running now, and since when. */
+const runningTurn = Effect.gen(function* () {
+  const store = yield* RobotState
+  const active = store.activeTurn()
+  const wakeup = active === undefined ? undefined : store.wakeup(active.wakeupId)
+  if (active === undefined || wakeup === undefined) return null
+  const activity = runningTool(readStoredEvents(store.sql, active.sessionId, active.startSeq)) ?? null
+  return { wakeup: causeOf(wakeup), task: active.task === null ? null : { id: active.task.id, title: active.task.title }, activity, since: active.startedAt } as RobotTurn
+})
 
 const config = Effect.gen(function* () {
   const store = yield* RobotState
@@ -37,7 +68,7 @@ export const fleetState = Effect.gen(function* () {
 })
 
 /** The tool running now: the latest call without a result (a code program's latest inner call wins). */
-function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): string | undefined {
+export function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): string | undefined {
   const open = new Map<string, string>()
   let inner: string | undefined
   for (const event of events) {
@@ -308,6 +339,8 @@ export const report = Effect.gen(function* () {
     id: current.id, ownerId: current.ownerId, kind: current.kind, identity: current.identity, sharing: current.sharing,
     status: current.status, fleetState: yield* fleetState, lastLine: last?.text ?? '', lastAt: last?.at ?? current.createdAt,
     accounts: chainAccounts(chainOf(current)),
+    turn: yield* runningTurn,
+    lastWakeup: store.get<LastWakeup>(LAST_WAKEUP) ?? null,
   }
   yield* Effect.promise(() => platform.env.HOME.getByName(HOME_ID).robotChanged(entry))
 })

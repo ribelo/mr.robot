@@ -96,6 +96,15 @@ export interface RoutineRow {
   readonly sessionId: string
 }
 
+/** The Turn running now: its Wake-up, where it starts in the log, and the Task it works on with that Task's attempt. */
+export interface ActiveTurn {
+  readonly wakeupId: number
+  readonly startedAt: number
+  readonly sessionId: string
+  readonly startSeq: number
+  readonly task: { readonly id: string; readonly title: string; readonly attemptId: number } | null
+}
+
 export interface ProposalRow extends ProposalView {
   readonly createdAt: number
   readonly answeredAt: number | null
@@ -148,7 +157,7 @@ export interface RoutineRun {
   readonly firstLine: string
 }
 
-const SCHEMA_VERSION = 9
+const SCHEMA_VERSION = 10
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -162,7 +171,15 @@ function typedSpendLimit(sql: SqlStorage): void {
   sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, spendLimit: legacyRobotSpendLimit(spendLimitUsd) }))
 }
 
+/** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
+function addColumns(sql: SqlStorage, table: string, columns: readonly string[]): void {
+  const present = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((column) => column.name))
+  for (const column of columns) if (!present.has(column.split(' ')[0]!)) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`)
+}
+
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // The Task a Turn works on and its attempt at the Home (v1.13, mc-w3cc).
+  10: [(sql) => addColumns(sql, 'turn', ['task_id TEXT', 'task_title TEXT', 'attempt_id INTEGER'])],
   // Typed spend limits (v1.12, ux-ommv).
   9: [typedSpendLimit],
   // Grant levels (v1.11, sk-xj5q): every row stored so far was a grant, so it becomes allow.
@@ -593,11 +610,18 @@ export class RobotStore {
     return this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM wakeup').one().n
   }
 
-  activeTurn(): { wakeupId: number; startedAt: number; sessionId: string; startSeq: number } | undefined {
-    const row = this.sql.exec<{ wakeup_id: number; started_at: number; session_id: string; start_seq: number }>(
-      "SELECT wakeup_id, started_at, session_id, start_seq FROM turn WHERE k = 'active'",
+  activeTurn(): ActiveTurn | undefined {
+    const row = this.sql.exec<{ wakeup_id: number; started_at: number; session_id: string; start_seq: number; task_id: string | null; task_title: string | null; attempt_id: number | null }>(
+      "SELECT wakeup_id, started_at, session_id, start_seq, task_id, task_title, attempt_id FROM turn WHERE k = 'active'",
     ).toArray()[0]
-    return row === undefined ? undefined : { wakeupId: row.wakeup_id, startedAt: row.started_at, sessionId: row.session_id, startSeq: row.start_seq }
+    if (row === undefined) return undefined
+    const task = row.task_id === null || row.attempt_id === null ? null : { id: row.task_id, title: row.task_title ?? '', attemptId: row.attempt_id }
+    return { wakeupId: row.wakeup_id, startedAt: row.started_at, sessionId: row.session_id, startSeq: row.start_seq, task }
+  }
+
+  /** The running Turn works on this Task from now on (mc-w3cc); set once per Turn. @returns false when it already has one. */
+  setTurnTask(task: { readonly id: string; readonly title: string; readonly attemptId: number }): boolean {
+    return this.sql.exec("UPDATE turn SET task_id = ?, task_title = ?, attempt_id = ? WHERE k = 'active' AND task_id IS NULL", task.id, task.title, task.attemptId).rowsWritten === 1
   }
 
   beginTurn(wakeupId: number, sessionId: string, startSeq: number, now: number): void {

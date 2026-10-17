@@ -602,6 +602,12 @@ export const api = new Router<ApiContext>()
     return yield* Effect.fail(result.reason === 'not-found' || result.reason === 'not-help' ? notFound('no such request for help') : result.reason === 'closed' ? conflict('this request is already answered') : badRequest('the answer needs text'))
   }))
   .on('DELETE', '/api/robots/:id/routines/:routine', (c, { id, routine }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).removeRoutine(routine)))))
+  // Stop the running Turn (mc-w5ee): the owner or a Member the Robot is shared with.
+  .on('POST', '/api/robots/:id/interrupt', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const { interrupted } = yield* call(() => robot(c, id).interrupt(c.member.name))
+    return interrupted ? { ok: true } : yield* Effect.fail(conflict('this Robot is not working now'))
+  }))
   .on('POST', '/api/robots/:id/pause', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).pause()))))
   .on('POST', '/api/robots/:id/resume', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).resume()))))
   .on('DELETE', '/api/robots/:id', (c, { id }) => Effect.gen(function* () {

@@ -6,7 +6,7 @@ import { RobotConversation } from '../src/App.tsx'
 
 const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system' } as Me
 const identity = { name: 'Sales', title: '', description: '', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }
-const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', identity, lastLine: '', lastAt: 0, unread: false } as const
+const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity, lastLine: '', lastAt: 0, unread: false } as const
 const panel = { summary, canEdit: true } as unknown as RobotPanel
 const at = Date.parse('2026-10-06T18:00:00Z')
 const earlier = { kind: 'reply', id: 'e-1', seq: 1, at, text: 'Hello.' } as const

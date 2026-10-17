@@ -11,7 +11,7 @@ afterEach(() => {
 })
 
 const robot: RobotSummary = {
-  id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping',
+  id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null,
   identity: { name: 'Bills', title: '', description: '', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }, lastLine: '', lastAt: 0, unread: false,
 }
 

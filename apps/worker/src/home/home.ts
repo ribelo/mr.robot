@@ -56,7 +56,7 @@ import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
 import * as Tasks from './tasks.ts'
-import type { TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
+import type { LastWakeup, RobotTurn, TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
 import { legacyHomeSpendLimit } from '../platform/spend-limit-migration.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
@@ -93,6 +93,9 @@ export interface RegistryEntry {
   readonly lastAt: number
   /** Provider accounts in the Robot's model chain (pa-f59m). */
   readonly accounts?: readonly string[]
+  /** The running Turn's cause, subject, tool and start (mc-w1aa, mc-w6ff); null while it does not work. */
+  readonly turn: RobotTurn | null
+  readonly lastWakeup: LastWakeup | null
 }
 
 export type SignIn =
@@ -102,7 +105,7 @@ export type SignIn =
 type MemberSql = { id: string; email: string; name: string; role: MemberRole; status: MemberStatus; created_at: number; avatar: string | null }
 type RobotSql = {
   id: string; owner_id: string; kind: 'mr-robot' | 'robot'; identity: string; sharing: Sharing; status: RobotStatus
-  fleet_state: FleetState; last_line: string; last_at: number
+  fleet_state: FleetState; last_line: string; last_at: number; turn: string | null; last_wakeup: string | null
 }
 
 /** The Home's reach beyond its SQLite: the other Durable Objects, R2, Workers AI and the secret vault. */
@@ -387,12 +390,14 @@ const robotChanged = (changed: RegistryEntry) => Effect.gen(function* () {
   const sql = yield* Sql
   const before = yield* entry(changed.id)
   yield* sql.run(
-    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at, accounts)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at, accounts, turn, last_wakeup)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET identity = excluded.identity, sharing = excluded.sharing, status = excluded.status,
-       fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at, accounts = excluded.accounts`,
+       fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at, accounts = excluded.accounts,
+       turn = excluded.turn, last_wakeup = excluded.last_wakeup`,
     changed.id, changed.ownerId, changed.kind, JSON.stringify(changed.identity), changed.sharing, changed.status,
     changed.fleetState, changed.lastLine, changed.lastAt, JSON.stringify(changed.accounts ?? []),
+    changed.turn === null ? null : JSON.stringify(changed.turn), changed.lastWakeup === null ? null : JSON.stringify(changed.lastWakeup),
   )
   const reach = (value: RegistryEntry | undefined) => value === undefined ? 'none' : `${value.sharing}:${value.status === 'deleted'}`
   if (changed.kind === 'robot' && reach(before) !== reach(changed)) yield* syncMrRobots
@@ -1415,6 +1420,23 @@ export class Home extends DurableObject<Env> {
   /** A Robot's alarm asks for its due Tasks; the Home hands them out and moves them on (mc-s1aa, mc-s2bb). */
   dueTasks(robotId: string): Promise<{ tasks: Tasks.DueTask[]; nextDue: number | null }> { return this.run(Tasks.takeDue(robotId)) }
 
+  /**
+   * A Turn of this Robot starts serving the Task (mc-t4dd, mc-w3cc): an attempt running. Refused (null) for a Task
+   * that is not open and assigned to the Robot.
+   */
+  attemptStarted(taskId: string, robotId: string): Promise<{ attemptId: number; title: string } | null> {
+    return this.run(Effect.gen(function* () {
+      const task = yield* Tasks.taskRow(taskId)
+      if (task === undefined || task.state !== 'open' || task.assignee.kind !== 'robot' || task.assignee.robotId !== robotId) return null
+      return { attemptId: yield* Tasks.addAttempt(taskId, robotId, 'running', Date.now(), null, ''), title: task.title }
+    }))
+  }
+
+  /** The Turn ended: its attempt ends ok, failed or interrupted, with the first line of the reply. */
+  attemptFinished(attemptId: number, outcome: 'ok' | 'failed' | 'interrupted', firstLine: string): Promise<void> {
+    return this.run(Tasks.finishAttempt(attemptId, outcome, firstLine))
+  }
+
   /** A due Task whose earlier Wake-up has not been served yet: the occurrence is skipped (cd-d14a). */
   taskSkipped(taskId: string, robotId: string, reason: string): Promise<void> {
     const now = Date.now()
@@ -1820,5 +1842,7 @@ function entryFromSql(row: RobotSql): RegistryEntry {
     fleetState: row.fleet_state,
     lastLine: row.last_line,
     lastAt: row.last_at,
+    turn: row.turn === null ? null : JSON.parse(row.turn) as RobotTurn,
+    lastWakeup: row.last_wakeup === null ? null : JSON.parse(row.last_wakeup) as LastWakeup,
   }
 }

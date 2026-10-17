@@ -16,7 +16,7 @@ afterEach(() => {
 })
 
 const identity = { name: 'Sales Outbound', title: 'Sales', description: '', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }
-const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', identity, lastLine: '', lastAt: 0, unread: false } as const
+const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity, lastLine: '', lastAt: 0, unread: false } as const
 const usage = (limit: FleetRow['usage']['limit']) => ({ month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limit })
 
 const segmentOf = (name: string) => screen.getByRole('radiogroup', { name }).querySelector('[aria-checked="true"]')?.textContent

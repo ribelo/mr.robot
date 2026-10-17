@@ -459,6 +459,26 @@ export const SettingsPatch = Schema.Struct({
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 
+/** What starts a Turn (GLOSSARY: Wake-up). */
+export const WakeupKind = Schema.Literals(['member', 'task', 'robot', 'channel', 'takeover', 'platform'])
+export type WakeupKind = typeof WakeupKind.Type
+
+/** What woke a Robot (mc-w1aa): the kind of Wake-up and who or what sent it ("Anna", "schedule", "slack #ops"). */
+export const WakeupCause = Schema.Struct({ kind: WakeupKind, from: Schema.String })
+export type WakeupCause = typeof WakeupCause.Type
+
+/** The Task a Turn works on (mc-w2bb). */
+export const TaskRef = Schema.Struct({ id: Schema.String, title: Schema.String })
+export type TaskRef = typeof TaskRef.Type
+
+/** The running Turn of a Robot: its cause, its subject when it has one, the tool running and since when (mc-w6ff). */
+export const RobotTurn = Schema.Struct({ wakeup: WakeupCause, task: Schema.NullOr(TaskRef), activity: Schema.NullOr(Schema.String), since: Schema.Number })
+export type RobotTurn = typeof RobotTurn.Type
+
+/** The cause and subject of the Robot's last Turn. */
+export const LastWakeup = Schema.Struct({ wakeup: WakeupCause, task: Schema.NullOr(TaskRef) })
+export type LastWakeup = typeof LastWakeup.Type
+
 /** One row of the robot list. */
 export const RobotSummary = Schema.Struct({
   id: Schema.String,
@@ -471,6 +491,9 @@ export const RobotSummary = Schema.Struct({
   fleetState: FleetState,
   lastLine: Schema.String,
   lastAt: Schema.Number,
+  /** The running Turn; null while the Robot does not work. */
+  turn: Schema.NullOr(RobotTurn),
+  lastWakeup: Schema.NullOr(LastWakeup),
   unread: Schema.Boolean,
   /** This person's list settings (robot-mktj). */
   pinned: Schema.optional(Schema.Boolean),
@@ -658,10 +681,6 @@ export type TaskPatch = typeof TaskPatch.Type
 /** What happened to a Task, as its card in a Conversation says (mc-c1aa). */
 export const TaskAction = Schema.Literals(['created', 'updated', 'assigned', 'done', 'cancelled', 'paused', 'resumed', 'ran'])
 export type TaskAction = typeof TaskAction.Type
-
-/** What starts a Turn (GLOSSARY: Wake-up). */
-export const WakeupKind = Schema.Literals(['member', 'task', 'robot', 'channel', 'takeover', 'platform'])
-export type WakeupKind = typeof WakeupKind.Type
 
 export const TaskAssign = Schema.Struct({ assignee: TaskAssignee })
 export const TaskPause = Schema.Struct({ paused: Schema.Boolean })

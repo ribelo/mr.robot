@@ -8,7 +8,7 @@ import { RobotList, type GroupChange } from '../src/components/RobotList.tsx'
 afterEach(cleanup)
 
 const robot = (id: string, name: string, more: Partial<RobotSummary> = {}): RobotSummary => ({
-  id, ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping',
+  id, ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null,
   identity: { name, title: '', description: '', avatarColor: '#888888', avatarSeed: id }, lastLine: '', lastAt: 0, unread: false, ...more,
 })
 

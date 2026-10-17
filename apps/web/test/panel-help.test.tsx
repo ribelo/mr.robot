@@ -9,7 +9,7 @@ const now = Date.parse('2026-10-10T12:00:00Z')
 
 const panel: RobotPanel = {
   summary: {
-    id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'waiting for you',
+    id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'waiting for you', turn: null, lastWakeup: null,
     identity: { name: 'Accountant', title: 'Books', description: 'Keeps the books.', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }, lastLine: '', lastAt: 0, unread: false,
   },
   settings: {

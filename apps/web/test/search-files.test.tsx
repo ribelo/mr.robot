@@ -21,7 +21,7 @@ describe('search, filter and files (v1.3 ticket 07)', () => {
   })
 
   it('filters the robot list by name (pl-4nfk)', () => {
-    const robot = (id: string, name: string): RobotSummary => ({ id, identity: { name, title: '', description: '', avatarColor: '#888', avatarSeed: 'seed-1' }, ownerId: 'm-1', kind: 'robot', status: 'active', fleetState: 'sleeping', lastLine: '', lastAt: at, unread: false } as unknown as RobotSummary)
+    const robot = (id: string, name: string): RobotSummary => ({ id, identity: { name, title: '', description: '', avatarColor: '#888', avatarSeed: 'seed-1' }, ownerId: 'm-1', kind: 'robot', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, lastLine: '', lastAt: at, unread: false } as unknown as RobotSummary)
     const noop = () => undefined
     render(<RobotList robots={[robot('1', 'Flat Watcher'), robot('2', 'Gym Buddy'), robot('3', 'Invoice clerk')]} selected={undefined} meName="Anna" meAvatar={{ kind: 'initials', color: '#6c63ff' }} isAdmin={false}
       onSelect={noop} onCreate={noop} onAdmin={noop} onProfile={noop} groups={[]} onGroupChange={async () => true} onListPref={noop} onEditProfile={noop} onAdvanced={noop} onFiles={noop} />)

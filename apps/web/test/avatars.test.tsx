@@ -16,7 +16,7 @@ afterEach(() => {
 const at = Date.parse('2026-10-14T10:00:00Z')
 const identity = { name: 'Sales Outbound', title: 'Sales', description: 'Works the pipeline overnight.', avatarColor: '#f4a03a', avatarSeed: 'seed-sales' }
 const summary: RobotSummary = {
-  id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping',
+  id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null,
   identity, lastLine: 'Done.', lastAt: 0, unread: false,
 }
 const usage = { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limit: { limit: { kind: 'none' as const }, from: 'home' as const } }

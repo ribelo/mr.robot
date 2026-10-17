@@ -123,12 +123,13 @@ import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import * as Views from './views.ts'
+import { causeOf, LAST_WAKEUP, runningTool } from './views.ts'
 import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
 import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
 export type { AnswerResult, HelpAnswerer, HelpAnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
-import { RobotStore, storedToolCall, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
+import { RobotStore, storedToolCall, type ActiveTurn, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
 
 export { DEFAULT_CONTEXT_BUDGET } from './programs.ts'
 
@@ -408,6 +409,35 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
+  /**
+   * The running Turn works on this Task (mc-w3cc): once per Turn, only a Task assigned to this Robot. The Home
+   * records an attempt running; the Turn's end finishes it.
+   */
+  async focusTask(taskId: string): Promise<{ ok: true; title: string } | { ok: false; reason: string }> {
+    const active = this.store.activeTurn()
+    if (active === undefined) return { ok: false, reason: 'No Turn is running.' }
+    if (active.task !== null) return { ok: false, reason: active.task.id === taskId ? 'This Turn already works on that Task.' : `This Turn already works on the Task "${active.task.title}" (${active.task.id}). A Turn has one Task.` }
+    const started = await this.home().attemptStarted(taskId, this.store.requireConfig().id)
+    if (started === null) return { ok: false, reason: 'That Task is not an open Task assigned to you.' }
+    if (!this.store.setTurnTask({ id: taskId, title: started.title, attemptId: started.attemptId })) {
+      await this.home().attemptFinished(started.attemptId, 'failed', 'This Turn already had a Task.')
+      return { ok: false, reason: 'This Turn already works on a Task.' }
+    }
+    await this.report()
+    return { ok: true, title: started.title }
+  }
+
+  /**
+   * A person stops the running Turn (mc-w5ee): the model call and tools are cancelled, the Wake-up is used up,
+   * the attempt ends interrupted and the Conversation says who did it. False when no Turn runs.
+   */
+  async interrupt(by: string): Promise<{ interrupted: boolean }> {
+    if (this.store.activeTurn() === undefined) return { interrupted: false }
+    this.store.set(INTERRUPTED_BY, by)
+    this.composition?.value.agent.cancel({ kind: 'user' })
+    return { interrupted: true }
+  }
+
   /** The Home planned this Robot's earliest due Task (mc-s1aa): the alarm comes then. */
   setNextDue(at: number | null): Promise<void> {
     return this.program(Programs.setNextDue(at))
@@ -481,6 +511,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
       this.store.beginTurn(wakeup.id, agent.session.id, startSeq, Date.now())
       this.store.set(`turn-start:${wakeup.id}`, startSeq)
+      // A Task Wake-up makes the Task the Turn's subject, with an attempt at the Home (mc-t4dd).
+      const taskId = wakeup.kind === 'task' && typeof wakeup.payload['taskId'] === 'string' ? wakeup.payload['taskId'] : undefined
+      if (taskId !== undefined) await this.focusTask(taskId).catch((error: unknown) => console.warn('attempt not started', taskId, error))
       agent.followup(wakeupMessage({
         sender: wakeup.sender,
         text,
@@ -514,8 +547,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     // A block is remembered for its own Turn only (rb-kank).
     this.blockedThisTurn.clear()
+    const turn = this.store.activeTurn()
     this.store.endTurn(wakeup.id)
-    await this.afterTurn(wakeup)
+    await this.afterTurn(wakeup, turn)
     await this.rearm()
     await this.changed()
   }
@@ -562,7 +596,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** Platform duties once a Turn ends: SOUL.md changes, and the hooks of later tickets. */
-  protected async afterTurn(wakeup: Wakeup): Promise<void> {
+  protected async afterTurn(wakeup: Wakeup, turn?: ActiveTurn): Promise<void> {
+    const interruptedBy = this.store.get<string>(INTERRUPTED_BY)
+    this.store.delete(INTERRUPTED_BY)
+    this.store.set(LAST_WAKEUP, { wakeup: causeOf(wakeup), task: turn?.task == null ? null : { id: turn.task.id, title: turn.task.title } })
     if (this.store.get('takeover') === undefined) {
       // Someone is watching the screen: the browser stays open for them and closes when they leave (rb-keaw).
       if (this.liveWatchers() > 0 && this.browserPage !== undefined) this.openedForViewer = true
@@ -572,7 +609,20 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
+    if (interruptedBy !== undefined) {
+      // An interrupted Turn is over: its Wake-up is used up, not kept for Try again (mc-w5ee).
+      const config = this.store.requireConfig()
+      this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Interrupted by ${interruptedBy}.`, Date.now())
+      this.store.delete('failed-wakeup')
+      if (turn?.task != null) await this.home().attemptFinished(turn.task.attemptId, 'interrupted', `Interrupted by ${interruptedBy}.`).catch((error: unknown) => console.warn('attempt not finished', error))
+      return
+    }
     const failedTurn = this.rememberFailure(wakeup, startSeq)
+    if (turn?.task != null) {
+      const reply = failedTurn ? undefined : (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
+      const firstLine = failedTurn ? 'The Turn failed.' : reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'
+      await this.home().attemptFinished(turn.task.attemptId, failedTurn ? 'failed' : 'ok', firstLine).catch((error: unknown) => console.warn('attempt not finished', error))
+    }
     if (failedTurn) await this.chainFailure(startSeq).catch((error: unknown) => console.warn('model chain not advanced', error))
     else await this.chainSucceeded().catch(() => undefined)
     const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
@@ -878,6 +928,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
     if (wakeup !== undefined) {
       if (wakeup.kind === 'routine') this.store.finishRoutineRun(wakeup.id, 'failed', 'The Turn failed.', Date.now())
+      const attempt = active?.task?.attemptId
+      if (attempt !== undefined) this.ctx.waitUntil(this.home().attemptFinished(attempt, 'failed', 'The Turn failed.').catch(() => undefined))
+      this.store.delete(INTERRUPTED_BY)
       this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
       this.store.endTurn(wakeup.id)
     }
@@ -952,7 +1005,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       storage: this.ctx.storage,
       sessionId: config.liveSessionId,
       ...(seed === undefined ? {} : { seed }),
-      onAppend: () => this.broadcast(),
+      onAppend: () => {
+        this.broadcast()
+        this.reportActivity()
+      },
       redact: (json) => maskSecrets(json, this.turnSecrets),
       provider: config.model.provider,
       model: config.model.model,
@@ -1682,6 +1738,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private report(): Promise<void> {
     return this.program(Views.report)
+  }
+
+  /** The tool the registry row last showed, so a new event reports only when the running tool changed (mc-w6ff). */
+  private reportedActivity: string | null = null
+
+  private reportActivity(): void {
+    const active = this.store.activeTurn()
+    const activity = active === undefined ? null : runningTool(readStoredEvents(this.ctx.storage.sql, active.sessionId, active.startSeq)) ?? null
+    if (activity === this.reportedActivity) return
+    this.reportedActivity = activity
+    this.ctx.waitUntil(this.report().catch(() => undefined))
   }
 
 
@@ -2827,6 +2894,9 @@ const MEDIA_TYPES: Record<string, string> = {
 function mediaTypeOf(path: string): string {
   return MEDIA_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
 }
+
+/** The kv key of who interrupted the running Turn, until the Turn has ended. */
+const INTERRUPTED_BY = 'interrupted-by'
 
 /** Who started a Task Wake-up, from its payload: the schedule unless a person or a Robot ran it now. */
 function taskRunOf(payload: Record<string, unknown>): { by: TaskRunBy; who?: string } {
