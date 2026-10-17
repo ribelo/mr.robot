@@ -17,7 +17,7 @@ const settings = {
   memberSpendLimit: { kind: 'none' },
   models: [{ provider: 'anthropic', model: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', contextWindow: 128_000 }],
 } as const
-const base: AdminView = { fleet: [], routines: [], members: [], skills: [], skillRepository: null, providers: [], settings }
+const base: AdminView = { fleet: [], robotsToMigrate: 0, members: [], skills: [], skillRepository: null, providers: [], settings }
 
 function stubApi(view: AdminView): void {
   vi.stubGlobal('fetch', vi.fn(async (input: string | Request) => {

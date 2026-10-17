@@ -2,7 +2,7 @@
  * What a Robot's tools may ask of the Robot that runs them. The Robot DO implements
  * it; tools never touch the DO or its storage directly.
  */
-import type { GrantSet, Identity, ProposalKind, ProposalView, RoutineSchedule, RoutineView } from '@mr-robot/protocol'
+import type { GrantSet, Identity, ProposalKind, ProposalView } from '@mr-robot/protocol'
 import type * as Effect from 'effect/Effect'
 import type { MemberFileName } from '../member/member.ts'
 import type { RobotConfig } from '../robot/store.ts'
@@ -22,11 +22,4 @@ export interface WorkspaceHost {
   /** The owner's Member file, mounted read-only (robot-mj7v). */
   memberFile(name: MemberFileName): Promise<string>
   run<A, E>(effect: Effect.Effect<A, E>): Promise<A>
-}
-
-export interface RoutineHost {
-  createRoutine(input: { name: string; prompt: string; schedule: RoutineSchedule }): Promise<RoutineView>
-  updateRoutine(id: string, input: { name?: string; prompt?: string; schedule?: RoutineSchedule }): Promise<RoutineView>
-  deleteRoutine(id: string): Promise<RoutineView>
-  listRoutines(): Promise<RoutineView[]>
 }

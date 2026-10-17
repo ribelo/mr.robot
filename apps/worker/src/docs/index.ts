@@ -14,7 +14,7 @@ import { MEMORY_AND_FILES } from './memory-and-files.ts'
 import { MR_ROBOT } from './mr-robot.ts'
 import { PROVIDERS } from './providers.ts'
 import { ROBOTS } from './robots.ts'
-import { ROUTINES } from './routines.ts'
+import { TASKS } from './tasks.ts'
 
 export const DOCS_DIRECTORY = 'docs'
 
@@ -33,7 +33,7 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('members', 'Members: what they own and share, the profile, the nickname and the Owner line, avatars, the Robot list with its groups and Hidden.', MEMBERS),
   doc('robots', 'Robots: creation and setup interview, Persona files, settings and the Robot avatar (Another look), Mr. Robot versus other Robots, skills.', ROBOTS),
   doc('grants', 'Grant items and the levels allow, ask and deny; tool-call Asks; propose_grants; my_capabilities and the Owner line.', GRANTS),
-  doc('routines', 'Routines: schedule types, the Routine tools, limits, time zone, unattended Turns.', ROUTINES),
+  doc('tasks', 'Tasks: doers, the three timings, state and attempts, parents, the Task tools, what a Robot sees and whom it gives Tasks, limits, reminders for people.', TASKS),
   doc('asks-and-help', 'Asks and their kinds; need_help, the 30-minute escalation to Mr. Robot, urgent requests.', ASKS_AND_HELP),
   doc('memory-and-files', 'Memory files and whose they are, the first message of the context, the Workspace layout, the file tools.', MEMORY_AND_FILES),
   doc('connections', 'Connectors and Connections: Google, Slack, Discord as a bot and as you; connecting as you (sign-in window, Takeover, paste), Sign in again, sharing, grants, write access.', CONNECTIONS),

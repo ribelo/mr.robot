@@ -269,7 +269,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   /** Every body posted to a Discord channel, in order. */
   const postsTo = (channel: string) => connectorFixtures.calls.filter((call) => call.method === 'POST' && call.url === `${API}/channels/${channel}/messages`).map(json)
   const incoming = (id: string, text: string) => ({ id, channelId: 'C-robot', guildId: 'G-1', authorId: 'U-anna', authorName: 'Anna', text, direct: false })
-  const notifyGrant = { tools: ['notify', 'routines'], skills: [], recipients: [], secrets: [] }
+  const notifyGrant = { tools: ['notify', 'tasks'], skills: [], recipients: [], secrets: [] }
 
   /** An active robot with its own Discord channel; `settings` adds to what the owner set. */
   async function discordRobot(settings: Record<string, unknown> = {}): Promise<string> {
@@ -325,34 +325,25 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     expect(postsTo('C-robot').map((body) => body['content'])).toEqual([expect.stringContaining('A new flat matches.'), expect.stringContaining('Pick a date.')])
   })
 
-  async function routineRobot(settings: Record<string, unknown>): Promise<string> {
-    const id = await discordRobot(settings)
-    scripts.set(id, [
-      { calls: [{ name: 'routine_set', args: { title: 'Flat check', prompt: 'Look at the listings.', weekly: { time: '02:00:00', time_zone: 'Europe/Warsaw', weekdays: [7] } } }] },
-      { text: 'Scheduled.' },
-    ])
-    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'Check every week.' } })
-    await settle(id)
-    expect(connectorFixtures.calls.filter((call) => call.url.includes('/channels/'))).toEqual([])
-    return id
-  }
-  const runRoutine = async (id: string) => {
+  const taskRobot = (settings: Record<string, unknown>): Promise<string> => discordRobot(settings)
+  /** A scheduled Task of the Robot comes due: a Turn nobody asked for. */
+  const runTask = async (id: string) => {
     scripts.set(id, [{ text: 'Checked: nothing new.' }])
-    await testRobot(id).backdateRoutinesForTest(1000)
+    await api(ANNA, '/api/tasks', { body: { title: 'Flat check', instructions: 'Look at the listings.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } } })
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
   }
 
-  it('a Routine nobody asked for posts its final reply to the channel while "also send its own messages" is on', async () => {
-    const id = await routineRobot({})
+  it('a Task nobody asked for posts its final reply to the channel while "also send its own messages" is on', async () => {
+    const id = await taskRobot({})
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.discordProactive).toBe(true)
-    await runRoutine(id)
+    await runTask(id)
     expect(postsTo('C-robot')).toEqual([{ content: 'Checked: nothing new.' }])
   })
 
-  it('a Routine posts nothing to Discord when "also send its own messages" is off', async () => {
-    const id = await routineRobot({ discordProactive: false })
-    await runRoutine(id)
+  it('a Task posts nothing to Discord when "also send its own messages" is off', async () => {
+    const id = await taskRobot({ discordProactive: false })
+    await runTask(id)
     expect(postsTo('C-robot')).toEqual([])
     // Replies to Discord messages still go back.
     scripts.set(id, [{ text: 'Still nothing.' }])

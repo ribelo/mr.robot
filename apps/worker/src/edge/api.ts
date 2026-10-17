@@ -445,11 +445,6 @@ export const api = new Router<ApiContext>()
     return yield* call(() => c.env.MEMBER.getByName(c.member.id).updateGroup(id, patch))
   }))
   .on('DELETE', '/api/robot-groups/:id', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).removeGroup(id)).pipe(Effect.as({ ok: true })))
-  .on('POST', '/api/robots/:id/routines/:routine/pause', (c, { id, routine }) => Effect.gen(function* () {
-    yield* owner(c, id)
-    const { paused } = yield* decodeBody(c.request, Schema.Struct({ paused: Schema.Boolean }))
-    return yield* call(() => robot(c, id).pauseRoutine(routine, paused)).pipe(Effect.mapError((error) => notFound(error.detail ?? error.message)))
-  }))
   .on('POST', '/api/robots', (c) => Effect.gen(function* () {
     const { brief, model } = yield* decodeBody(c.request, Schema.Struct({
       brief: Schema.optional(Schema.String),
@@ -571,7 +566,8 @@ export const api = new Router<ApiContext>()
     const access = yield* reach(c, id)
     const entry = (yield* call(() => home(c.env).reachable(c.member.id))).find((summary) => summary.id === id)
     if (entry === undefined) return yield* Effect.fail(notFound())
-    const panel: RobotPanel = yield* call(() => robot(c, id).panel(access === 'owner', entry))
+    const tasks = (yield* call((): Promise<TaskPage> => home(c.env).listTasks(taskCaller(c, false), { assignee: { kind: 'robot', robotId: id }, state: 'all' }))).tasks
+    const panel: RobotPanel = yield* call(() => robot(c, id).panel(access === 'owner', entry, tasks))
     return panel
   }))
   .on('GET', '/api/robots/:id/catalog', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => home(c.env).catalog(c.member.id, id)))))
@@ -601,8 +597,6 @@ export const api = new Router<ApiContext>()
     if (result.ok) return result.proposal
     return yield* Effect.fail(result.reason === 'not-found' || result.reason === 'not-help' ? notFound('no such request for help') : result.reason === 'closed' ? conflict('this request is already answered') : badRequest('the answer needs text'))
   }))
-  .on('DELETE', '/api/robots/:id/routines/:routine', (c, { id, routine }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).removeRoutine(routine)))))
-  // Stop the running Turn (mc-w5ee): the owner or a Member the Robot is shared with.
   .on('POST', '/api/robots/:id/interrupt', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
     const { interrupted } = yield* call(() => robot(c, id).interrupt(c.member.name))
@@ -633,6 +627,8 @@ export const api = new Router<ApiContext>()
   }))
 
   // ------------------------------------------------------------ Tasks (v1.13)
+  // The active Members of the Home: who a Task can be given to (mc-n2bb).
+  .on('GET', '/api/members', (c) => Effect.map(call(() => home(c.env).members()), (members) => members.filter((member) => member.status === 'active')))
   .on('GET', '/api/tasks', (c) => {
     const query = new URL(c.request.url).searchParams
     return call((): Promise<TaskPage> => home(c.env).listTasks(taskCaller(c, query.get('scope') === 'home'), taskFilter(query)))

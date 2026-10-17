@@ -59,17 +59,17 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const other = (await api<{ id: string }>(ANNA, '/api/robots', { body: {} })).body.id
     await settle(other)
-    await api(ANNA, `/api/robots/${other}/settings`, { method: 'PATCH', body: { grants: { tools: { routines: 'allow', files: 'allow' } } } })
+    await api(ANNA, `/api/robots/${other}/settings`, { method: 'PATCH', body: { grants: { tools: { tasks: 'allow', files: 'allow' } } } })
     await testRobot(other).activateForTest()
     const id = await mrRobotId()
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
-    const tools = ['web', { name: 'browser', level: 'ask' }, { name: 'routines', level: 'deny' }]
+    const tools = ['web', { name: 'browser', level: 'ask' }, { name: 'tasks', level: 'deny' }]
     scripts.set(id, [{ calls: [{ name: 'robot_propose_grants', args: { robot_id: other, purpose: 'it should browse with you watching', tools } }] }, { text: 'Asked.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'set up the new robot' } })
     await settle(id)
     const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
     if (ask?.kind !== 'question') throw new Error('no grant question')
-    expect(ask.proposal.grants?.tools).toEqual({ web: 'allow', browser: 'ask', routines: 'deny' })
+    expect(ask.proposal.grants?.tools).toEqual({ web: 'allow', browser: 'ask', tasks: 'deny' })
     await api(ANNA, `/api/robots/${other}/proposals/${ask.proposal.id}`, { body: { revision: ask.proposal.revision, approve: true } })
     await settle(other)
     expect((await api<RobotPanel>(ANNA, `/api/robots/${other}/panel`)).body.settings.grants.tools).toEqual({ files: 'allow', web: 'allow', browser: 'ask' })

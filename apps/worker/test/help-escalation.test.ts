@@ -1,7 +1,7 @@
 /**
  * need_help escalation (v1.11 ticket 07): an unanswered request wakes the owner's Mr. Robot after 30 minutes, or at once
  * when urgent; he lists and answers requests with help_requests and help_answer; the owner may still answer after him.
- * Time is faked as in the Routine tests: the request moves into the past and the Robot's alarm is run.
+ * Time is faked as in the Task tests: the request moves into the past and the Robot's alarm is run.
  */
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

@@ -14,7 +14,7 @@ beforeEach(async () => {
   await api(ANNA, '/api/me')
 })
 
-async function robot(name: string, tools: string[] = ['files', 'routines']): Promise<string> {
+async function robot(name: string, tools: string[] = ['files', 'tasks']): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
@@ -33,7 +33,7 @@ const robots = async () => (await api<RobotSummary[]>(ANNA, '/api/robots')).body
 const mrRobot = async () => (await robots()).find((entry) => entry.kind === 'mr-robot')!
 
 describe('delete, clear and reset (v1.3 ticket 06)', () => {
-  it('deletes a robot for good only with its name typed: storage, files, routines, recipient grants (pl-3uoy, pl-kehf)', async () => {
+  it('deletes a robot for good only with its name typed: storage, files, recipient grants (pl-3uoy, pl-kehf)', async () => {
     const id = await robot('New robot')
     await say(id, 'note it', [{ calls: [{ name: 'write', args: { file_path: 'notes.md', content: 'x' } }] }, { text: 'Noted.' }])
     const mr = (await mrRobot()).id
@@ -52,7 +52,7 @@ describe('delete, clear and reset (v1.3 ticket 06)', () => {
     expect(JSON.stringify(panel.settings.grants.recipients)).not.toContain(id)
   })
 
-  it('clears history keeping configuration, routines and every file (pl-05eu, pl-y228, sk-8won)', async () => {
+  it('clears history keeping configuration and every file (pl-05eu, pl-y228, sk-8won)', async () => {
     const id = await robot('Bills')
     await api(ANNA, `/api/robots/${id}/file?path=MEMORY.md`, { method: 'PUT', body: { content: '# MEMORY.md\nPays on the 10th.' } })
     await say(id, 'zebra-before-clear', [{ text: 'Remembered.' }])

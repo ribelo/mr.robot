@@ -9,7 +9,6 @@ declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[]; clientId?: string } & ContextFormed
     robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; avatarSeed: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string } & ContextFormed
-    routine: { kind: 'routine'; routineId: string; name: string } & ContextFormed
     task: { kind: 'task'; taskId: string; name: string; by: TaskRunBy } & ContextFormed
     channel: { kind: 'channel'; channel: string; from: string } & ContextFormed
     platform: { kind: 'platform'; summary: string } & ContextFormed
@@ -149,11 +148,6 @@ function sourceMessage(input: WakeupMessageInput): UserMessage {
         },
       })
     }
-    case 'routine':
-      return createUserMessage({
-        content: [{ type: 'text', text: `[Routine "${sender.name}" (${sender.routineId}) is due. Nobody is watching this turn.]\n${input.text}` }],
-        source: { kind: 'routine', routineId: sender.routineId, name: sender.name },
-      })
     case 'task': {
       const run = input.taskRun ?? { by: 'schedule' as const }
       const head = run.by === 'schedule'

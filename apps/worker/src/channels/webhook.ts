@@ -1,7 +1,7 @@
 /**
  * The webhook Channel (v1.6 ticket 07, cd-q7mc): an outside system POSTs to the Robot's address and
  * the request body becomes a Wake-up. Nothing asked for it inside the app, so a webhook-woken Turn
- * answers like a Routine: in the app, and to the Channels that opted in to hear the Robot unasked.
+ * answers like a Task's Turn: in the app, and to the Channels that opted in to hear the Robot unasked.
  * The adapter therefore has no route to reply to and delivers nothing itself.
  */
 import type { ChannelAdapter, InboundEvent, InboundWakeup } from './channel.ts'

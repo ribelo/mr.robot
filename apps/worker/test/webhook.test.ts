@@ -111,7 +111,7 @@ describe('webhook Channel (v1.6 ticket 07)', () => {
     expect(await webhookMessages(id)).toHaveLength(1)
   })
 
-  it('answers like a Routine: in the app, and to the Channels the Robot hears everything on (cd-pqt8)', async () => {
+  it('answers like the Turn of a Task: in the app, and to the Channels the Robot hears everything on (cd-pqt8)', async () => {
     const id = await activeRobot(['pwa', 'fake'])
     const { path } = (await api<WebhookView>(ANNA, `/api/robots/${id}/webhook`)).body
     fakeOutbox.length = 0

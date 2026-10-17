@@ -408,7 +408,7 @@ export const RobotSettings = Schema.Struct({
   browserBackend: Schema.NullOr(BrowserBackend),
   /** The Discord channel this Robot talks in (cn-y1ac); null: no Discord. */
   discordChannel: Schema.NullOr(Schema.String),
-  /** Also send the Robot's own messages (Routine results, notifications) to its Discord channel; replies to Discord messages always go back. */
+  /** Also send the Robot's own messages (Task results, notifications) to its Discord channel; replies to Discord messages always go back. */
   discordProactive: Schema.Boolean,
 })
 export type RobotSettings = typeof RobotSettings.Type
@@ -547,41 +547,6 @@ export const ScreenView = Schema.Struct({
   at: Schema.Number,
 })
 export type ScreenView = typeof ScreenView.Type
-
-// ---------------------------------------------------------------- Routines
-
-export const RoutineSchedule = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('once'), at: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('interval'), everyMinutes: Schema.Number }),
-  Schema.Struct({ kind: Schema.Literal('daily'), time: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('weekly'), time: Schema.String, weekdays: Schema.Array(Schema.Number) }),
-  Schema.Struct({ kind: Schema.Literal('cron'), expression: Schema.String }),
-])
-export type RoutineSchedule = typeof RoutineSchedule.Type
-
-export const RoutineView = Schema.Struct({
-  id: Schema.String,
-  robotId: Schema.String,
-  name: Schema.String,
-  prompt: Schema.String,
-  schedule: RoutineSchedule,
-  timeZone: Schema.String,
-  summary: Schema.String,
-  nextRun: Schema.NullOr(Schema.Number),
-  lastRun: Schema.NullOr(Schema.Number),
-  /** Paused by its owner: it keeps its schedule but does not run (robot-qhll). */
-  paused: Schema.Boolean,
-  /** The schedule as a cron line with its time zone, when it has one ("CRON_TZ=Europe/Warsaw 0 9 * * 1-5"). */
-  cron: Schema.NullOr(Schema.String),
-  /** The last 20 runs, newest first (robot-l3gr, cd-3t0p): when it started and finished, how it ended, the first line of its reply. */
-  runs: Schema.Array(Schema.Struct({
-    startedAt: Schema.Number,
-    finishedAt: Schema.NullOr(Schema.Number),
-    outcome: Schema.Literals(['running', 'ok', 'failed', 'skipped']),
-    firstLine: Schema.String,
-  })),
-})
-export type RoutineView = typeof RoutineView.Type
 
 // ---------------------------------------------------------------- Tasks (v1.13)
 
@@ -872,7 +837,6 @@ const PlatformSender = Schema.Struct({ kind: Schema.Literal('platform') })
 export const Sender = Schema.Union([
   MemberSender,
   RobotSender,
-  Schema.Struct({ kind: Schema.Literal('routine'), routineId: Schema.String, name: Schema.String }),
   /** A Task whose moment came, or that a person ran now (mc-s1aa). */
   Schema.Struct({ kind: Schema.Literal('task'), taskId: Schema.String, name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('channel'), channel: Schema.String, from: Schema.String }),
@@ -936,8 +900,6 @@ export const ChatItem = Schema.Union([
   /** A Thread card (ch-iy16): what happened to the Thread, with its state now. */
   Schema.Struct({ kind: Schema.Literal('thread'), ...itemFields, event: ThreadEvent, thread: ThreadView }),
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
-  /** A Routine card; `by` names who changed it when it was not the Robot itself (Mr. Robot, cd-n9pi). */
-  Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran', 'paused', 'resumed']), name: Schema.String, by: Schema.optional(Schema.String) }),
   /** A Task card (mc-c1aa); `by` names who changed it when it was not this Robot. */
   Schema.Struct({ kind: Schema.Literal('task'), ...itemFields, action: TaskAction, taskId: Schema.String, title: Schema.String, by: Schema.optional(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('question'), ...itemFields, proposal: ProposalView }),
@@ -976,7 +938,7 @@ export const ConversationSearchResult = Schema.Struct({
   items: Schema.Array(Schema.Struct({
     /** The id of the chat item. */
     id: Schema.String,
-    /** Who said it: a person's or Robot's name, a Routine, a Channel, or the Robot itself. */
+    /** Who said it: a person's or Robot's name, a Task, a Channel, or the Robot itself. */
     sender: Schema.String,
     at: Schema.Number,
     snippet: Schema.String,
@@ -1082,7 +1044,8 @@ export interface UsageRow extends UsageView {
 export const RobotPanel = Schema.Struct({
   summary: RobotSummary,
   settings: RobotSettings,
-  routines: Schema.Array(RoutineView),
+  /** The Tasks assigned to this Robot that the viewer may see, open ones first (mc-n6ff). */
+  tasks: Schema.Array(TaskView),
   screen: Schema.NullOr(ScreenView),
   usage: UsageView,
   canEdit: Schema.Boolean,
@@ -1255,7 +1218,8 @@ export type VpnSummary = typeof VpnSummary.Type
 
 export const AdminView = Schema.Struct({
   fleet: Schema.Array(FleetRow),
-  routines: Schema.Array(Schema.Struct({ ...RoutineView.fields, robotName: Schema.String, ownerName: Schema.String })),
+  /** Robots whose Routines have not yet become Tasks (v1.13 ticket 05): reached again at the Home's next start. */
+  robotsToMigrate: Schema.Number,
   members: Schema.Array(Schema.Struct({ ...MemberView.fields, usage: UsageView })),
   skills: Schema.Array(SkillView),
   skillRepository: Schema.NullOr(Schema.Struct({ repo: Schema.String, ref: Schema.String, path: Schema.String })),

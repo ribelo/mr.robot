@@ -11,7 +11,7 @@ const me = { kind: 'member' as const, memberId: 'm-1', name: 'Anna' }
 
 const proposal: ProposalView = {
   id: 'p-1', kind: 'setup', revision: 2, status: 'open', purpose: 'Watch listings daily',
-  grants: { ...emptyGrants, tools: { web: 'allow', routines: 'allow' } }, file: null, skill: null,
+  grants: { ...emptyGrants, tools: { web: 'allow', tasks: 'allow' } }, file: null, skill: null,
 }
 
 const items: ChatItem[] = [
@@ -19,27 +19,27 @@ const items: ChatItem[] = [
   { kind: 'message', id: 'b', seq: 2, at, sender: { kind: 'robot', robotId: 'r-3', name: 'Chief', avatarColor: '#5ec4b6', avatarSeed: 'r-3' }, text: 'flagged the accounts', attachments: [], reaction: null },
   { kind: 'reply', id: 'c', seq: 3, at, text: '✓ **Salesforce** → list pulled' },
   { kind: 'message', id: 'd', seq: 4, at, sender: me, text: 'Send it. Run this every week.', attachments: [], reaction: '👍' },
-  { kind: 'routine', id: 'e', seq: 5, at, action: 'created', name: 'Overnight outbound' },
+  { kind: 'task', id: 'e', seq: 5, at, action: 'created', taskId: 't-1', title: 'Overnight outbound' },
   { kind: 'question', id: 'f', seq: 6, at, proposal },
 ]
 
 describe('ChatView (robot-q4b2)', () => {
-  it('renders bubbles, the reaction, the routine card and robot senders', () => {
+  it('renders bubbles, the reaction, the Task card and robot senders', () => {
     const { container } = render(<ChatView items={items} meId="m-1" working={false} canAnswer={false} now={at} />)
     expect(screen.getByTestId('robot-messages-header').textContent).toBe('Messages from  Account Manager and  Chief')
     expect(container.querySelector('.bubble-own')?.textContent).toBe('Send it. Run this every week.')
     expect(screen.getByLabelText('reacted 👍')).toBeTruthy()
     // Robot replies are Markdown (pl-6bop).
     expect(container.querySelector('.bubble-robot strong')?.textContent).toBe('Salesforce')
-    expect(screen.getByText('Created routine')).toBeTruthy()
+    expect(screen.getByText('Created task')).toBeTruthy()
     expect(screen.getByText('Overnight outbound')).toBeTruthy()
     expect(screen.queryByText('Approve')).toBeNull()
     expect(screen.getByText('Approve these Grants to finish setup · waiting for the owner')).toBeTruthy()
   })
 
-  it('names Mr. Robot on a Routine card he made for this Robot (cd-n9pi)', () => {
-    render(<ChatView items={[{ kind: 'routine', id: 'g', seq: 1, at, action: 'created', name: 'Weekly digest', by: 'Mr. Robot' }]} meId="m-1" working={false} canAnswer={false} now={at} />)
-    expect(screen.getByText('Routine created by Mr. Robot')).toBeTruthy()
+  it('names Mr. Robot on a Task card he made for this Robot (cd-n9pi, mc-c1aa)', () => {
+    render(<ChatView items={[{ kind: 'task', id: 'g', seq: 1, at, action: 'created', taskId: 't-2', title: 'Weekly digest', by: 'Mr. Robot' }]} meId="m-1" working={false} canAnswer={false} now={at} />)
+    expect(screen.getByText('Task created by Mr. Robot')).toBeTruthy()
     expect(screen.getByText('Weekly digest')).toBeTruthy()
   })
 

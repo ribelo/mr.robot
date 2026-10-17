@@ -6,7 +6,7 @@ import { api, settle, stubModels } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
-const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'routines', 'asks-and-help', 'memory-and-files', 'connections', 'hosts', 'browser', 'providers']
+const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'connections', 'hosts', 'browser', 'providers']
 const DOC_PATHS = DOC_NAMES.map((name) => `docs/${name}.md`)
 
 beforeEach(async () => {
@@ -80,16 +80,16 @@ describe('the product docs (v1.11 ticket 02)', () => {
     expect(docs.map((file) => file.path).sort()).toEqual([...DOC_PATHS].sort())
     expect(docs.every((file) => file.size > 0)).toBe(true)
 
-    const opened = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/routines.md`)).body
-    expect(opened).toMatchObject({ readOnly: true, path: 'docs/routines.md' })
-    expect(opened.text).toContain('# Routines')
-    expect((await api(ANNA, `/api/robots/${id}/file?path=docs/routines.md`, { method: 'PUT', body: { content: 'x' } })).status).toBe(400)
-    expect((await api(ANNA, `/api/robots/${id}/file?path=docs/routines.md`, { method: 'DELETE' })).status).toBe(400)
+    const opened = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/tasks.md`)).body
+    expect(opened).toMatchObject({ readOnly: true, path: 'docs/tasks.md' })
+    expect(opened.text).toContain('# Tasks')
+    expect((await api(ANNA, `/api/robots/${id}/file?path=docs/tasks.md`, { method: 'PUT', body: { content: 'x' } })).status).toBe(400)
+    expect((await api(ANNA, `/api/robots/${id}/file?path=docs/tasks.md`, { method: 'DELETE' })).status).toBe(400)
     expect((await api(ANNA, `/api/robots/${id}/file?path=docs/nothing.md`)).status).toBe(404)
 
     expect((await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'Mr. Robot', memory: true } })).status).toBe(200)
     expect((await listed()).filter((file) => file.group === 'docs')).toHaveLength(DOC_PATHS.length)
-    expect((await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/routines.md`)).body.text).toContain('# Routines')
+    expect((await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/tasks.md`)).body.text).toContain('# Tasks')
   })
 
   it('are listed by docsIndex with the rule to read them first (sk-xseb)', () => {

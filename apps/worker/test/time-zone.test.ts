@@ -1,6 +1,6 @@
 import { reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Me, RobotPanel } from '@mr-robot/protocol'
+import type { Me, RobotPanel, TaskView } from '@mr-robot/protocol'
 import { localDate } from '../src/robot/schedule.ts'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
@@ -37,6 +37,9 @@ async function turn(id: string, text: string, script: Parameters<typeof scripts.
 const lastUser = (id: string) => JSON.stringify((requests.get(id) ?? []).filter((request) => request.purpose !== 'compaction').at(-1)!.messages.filter((message) => message.role === 'user').at(-1))
 const allUser = (id: string) => JSON.stringify((requests.get(id) ?? []).filter((request) => request.purpose !== 'compaction').at(-1)!.messages.filter((message) => message.role === 'user'))
 const panel = async (id: string) => (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
+/** A daily Task of the Robot at 09:00 (or `time`); without a zone it is the owner's. */
+const daily = async (id: string, title: string, time = '09:00', timeZone?: string) => (await api<TaskView>(ANNA, '/api/tasks', { body: { title, assignee: { kind: 'robot', robotId: id }, timing: { kind: 'recurring', schedule: { kind: 'daily', time }, ...(timeZone === undefined ? {} : { timeZone }) } } })).body
+const recurring = (task: TaskView) => task.timing as Extract<TaskView['timing'], { kind: 'recurring' }>
 
 describe('the profile zone comes from the app (v1.11 ticket 08)', () => {
   it('a new Member starts in UTC and the X-Time-Zone header sets the zone (sk-vpxv)', async () => {
@@ -73,18 +76,13 @@ describe('the profile zone comes from the app (v1.11 ticket 08)', () => {
 })
 
 describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
-  it('moves wall-clock Routines to the new zone, leaves a Routine with its own zone, and tells each Robot once', async () => {
-    const id = await activeRobot(['routines'])
-    await turn(id, 'set up routines', [
-      { calls: [
-        { name: 'routine_set', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: 'UTC' } } },
-        { name: 'routine_set', args: { title: 'Tokyo close', prompt: 'Close the books.', daily: { time: '18:30:00', time_zone: TOKYO } } },
-      ] },
-      { text: 'Done.' },
-    ])
-    const before = (await panel(id)).routines
-    expect(before.map((routine) => routine.timeZone).sort()).toEqual([TOKYO, 'UTC'])
-    const tokyoRun = before.find((routine) => routine.name === 'Tokyo close')!.nextRun
+  it('moves wall-clock recurring Tasks to the new zone, leaves a Task with its own zone, and tells each Robot once', async () => {
+    const id = await activeRobot()
+    await daily(id, 'Digest')
+    await daily(id, 'Tokyo close', '18:30', TOKYO)
+    const before = (await panel(id)).tasks
+    expect(before.map((task) => recurring(task).timeZone).sort()).toEqual([TOKYO, 'UTC'])
+    const tokyoRun = recurring(before.find((task) => task.title === 'Tokyo close')!).next
 
     // Mr. Robot has already seen its baseline, so the change reaches it as a note.
     const mr = (await robots(ANNA)).find((robot) => robot.kind === 'mr-robot')!
@@ -92,14 +90,14 @@ describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
 
     await me(NEW_YORK)
 
-    const after = (await panel(id)).routines
-    const digest = after.find((routine) => routine.name === 'Digest')!
+    const after = (await panel(id)).tasks
+    const digest = recurring(after.find((task) => task.title === 'Digest')!)
     expect(digest.timeZone).toBe(NEW_YORK)
-    expect(localDate(digest.nextRun!, NEW_YORK)).toMatchObject({ hour: 9, minute: 0 })
-    expect(digest.nextRun!).toBeGreaterThan(Date.now())
-    const tokyo = after.find((routine) => routine.name === 'Tokyo close')!
-    expect(tokyo).toMatchObject({ timeZone: TOKYO, nextRun: tokyoRun })
-    expect(await testRobot(id).alarmForTest()).toBe(Math.min(digest.nextRun!, tokyo.nextRun!))
+    expect(localDate(digest.next, NEW_YORK)).toMatchObject({ hour: 9, minute: 0 })
+    expect(digest.next).toBeGreaterThan(Date.now())
+    const tokyo = recurring(after.find((task) => task.title === 'Tokyo close')!)
+    expect(tokyo).toMatchObject({ timeZone: TOKYO, next: tokyoRun })
+    expect(await testRobot(id).alarmForTest()).toBe(Math.min(digest.next, tokyo.next))
 
     // The next Turn hears it once, on every Robot of the owner (Mr. Robot too).
     await turn(id, 'what now?')
@@ -116,17 +114,18 @@ describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
   })
 
   it('a pinned zone is what Robots follow, and unpinning moves them to the app\'s zone', async () => {
-    const id = await activeRobot(['routines'])
-    await turn(id, 'set up', [{ calls: [{ name: 'routine_set', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: 'UTC' } } }] }, { text: 'Done.' }])
+    const id = await activeRobot()
+    await daily(id, 'Digest')
+    const zone = async () => recurring((await panel(id)).tasks[0]!)
     await me(NEW_YORK)
     await api(ANNA, '/api/me', { method: 'PATCH', body: { timeZone: TOKYO } })
-    expect((await panel(id)).routines[0]).toMatchObject({ timeZone: TOKYO })
+    expect(await zone()).toMatchObject({ timeZone: TOKYO })
     await me('Europe/Berlin')
-    expect((await panel(id)).routines[0]).toMatchObject({ timeZone: TOKYO })
+    expect(await zone()).toMatchObject({ timeZone: TOKYO })
     await api(ANNA, '/api/me', { method: 'PATCH', body: { useDetectedTimeZone: true } })
-    const digest = (await panel(id)).routines[0]!
+    const digest = await zone()
     expect(digest).toMatchObject({ timeZone: 'Europe/Berlin' })
-    expect(localDate(digest.nextRun!, 'Europe/Berlin')).toMatchObject({ hour: 9, minute: 0 })
+    expect(localDate(digest.next, 'Europe/Berlin')).toMatchObject({ hour: 9, minute: 0 })
   })
 
   it('daily notes follow the new zone at the next baseline', async () => {
@@ -148,12 +147,12 @@ describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
     expect(allUser(id)).toContain('Note written ahead of the date line.')
   })
 
-  it('a Robot created after the zone is known keeps its Routines in the profile zone through later moves', async () => {
+  it('a recurring Task made after the zone is known stays in the profile zone through later moves', async () => {
     await me(NEW_YORK)
-    const id = await activeRobot(['routines'])
-    await turn(id, 'set up', [{ calls: [{ name: 'routine_set', args: { title: 'Digest', prompt: 'Send the digest.', daily: { time: '09:00:00', time_zone: NEW_YORK } } }] }, { text: 'Done.' }])
-    expect((await panel(id)).routines[0]).toMatchObject({ timeZone: NEW_YORK })
+    const id = await activeRobot()
+    await daily(id, 'Digest')
+    expect(recurring((await panel(id)).tasks[0]!)).toMatchObject({ timeZone: NEW_YORK })
     await me(TOKYO)
-    expect((await panel(id)).routines[0]).toMatchObject({ timeZone: TOKYO })
+    expect(recurring((await panel(id)).tasks[0]!)).toMatchObject({ timeZone: TOKYO })
   })
 })

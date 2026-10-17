@@ -1,25 +1,25 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
-import type { Identity, RobotPanel, RoutineView } from '@mr-robot/protocol'
+import type { Identity, RobotPanel, TaskView } from '@mr-robot/protocol'
 import { keys, panelAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { renderResult } from './AtomView.tsx'
 import { Avatar } from './Avatar.tsx'
-import { ClockIcon } from './ChatView.tsx'
 import { ColorPicker } from './ColorPicker.tsx'
 import { SaveButton } from './SaveButton.tsx'
+import { TaskList } from './TaskSheets.tsx'
 
-/** Edit profile (robot-lulc, reference 09): avatar, name, title, description, notifications, Routines. */
-export function EditProfileSheet({ robotId, onClose, onOpenRoutine }: {
+/** Edit profile (robot-lulc, reference 09): avatar, name, title, description, notifications, Tasks. */
+export function EditProfileSheet({ robotId, onClose, onOpenTask }: {
   robotId: string
   onClose: () => void
-  onOpenRoutine: (routine: RoutineView) => void
+  onOpenTask: (task: TaskView) => void
 }) {
   const result = useAtomValue(panelAtom(robotId))
-  return <>{renderResult(result, {}, (panel) => <ProfileForm robotId={robotId} panel={panel} onClose={onClose} onOpenRoutine={onOpenRoutine} />)}</>
+  return <>{renderResult(result, {}, (panel) => <ProfileForm robotId={robotId} panel={panel} onClose={onClose} onOpenTask={onOpenTask} />)}</>
 }
 
-function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: string; panel: RobotPanel; onClose: () => void; onOpenRoutine: (routine: RoutineView) => void }) {
+function ProfileForm({ robotId, panel, onClose, onOpenTask }: { robotId: string; panel: RobotPanel; onClose: () => void; onOpenTask: (task: TaskView) => void }) {
   const command = useCommand()
   const [identity, setIdentity] = useState<Identity>(panel.settings.identity)
   const [notify, setNotify] = useState(panel.settings.notifications.enabled)
@@ -81,13 +81,13 @@ function ProfileForm({ robotId, panel, onClose, onOpenRoutine }: { robotId: stri
         <div className="toggle-card">
           <div>
             <div>Also send its own messages here</div>
-            <div className="muted">Routine results and notifications go to this channel too. Replies to Discord messages always go back to Discord.</div>
+            <div className="muted">Task results and notifications go to this channel too. Replies to Discord messages always go back to Discord.</div>
           </div>
           <button type="button" role="switch" aria-checked={discordProactive} aria-label="Also send its own messages to Discord" disabled={!editable} className={discordProactive ? 'switch on' : 'switch'} onClick={() => setDiscordProactive(!discordProactive)}><span /></button>
         </div>
       ) : null}
-      <h3 className="panel-section">Routines</h3>
-      <RoutineList routines={panel.routines} onOpen={onOpenRoutine} />
+      <h3 className="panel-section">Tasks</h3>
+      <TaskList tasks={panel.tasks} onOpen={onOpenTask} />
       {error === undefined ? null : <div className="muted">{error}</div>}
     </Sheet>
   )
@@ -98,91 +98,7 @@ function newAvatarSeed(): string {
   return [...crypto.getRandomValues(new Uint8Array(8))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export function RoutineList({ routines, onOpen }: { routines: readonly RoutineView[]; onOpen: (routine: RoutineView) => void }) {
-  if (routines.length === 0) return <div className="muted">No routines.</div>
-  return (
-    <ul className="routine-cards">
-      {routines.map((routine) => (
-        <li key={routine.id}>
-          <button type="button" className="routine-card" onClick={() => onOpen(routine)}>
-            <span className="routine-icon"><ClockIcon /></span>
-            <span className="routine-card-text">
-              <span className="routine-name">{routine.name}</span>
-              <span className="muted">{routine.summary}</span>
-            </span>
-            <span className={routine.paused ? 'routine-status paused' : 'routine-status'}>{routine.paused ? 'Paused' : 'Active'}</span>
-            <span className="chevron">›</span>
-          </button>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/** Routine detail (robot-l3gr, robot-qhll, reference 08). */
-export function RoutineSheet({ robotId, routineId, canEdit, onClose, onBack }: {
-  robotId: string
-  routineId: string
-  canEdit: boolean
-  onClose: () => void
-  onBack?: () => void
-}) {
-  const result = useAtomValue(panelAtom(robotId))
-  const command = useCommand()
-  const [error, setError] = useState<string>()
-  return <>{renderResult(result, { what: 'the routine' }, (panel) => {
-    const routine = panel.routines.find((entry) => entry.id === routineId)
-    if (routine === undefined) return <Sheet onClose={onClose}><div className="muted">This Routine no longer exists.</div></Sheet>
-    const act = async (run: Parameters<typeof command>[0], closeAfter = false) => {
-      const failure = exitFailure(await command(run, [keys.robot(robotId), keys.admin]))
-      setError(failure)
-      if (failure === undefined && closeAfter) (onBack ?? onClose)()
-    }
-    return <RoutineDetail routine={routine} canEdit={canEdit} onClose={onClose} {...(onBack === undefined ? {} : { onBack })} error={error}
-      onDelete={() => void act((api) => api.deleteRoutine(robotId, routine.id), true)}
-      onTogglePause={() => void act((api) => api.pauseRoutine(robotId, routine.id, !routine.paused))} />
-  })}</>
-}
-
-function RoutineDetail({ routine, canEdit, onClose, onBack, error, onDelete, onTogglePause }: { routine: RoutineView; canEdit: boolean; onClose: () => void; onBack?: () => void; error: string | undefined; onDelete: () => void; onTogglePause: () => void }) {
-  return (
-    <Sheet
-      title={routine.name}
-      onClose={onClose}
-      {...(onBack === undefined ? {} : { onBack })}
-      footer={canEdit ? (
-        <>
-          <ConfirmButton label="Delete" confirm="Delete for good" onConfirm={onDelete} />
-          <span className="spacer" />
-          <button type="button" className="button" onClick={onTogglePause}>{routine.paused ? 'Resume' : 'Pause'}</button>
-        </>
-      ) : null}
-    >
-      <dl className="detail-rows">
-        <div><dt>Schedule</dt><dd>{routine.summary}{routine.cron === null ? null : <div className="mono muted">{routine.cron}</div>}</dd></div>
-        <div><dt>Status</dt><dd><span className={routine.paused ? 'status-dot paused' : 'status-dot'} /> {routine.paused ? 'Paused' : 'Active'}</dd></div>
-        <div><dt>Next run</dt><dd>{routine.nextRun === null ? '—' : new Date(routine.nextRun).toLocaleString()}</dd></div>
-      </dl>
-      <h3 className="panel-section">Instructions</h3>
-      <div className="detail-block">{routine.prompt}</div>
-      <h3 className="panel-section">Recent runs</h3>
-      {routine.runs.length === 0 ? <div className="detail-block muted">No runs yet</div> : (
-        <ul className="detail-block runs">
-          {routine.runs.map((run) => (
-            <li key={run.startedAt}>
-              <span className={`run-${run.outcome}`} title={run.outcome}>{run.outcome === 'ok' ? '✓' : run.outcome === 'failed' ? '✕' : run.outcome === 'skipped' ? '–' : '…'}</span>
-              <span className="muted">{new Date(run.startedAt).toLocaleString()}{run.finishedAt === null ? '' : ` – ${new Date(run.finishedAt).toLocaleTimeString()}`}</span>
-              <span>{run.outcome === 'skipped' ? `Skipped: ${run.firstLine}` : run.firstLine}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {error === undefined ? null : <div className="muted">{error}</div>}
-    </Sheet>
-  )
-}
-
-function Sheet({ title, onClose, onBack, footer, children }: { title?: string; onClose: () => void; onBack?: () => void; footer?: ReactNode; children: ReactNode }) {
+export function Sheet({ title, onClose, onBack, footer, children }: { title?: string; onClose: () => void; onBack?: () => void; footer?: ReactNode; children: ReactNode }) {
   useEffect(() => {
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     document.addEventListener('keydown', escape)

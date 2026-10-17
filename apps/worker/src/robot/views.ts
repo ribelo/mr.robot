@@ -5,22 +5,21 @@
  */
 import * as Effect from 'effect/Effect'
 import { effectiveSpendLimit, type HomeSpendLimit } from '@mr-robot/protocol'
-import type { ChatItem, Conversation, ConversationPage, ConversationSearchResult, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, RoutineView, ScreenView, Trajectory, TrajectoryEvent, TrajectoryExcerpt, UsageView } from '@mr-robot/protocol'
+import type { ChatItem, Conversation, ConversationPage, ConversationSearchResult, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, ScreenView, TaskView, Trajectory, TrajectoryEvent, TrajectoryExcerpt, UsageView } from '@mr-robot/protocol'
 import { readStoredEvents } from '../agent/session-log.ts'
 import { HOME_ID } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { invalid, notFound } from '../platform/durable.ts'
-import { homeSpendLimit, proposalView, RobotPlatform, RobotState, routineView, settingsWith } from './programs.ts'
+import { homeSpendLimit, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
 import { projectChat } from './projection.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, Wakeup } from './store.ts'
 import type { LastWakeup, RobotTurn, WakeupCause } from '@mr-robot/protocol'
 
-/** What woke the Robot, as its fleet row names it (mc-w1aa): a Routine of before v1.13 is a Task its schedule woke. */
+/** What woke the Robot, as its fleet row names it (mc-w1aa). */
 export function causeOf(wakeup: Wakeup): WakeupCause {
   const sender = wakeup.sender
   switch (wakeup.kind) {
-    case 'routine': return { kind: 'task', from: 'schedule' }
     case 'task': {
       const who = typeof wakeup.payload['who'] === 'string' ? wakeup.payload['who'] : undefined
       return { kind: 'task', from: wakeup.payload['by'] === 'member' || wakeup.payload['by'] === 'robot' ? who ?? 'run now' : 'schedule' }
@@ -257,11 +256,6 @@ export const sessionEvents = (input: { before?: number; after?: number; limit?: 
   return { events: `[${rows.map((row) => mask(row.event)).join(',')}]`, hasMore: first !== undefined && first > 0 && input.after === undefined, sessionId: current.liveSessionId }
 })
 
-export const routineViews = Effect.gen(function* () {
-  const store = yield* RobotState
-  const id = (yield* config).id
-  return store.routines().map((routine): RoutineView => routineView(id, routine, store.routineRuns(routine.id)))
-})
 
 const screen = Effect.gen(function* () {
   const store = yield* RobotState
@@ -283,14 +277,14 @@ const usage = (home: HomeSpendLimit) => Effect.gen(function* () {
 interface TakeoverRow { readonly reason: string; readonly claimedBy: string | null }
 
 /** The robot panel (robot-z3ud). */
-export const panel = (canEdit: boolean, summary: RobotSummary) => Effect.gen(function* () {
+export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly TaskView[]) => Effect.gen(function* () {
   const store = yield* RobotState
   const takeover = store.get<TakeoverRow>('takeover')
   const home = yield* homeSpendLimit
   return {
     summary,
     settings: yield* settingsWith(home),
-    routines: yield* routineViews,
+    tasks,
     screen: yield* screen,
     usage: yield* usage(home),
     canEdit,
@@ -306,7 +300,7 @@ export const adminRow = (home: HomeSpendLimit) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = store.config()
   if (current === undefined) return null
-  return { fleetState: yield* fleetState, status: current.status, grants: store.grants(), model: current.model, usage: yield* usage(home), routines: yield* routineViews } as { fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] }
+  return { fleetState: yield* fleetState, status: current.status, grants: store.grants(), model: current.model, usage: yield* usage(home) } as { fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView }
 })
 
 export const status = Effect.gen(function* () {

@@ -9,7 +9,6 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import { DeputySettingsPatch, type RobotSettings, type SettingsPatch } from '@mr-robot/protocol'
 import type { DeputyHost, HelpListing, RobotListing } from '../agent/tools/deputy.ts'
-import type { RoutineChange } from '../agent/tools/routines.ts'
 import { HOME_ID } from '../env.ts'
 import { conflict, invalid, notFound, type DurableError } from '../platform/durable.ts'
 import { normalizePath } from '../workspace/workspace.ts'
@@ -24,8 +23,8 @@ const promise = <A>(run: () => Promise<A>) => Effect.promise(run)
 
 /** The target Robot's methods a deputy call reaches: the ones the PWA's edge API calls, nothing else. */
 export const DEPUTY_METHODS = [
-  'conversationPage', 'searchConversation', 'trajectoryAround', 'files', 'fileContent', 'settings', 'openProposals', 'routineList',
-  'saveFile', 'deleteFile', 'updateSettings', 'setRoutine', 'pauseRoutine', 'removeRoutine',
+  'conversationPage', 'searchConversation', 'trajectoryAround', 'files', 'fileContent', 'settings', 'openProposals',
+  'saveFile', 'deleteFile', 'updateSettings',
   // Mr. Robot answers requests for help (sk-gag7): the one answer path open to him, and it refuses every other kind of Ask (sk-iis1).
   // The Ask answer paths (answer, answerToolCall, ...) are not on this list and never will be.
   'answerHelp',
@@ -138,10 +137,6 @@ export const grants = (robotId: string) => Effect.gen(function* () {
   const { robot } = yield* target(robotId, false)
   const [settings, openProposals] = yield* Effect.all([ask(robot, 'settings'), ask(robot, 'openProposals')])
   return { grants: settings.grants, openProposals }
-})
-export const routines = (robotId: string) => Effect.gen(function* () {
-  const { robot } = yield* target(robotId, false)
-  return yield* ask(robot, 'routineList')
 })
 export const settings = (robotId: string) => Effect.gen(function* () {
   const { current, robot } = yield* target(robotId, false)
@@ -257,19 +252,8 @@ export const configure = (robotId: string, change: { name?: string; title?: stri
   return { id: robotId, identity: settings.identity as unknown }
 })
 
-export const routineSet = (robotId: string, change: RoutineChange) => Effect.gen(function* () {
-  const { robot, by } = yield* target(robotId, true)
-  return yield* ask(robot, 'setRoutine', change, by)
-})
-export const routinePause = (robotId: string, id: string, paused: boolean) => Effect.gen(function* () {
-  const { robot, by } = yield* target(robotId, true)
-  return yield* ask(robot, 'pauseRoutine', id, paused, by)
-})
-export const routineDelete = (robotId: string, id: string) => Effect.gen(function* () {
-  const { robot, by } = yield* target(robotId, true)
-  yield* ask(robot, 'removeRoutine', id, by)
-  return { deleted: id }
-})
+/** The Robot a Task tool with robot_id works as (v1.13 ticket 04): the deputy's reach and ownership checks. */
+export const reach = (robotId: string, change: boolean) => target(robotId, change)
 
 export type Run = <A>(program: Effect.Effect<A, { readonly _tag: string; readonly message: string }, RobotState | RobotPlatform>) => Promise<A>
 

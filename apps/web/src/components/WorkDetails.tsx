@@ -21,7 +21,7 @@ function toolIcon(name: string): ReactNode {
   if (/^(write|edit|host_write|skill_write|memory_write_shared)$/.test(name)) return <IconEditOutlineRegular />
   if (/search/.test(name)) return <IconSearchOutlineRegular />
   if (/^(web_fetch|crawling_exa)$/.test(name) || name.startsWith('browser_')) return <IconGlobeOutlineRegular />
-  if (/schedule|routine/.test(name)) return <IconAlarmClockOutlineRegular />
+  if (/schedule|task_/.test(name)) return <IconAlarmClockOutlineRegular />
   if (/message|reply|notify/.test(name)) return <IconSendOutlineRegular />
   if (/login/.test(name)) return <IconLinkOutlineRegular />
   return <IconSparkleRegular />

@@ -130,11 +130,11 @@ function RewindSheet({ id, onClose, onDone }: { id: string; onClose: () => void;
               Rewound to event {rewind.atSeq} on {new Date(rewind.at).toLocaleString()}. <button type="button" className="link" onClick={() => void act((api) => api.undoRewind(id, rewind.id))}>Undo</button>
             </div>
           ))}
-          <ul className="routine-cards">
+          <ul className="task-cards">
             {turns.map((turn) => (
-              <li key={turn.seq} className="routine-card">
-                <span className="routine-card-text">
-                  <span className="routine-name">Turn {turn.turn ?? ''} · {new Date(turn.at).toLocaleString()}</span>
+              <li key={turn.seq} className="task-card">
+                <span className="task-card-text">
+                  <span className="task-name">Turn {turn.turn ?? ''} · {new Date(turn.at).toLocaleString()}</span>
                   <span className="muted">{turn.text || '(no message)'}</span>
                 </span>
                 <ConfirmButton label="Rewind to before" confirm="Rewind" onConfirm={() => void act((api) => api.rewindBeforeTurn(id, turn.turn ?? 0))} />

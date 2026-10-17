@@ -12,11 +12,11 @@ Read members.md for the profile, the nickname, avatars and the Robot list with i
 
 ## Robots
 
-A Robot has one endless Conversation, its own Workspace files, its own Routines, its own Grants and its own browser. The owner decides what a Robot may do. Everything is off until the owner grants it. Read grants.md.
+A Robot has one endless Conversation, its own Workspace files, its own Grants and its own browser. Its work is kept as Tasks at the Home, beside the Tasks of people. Read tasks.md. The owner decides what a Robot may do. Everything is off until the owner grants it. Read grants.md.
 
 A Robot sleeps between Turns. A Turn is one run of the Robot. A Wake-up starts a Turn. A Wake-up is one of these:
 - a message from a Member
-- a Routine occurrence
+- a Task whose moment came, or that a person ran now
 - a message from another Robot
 - a Channel event
 - a returned Takeover
@@ -30,13 +30,16 @@ Each Member gets a Robot named Mr. Robot on the first sign-in. Mr. Robot is the 
 Mr. Robot does these tasks:
 - He creates Robots.
 - He gives Robots work and messages them.
-- He configures Robots: settings, model chains, Routines and files.
+- He configures Robots: settings, model chains and files.
+- He creates and assigns Tasks for his owner and the Robots, also as one of them (robot_id).
 - He reads their Conversations and files when he needs to.
 - He answers when a Robot calls need_help.
 
 Mr. Robot has every capability the owner can grant, unless the owner lowered one. He never approves another Robot's tool-call Asks. Only the owner does. Mr. Robot of one Member can talk with Mr. Robot of another Member in a Thread. Other Robots never talk across Members.
 
 ## What the owner sees
+
+Mission Control shows the owner every Robot he reaches (what woke it, the Task it works on, the running tool) and every Task he sees, in two tables. Mr. Robot sits there in a side drawer, so the owner types a Task in words.
 
 The owner reads the Conversation as a simple chat or as the Trajectory. The Trajectory shows every Turn, tool call, result and executed program. The owner can Rewind a Conversation to an earlier point. Rewind does not undo external effects such as sent messages.
 
@@ -57,7 +60,7 @@ A Robot works in code mode by default. It writes a program that calls its tools,
 - members.md: the profile, the nickname, avatars and the Robot list.
 - robots.md: Robots and their setup.
 - grants.md: what a Robot may do.
-- routines.md: scheduled work.
+- tasks.md: Tasks, scheduled and recurring work, reminders.
 - asks-and-help.md: decisions and requests for help.
 - memory-and-files.md: memory and the Workspace.
 - connections.md, hosts.md, browser.md, providers.md.

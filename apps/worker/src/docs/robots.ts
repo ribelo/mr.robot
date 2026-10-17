@@ -41,7 +41,7 @@ The owner can pause, resume and delete a Robot. A paused Robot does not run.
 ## Clear history, Start over, Reset everything
 
 - Clear history clears the Conversation.
-- Start over clears the Conversation and resets the Workspace to the templates. Grants, Routines, Connections and settings stay.
+- Start over clears the Conversation and resets the Workspace to the templates. Grants, Tasks, Connections and settings stay.
 - Reset everything keeps logins, Provider accounts, Hosts, the skill library and Home settings.
 
 The docs/ folder is never removed. The platform owns it.

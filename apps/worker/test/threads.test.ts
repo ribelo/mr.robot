@@ -83,7 +83,7 @@ describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', (
 
     scripts.set(anna, [{ text: 'ok' }])
     await answer(ANNA, anna, out, true, '  my calendar,\nbut not the doctor  ')
-    expect((await testRobot(anna).panel(true, (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((r) => r.id === anna)!)).threads![0]).toMatchObject({ state: 'invited', scope: 'my calendar for Friday' })
+    expect((await testRobot(anna).panel(true, (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((r) => r.id === anna)!, [])).threads![0]).toMatchObject({ state: 'invited', scope: 'my calendar for Friday' })
     expect((await env.HOME.getByName('home').adminView((await api<{ id: string }>(ANNA, '/api/me')).body.id)).threads![0]).toMatchObject({ state: 'invited' })
 
     scripts.set(anna, [{ text: 'opened' }])

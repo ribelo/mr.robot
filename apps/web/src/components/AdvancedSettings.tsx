@@ -162,7 +162,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </div>
       {danger === 'delete' ? (
         <ConfirmByName title={`Delete ${name}`} name={name} action="Delete robot"
-          goes="The robot, its conversation, files, memory and routines are deleted, and other robots stop being able to message it."
+          goes="The robot, its conversation, files and memory are deleted, and other robots stop being able to message it. Its open Tasks stay, without a doer."
           onCancel={() => setDanger(undefined)} onConfirm={() => onDelete(name)} />
       ) : danger === 'start-over' ? (
         <ConfirmByName title={`Start ${name} over`} name={name} action="Start over" goes={START_OVER_GOES} stays={START_OVER_STAYS}

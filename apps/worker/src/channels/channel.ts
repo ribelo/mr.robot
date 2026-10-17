@@ -11,7 +11,7 @@
  *    - a reply goes back where the question came from: the final reply of a Turn that a Channel
  *      woke goes to that Channel; a Turn woken by a Member in the app answers in the app only;
  *    - only the final reply of a Turn leaves the app; interim replies stay in the Conversation;
- *    - what nobody asked for (the final reply of a Routine, a Robot message, a takeover, the
+ *    - what nobody asked for (the final reply of a Task's Turn, a Robot message, a takeover, the
  *      platform) and notifications other than "finished" go to the Channels that opted in to
  *      hear the Robot unasked (Discord: its own channel, when the owner allows it);
  *    - a "finished" notification only repeats the reply, so such Channels never get it;
@@ -56,7 +56,7 @@ export type ChannelOutput =
       readonly route: ReplyRoute | null
       /** The last reply of its Turn. */
       readonly final: boolean
-      /** Nobody asked for this Turn on any Channel: a Routine, a Robot message, a takeover, the platform. */
+      /** Nobody asked for this Turn on any Channel: a Task, a Robot message, a takeover, the platform. */
       readonly unprompted: boolean
     }
   | {

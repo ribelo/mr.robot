@@ -101,7 +101,7 @@ const byKey = (list: Array<{ kind: string; grant: string }>) => [...list].sort((
 describe('my_capabilities (sk-e1hh, sk-ixvp)', () => {
   it("lists what Advanced settings lists, with the same levels and descriptions, grouped by level and pointing to propose_grants", async () => {
     await reachableThings()
-    const id = await activeRobot({ tools: { files: 'allow', web: 'ask', routines: 'allow', browser: 'deny' }, secrets: { shop: 'ask' } })
+    const id = await activeRobot({ tools: { files: 'allow', web: 'ask', tasks: 'allow', browser: 'deny' }, secrets: { shop: 'ask' } })
     const { items, view } = await toolList(id)
     const expected = await settingsList(id)
     expect(expected.length).toBeGreaterThan(20)
@@ -110,7 +110,7 @@ describe('my_capabilities (sk-e1hh, sk-ixvp)', () => {
     expect([...new Set(items.map((entry) => entry.kind))]).toEqual(expect.arrayContaining(['tool group', 'recipient', 'connection', 'host', 'login']))
     expect(items.filter((entry) => entry.kind === 'host')).toHaveLength(3)
     expect(items.filter((entry) => entry.kind === 'connection')).toHaveLength(2)
-    expect(view.allow.map((entry) => entry.grant)).toEqual(expect.arrayContaining(['files', 'routines']))
+    expect(view.allow.map((entry) => entry.grant)).toEqual(expect.arrayContaining(['files', 'tasks']))
     expect(view.ask.map((entry) => entry.grant)).toEqual(expect.arrayContaining(['web', 'shop']))
     expect(view.deny.map((entry) => entry.grant)).toEqual(expect.arrayContaining(['browser', 'exa']))
     expect(view.note).toContain('propose_grants')
@@ -230,7 +230,7 @@ describe('labels of plugin tools and Hosts (ux-5g3w, ux-q8o6, ux-qm6u, ux-ywxa, 
     const runtime = platform.slice(platform.indexOf('## Runtime'))
     expect(runtime).toContain('\n- Hosts: Desk · offline.\n')
     expect(runtime).toContain('\nallow: tools web; connections Google · anna@gmail.test\nask: hosts Desk · files\n')
-    const toolRules = platform.slice(platform.indexOf('## Tools'), platform.indexOf('## Routines'))
+    const toolRules = platform.slice(platform.indexOf('## Tools'), platform.indexOf('## Tasks'))
     expect(toolRules).toContain('- Host online state is in the runtime section and in my_capabilities; never probe a Host with a command to find out.')
   })
 })
@@ -287,24 +287,21 @@ describe('the time of a Wake-up (sk-nitq)', () => {
     expect(conversation.items.filter((item) => item.kind === 'message').map((item) => item.kind === 'message' ? item.text : '')).toEqual(['Buy milk.'])
   })
 
-  it('a Routine Wake-up has the time in front of its label, on the same line', async () => {
-    const id = await activeRobot({ tools: { routines: 'allow' } })
-    scripts.set(id, [{ calls: [{ name: 'routine_set', args: { title: 'Pulse', prompt: 'Check prices.', every_seconds: 300 } }] }, { text: 'Created.' }])
-    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'check every 5 minutes' } })
-    await settle(id)
+  it('a Task Wake-up has the time in front of its label, on the same line', async () => {
+    const id = await activeRobot({})
     scripts.set(id, [{ text: 'Checked.' }])
-    await testRobot(id).backdateRoutinesForTest(1000)
     const before = Date.now()
+    await api(ANNA, '/api/tasks', { body: { title: 'Pulse', instructions: 'Check prices.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } } })
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
     const after = Date.now()
     const wake = JSON.stringify(lastRequest(id).messages.at(-1))
-    const found = /"text":"\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) Europe\/Warsaw\] \[Routine \\"Pulse\\" \([^)]+\) is due\. Nobody is watching this turn\.\]\\n/.exec(wake)
+    const found = /"text":"\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) Europe\/Warsaw\] \[Task \\"Pulse\\" \([^)]+\) is due\. Nobody is watching this turn\. When the Task is finished, call task_done\.\]\\n/.exec(wake)
     expect(found, wake).not.toBeNull()
     expect([warsaw(before), warsaw(after)]).toContain(found![1])
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.slice(-2)).toEqual([
-      expect.objectContaining({ kind: 'routine', action: 'ran', name: 'Pulse' }),
+      expect.objectContaining({ kind: 'task', action: 'ran', title: 'Pulse' }),
       expect.objectContaining({ kind: 'reply', text: 'Checked.' }),
     ])
   })

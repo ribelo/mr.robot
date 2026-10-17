@@ -9,6 +9,7 @@ import type { Actor, Attempt, AttemptOutcome, Remind, TaskAssignee, TaskExternal
 import { conflict, invalid, notFound, Sql, type DurableError } from '../platform/durable.ts'
 import { advanced, overdue, parseTiming, pausedTiming, reminderAt, wakeAt } from './task-timing.ts'
 import { nextRun } from '../robot/schedule.ts'
+import type { ExportedRoutine } from '../robot/routine-export.ts'
 
 export const TASK_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS task (
@@ -495,4 +496,28 @@ export const rezoneTasks = (memberId: string, from: string, to: string, now = Da
 export const finishAttempt = (attemptId: number, outcome: Exclude<AttemptOutcome, 'running' | 'skipped'>, firstLine: string, now = Date.now()) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run("UPDATE task_attempt SET outcome = ?, first_line = ?, finished_at = ? WHERE id = ? AND outcome = 'running'", outcome, firstLine.slice(0, 160), now, attemptId)
+})
+
+/**
+ * A Robot's Routines become its Tasks (v1.13 ticket 05, mc-t7gg): recurring, or scheduled for a one-shot, made by
+ * the Robot, assigned to it, with their runs as attempts. A Routine stored before keeps its Task: importing twice
+ * changes nothing. @returns how many Tasks were added.
+ */
+export const importRoutines = (robot: { readonly id: string; readonly ownerId: string; readonly identity: { readonly name: string; readonly avatarColor: string; readonly avatarSeed: string } }, routines: readonly ExportedRoutine[], now = Date.now()) => Effect.gen(function* () {
+  let added = 0
+  for (const routine of routines) {
+    if ((yield* taskRow(routine.id)) !== undefined) continue
+    const state: TaskState = routine.done ? 'done' : 'open'
+    yield* saveTask({
+      id: routine.id, title: routine.title, instructions: routine.instructions,
+      createdBy: { kind: 'robot', robotId: robot.id, name: robot.identity.name, avatarColor: robot.identity.avatarColor, avatarSeed: robot.identity.avatarSeed },
+      creatorMember: robot.ownerId, assignee: { kind: 'robot', robotId: robot.id }, parentId: null, timing: routine.timing,
+      // A one-shot that is still to come waits for its moment; one that ran is done.
+      wakeAt: routine.timing.kind === 'scheduled' && routine.timing.at <= now ? null : wakeAt(routine.timing, state),
+      remind: { kind: 'none' }, remindedFor: null, state, external: null, createdAt: routine.createdAt, updatedAt: now,
+    })
+    for (const attempt of [...routine.attempts].reverse()) yield* addAttempt(routine.id, robot.id, attempt.outcome, attempt.startedAt, attempt.finishedAt, attempt.firstLine)
+    added += 1
+  }
+  return added
 })

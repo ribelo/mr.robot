@@ -22,7 +22,8 @@ import type { SaveOutcome } from './components/SaveButton.tsx'
 import { Pages } from './pages.tsx'
 import { applyTheme } from './theme/theme.ts'
 import { NewRobot } from './components/NewRobot.tsx'
-import { EditProfileSheet, RoutineSheet } from './components/RobotSheets.tsx'
+import { EditProfileSheet } from './components/RobotSheets.tsx'
+import { TaskSheet } from './components/TaskSheets.tsx'
 
 export function App() {
   const meResult = useAtomValue(meAtom)
@@ -65,16 +66,15 @@ function SignedIn({ me }: { me: Me }) {
         <EditProfileSheet
           robotId={sheet.robotId}
           onClose={() => setSheet(undefined)}
-          onOpenRoutine={(routine) => setSheet({ kind: 'routine', robotId: sheet.robotId, routineId: routine.id, fromProfile: true })}
+          onOpenTask={(task) => setSheet({ kind: 'task', taskId: task.id, fromProfile: sheet.robotId })}
         />
       ) : null}
-      {sheet?.kind === 'routine' ? (
-        <RoutineSheet
-          robotId={sheet.robotId}
-          routineId={sheet.routineId}
-          canEdit={robots.find((entry) => entry.id === sheet.robotId)?.ownerId === me.id}
+      {sheet?.kind === 'task' ? (
+        <TaskSheet
+          taskId={sheet.taskId}
           onClose={() => setSheet(undefined)}
-          {...(sheet.fromProfile ? { onBack: () => setSheet({ kind: 'profile', robotId: sheet.robotId }) } : {})}
+          onOpenTask={(taskId) => setSheet({ ...sheet, taskId })}
+          {...(sheet.fromProfile === null ? {} : { onBack: () => setSheet({ kind: 'profile', robotId: sheet.fromProfile! }) })}
         />
       ) : null}
       <RobotList
@@ -130,8 +130,8 @@ function Empty() {
   return <div className="empty-main"><EmptyState title="Pick a robot" hint="Choose one on the left, or tap + to make a new one." /></div>
 }
 
-/** The sheet open over the app: a Robot's profile or one of its Routines. */
-type Sheet = { kind: 'profile'; robotId: string } | { kind: 'routine'; robotId: string; routineId: string; fromProfile: boolean }
+/** The sheet open over the app: a Robot's profile, or a Task (opened from that profile, or from the panel). */
+type Sheet = { kind: 'profile'; robotId: string } | { kind: 'task'; taskId: string; fromProfile: string | null }
 
 function RobotView({ route, me, robot, onSheet }: { route: Extract<Route, { page: 'robot' }>; me: Me; robot: RobotSummary | undefined; onSheet: (sheet: Sheet) => void }) {
   const id = route.id
@@ -257,7 +257,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
         <Panel
           panel={panel}
           onClose={() => go({ page: 'robot', id, panel: false })}
-          onOpenRoutine={(routine) => onSheet({ kind: 'routine', robotId: id, routineId: routine, fromProfile: false })}
+          onOpenTask={(taskId) => onSheet({ kind: 'task', taskId, fromProfile: null })}
           onEditProfile={() => onSheet({ kind: 'profile', robotId: id })}
           onOpenScreen={() => go({ page: 'takeover', id })}
           onAdvanced={() => go({ page: 'advanced', id })}
@@ -275,7 +275,7 @@ function searchText(item: ConversationData['items'][number]): string {
   switch (item.kind) {
     case 'message': return item.text + ' ' + item.attachments.map((file) => file.name).join(' ')
     case 'reply': case 'notice': case 'thinking': return item.text
-    case 'routine': return item.name
+    case 'task': return item.title
     case 'question': return item.proposal.purpose
     case 'thread': return item.thread.topic
     default: return ''

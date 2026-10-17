@@ -252,7 +252,7 @@ export function RobotList({ robots, groups, selected, meName, meAvatar, isAdmin,
         <ConfirmByName
           title={`Delete ${danger.robot.identity.name}`}
           name={danger.robot.identity.name}
-          goes="The robot, its conversation, files, memory and routines are deleted, and other robots stop being able to message it."
+          goes="The robot, its conversation, files and memory are deleted, and other robots stop being able to message it. Its open Tasks stay, without a doer."
           action="Delete robot"
           onCancel={() => setDanger(undefined)}
           onConfirm={async () => {

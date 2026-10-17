@@ -12,9 +12,9 @@ import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberAvatar, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
-  AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, RoutineView, SettingsCatalog, SkillsSynced,
+  AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView,
   SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
-  type GroupPatch, type HomeSettingsPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
+  type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
 
@@ -95,8 +95,17 @@ const make = Effect.gen(function* () {
     updateGroup: (id: string, patch: GroupPatch) => request(RobotGroup, 'PATCH', `/api/robot-groups/${enc(id)}`, patch),
     orderGroups: (ids: readonly string[]) => request(Schema.Array(RobotGroup), 'PUT', '/api/robot-groups/order', { ids }),
     deleteGroup: (id: string) => send('DELETE', `/api/robot-groups/${enc(id)}`),
-    pauseRoutine: (id: string, routine: string, paused: boolean) => request(RoutineView, 'POST', `/api/robots/${enc(id)}/routines/${enc(routine)}/pause`, { paused }),
-    deleteRoutine: (id: string, routine: string) => send('DELETE', `/api/robots/${enc(id)}/routines/${enc(routine)}`),
+    /** The active Members of the Home, for a Task's doer (v1.13). */
+    homeMembers: get(Schema.Array(MemberView), '/api/members'),
+    /** Tasks (v1.13): a page by query ("state=all&parent=t-…"), one Task, and its changes. */
+    tasks: (query: string) => get(TaskPage, `/api/tasks${query === '' ? '' : `?${query}`}`),
+    task: (id: string) => get(TaskView, `/api/tasks/${enc(id)}`),
+    createTask: (input: TaskInput) => request(TaskView, 'POST', '/api/tasks', input),
+    updateTask: (id: string, patch: TaskPatch) => request(TaskView, 'PATCH', `/api/tasks/${enc(id)}`, patch),
+    finishTask: (id: string) => request(TaskView, 'POST', `/api/tasks/${enc(id)}/done`, {}),
+    cancelTask: (id: string) => request(TaskView, 'POST', `/api/tasks/${enc(id)}/cancel`, {}),
+    pauseTask: (id: string, paused: boolean) => request(TaskView, 'POST', `/api/tasks/${enc(id)}/pause`, { paused }),
+    assignTask: (id: string, assignee: TaskAssignee) => request(TaskView, 'POST', `/api/tasks/${enc(id)}/assign`, { assignee }),
     rewind: (id: string, atSeq: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { atSeq }),
     rewindBeforeTurn: (id: string, turn: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { beforeTurn: turn }),
     undoRewind: (id: string, rewind: string) => send('POST', `/api/robots/${enc(id)}/rewinds/${enc(rewind)}/undo`),

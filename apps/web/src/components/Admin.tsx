@@ -62,22 +62,7 @@ function AdminPage({ view }: { view: AdminView }) {
         </tbody>
       </table>
 
-      <h2>Routines</h2>
-      {view.routines.length === 0 ? <div className="muted">No routines.</div> : (
-        <table className="grid">
-          <thead><tr><th>Next run</th><th>Routine</th><th>Robot</th><th>Schedule</th></tr></thead>
-          <tbody>
-            {view.routines.map((routine) => (
-              <tr key={`${routine.robotId}-${routine.id}`}>
-                <td>{routine.nextRun === null ? '—' : new Date(routine.nextRun).toLocaleString()}</td>
-                <td>{routine.name}</td>
-                <td>{routine.robotName}<div className="muted">{routine.ownerName}</div></td>
-                <td className="muted">{routine.summary}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {view.robotsToMigrate === 0 ? null : <div className="muted">{view.robotsToMigrate} {view.robotsToMigrate === 1 ? 'Robot' : 'Robots'} still to migrate: their Routines become Tasks when the Home next starts.</div>}
 
       <h2>Threads</h2>
       {(view.threads ?? []).length === 0 ? <div className="muted">No Threads between chiefs.</div> : (

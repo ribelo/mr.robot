@@ -180,18 +180,11 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
     }
     case 'reply':
       return <div className="row"><div className="bubble bubble-robot" style={robotTint(robotColor)}><Markdown text={item.text} /></div></div>
-    case 'routine':
-      return (
-        <div className="chat-separator routine-line">
-          {item.action === 'ran' ? null : <span>{item.by === undefined ? routineVerb(item.action) : `Routine ${item.action} by ${item.by}`} </span>}
-          <span className="routine-name"><ClockIcon /> {item.name}</span>
-        </div>
-      )
     case 'task':
       return (
-        <div className="chat-separator routine-line">
+        <div className="chat-separator task-line">
           {item.action === 'ran' ? null : <span>{item.by === undefined ? taskVerb(item.action) : `Task ${item.action} by ${item.by}`} </span>}
-          <span className="routine-name"><ClockIcon /> {item.title}</span>
+          <span className="task-name"><ClockIcon /> {item.title}</span>
         </div>
       )
     case 'notice':
@@ -213,9 +206,6 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
   }
 }
 
-function routineVerb(action: 'created' | 'updated' | 'deleted' | 'ran' | 'paused' | 'resumed'): string {
-  return action === 'created' ? 'Created routine' : action === 'updated' ? 'Updated routine' : action === 'deleted' ? 'Deleted routine' : action === 'paused' ? 'Paused routine' : action === 'resumed' ? 'Resumed routine' : ''
-}
 
 function taskVerb(action: TaskAction): string {
   switch (action) {

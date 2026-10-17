@@ -37,8 +37,6 @@ import type {
   RobotPanel,
   RobotSettings,
   RobotSummary,
-  RoutineSchedule,
-  RoutineView,
   ScreenView,
   Sender,
   UsageView,
@@ -55,7 +53,6 @@ import { askGate, bothItems, fixedItems, NO_ITEMS, type AskGateHost, type GrantI
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
-import { AlarmSchedule, dueDelivery, type ScheduleTask } from '../agent/schedule.ts'
 import { type NotifyHost } from '../agent/tools/notify.ts'
 import { maskSecrets, type SecretHost } from '../agent/tools/secrets.ts'
 import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
@@ -99,8 +96,9 @@ import { Notify } from '../plugins/notify.ts'
 import { Robots } from '../plugins/robots.ts'
 import { Deputy } from '../plugins/deputy.ts'
 import * as DeputyPrograms from './deputy.ts'
-import { Routines } from '../plugins/routines.ts'
-import { routinesHost } from './routines-host.ts'
+import { Tasks } from '../plugins/tasks.ts'
+import { tasksHost, type TaskTurn } from './tasks-host.ts'
+import type { TaskView } from '@mr-robot/protocol'
 import { Setup } from '../plugins/setup.ts'
 import { Skills } from '../plugins/skills.ts'
 import { Web } from '../plugins/web.ts'
@@ -117,8 +115,7 @@ import { makeWorkspace, type WorkspaceShape } from '../workspace/workspace.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
-import { cronOf, describeSchedule, nextRun, validateSchedule } from './schedule.ts'
-import { rezoneRecord } from './time-zone.ts'
+import { dropRoutines, exportRoutines, type ExportedRoutine } from './routine-export.ts'
 import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
@@ -127,9 +124,9 @@ import { causeOf, LAST_WAKEUP, runningTool } from './views.ts'
 import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
-import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, routineView, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
+import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
 export type { AnswerResult, HelpAnswerer, HelpAnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
-import { RobotStore, storedToolCall, type ActiveTurn, type ProposalRow, type RobotConfig, type RoutineRow, type Wakeup, type WakeupKind } from './store.ts'
+import { RobotStore, storedToolCall, type ActiveTurn, type TaskCard, type ProposalRow, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
 
 export { DEFAULT_CONTEXT_BUDGET } from './programs.ts'
 
@@ -199,7 +196,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         stopWatching: () => Effect.promise(() => this.stopWatching()),
         setAlarm: (at) => Effect.promise(() => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at))),
         seedWorkspace: () => Effect.promise(() => this.seedWorkspace()),
-        schedule: () => Effect.sync(() => this.schedule()),
         notifyMembers: (kind, body) => Effect.promise(() => this.notifyMembers(kind, body).catch(() => 0)),
         rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
         working: () => Effect.sync(() => this.store.activeTurn() !== undefined || this.pumping !== undefined),
@@ -273,7 +269,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * Start the Conversation over (pl-05eu, pl-y228): a new session, without the old log, notices,
-   * rewinds or queued wake-ups. Configuration, routines, grants and every Workspace file stay (v1.11, sk-8won).
+   * rewinds or queued wake-ups. Configuration, grants and every Workspace file stay (v1.11, sk-8won); its Tasks live at the Home.
    */
   async clearHistory(): Promise<void> {
     if (this.store.activeTurn() !== undefined) throw new Error('the Robot is working; wait for it to finish, then clear')
@@ -283,14 +279,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Answered Asks go with the history; open ones are still decisions the owner owes.
     sql.exec("DELETE FROM proposal WHERE status != 'open'")
     this.store.search.clear()
-    this.store.abandonRoutineRuns(Date.now())
     for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen']) this.store.delete(key)
     this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
     await this.changed()
   }
 
   /**
-   * Start over (sk-8won): clear the history, then reset the whole Workspace to the templates. Grants, Routines,
+   * Start over (sk-8won): clear the history, then reset the whole Workspace to the templates. Grants, Tasks,
    * Connections and settings stay. The product docs are not Workspace objects, so they stay too. The
    * screenshots go with the Conversation that showed them.
    */
@@ -383,9 +378,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async runAlarm(): Promise<void> {
     const config = this.store.config()
     if (config !== undefined && config.status !== 'deleted') await this.expireCapture(Date.now()).catch((error: unknown) => console.warn('sign-in not ended', error))
-    if (config !== undefined && config.status !== 'deleted') await this.fireRoutines(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.program(Programs.fireTasks(Date.now())).catch((error: unknown) => console.warn('due Tasks not fetched', error))
-    // Due Routines start at once; housekeeping below must not delay their Turns.
+    // Due Tasks start at once; housekeeping below must not delay their Turns.
     if (this.store.pendingWakeups() > 0) this.drain()
     if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
     if (config !== undefined && config.status !== 'deleted') await this.sweepScreens(Date.now()).catch((error: unknown) => console.warn('screenshots not swept', error))
@@ -395,19 +389,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
   }
-
-  /**
-   * Due Routines become Wake-ups. However many occurrences were missed while the Robot was
-   * down, each due Routine runs once (robot-v1gb), and its next run is computed from now.
-   */
-  /**
-   * Due DSH schedule records become wake-ups with DSH's own framing; a recurring one contributes
-   * only its latest missed occurrence and advances to a future target, a one-shot ends (robot-v1gb).
-   */
-  private fireRoutines(now: number): Promise<void> {
-    return this.program(Programs.fireRoutines(now))
-  }
-
 
   /**
    * The running Turn works on this Task (mc-w3cc): once per Turn, only a Task assigned to this Robot. The Home
@@ -427,6 +408,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { ok: true, title: started.title }
   }
 
+  /** What the Task tools need of the running Turn. */
+  private taskTurn(): TaskTurn {
+    return {
+      focus: (taskId) => this.focusTask(taskId),
+      doneLine: (taskId, line) => {
+        if (this.store.activeTurn()?.task?.id === taskId) this.store.set(DONE_LINE, line)
+      },
+    }
+  }
+
   /**
    * A person stops the running Turn (mc-w5ee): the model call and tools are cancelled, the Wake-up is used up,
    * the attempt ends interrupted and the Conversation says who did it. False when no Turn runs.
@@ -438,28 +429,18 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { interrupted: true }
   }
 
+  /** Someone else changed one of this Robot's Tasks: its Conversation shows a card naming who (mc-c1aa). */
+  async taskCard(card: TaskCard): Promise<void> {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted') return
+    const verb = card.action === 'done' ? 'marked done' : card.action
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Task ${verb} by ${card.by}: ${card.title}`, Date.now(), card)
+    await this.changed()
+  }
+
   /** The Home planned this Robot's earliest due Task (mc-s1aa): the alarm comes then. */
   setNextDue(at: number | null): Promise<void> {
     return this.program(Programs.setNextDue(at))
-  }
-
-  /** The Routine rules (creation, limits, edits) over the routine table; the alarm fires what it stores. */
-  private schedule(): AlarmSchedule {
-    const store = this.store
-    return new AlarmSchedule({
-      tasks: () => store.routines().map((routine): ScheduleTask => ({ record: routine.record, sessionId: routine.sessionId, active: routine.paused || routine.nextRun !== null })),
-      save: (task) => {
-        const existing = store.routine(task.record.id)
-        const timeZone = 'timeZone' in task.record ? task.record.timeZone : store.requireConfig().timeZone
-        store.saveRoutine({
-          id: task.record.id, name: task.record.title, prompt: task.record.prompt, schedule: existing?.schedule ?? { kind: 'once', at: task.record.scheduledAt },
-          timeZone, nextRun: existing?.paused === true ? null : Date.parse(task.record.scheduledAt), lastRun: existing?.lastRun ?? null,
-          createdAt: existing?.createdAt ?? Date.now(), paused: existing?.paused ?? false, record: task.record, sessionId: task.sessionId,
-        })
-      },
-      remove: (id) => store.deleteRoutine(id),
-      changed: () => this.ctx.waitUntil(this.rearm().then(() => this.changed())),
-    })
   }
 
   protected drain(): void {
@@ -618,22 +599,20 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       return
     }
     const failedTurn = this.rememberFailure(wakeup, startSeq)
+    const doneLine = this.store.get<string>(DONE_LINE)
+    this.store.delete(DONE_LINE)
     if (turn?.task != null) {
       const reply = failedTurn ? undefined : (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
-      const firstLine = failedTurn ? 'The Turn failed.' : reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'
+      const firstLine = failedTurn ? 'The Turn failed.' : doneLine !== undefined ? doneLine : reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'
       await this.home().attemptFinished(turn.task.attemptId, failedTurn ? 'failed' : 'ok', firstLine).catch((error: unknown) => console.warn('attempt not finished', error))
     }
     if (failedTurn) await this.chainFailure(startSeq).catch((error: unknown) => console.warn('model chain not advanced', error))
     else await this.chainSucceeded().catch(() => undefined)
     const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
-    if (!failedTurn && wakeup.kind !== 'routine' && wakeup.kind !== 'task' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
+    if (!failedTurn && wakeup.kind !== 'task' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
       // A Turn that ends with nothing to show (e.g. a reasoning model spent its output cap thinking) is not silent.
       const config = this.store.requireConfig()
       this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${config.identity.name} finished without a reply. If this repeats, raise its context budget in Advanced settings.`, Date.now())
-    }
-    if (wakeup.kind === 'routine') {
-      const reply = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
-      this.store.finishRoutineRun(wakeup.id, failedTurn ? 'failed' : 'ok', failedTurn ? 'The Turn failed.' : (reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'), Date.now())
     }
     await this.loadSecretMasks()
     await this.deliverReplies(wakeup, startSeq)
@@ -789,7 +768,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Replies of a Turn go back out as recipientsOf decides: to where the question came from, or unasked to the opted-in Channels. */
   private async deliverReplies(wakeup: Wakeup, startSeq: number): Promise<void> {
     const config = this.store.requireConfig()
-    // A webhook has nobody to answer: its Turn replies like a Routine's (app, and the Channels that opted in).
+    // A webhook has nobody to answer: its Turn replies like a Task's (app, and the Channels that opted in).
     const stored = (wakeup.payload['route'] as ReplyRoute | undefined) ?? null
     const route = stored?.channel === 'webhook' ? null : stored
     const unprompted = wakeup.kind !== 'member' && (wakeup.kind !== 'channel' || stored?.channel === 'webhook')
@@ -927,7 +906,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const wakeup = active !== undefined ? this.store.wakeup(active.wakeupId) : this.starting
     // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
     if (wakeup !== undefined) {
-      if (wakeup.kind === 'routine') this.store.finishRoutineRun(wakeup.id, 'failed', 'The Turn failed.', Date.now())
       const attempt = active?.task?.attemptId
       if (attempt !== undefined) this.ctx.waitUntil(this.home().attemptFinished(attempt, 'failed', 'The Turn failed.').catch(() => undefined))
       this.store.delete(INTERRUPTED_BY)
@@ -1109,7 +1087,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('deputy') && config.kind === 'mr-robot') mounts.push(mount(Deputy, { host: DeputyPrograms.deputyHost((program) => this.program(program)) }, gate(group('deputy'))))
     if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }, gate((tool) => fixedItems({ kind: 'tool', name: tool.startsWith('exa_agent_') ? 'exa-agent' : 'exa' }))))
     if (granted.has('web')) mounts.push(mount(Web, {}, gate(group('web'))))
-    if (granted.has('routines')) mounts.push(mount(Routines, { host: routinesHost((program) => this.program(program)) }, gate(group('routines'))))
+    if (granted.has('tasks')) mounts.push(mount(Tasks, { host: tasksHost((program) => this.program(program), this.taskTurn()) }, gate(group('tasks'))))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
     const skillNames = () => this.heldSkills()
@@ -1294,13 +1272,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return found
   }
 
-  /** Host calls fail clearly (hs-bfr8); a Routine that hits an offline host tells the owner (hs-nwcl). */
+  /** Host calls fail clearly (hs-bfr8); a Task's Turn that hits an offline host tells the owner (hs-nwcl). */
   private async hostCall<A>(call: () => Promise<A>): Promise<A> {
     try {
       return await call()
     } catch (error) {
-      if (error instanceof Error && error.name === 'HostOffline' && (this.currentWakeup === 'routine' || this.currentWakeup === 'task')) {
-        await this.notifyMembers('needs you', `could not finish a routine: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
+      if (error instanceof Error && error.name === 'HostOffline' && this.currentWakeup === 'task') {
+        await this.notifyMembers('needs you', `could not finish a task: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
       }
       throw error instanceof Error && error.name === 'HostOffline' ? new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running; do not switch to a cloud browser.`) : error
     }
@@ -2278,33 +2256,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  // ---------------------------------------------------------------- Routines (robot-gbbt, robot-qyd5)
+  // ---------------------------------------------------------------- Routines become Tasks (v1.13 ticket 05)
 
-  /** Pause keeps the Routine and its schedule but stops its alarm; resume plans the next run from now (robot-qhll). */
-  pauseRoutine(id: string, paused: boolean, by?: string): Promise<RoutineView> {
-    return this.program(Programs.pauseRoutine(id, paused, by))
+  /** The Robot's Routines and their runs, for the Home to store as Tasks; none once its tables are gone. */
+  exportRoutines(): ExportedRoutine[] {
+    return exportRoutines(this.ctx.storage.sql)
   }
 
-  /** Mr. Robot creates or edits a Routine of this Robot for his owner (cd-n9pi); the Conversation shows a card naming `by`. */
-  setRoutine(input: Programs.RoutineInput, by: string): Promise<RoutineView> {
-    return this.program(Programs.setRoutine(input, by))
+  /** The Home stored them as Tasks: the Routine tables go. */
+  dropRoutines(): void {
+    dropRoutines(this.ctx.storage.sql)
   }
-
-
-
-
-
-
-
-
-
-
-  /** The owner deletes a Routine from the panel (robot-qyd5). */
-  removeRoutine(id: string, by?: string): Promise<void> {
-    return this.program(Programs.removeRoutine(id, by))
-  }
-
-
 
   // ---------------------------------------------------------------- views
 
@@ -2500,25 +2462,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /**
-   * The owner's profile zone changed (v1.11 ticket 08). The Robot's zone is the owner's, so the
-   * next Turn, daily notes and Routines use the new one; wall-clock Routines in the old zone keep
-   * their local time in the new one, and the model hears it once with its next step.
+   * The owner's profile zone changed (v1.11 ticket 08). The Robot's zone is the owner's, so the next Turn and
+   * daily notes use the new one, and the model hears it once with its next step. Recurring Tasks move at the Home.
    */
   async timeZoneChanged(timeZone: string): Promise<void> {
     const config = this.store.config()
     if (config === undefined || config.status === 'deleted' || config.timeZone === timeZone) return
-    const from = config.timeZone
-    const now = Date.now()
     this.store.transaction(() => {
       this.store.updateConfig(() => ({ timeZone }))
-      for (const routine of this.store.routines()) {
-        const record = rezoneRecord(routine.record, from, timeZone, now)
-        const moved = record !== routine.record
-        if (!moved && routine.timeZone !== from) continue
-        this.store.saveRoutine({ ...routine, record, timeZone: 'timeZone' in record ? record.timeZone : timeZone, nextRun: moved && !routine.paused ? Date.parse(record.scheduledAt) : routine.nextRun })
-      }
       const pending = this.store.get<MemoryChange[]>('memory-changes') ?? []
-      this.store.set('memory-changes', [...pending, { path: 'time zone', by: 'your owner', notice: `Your owner's time zone changed to ${timeZone}. Daily notes, Routines and clock times use it from now on.` }].slice(-50))
+      this.store.set('memory-changes', [...pending, { path: 'time zone', by: 'your owner', notice: `Your owner's time zone changed to ${timeZone}. Daily notes, recurring Tasks and clock times use it from now on.` }].slice(-50))
     })
     await this.rearm()
     await this.changed()
@@ -2719,17 +2672,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  async panel(canEdit: boolean, summary: RobotSummary): Promise<RobotPanel> {
+  /** `tasks`: the Robot's Tasks the viewer may see, from the Home. */
+  async panel(canEdit: boolean, summary: RobotSummary, tasks: readonly TaskView[]): Promise<RobotPanel> {
     await this.reachForView()
-    return this.program(Views.panel(canEdit, summary))
+    return this.program(Views.panel(canEdit, summary, tasks))
   }
 
 
 
-  /** The Routines with their last runs, as the panel shows them. */
-  routineList(): Promise<RoutineView[]> {
-    return this.program(Views.routineViews)
-  }
 
 
   /** Filled by the browser and usage tickets. */
@@ -2745,7 +2695,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** One row of the admin fleet list, from the DO itself (robot-x26m). */
   /** `home` is the Home's per-Robot spend limit, which the row's limit in effect may follow. */
-  adminRow(home: HomeSpendLimit): Promise<{ fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView; routines: RoutineView[] } | null> {
+  adminRow(home: HomeSpendLimit): Promise<{ fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView } | null> {
     return this.program(Views.adminRow(home))
   }
 
@@ -2894,6 +2844,9 @@ const MEDIA_TYPES: Record<string, string> = {
 function mediaTypeOf(path: string): string {
   return MEDIA_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
 }
+
+/** The kv key of the result line task_done gave the Turn's own Task. */
+const DONE_LINE = 'task-done-line'
 
 /** The kv key of who interrupted the running Turn, until the Turn has ended. */
 const INTERRUPTED_BY = 'interrupted-by'

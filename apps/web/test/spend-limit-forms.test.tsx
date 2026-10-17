@@ -29,7 +29,7 @@ describe('Home spend limits in Admin (ux-dbx4, ux-en86)', () => {
       { ...summary, id: 'r-2', identity: { ...identity, name: 'Ledger' }, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'usd', amount: 50 }, from: 'robot' }) },
       { ...summary, id: 'r-3', identity: { ...identity, name: 'Free' }, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'none' }, from: 'robot' }) },
     ],
-    routines: [], members: [], skills: [], skillRepository: null, providers: [],
+    robotsToMigrate: 0, members: [], skills: [], skillRepository: null, providers: [],
     settings: { defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'usd', amount: 20 }, memberSpendLimit: { kind: 'none' }, models: [] },
   }
   const patches: unknown[] = []
@@ -99,7 +99,7 @@ describe("a Robot's spend limit in Advanced settings (ux-q8ve, ux-en86)", () => 
       codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
       notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true,
     },
-    routines: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }), canEdit: true, takeover: null,
+    tasks: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }), canEdit: true, takeover: null,
   }
   const catalog: SettingsCatalog = { toolGroups: [], skills: [], robots: [], secrets: [], models: [], workersAiEnabled: true }
 

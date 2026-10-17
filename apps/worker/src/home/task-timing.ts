@@ -36,7 +36,7 @@ export function parseTiming(input: TaskTimingInput | undefined, zone: string, no
       const timeZone = parseTimeZone(input.timeZone ?? zone)
       if (timeZone === undefined) return refused(`"${input.timeZone ?? zone}" is not a time zone; use a name like Europe/Warsaw`)
       try {
-        validateSchedule(input.schedule, timeZone, now)
+        validateSchedule(input.schedule, timeZone)
         if (input.schedule.kind === 'cron' && cronMinGapMinutes(input.schedule.expression) < MIN_OCCURRENCE_GAP_MINUTES) return refused(`${TOO_FREQUENT} This cron expression occurs more often.`)
         const next = nextRun(input.schedule, timeZone, now, now)
         if (next === null) return refused('This schedule never occurs.')

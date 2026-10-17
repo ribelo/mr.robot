@@ -39,7 +39,7 @@ describe('Clear history and Start over in the robot list (sk-8won)', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Start over…' }))
     const dialog = screen.getByRole('dialog', { name: 'Start Bills over' })
     expect(within(dialog).getByText(/every file in its workspace goes back to the templates/)).toBeTruthy()
-    expect(within(dialog).getByText(/Its settings, grants, routines and connections stay/)).toBeTruthy()
+    expect(within(dialog).getByText(/Its settings, grants, connections and Tasks stay/)).toBeTruthy()
     expect(within(dialog).queryByRole('checkbox')).toBeNull()
     const action = within(dialog).getByRole('button', { name: 'Start over' }) as HTMLButtonElement
     expect(action.disabled).toBe(true)

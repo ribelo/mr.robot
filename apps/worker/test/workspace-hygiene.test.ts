@@ -21,7 +21,7 @@ async function activeRobot(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['files', 'routines'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['files', 'tasks'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -110,11 +110,11 @@ describe('screenshots live outside the Workspace (sk-m7t1)', () => {
 })
 
 describe('Clear history and Start over (sk-8won)', () => {
-  it('Clear history keeps every file; Start over resets the Workspace to templates and keeps Grants, Routines and settings', async () => {
+  it('Clear history keeps every file; Start over resets the Workspace to templates and keeps Grants, Tasks and settings', async () => {
     const id = await activeRobot()
     await api(ANNA, `/api/robots/${id}/file?path=MEMORY.md`, { method: 'PUT', body: { content: '# MEMORY.md\nPays on the 10th.' } })
     await say(id, 'set up', [
-      { calls: [{ name: 'write', args: { file_path: 'out/report.md', content: 'quarterly' } }, { name: 'routine_set', args: { title: 'Taxes', prompt: 'Check taxes.', daily: { time: '09:00:00', time_zone: 'Europe/Warsaw' } } }] },
+      { calls: [{ name: 'write', args: { file_path: 'out/report.md', content: 'quarterly' } }, { name: 'task_create', args: { title: 'Taxes', instructions: 'Check taxes.', assignee: 'self', timing: { kind: 'recurring', daily: { time: '09:00' } } } }] },
       { text: 'Done.' },
     ])
     await testRobot(id).saveScreenForTest()
@@ -138,7 +138,7 @@ describe('Clear history and Start over (sk-8won)', () => {
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
     expect(panel.settings.grants).toEqual(grantsBefore)
     expect(panel.settings.identity.name).toBe(name)
-    expect(panel.routines.map((routine) => routine.name)).toEqual(['Taxes'])
+    expect(panel.tasks.map((task) => task.title)).toEqual(['Taxes'])
     expect(panel.screen).toBeNull()
     const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
     expect(items.filter((item) => item.kind === 'message' || item.kind === 'reply')).toEqual([])

@@ -1,10 +1,10 @@
 import type { RobotPanel } from '@mr-robot/protocol'
-import { RoutineList } from './RobotSheets.tsx'
+import { TaskList } from './TaskSheets.tsx'
 import { ThreadCard } from './ChatView.tsx'
 
 export interface PanelProps {
   readonly panel: RobotPanel
-  readonly onOpenRoutine: (id: string) => void
+  readonly onOpenTask: (id: string) => void
   readonly onEditProfile: () => void
   readonly onOpenScreen: () => void
   readonly onAdvanced: () => void
@@ -17,8 +17,8 @@ export interface PanelProps {
   readonly now?: number
 }
 
-/** The robot panel (robot-z3ud): screen thumbnail, Routines, simple settings. */
-export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, now = Date.now() }: PanelProps) {
+/** The robot panel (robot-z3ud): screen thumbnail, Tasks, simple settings. */
+export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, now = Date.now() }: PanelProps) {
   const name = panel.summary.identity.name
   return (
     <aside className="panel">
@@ -57,8 +57,8 @@ export function Panel({ panel, onOpenRoutine, onEditProfile, onOpenScreen, onAdv
             {panel.screen === null ? <span className="screen-empty">Open the browser</span> : <img src={panel.screen.url} alt="" />}
           </button>
           <div className="screen-caption">{name}’s screen</div>
-          <h3 className="panel-section">Routines</h3>
-          <RoutineList routines={panel.routines} onOpen={(routine) => onOpenRoutine(routine.id)} />
+          <h3 className="panel-section">Tasks</h3>
+          <TaskList tasks={panel.tasks} onOpen={(task) => onOpenTask(task.id)} />
           {panel.threads === undefined ? null : (
             <>
               <h3 className="panel-section">Threads</h3>

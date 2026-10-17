@@ -80,7 +80,7 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
   })
 
   it('has no shell, terminal or container tool at all', async () => {
-    const id = await activeRobot(['files', 'web', 'routines', 'notify'], false)
+    const id = await activeRobot(['files', 'web', 'tasks', 'notify'], false)
     await say(id, 'hi', [{ text: 'hi' }])
     for (const name of toolNames(id)) expect(name).not.toMatch(/bash|shell|terminal|exec|container|subagent/)
   })

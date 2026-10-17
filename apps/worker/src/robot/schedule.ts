@@ -1,10 +1,9 @@
 /**
- * Routine schedules in the owner's time zone (robot-gbbt): one-shot, interval, daily,
- * weekly and cron (five-field, Vixie semantics: when day-of-month and day-of-week are both
- * restricted, either matches). Pure functions; the Robot keeps one alarm at the earliest
- * next run.
+ * The rules of recurring Tasks in a time zone (robot-gbbt, mc-t2bb): interval, daily, weekly and cron (five-field,
+ * Vixie semantics: when day-of-month and day-of-week are both restricted, either matches), and local moments.
+ * Pure functions.
  */
-import type { RoutineSchedule } from '@mr-robot/protocol'
+import type { RecurringSchedule } from '@mr-robot/protocol'
 
 const MINUTE = 60_000
 const DAY = 86_400_000
@@ -57,7 +56,7 @@ export class ScheduleError extends Error {
 }
 
 /** Reject a schedule that can never run; returns it unchanged otherwise. */
-export function validateSchedule(schedule: RoutineSchedule, timeZone: string, now: number): RoutineSchedule {
+export function validateSchedule(schedule: RecurringSchedule, timeZone: string): RecurringSchedule {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone })
   } catch {
@@ -79,14 +78,12 @@ export function validateSchedule(schedule: RoutineSchedule, timeZone: string, no
     case 'cron':
       parseCron(schedule.expression)
       break
-    case 'once':
-      if (onceAt(schedule.at, timeZone) <= now) throw new ScheduleError('a one-shot routine must be in the future')
-      break
   }
   return schedule
 }
 
-function onceAt(at: string, timeZone: string): number {
+/** The instant of an ISO 8601 text: with an offset as given, without one as a wall-clock time in the zone. Throws ScheduleError. */
+export function onceAt(at: string, timeZone: string): number {
   if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(at)) {
     const instant = Date.parse(at)
     if (Number.isNaN(instant)) throw new ScheduleError(`cannot read the date "${at}"`)
@@ -98,15 +95,11 @@ function onceAt(at: string, timeZone: string): number {
 }
 
 /**
- * The first run strictly after `after`, or null when the schedule has no more runs.
- * @param anchor - when the Routine was created; interval runs are aligned to it.
+ * The first occurrence strictly after `after`, or null when the rule never occurs again.
+ * @param anchor - a past or planned occurrence; interval occurrences are aligned to it.
  */
-export function nextRun(schedule: RoutineSchedule, timeZone: string, after: number, anchor: number): number | null {
+export function nextRun(schedule: RecurringSchedule, timeZone: string, after: number, anchor: number): number | null {
   switch (schedule.kind) {
-    case 'once': {
-      const at = onceAt(schedule.at, timeZone)
-      return at > after ? at : null
-    }
     case 'interval': {
       const every = schedule.everyMinutes * MINUTE
       const steps = Math.floor((after - anchor) / every) + 1
@@ -225,50 +218,4 @@ export function cronMinGapMinutes(expression: string): number {
     gap = Math.min(gap, next - times[index]!)
   }
   return gap
-}
-
-// ---------------------------------------------------------------- summary
-
-const WEEKDAY_PLURAL = ['', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays', 'Sundays']
-
-/** How the panel describes a schedule: "Weekdays at 09:00", "Sundays at 02:00", "Every 30 minutes". */
-export function describeSchedule(schedule: RoutineSchedule, timeZone: string): string {
-  switch (schedule.kind) {
-    case 'once': {
-      const at = onceAt(schedule.at, timeZone)
-      return `Once, ${new Intl.DateTimeFormat('en-GB', { timeZone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(at)}`
-    }
-    case 'interval':
-      return schedule.everyMinutes % 60 === 0 ? `Every ${schedule.everyMinutes / 60 === 1 ? 'hour' : `${schedule.everyMinutes / 60} hours`}` : `Every ${schedule.everyMinutes} minutes`
-    case 'daily':
-      return `Daily at ${schedule.time}`
-    case 'weekly': {
-      const days = [...schedule.weekdays].sort()
-      const label = days.join(',') === '1,2,3,4,5' ? 'Weekdays' : days.join(',') === '6,7' ? 'Weekends' : days.length === 7 ? 'Daily' : days.map((day) => WEEKDAY_PLURAL[day]).join(', ')
-      return `${label} at ${schedule.time}`
-    }
-    case 'cron':
-      return `cron ${schedule.expression}`
-  }
-}
-
-/** The schedule as a cron line with its time zone, or null when cron cannot say it (a single run, odd intervals). */
-export function cronOf(schedule: RoutineSchedule, timeZone: string): string | null {
-  const at = (time: string) => {
-    const [hour, minute] = time.split(':').map(Number)
-    return `${minute} ${hour}`
-  }
-  const line = (() => {
-    switch (schedule.kind) {
-      case 'cron': return schedule.expression
-      case 'daily': return `${at(schedule.time)} * * *`
-      case 'weekly': return `${at(schedule.time)} * * ${[...schedule.weekdays].sort().map((day) => (day === 7 ? 0 : day)).join(',')}`
-      case 'interval':
-        if (schedule.everyMinutes < 60 && 60 % schedule.everyMinutes === 0) return `*/${schedule.everyMinutes} * * * *`
-        if (schedule.everyMinutes % 60 === 0 && 24 % (schedule.everyMinutes / 60) === 0) return `0 */${schedule.everyMinutes / 60} * * *`
-        return null
-      case 'once': return null
-    }
-  })()
-  return line === null ? null : `CRON_TZ=${timeZone} ${line}`
 }

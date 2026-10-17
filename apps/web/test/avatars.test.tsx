@@ -29,7 +29,7 @@ const panel: RobotPanel = {
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' },
     discordChannel: null, discordProactive: true,
   },
-  routines: [], screen: null, usage, canEdit: true, takeover: null,
+  tasks: [], screen: null, usage, canEdit: true, takeover: null,
 }
 const me = { id: 'm-1', email: 'a@example.com', name: 'Anna Nowak', role: 'admin', status: 'active', avatar: { kind: 'picture', color: '#6c63ff', key: 'avatar-0123456789abcdef01234567' } } as Me
 
@@ -82,7 +82,7 @@ describe('Robot avatars (ux-0zm6, ux-n1mw)', () => {
   it('shows Robots and Members with their avatars in the Admin tables', async () => {
     const view: AdminView = {
       fleet: [{ ...summary, grants: emptyGrants, model: panel.settings.model, usage }],
-      routines: [],
+      robotsToMigrate: 0,
       members: [{ id: 'm-1', email: 'a@example.com', name: 'Anna Nowak', role: 'admin', status: 'active', avatar: me.avatar, usage }, { id: 'm-2', email: 'b@example.com', name: 'Ben', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#3b82f6' }, usage }],
       skills: [], skillRepository: null, providers: [],
       settings: { defaultModel: panel.settings.model, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'none' }, models: [] },
@@ -99,7 +99,7 @@ describe('Robot avatars (ux-0zm6, ux-n1mw)', () => {
 describe('Another look (ux-h0s4)', () => {
   it('draws a new seed into the preview and saves it with the profile', async () => {
     const calls = stubApi((path) => (path === '/api/robots/r-1/panel' ? panel : path === '/api/robots/r-1/settings' ? panel.settings : undefined))
-    render(<RegistryProvider><EditProfileSheet robotId="r-1" onClose={() => {}} onOpenRoutine={() => {}} /></RegistryProvider>)
+    render(<RegistryProvider><EditProfileSheet robotId="r-1" onClose={() => {}} onOpenTask={() => {}} /></RegistryProvider>)
     await screen.findByText('Another look')
     const preview = () => faces(document.querySelector('.sheet-avatar')!)[0]!
     const before = preview()

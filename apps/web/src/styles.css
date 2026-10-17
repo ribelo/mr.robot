@@ -122,7 +122,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .reaction { margin-top: -10px; margin-right: 6px; background: var(--bubble); border: 2px solid var(--surface); border-radius: 999px; font-size: 12px; padding: 1px 5px; }
 .chat-separator { text-align: center; color: var(--muted); font-size: 13.5px; margin: 8px 0; }
 .notice { color: var(--faint); font-size: 13px; }
-.routine-line .routine-name, .inline-robot { color: var(--text); display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+.task-line .task-name, .inline-robot { color: var(--text); display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
 .icon-inline { vertical-align: -2px; }
 .sender { color: var(--muted); font-size: 13px; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -184,10 +184,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .screen-empty { display: grid; place-items: center; height: 100%; color: var(--faint); font-size: 13px; }
 .screen-caption { text-align: center; color: var(--muted); font-size: 13.5px; margin: 8px 0 18px; }
 .panel-section { font-size: 13.5px; font-weight: 500; color: var(--muted); margin: 18px 0 8px; }
-.routines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.routine { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 8px; color: var(--accent); }
-.routine .routine-name { color: var(--text); white-space: nowrap; }
-.routine-when { color: var(--faint); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .panel-links { display: flex; gap: 16px; margin: 22px 0 8px; }
 .muted { color: var(--faint); font-size: 13px; }
 .usage { margin-top: 10px; }
@@ -339,15 +335,15 @@ table.grid th { color: var(--faint); font-weight: 500; }
 .color-row { display: flex; gap: 8px; justify-content: center; }
 .color-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; }
 .color-dot.on { border-color: var(--text); }
-.routine-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.routine-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--hover); border-radius: 12px; text-align: left; }
-.routine-card:hover { background: var(--hover-strong); }
-.routine-icon { width: 30px; height: 30px; border-radius: 50%; background: var(--fill); display: grid; place-items: center; flex: none; }
-.routine-card-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.routine-card-text .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
-.routine-status { font-size: 13px; color: var(--muted); white-space: nowrap; }
-.routine-status::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); margin-right: 6px; }
-.routine-status.paused::before { background: var(--faint); }
+.task-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.task-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--hover); border-radius: 12px; text-align: left; }
+.task-card:hover { background: var(--hover-strong); }
+.task-icon { width: 30px; height: 30px; border-radius: 50%; background: var(--fill); display: grid; place-items: center; flex: none; }
+.task-card-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.task-card-text .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+.task-status { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.task-status::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); margin-right: 6px; }
+.task-status.paused::before { background: var(--faint); }
 .chevron { color: var(--faint); }
 .detail-rows { margin: 0; background: var(--hover); border-radius: 12px; }
 .detail-rows > div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 14px; border-bottom: 1px solid var(--line); }

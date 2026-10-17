@@ -1,10 +1,11 @@
 import { RegistryProvider } from '@effect/atom-react'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { emptyGrants, type RobotPanel, type SettingsCatalog, type SettingsPatch } from '@mr-robot/protocol'
+import { emptyGrants, type RobotPanel, type SettingsCatalog, type SettingsPatch, type TaskView } from '@mr-robot/protocol'
 import { Panel } from '../src/components/Panel.tsx'
 import { AdvancedSettings } from '../src/components/AdvancedSettings.tsx'
-import { EditProfileSheet, RoutineSheet } from '../src/components/RobotSheets.tsx'
+import { EditProfileSheet } from '../src/components/RobotSheets.tsx'
+import { TaskSheet } from '../src/components/TaskSheets.tsx'
 
 afterEach(cleanup)
 
@@ -20,33 +21,36 @@ const panel: RobotPanel = {
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true,
   },
-  routines: [{
-    id: 'rt-1', robotId: 'r-1', name: 'Overnight outbound', prompt: 'Work the queue', schedule: { kind: 'weekly', time: '02:00', weekdays: [7] },
-    timeZone: 'Europe/Warsaw', summary: 'Sundays at 02:00', nextRun: Date.parse('2026-10-11T00:00:00Z'), lastRun: null,
-    paused: false, cron: 'CRON_TZ=Europe/Warsaw 0 2 * * 0', runs: [
-      { startedAt: Date.parse('2026-10-11T00:00:00Z'), finishedAt: Date.parse('2026-10-11T00:00:00Z'), outcome: 'skipped', firstLine: 'The previous run had not finished.' },
-      { startedAt: Date.parse('2026-10-04T00:00:00Z'), finishedAt: Date.parse('2026-10-04T00:03:00Z'), outcome: 'ok', firstLine: 'Queue worked: 12 leads.' },
-    ],
-  }],
+  tasks: [],
   screen: { path: 'screens/last.png', url: '/api/robots/r-1/screen', at: 0 },
   usage: { month: '2026-10', inputTokens: 12000, outputTokens: 3000, costUsd: 0.42, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } },
   canEdit: true,
   takeover: null,
 }
 
+const task: TaskView = {
+  id: 't-1', title: 'Overnight outbound', instructions: 'Work the queue', createdBy: { kind: 'member', memberId: 'm-1', name: 'Anna' },
+  assignee: { kind: 'robot', robotId: 'r-1' }, parentId: null, timing: { kind: 'recurring', schedule: { kind: 'weekly', time: '02:00', weekdays: [7] }, timeZone: 'Europe/Warsaw', next: Date.parse('2026-10-11T00:00:00Z'), paused: false },
+  remind: { kind: 'none' }, state: 'open', external: null, createdAt: 0, updatedAt: 0, children: 0, overdue: false, attempts: [
+    { robotId: 'r-1', startedAt: Date.parse('2026-10-11T00:00:00Z'), finishedAt: Date.parse('2026-10-11T00:00:00Z'), outcome: 'skipped', firstLine: 'The previous run had not finished.' },
+    { robotId: 'r-1', startedAt: Date.parse('2026-10-04T00:00:00Z'), finishedAt: Date.parse('2026-10-04T00:03:00Z'), outcome: 'ok', firstLine: 'Queue worked: 12 leads.' },
+  ],
+}
+const withTask: RobotPanel = { ...panel, tasks: [task] }
+
 const handlers = () => ({
-  onOpenRoutine: vi.fn(), onEditProfile: vi.fn(), onOpenScreen: vi.fn(), onAdvanced: vi.fn(), onTrajectory: vi.fn(), onFiles: vi.fn(), onClose: vi.fn(),
+  onOpenTask: vi.fn(), onEditProfile: vi.fn(), onOpenScreen: vi.fn(), onAdvanced: vi.fn(), onTrajectory: vi.fn(), onFiles: vi.fn(), onClose: vi.fn(),
 })
 
 describe('Panel (robot-z3ud)', () => {
-  it('shows the screen and the Routines; a Routine opens its detail, ⚙ opens the profile', () => {
+  it('shows the screen and the Tasks; a Task opens its detail, ⚙ opens the profile (mc-n6ff)', () => {
     const on = handlers()
-    render(<Panel panel={panel} {...on} />)
+    render(<Panel panel={withTask} {...on} />)
     expect(screen.getByText('Sales Outbound’s screen')).toBeTruthy()
-    expect(screen.getByText('Sundays at 02:00')).toBeTruthy()
-    expect(screen.getByText('Active')).toBeTruthy()
+    expect(screen.getByText(/^Sundays at 02:00 · next /)).toBeTruthy()
+    expect(screen.getByText('Open')).toBeTruthy()
     fireEvent.click(screen.getByText('Overnight outbound'))
-    expect(on.onOpenRoutine).toHaveBeenCalledWith('rt-1')
+    expect(on.onOpenTask).toHaveBeenCalledWith('t-1')
     fireEvent.click(screen.getByLabelText('Edit profile'))
     expect(on.onEditProfile).toHaveBeenCalled()
     fireEvent.click(screen.getByLabelText("Sales Outbound's screen"))
@@ -59,7 +63,7 @@ describe('Panel (robot-z3ud)', () => {
   })
 })
 
-describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
+describe('Robot and Task sheets (robot-lulc, mc-m9ii)', () => {
   const serve = () => {
     const calls: Array<{ path: string; method: string; body: unknown }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
@@ -70,21 +74,26 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
       if (path.endsWith('/panel')) return Response.json(panel)
       // The server answers a settings change with the saved settings, a routine change with the routine.
       if (path.endsWith('/settings')) return Response.json(panel.settings)
-      if (path.endsWith('/pause')) return Response.json(panel.routines[0])
+      if (path === '/api/tasks/t-1') return Response.json(task)
+      if (path === '/api/tasks') return Response.json({ tasks: [], next: null })
+      if (path === '/api/members') return Response.json([{ id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#3b82f6' } }])
+      if (path === '/api/robots') return Response.json([panel.summary])
+      if (path.endsWith('/pause')) return Response.json({ ...task, timing: { ...task.timing, paused: true } })
       return Response.json({ ok: true })
     }))
     return calls
   }
 
-  it('the routine detail shows schedule, cron, status, instructions and runs, and pauses', async () => {
+  it('the Task detail shows doer, schedule, instructions and attempts, and pauses (mc-m9ii, mc-t4dd)', async () => {
     const calls = serve()
-    render(<RegistryProvider><RoutineSheet robotId="r-1" routineId="rt-1" canEdit onClose={vi.fn()} /></RegistryProvider>)
+    render(<RegistryProvider><TaskSheet taskId="t-1" onClose={vi.fn()} /></RegistryProvider>)
     expect(await screen.findByText('Work the queue')).toBeTruthy()
-    expect(screen.getByText('CRON_TZ=Europe/Warsaw 0 2 * * 0')).toBeTruthy()
+    expect(screen.getByText('Europe/Warsaw')).toBeTruthy()
+    expect(await screen.findByText('Sales Outbound')).toBeTruthy()
     expect(screen.getByText('Queue worked: 12 leads.')).toBeTruthy()
     expect(screen.getByText('Skipped: The previous run had not finished.')).toBeTruthy()
     fireEvent.click(screen.getByText('Pause'))
-    await vi.waitFor(() => expect(calls.some((call) => call.path === '/api/robots/r-1/routines/rt-1/pause')).toBe(true))
+    await vi.waitFor(() => expect(calls.some((call) => call.path === '/api/tasks/t-1/pause')).toBe(true))
     expect(calls.find((call) => call.path.endsWith('/pause'))!.body).toEqual({ paused: true })
     vi.unstubAllGlobals()
   })
@@ -92,7 +101,7 @@ describe('Robot sheets (robot-lulc, robot-l3gr, robot-qhll)', () => {
   it('edit profile saves name and notifications together', async () => {
     const calls = serve()
     const closed = vi.fn()
-    render(<RegistryProvider><EditProfileSheet robotId="r-1" onClose={closed} onOpenRoutine={vi.fn()} /></RegistryProvider>)
+    render(<RegistryProvider><EditProfileSheet robotId="r-1" onClose={closed} onOpenTask={vi.fn()} /></RegistryProvider>)
     fireEvent.change(await screen.findByDisplayValue('Sales Outbound'), { target: { value: 'Outbound' } })
     fireEvent.click(screen.getByRole('switch', { name: 'Notifications' }))
     fireEvent.click(screen.getByRole('switch', { name: 'Wake on screen notifications' }))

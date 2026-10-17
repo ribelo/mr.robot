@@ -158,7 +158,7 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     expect(again.closes).toContain(4002)
   })
 
-  it('tells the owner when a Routine meets an offline host (hs-nwcl)', async () => {
+  it('tells the owner when the Turn of a Task meets an offline host (hs-nwcl)', async () => {
     const host = await fakeHost()
     const robot = await robotWith(ANNA, [`${host.hostId}:shell`])
     host.socket.close(1000)
@@ -168,9 +168,9 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
     await api(ANNA, '/api/push/subscriptions', { body: { endpoint: 'https://push.example/phone', keys: { p256dh: b64(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey) as ArrayBuffer)), auth: b64(crypto.getRandomValues(new Uint8Array(16))) }, device: 'phone' } })
     scripts.set(robot, [{ calls: [{ name: 'host_run', args: { host: 'Desk', command: 'backup' } }] }, { text: 'The host is offline.' }])
-    await testRobot(robot).wake({ kind: 'routine', sender: { kind: 'routine', routineId: 'rt-1', name: 'Backup' }, text: 'Run the backup.' })
+    await testRobot(robot).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Backup' }, text: 'Run the backup.' })
     await settle(robot)
-    expect((await member.deliveredForTest()).map((sent) => sent.body).join(' | ')).toContain('could not finish a routine: the host "Desk" is offline')
+    expect((await member.deliveredForTest()).map((sent) => sent.body).join(' | ')).toContain('could not finish a task: the host "Desk" is offline')
   })
 
   it("shows a Robot's notification on the owner's paired computer (pl-b5vp)", async () => {

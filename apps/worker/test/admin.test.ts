@@ -41,19 +41,6 @@ describe('the admin view', () => {
     expect((await api(BEN, '/api/admin')).status).toBe(403)
   })
 
-  it('lists Routines across Robots by next run (robot-bvme)', async () => {
-    const one = await robotOf(ANNA, ['routines'])
-    const two = await robotOf(ANNA, ['routines'])
-    for (const [id, name, time] of [[one, 'Late', '23:00'], [two, 'Early', '06:00']] as const) {
-      scripts.set(id, [{ calls: [{ name: 'routine_set', args: { title: name, prompt: 'go', daily: { time: `${time}:00`, time_zone: 'Europe/Warsaw' } } }] }, { text: 'ok' }])
-      await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'make it' } })
-      await settle(id)
-    }
-    const routines = (await admin()).routines
-    expect(routines.map((routine) => routine.name).sort()).toEqual(['Early', 'Late'])
-    expect(routines[0]!.nextRun!).toBeLessThanOrEqual(routines[1]!.nextRun!)
-  })
-
   it('cost table matches the Member and Robot counters', async () => {
     const id = await robotOf(ANNA)
     scripts.set(id, [{ text: 'one' }])

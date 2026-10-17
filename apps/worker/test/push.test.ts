@@ -63,7 +63,7 @@ describe('Web Push', () => {
 
   it('sends one push per event kind with a deep link to the Conversation (robot-9xoj)', async () => {
     await api(ANNA, '/api/push/subscriptions', { body: await device('phone') })
-    const id = await activeRobot(['routines'])
+    const id = await activeRobot(['tasks'])
 
     scripts.set(id, [
       { calls: [{ name: 'propose_grants', args: { purpose: 'Read web pages', tools: ['web'] } }] },
@@ -71,11 +71,11 @@ describe('Web Push', () => {
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'watch the shop' } })
     await settle(id)
-    await testRobot(id).wake({ kind: 'routine', sender: { kind: 'routine', routineId: 'rt-1', name: 'Check' }, text: 'Check the shop.' })
+    await testRobot(id).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Check' }, text: 'Check the shop.' })
     scripts.set(id, [{ text: 'Shop checked: nothing new.' }])
     await settle(id)
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { model: { provider: 'missing-provider', model: 'x', effort: 'off' } } })
-    await testRobot(id).wake({ kind: 'routine', sender: { kind: 'routine', routineId: 'rt-1', name: 'Check' }, text: 'again' })
+    await testRobot(id).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Check' }, text: 'again' })
     await settle(id)
 
     const sent = await (await member()).deliveredForTest()
@@ -91,7 +91,7 @@ describe('Web Push', () => {
     await api(ANNA, '/api/push/subscriptions', { body: await device('phone') })
     const id = await activeRobot()
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { notifications: { enabled: false, members: [], channels: ['pwa'] } } })
-    await testRobot(id).wake({ kind: 'routine', sender: { kind: 'routine', routineId: 'rt-1', name: 'Check' }, text: 'Check.' })
+    await testRobot(id).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Check' }, text: 'Check.' })
     scripts.set(id, [{ text: 'Checked.' }])
     await settle(id)
     expect(await (await member()).deliveredForTest()).toEqual([])
@@ -104,7 +104,7 @@ describe('Web Push', () => {
     const fmt = (offset: number) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now.getTime() + offset)
     const id = await activeRobot()
     await api(ANNA, '/api/me', { method: 'PATCH', body: { quietHours: { start: fmt(-3_600_000), end: fmt(3_600_000) } } })
-    await testRobot(id).wake({ kind: 'routine', sender: { kind: 'routine', routineId: 'rt-1', name: 'Night' }, text: 'Night check.' })
+    await testRobot(id).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Night' }, text: 'Night check.' })
     scripts.set(id, [{ text: 'All quiet.' }])
     await settle(id)
     expect(await (await member()).deliveredForTest()).toEqual([])
@@ -118,7 +118,7 @@ describe('Web Push', () => {
   it('drops a device the push service no longer knows', async () => {
     await api(ANNA, '/api/push/subscriptions', { body: await device('gone') })
     const id = await activeRobot()
-    await testRobot(id).wake({ kind: 'routine', sender: { kind: 'routine', routineId: 'rt-1', name: 'Check' }, text: 'Check.' })
+    await testRobot(id).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Check' }, text: 'Check.' })
     scripts.set(id, [{ text: 'Checked.' }])
     await settle(id)
     expect(await (await member()).pushDevices()).toEqual([])

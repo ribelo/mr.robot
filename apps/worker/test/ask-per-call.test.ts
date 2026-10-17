@@ -109,10 +109,10 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
     expect(calls).toEqual(['run_code'])
   })
 
-  it('lets a Routine Turn end waiting and resumes the work on the answer', async () => {
+  it('lets the Turn of a Task end waiting and resumes the work on the answer', async () => {
     const id = await askingRobot(false)
     scripts.set(id, [{ calls: [write('report')] }, { text: 'Waiting for my owner.' }])
-    await testRobot(id).wake({ kind: 'routine', sender: { kind: 'routine', routineId: 'rt-1', name: 'Night' }, text: 'Write the report.' })
+    await testRobot(id).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Night' }, text: 'Write the report.' })
     await settle(id)
     expect((await robots(ANNA)).find((robot) => robot.id === id)?.fleetState).toBe('waiting for you')
     const [ask] = await asks(id)

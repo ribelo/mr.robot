@@ -31,7 +31,7 @@ Host tools run as the signed-in OS user, in the login shell of that user. They r
 
 ## A Host that is offline
 
-A Host tool or the Host browser fails with a typed "host offline" error. The Robot tells the owner. If a Routine hit the error, the owner gets a notification. The platform does not fall back to a cloud browser. The owner can set a fallback backend for the Robot on purpose.
+A Host tool or the Host browser fails with a typed "host offline" error. The Robot tells the owner. If a Task's Turn hit the error, the owner gets a notification. The platform does not fall back to a cloud browser. The owner can set a fallback backend for the Robot on purpose.
 
 ## Host browser needs a screen
 

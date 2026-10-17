@@ -390,8 +390,8 @@ const robotChanged = (changed: RegistryEntry) => Effect.gen(function* () {
   const sql = yield* Sql
   const before = yield* entry(changed.id)
   yield* sql.run(
-    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at, accounts, turn, last_wakeup)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at, accounts, turn, last_wakeup, routines_migrated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT (id) DO UPDATE SET identity = excluded.identity, sharing = excluded.sharing, status = excluded.status,
        fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at, accounts = excluded.accounts,
        turn = excluded.turn, last_wakeup = excluded.last_wakeup`,
@@ -521,7 +521,7 @@ const clearRobot = (memberId: string, robotId: string, typed: string) => Effect.
   yield* remote((env) => env.ROBOT.getByName(robotId).clearHistory())
 })
 
-/** Start a Robot over (sk-8won): the Conversation and the whole Workspace back to templates; Grants, Routines, Connections and settings stay. */
+/** Start a Robot over (sk-8won): the Conversation and the whole Workspace back to templates; Grants, Connections and settings stay, and its Tasks. */
 const startOverRobot = (memberId: string, robotId: string, typed: string) => Effect.gen(function* () {
   const found = yield* entry(robotId)
   if (found === undefined || found.ownerId !== memberId) return yield* notFound('no such robot of yours')
@@ -565,8 +565,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     Effect.map(remote((env) => env.MEMBER.getByName(person.id).accounts()), (views) => views.map((view) => ({ id: view.id, provider: view.provider, label: view.label, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
   return {
     fleet: live.map(({ summary: row, row: admin }) => ({ ...row, fleetState: admin.fleetState, status: admin.status, grants: admin.grants, model: admin.model, usage: admin.usage })),
-    routines: live.flatMap(({ summary: row, row: admin }) => admin.routines.map((routine) => ({ ...routine, robotName: row.identity.name, ownerName: row.ownerName })))
-      .sort((a, b) => (a.nextRun ?? Infinity) - (b.nextRun ?? Infinity)),
+    robotsToMigrate: (yield* sql.first<{ n: number }>("SELECT COUNT(*) AS n FROM robot WHERE routines_migrated = 0 AND status != 'deleted'"))?.n ?? 0,
     members: memberRows,
     skills: (yield* sql.all<SkillSql>('SELECT * FROM skill ORDER BY name')).map(skillFromSql),
     skillRepository: yield* skillRepository,
@@ -1314,6 +1313,8 @@ export class Home extends DurableObject<Env> {
     // v1.13 (mc-w1aa): the running Turn's cause and subject, and the last Wake-up, as the Robot reports them.
     try { sql.exec('ALTER TABLE robot ADD COLUMN turn TEXT') } catch { /* added before */ }
     try { sql.exec('ALTER TABLE robot ADD COLUMN last_wakeup TEXT') } catch { /* added before */ }
+    // v1.13 ticket 05: whether the Robot's Routines are Tasks yet; every Robot registered before has them still.
+    try { sql.exec('ALTER TABLE robot ADD COLUMN routines_migrated INTEGER NOT NULL DEFAULT 0') } catch { /* added before */ }
     for (const statement of Tasks.TASK_SCHEMA) sql.exec(statement)
     // v1.12 (ux-2ft4): the Member's avatar as JSON; NULL until they choose one.
     try { sql.exec('ALTER TABLE member ADD COLUMN avatar TEXT') } catch { /* added before */ }
@@ -1350,6 +1351,7 @@ export class Home extends DurableObject<Env> {
     })
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
     ctx.waitUntil(this.destroyOrphans().catch((error: unknown) => console.warn('orphans not destroyed', error)))
+    ctx.waitUntil(this.migrateRoutines().catch((error: unknown) => console.warn('Routines not migrated', error)))
     ctx.waitUntil(this.unsharePersonConnections().catch((error: unknown) => console.warn('person connections not unshared', error)))
     // A restart (a deploy, an eviction) loses the gateway socket: listen again at once, within the gateway's limits.
     ctx.waitUntil(this.ensureDiscordGateway())
@@ -1395,8 +1397,24 @@ export class Home extends DurableObject<Env> {
     return {
       zoneOf: (memberId) => Effect.promise(() => profile(memberId).then((found) => found.timeZone, () => DEFAULT_TIME_ZONE)),
       acceptsFrom: (memberId) => Effect.promise(() => profile(memberId).then((found) => found.acceptTasksFrom ?? [], () => [])),
-      changed: (change) => this.planned([change.before?.assignee, change.after.assignee]),
+      changed: (change) => Effect.andThen(this.planned([change.before?.assignee, change.after.assignee]), this.cards(change)),
     }
+  }
+
+  /**
+   * A Task card in the Conversation of each Robot the change concerns (mc-c1aa): its doer, and the doer it was
+   * given away from. A Robot's own change shows as its own tool call there, so it gets no card.
+   */
+  private cards(change: Tasks.TaskChange): Effect.Effect<void> {
+    const env = this.env
+    const robots = new Set([change.after.assignee, ...(change.action === 'assigned' && change.before !== null ? [change.before.assignee] : [])]
+      .flatMap((assignee) => (assignee.kind === 'robot' ? [assignee.robotId] : [])))
+    const actor = change.actor
+    if (actor.kind === 'robot') robots.delete(actor.robotId)
+    const by = actor.kind === 'platform' ? 'the platform' : actor.name
+    return Effect.promise(() => Promise.all([...robots].map((robotId) =>
+      env.ROBOT.getByName(robotId).taskCard({ kind: 'task', action: change.action, taskId: change.after.id, title: change.after.title, by }).catch((error: unknown) => console.warn('Task card not shown', robotId, error)),
+    ))).pipe(Effect.asVoid)
   }
 
   /** Plan again after Tasks changed: each Robot's earliest due moment (mc-s1aa), and the Home's next reminder (mc-s3cc). */
@@ -1435,6 +1453,30 @@ export class Home extends DurableObject<Env> {
   /** The Turn ended: its attempt ends ok, failed or interrupted, with the first line of the reply. */
   attemptFinished(attemptId: number, outcome: 'ok' | 'failed' | 'interrupted', firstLine: string): Promise<void> {
     return this.run(Tasks.finishAttempt(attemptId, outcome, firstLine))
+  }
+
+  /**
+   * Routines become Tasks (v1.13 ticket 05, mc-t7gg): each Robot not yet migrated hands over its Routines, a few
+   * Robots at a time; the Home stores them as Tasks, then the Robot drops its tables. A Robot that cannot be reached
+   * stays to migrate and is tried again at the Home's next start.
+   */
+  async migrateRoutines(): Promise<void> {
+    const sql = this.ctx.storage.sql
+    const pending = sql.exec<RobotSql>("SELECT * FROM robot WHERE routines_migrated = 0 AND status != 'deleted'").toArray().map(entryFromSql)
+    for (let index = 0; index < pending.length; index += 8) {
+      await Promise.all(pending.slice(index, index + 8).map(async (entry) => {
+        try {
+          const robot = this.env.ROBOT.getByName(entry.id)
+          const routines = await robot.exportRoutines()
+          await this.run(Tasks.importRoutines(entry, routines))
+          await robot.dropRoutines()
+          sql.exec('UPDATE robot SET routines_migrated = 1 WHERE id = ?', entry.id)
+          await this.run(this.planned([{ kind: 'robot', robotId: entry.id }]))
+        } catch (error) {
+          console.warn('Routines of a Robot not migrated; tried again at the next start', entry.id, error)
+        }
+      }))
+    }
   }
 
   /** A due Task whose earlier Wake-up has not been served yet: the occurrence is skipped (cd-d14a). */
@@ -1555,7 +1597,7 @@ export class Home extends DurableObject<Env> {
     await Promise.all(robots.map((robot) => this.env.ROBOT.getByName(robot.id).ownerChanged(owner).catch((error: unknown) => console.warn('owner change not delivered', robot.id, error))))
   }
 
-  /** A Member's profile zone changed: each of their Robots follows it, recomputes its Routines and notes it. */
+  /** A Member's profile zone changed: their recurring Tasks keep their local time, and each of their Robots follows it and notes it. */
   async timeZoneChanged(memberId: string, timeZone: string, from?: string): Promise<void> {
     if (from !== undefined && from !== timeZone) {
       const moved = await this.run(Tasks.rezoneTasks(memberId, from, timeZone))

@@ -5,7 +5,7 @@ A Grant is a permission the owner gives a Robot. Everything is off until granted
 ## Grant items
 
 A grant item is one of these:
-- a tool group: files, web, browser, routines, messaging, notify, skills, secrets, exa, exa-agent
+- a tool group: files, web, browser, tasks, messaging, notify, skills, secrets, exa, exa-agent
 - a skill
 - a recipient Robot (a Robot it may message)
 - a Connection, with a separate item for Connection write. The item names its plugin and account, for example "Google · anna@example.com". Read connections.md.
@@ -31,7 +31,7 @@ An item with no stored level is deny.
 4. If the owner approves, the platform runs the stored call: the same tool with the same arguments. A Wake-up "[Your owner approved <tool> (<Ask id>)]" gives the Robot the result.
 5. If the owner rejects, the call does not run. A Wake-up "[Your owner rejected <tool> (<Ask id>): <reason>]" tells the Robot.
 
-This also works in a Routine Turn that nobody watches: the Ask waits, and the answer wakes the Robot later.
+This also works in a Task's Turn that nobody watches: the Ask waits, and the answer wakes the Robot later.
 
 One approval covers exactly one call. The platform never remembers an approval.
 

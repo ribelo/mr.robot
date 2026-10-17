@@ -18,10 +18,10 @@ const panel: RobotPanel = {
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true,
   },
-  routines: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limit: { limit: { kind: 'none' }, from: 'home' } }, canEdit: true, takeover: null,
+  tasks: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, limit: { limit: { kind: 'none' }, from: 'home' } }, canEdit: true, takeover: null,
 }
 
-const handlers = () => ({ onOpenRoutine: vi.fn(), onEditProfile: vi.fn(), onOpenScreen: vi.fn(), onAdvanced: vi.fn(), onTrajectory: vi.fn(), onFiles: vi.fn(), onClose: vi.fn() })
+const handlers = () => ({ onOpenTask: vi.fn(), onEditProfile: vi.fn(), onOpenScreen: vi.fn(), onAdvanced: vi.fn(), onTrajectory: vi.fn(), onFiles: vi.fn(), onClose: vi.fn() })
 
 describe('open requests for help in the Panel (sk-fmvh)', () => {
   it('lists each with its text, age, urgency and whether Mr. Robot was asked; a click opens its card', () => {

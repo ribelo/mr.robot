@@ -6,7 +6,7 @@
 import { TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
-import { recordFromLegacy, type ScheduleRecord } from '../agent/schedule.ts'
+import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
 import { GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
 import type {
@@ -25,13 +25,14 @@ import type {
   ReviewView,
   RewindView,
   RobotStatus,
-  RoutineSchedule,
   RobotSpendLimit,
   ThreadEvent,
   ThreadView,
   BrowserBackend,
   Sender,
   Sharing,
+  TaskAction,
+  WakeupKind,
 } from '@mr-robot/protocol'
 
 export interface RobotConfig {
@@ -69,7 +70,7 @@ export interface RobotConfig {
   readonly createdAt: number
 }
 
-export type WakeupKind = 'member' | 'routine' | 'task' | 'robot' | 'channel' | 'takeover' | 'platform'
+export type { WakeupKind }
 
 export interface Wakeup {
   readonly id: number
@@ -79,21 +80,6 @@ export interface Wakeup {
   /** Extra structured data the turn needs (attachments, robot request ids, channel reply route). */
   readonly payload: Record<string, unknown>
   readonly createdAt: number
-}
-
-export interface RoutineRow {
-  readonly id: string
-  readonly name: string
-  readonly prompt: string
-  readonly schedule: RoutineSchedule
-  readonly timeZone: string
-  readonly nextRun: number | null
-  readonly lastRun: number | null
-  readonly createdAt: number
-  readonly paused: boolean
-  /** The DSH schedule record: title, prompt, rule and next target. */
-  readonly record: ScheduleRecord
-  readonly sessionId: string
 }
 
 /** The Turn running now: its Wake-up, where it starts in the log, and the Task it works on with that Task's attempt. */
@@ -112,12 +98,21 @@ export interface ProposalRow extends ProposalView {
   readonly payload: Record<string, unknown>
 }
 
-/** A notice the chat shows as a Routine card instead of a line of text (a Routine another Robot changed). */
-export interface RoutineCard {
+/** A notice the chat shows as a Task card (mc-c1aa): someone other than this Robot changed one of its Tasks. */
+export interface TaskCard {
+  readonly kind: 'task'
+  readonly action: TaskAction
+  readonly taskId: string
+  readonly title: string
+  /** Who changed it. */
+  readonly by: string
+}
+
+/** A Routine card stored before v1.13; read as a Task card (mc-c2bb). */
+export interface StoredRoutineCard {
   readonly kind: 'routine'
   readonly action: 'created' | 'updated' | 'deleted' | 'paused' | 'resumed'
   readonly name: string
-  /** Who changed it. */
   readonly by: string
 }
 
@@ -128,7 +123,7 @@ export interface ThreadCard {
   readonly event: ThreadEvent
 }
 
-export type NoticeCard = RoutineCard | ThreadCard
+export type NoticeCard = TaskCard | ThreadCard | StoredRoutineCard
 
 /** This chief's copy of a Thread: the state the Home last told it, and the messages since the owner last let it go on (ch-408z). */
 export interface ThreadCopy {
@@ -145,19 +140,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-/** How many runs of one Routine the Robot keeps (cd-3t0p). */
-export const ROUTINE_RUNS_KEPT = 20
-
-export type RoutineRunOutcome = 'running' | 'ok' | 'failed' | 'skipped'
-
-export interface RoutineRun {
-  readonly startedAt: number
-  readonly finishedAt: number | null
-  readonly outcome: RoutineRunOutcome
-  readonly firstLine: string
-}
-
-const SCHEMA_VERSION = 10
+const SCHEMA_VERSION = 12
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -178,6 +161,10 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Routines are Tasks at the Home (v1.13 ticket 05): a Robot without any has no Routine tables; the Home takes the others' and drops them.
+  12: [dropEmptyRoutines],
+  // The routines tool group became tasks (v1.13, mc-r1aa): the same Grant, by its new name.
+  11: ["UPDATE OR REPLACE grant_item SET name = 'tasks' WHERE kind = 'tool' AND name = 'routines'"],
   // The Task a Turn works on and its attempt at the Home (v1.13, mc-w3cc).
   10: [(sql) => addColumns(sql, 'turn', ['task_id TEXT', 'task_title TEXT', 'attempt_id INTEGER'])],
   // Typed spend limits (v1.12, ux-ommv).
@@ -327,7 +314,9 @@ export class RobotStore {
     this.transaction(() => {
       this.sql.exec('DELETE FROM grant_item')
       for (const [kind, field] of Object.entries(GRANT_FIELDS) as Array<[GrantKind, keyof GrantSet]>) {
-        for (const [name, level] of Object.entries(grants[field])) {
+        for (const [given, level] of Object.entries(grants[field])) {
+          // A proposal made before v1.13 names the group by its old name (mc-r1aa).
+          const name = kind === 'tool' && given === 'routines' ? 'tasks' : given
           if (kept(kind, level)) this.sql.exec('INSERT INTO grant_item (kind, name, level) VALUES (?, ?, ?)', kind, name, level)
         }
       }
@@ -510,75 +499,6 @@ export class RobotStore {
 
   resetThreadWindow(id: string): void {
     this.sql.exec('UPDATE thread SET window_count = 0 WHERE id = ?', id)
-  }
-
-  // ------------------------------------------------------------ routines
-
-  routines(): RoutineRow[] {
-    return this.sql.exec<RoutineSql>('SELECT * FROM routine ORDER BY created_at').toArray().map(routineFromSql)
-  }
-
-  routine(id: string): RoutineRow | undefined {
-    const row = this.sql.exec<RoutineSql>('SELECT * FROM routine WHERE id = ?', id).toArray()[0]
-    return row === undefined ? undefined : routineFromSql(row)
-  }
-
-  saveRoutine(routine: RoutineRow): void {
-    this.sql.exec(
-      `INSERT INTO routine (id, name, prompt, schedule, time_zone, next_run, last_run, created_at, paused, record, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET name = excluded.name, prompt = excluded.prompt, schedule = excluded.schedule,
-         time_zone = excluded.time_zone, next_run = excluded.next_run, last_run = excluded.last_run, paused = excluded.paused,
-         record = excluded.record, session_id = excluded.session_id`,
-      routine.id, routine.name, routine.prompt, JSON.stringify(routine.schedule), routine.timeZone,
-      routine.nextRun, routine.lastRun, routine.createdAt, routine.paused ? 1 : 0, JSON.stringify(routine.record), routine.sessionId,
-    )
-  }
-
-  /** A run starts: its Turn is queued as the given wake-up. Only the newest ROUTINE_RUNS_KEPT runs of the Routine are kept. */
-  addRoutineRun(routineId: string, wakeupId: number, at: number): void {
-    this.sql.exec("INSERT INTO routine_run (wakeup_id, routine_id, started_at, outcome, first_line) VALUES (?, ?, ?, 'running', '')", wakeupId, routineId, at)
-    this.pruneRoutineRuns(routineId)
-  }
-
-  /** A due run that did not start because the previous one has not finished (cd-d14a keeps a Routine from flooding its Robot). */
-  addSkippedRoutineRun(routineId: string, at: number, firstLine: string): void {
-    this.sql.exec("INSERT INTO routine_run (wakeup_id, routine_id, started_at, finished_at, outcome, first_line) VALUES (NULL, ?, ?, ?, 'skipped', ?)", routineId, at, at, firstLine)
-    this.pruneRoutineRuns(routineId)
-  }
-
-  finishRoutineRun(wakeupId: number, outcome: 'ok' | 'failed', firstLine: string, at: number): void {
-    this.sql.exec('UPDATE routine_run SET outcome = ?, first_line = ?, finished_at = ? WHERE wakeup_id = ?', outcome, firstLine, at, wakeupId)
-  }
-
-  /** Whether an earlier run of the Routine is still queued or running. */
-  routineRunPending(routineId: string): boolean {
-    return this.sql.exec(
-      "SELECT 1 FROM routine_run WHERE routine_id = ? AND outcome = 'running' AND wakeup_id IN (SELECT id FROM wakeup)", routineId,
-    ).toArray().length > 0
-  }
-
-  /** Runs whose Turn can no longer happen (the Conversation was cleared) end as failed. */
-  abandonRoutineRuns(at: number): void {
-    this.sql.exec("UPDATE routine_run SET outcome = 'failed', first_line = 'Cleared with the Conversation.', finished_at = ? WHERE outcome = 'running'", at)
-  }
-
-  routineRuns(routineId: string): RoutineRun[] {
-    return this.sql.exec<{ started_at: number; finished_at: number | null; outcome: RoutineRunOutcome; first_line: string }>(
-      'SELECT started_at, finished_at, outcome, first_line FROM routine_run WHERE routine_id = ? ORDER BY started_at DESC, id DESC LIMIT ?', routineId, ROUTINE_RUNS_KEPT,
-    ).toArray().map((row) => ({ startedAt: row.started_at, finishedAt: row.finished_at, outcome: row.outcome, firstLine: row.first_line }))
-  }
-
-  private pruneRoutineRuns(routineId: string): void {
-    this.sql.exec(
-      'DELETE FROM routine_run WHERE routine_id = ? AND id NOT IN (SELECT id FROM routine_run WHERE routine_id = ? ORDER BY started_at DESC, id DESC LIMIT ?)',
-      routineId, routineId, ROUTINE_RUNS_KEPT,
-    )
-  }
-
-  deleteRoutine(id: string): boolean {
-    const deleted = this.sql.exec('DELETE FROM routine WHERE id = ?', id).rowsWritten > 0
-    if (deleted) this.sql.exec('DELETE FROM routine_run WHERE routine_id = ?', id)
-    return deleted
   }
 
   // ------------------------------------------------------------ wake-ups and the active turn
@@ -823,40 +743,10 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
   }
 }
 
-type RoutineSql = {
-  id: string
-  name: string
-  prompt: string
-  schedule: string
-  time_zone: string
-  next_run: number | null
-  last_run: number | null
-  created_at: number
-  paused: number
-  record: string | null
-  session_id: string | null
-}
-
-function routineFromSql(row: RoutineSql): RoutineRow {
-  return {
-    id: row.id,
-    name: row.name,
-    prompt: row.prompt,
-    schedule: JSON.parse(row.schedule) as RoutineSchedule,
-    timeZone: row.time_zone,
-    nextRun: row.next_run,
-    lastRun: row.last_run,
-    createdAt: row.created_at,
-    paused: row.paused === 1,
-    // A Routine stored before the DSH schedule port becomes the record it describes.
-    record: row.record === null ? recordFromLegacy(row.id, row.name, row.prompt, JSON.parse(row.schedule) as RoutineSchedule, row.time_zone, (row.next_run ?? Date.now()) - 1) : (JSON.parse(row.record) as ScheduleRecord),
-    sessionId: row.session_id ?? '',
-  }
-}
-
 type WakeupSql = {
   id: number
-  kind: WakeupKind
+  /** 'routine' for a Wake-up queued before v1.13. */
+  kind: WakeupKind | 'routine'
   sender: string
   text: string
   payload: string
@@ -864,12 +754,12 @@ type WakeupSql = {
 }
 
 function wakeupFromSql(row: WakeupSql): Wakeup {
-  return {
+  return legacyWakeup<Wakeup>({
     id: row.id,
-    kind: row.kind,
+    kind: row.kind as WakeupKind,
     sender: JSON.parse(row.sender) as Sender,
     text: row.text,
     payload: JSON.parse(row.payload) as Record<string, unknown>,
     createdAt: row.created_at,
-  }
+  })
 }

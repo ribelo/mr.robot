@@ -30,7 +30,7 @@ async function setupThroughProposal(as: string): Promise<{ id: string; proposal:
   const id = await newRobot(as)
   scripts.set(id, [
     { calls: [{ name: 'set_identity', args: { name: 'Flat Watcher', title: 'Housing', description: 'Watches apartment prices.', avatarColor: '#3b82f6' } }] },
-    { calls: [{ name: 'setup_complete', args: { purpose: 'Watch listings daily', tools: ['web', 'routines'], skills: [], recipients: [], secrets: [] } }] },
+    { calls: [{ name: 'setup_complete', args: { purpose: 'Watch listings daily', tools: ['web', 'tasks'], skills: [], recipients: [], secrets: [] } }] },
     { text: 'Here is what I need.' },
   ])
   await api(as, `/api/robots/${id}/messages`, { body: { text: 'Check Otodom every morning.' } })
@@ -60,7 +60,7 @@ describe('creating a Robot', () => {
   it('asks for Grants in one summary; approval is a compare-and-swap that applies exactly that set (robot-cobv)', async () => {
     const { id, proposal } = await setupThroughProposal(ANNA)
     // What the owner approves is what is applied: the asked items at allow, files, web and exa at ask unless asked (sk-3sij).
-    expect(proposal).toMatchObject({ kind: 'setup', status: 'open', grants: { tools: { web: 'allow', routines: 'allow', files: 'ask', exa: 'ask' } } })
+    expect(proposal).toMatchObject({ kind: 'setup', status: 'open', grants: { tools: { web: 'allow', tasks: 'allow', files: 'ask', exa: 'ask' } } })
     expect(proposal.file).toBeNull()
 
     const stale = await api(ANNA, `/api/robots/${id}/proposals/${proposal.id}`, { body: { revision: proposal.revision + 1, approve: true } })
@@ -74,10 +74,10 @@ describe('creating a Robot', () => {
     const robot = (await robots(ANNA)).find((entry) => entry.id === id)
     expect(robot).toMatchObject({ status: 'active', identity: { name: 'Flat Watcher' } })
     const settings = await env.ROBOT.getByName(id).settings()
-    expect(settings.grants).toEqual({ tools: { exa: 'ask', files: 'ask', routines: 'allow', web: 'allow' }, skills: {}, recipients: {}, secrets: {}, hosts: {}, connections: {} })
+    expect(settings.grants).toEqual({ tools: { exa: 'ask', files: 'ask', tasks: 'allow', web: 'allow' }, skills: {}, recipients: {}, secrets: {}, hosts: {}, connections: {} })
     // Ask items are registered; what was neither approved nor a default is not (sk-3sij).
     const registered = await env.ROBOT.getByName(id).toolNames()
-    expect(registered).toEqual(expect.arrayContaining(['delete_file', 'web_search_exa', 'routine_set']))
+    expect(registered).toEqual(expect.arrayContaining(['delete_file', 'web_search_exa', 'task_create']))
     expect(registered).not.toContain('browser_open')
     expect(registered).not.toContain('exa_agent_list_events')
 

@@ -52,7 +52,7 @@ export const PLUGINS: readonly PluginEntry[] = [
   capability('files', 'Files', 'folder'),
   capability('web', 'Web', 'globe'),
   capability('browser', 'Browser', 'browser'),
-  capability('routines', 'Routines', 'alarm'),
+  capability('tasks', 'Tasks', 'alarm'),
   capability('messaging', 'Messaging', 'send'),
   capability('secrets', 'Logins', 'key'),
   capability('skills', 'Skills', 'sparkle'),

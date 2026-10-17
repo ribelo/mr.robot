@@ -21,7 +21,7 @@ const settings = {
   memberSpendLimit: { kind: 'none' },
   models: [kimi, sonnet, glm],
 } as const
-const view: AdminView = { fleet: [], routines: [], members: [], skills: [], skillRepository: null, providers: [], settings }
+const view: AdminView = { fleet: [], robotsToMigrate: 0, members: [], skills: [], skillRepository: null, providers: [], settings }
 
 /** The Save button of Home settings: the one right after the spend limits. */
 const saveHomeSettings = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Spend limit per Member' }).closest('.form')!.nextElementSibling as HTMLElement).getByRole('button', { name: 'Save' }))

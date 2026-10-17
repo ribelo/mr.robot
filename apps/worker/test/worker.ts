@@ -33,6 +33,11 @@ export class Home extends ProductionHome {
     return this.ctx.storage.getAlarm()
   }
 
+  /** The Robot's Routines are not Tasks yet, as for every Robot registered before v1.13. */
+  async unmigrateForTest(robotId: string): Promise<void> {
+    this.ctx.storage.sql.exec('UPDATE robot SET routines_migrated = 0 WHERE id = ?', robotId)
+  }
+
   /** Pretend the platform was down for `ms`: every Task's moment moves into the past, and the Robots and the alarm hear it. */
   async backdateTasksForTest(ms: number): Promise<void> {
     const sql = this.ctx.storage.sql
@@ -168,14 +173,33 @@ export class Robot extends ProductionRobot {
     await this.changed()
   }
 
-  /** Pretend the Robot was down: every Routine's next run moves into the past by `ms`. */
-  async backdateRoutinesForTest(ms: number): Promise<void> {
-    for (const routine of this.store.routines()) {
-      // Back in time as if the DO had slept: the stored DSH record's target moves too.
-      if (routine.nextRun !== null) this.store.saveRoutine({ ...routine, nextRun: Date.now() - ms, createdAt: routine.createdAt - ms, record: { ...routine.record, scheduledAt: new Date(Date.now() - ms).toISOString() } })
+  /**
+   * The Robot as it was before v1.13 (ticket 05): Routine tables with these rows and runs, as the old migrations
+   * left them, so the Home's migration finds something to take.
+   */
+  async seedRoutinesForTest(routines: ReadonlyArray<{ id: string; name: string; prompt: string; record: Record<string, unknown>; nextRun: number | null; paused?: boolean; runs: ReadonlyArray<{ startedAt: number; outcome: string; firstLine: string }> }>): Promise<void> {
+    const sql = this.store.sql
+    sql.exec('CREATE TABLE IF NOT EXISTS routine (id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, schedule TEXT NOT NULL, time_zone TEXT NOT NULL, next_run INTEGER, last_run INTEGER, created_at INTEGER NOT NULL, paused INTEGER NOT NULL DEFAULT 0, record TEXT, session_id TEXT)')
+    sql.exec('CREATE TABLE IF NOT EXISTS routine_run (id INTEGER PRIMARY KEY AUTOINCREMENT, wakeup_id INTEGER, routine_id TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, outcome TEXT NOT NULL, first_line TEXT NOT NULL)')
+    for (const routine of routines) {
+      sql.exec('INSERT INTO routine (id, name, prompt, schedule, time_zone, next_run, last_run, created_at, paused, record, session_id) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+        routine.id, routine.name, routine.prompt, JSON.stringify({ kind: 'daily', time: '09:00' }), 'Europe/Warsaw', routine.nextRun, Date.now() - 86_400_000, routine.paused === true ? 1 : 0, JSON.stringify(routine.record), 's-old')
+      for (const run of routine.runs) sql.exec('INSERT INTO routine_run (wakeup_id, routine_id, started_at, finished_at, outcome, first_line) VALUES (NULL, ?, ?, ?, ?, ?)', routine.id, run.startedAt, run.startedAt + 1000, run.outcome, run.firstLine)
     }
-    await this.ctx.storage.setAlarm(Date.now() - ms)
   }
+
+  /** A Routine card notice and a queued Routine Wake-up, as a Robot before v1.13 stored them (mc-c2bb). */
+  async seedRoutineItemsForTest(routineId: string, name: string): Promise<void> {
+    const config = this.store.requireConfig()
+    this.store.sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, ?)', 'n-old', config.liveSessionId, 0, Date.now(), `Routine created by Mr. Robot: ${name}`, JSON.stringify({ kind: 'routine', action: 'created', name, by: 'Mr. Robot' }))
+    this.store.sql.exec('INSERT INTO wakeup (kind, sender, text, payload, created_at) VALUES (?, ?, ?, ?, ?)', 'routine', JSON.stringify({ kind: 'routine', routineId, name }), 'Do the old thing.', JSON.stringify({ routineId, due: Date.now(), attachments: [] }), Date.now())
+  }
+
+  /** Whether the Routine tables are still there. */
+  async hasRoutineTablesForTest(): Promise<boolean> {
+    return this.store.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name IN ('routine', 'routine_run')").toArray().length > 0
+  }
+
 
   /** Pretend `ms` passed since the Robot asked for help: open requests move into the past and the alarm comes due (v1.11 ticket 07). */
   async backdateHelpForTest(ms: number): Promise<void> {

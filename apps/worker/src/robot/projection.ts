@@ -3,9 +3,9 @@
  * log the Trajectory shows (robot-frf5). Nothing here is stored separately except notices.
  */
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender, ThreadView } from '@mr-robot/protocol'
+import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender, TaskAction, ThreadView } from '@mr-robot/protocol'
 import { MEMBER_TIME_LABEL } from '../agent/sources.ts'
-import type { NoticeRow } from './store.ts'
+import type { NoticeRow, StoredRoutineCard } from './store.ts'
 
 interface ContentBlock { readonly type: string; readonly text?: string }
 interface MessageLike { readonly id: string; readonly content: readonly ContentBlock[]; readonly source?: Record<string, unknown> }
@@ -13,28 +13,47 @@ interface MessageLike { readonly id: string; readonly content: readonly ContentB
 /** Tools whose use the chat already shows in their own way (a 👍 on the message). */
 const HIDDEN_TOOLS = new Set(['react'])
 
-/** Tool names Conversations stored before the product's own Routine tools; read-only, so old cards still render. */
-const LEGACY_ROUTINE_TOOLS: Record<string, 'created' | 'updated' | 'deleted'> = {
+/**
+ * Routine tools of Conversations stored before v1.13, and the schedule tools before them: read-only, so their
+ * cards still render, as the Task cards they now are (mc-c2bb). A deleted Routine reads as a cancelled Task.
+ */
+const LEGACY_ROUTINE_TOOLS: Record<string, TaskAction> = {
   routine_create: 'created',
   routine_update: 'updated',
-  routine_delete: 'deleted',
+  routine_delete: 'cancelled',
+  routine_pause: 'paused',
   schedule_create: 'created',
   schedule_update: 'updated',
-  schedule_delete: 'deleted',
+  schedule_delete: 'cancelled',
 }
 
+/** The card of a stored Routine tool call; a call about another Robot (robot_id) has none here. */
+function routineAction(name: string, args: Record<string, unknown>): TaskAction | undefined {
+  if (args['robot_id'] !== undefined) return undefined
+  if (name === 'routine_set') return args['id'] === undefined ? 'created' : 'updated'
+  if (name === 'routine_pause') return args['paused'] === false ? 'resumed' : 'paused'
+  return LEGACY_ROUTINE_TOOLS[name]
+}
+
+/** A Routine card notice stored before v1.13, as the Task card it now is. */
+const ROUTINE_CARD_ACTIONS: Record<StoredRoutineCard['action'], TaskAction> = { created: 'created', updated: 'updated', deleted: 'cancelled', paused: 'paused', resumed: 'resumed' }
 /**
- * The card a Routine tool call shows in the Conversation of the Robot that made it. A call with robot_id changes
- * another Robot's Routine; that Robot's Conversation shows the card ("Routine created by <name>"), not this one.
+ * The card a Task tool call shows in the Conversation of the Robot that made it (mc-c1aa). A call with robot_id
+ * works as another Robot; the Home tells that Robot's Conversation, not this one.
  */
-function routineAction(name: string, args: Record<string, unknown>): 'created' | 'updated' | 'deleted' | undefined {
+function taskAction(name: string, args: Record<string, unknown>): TaskAction | undefined {
   if (args['robot_id'] !== undefined) return undefined
   switch (name) {
-    case 'routine_set': return args['id'] === undefined ? 'created' : 'updated'
-    case 'routine_delete': return 'deleted'
-    default: return LEGACY_ROUTINE_TOOLS[name]
+    case 'task_create': return 'created'
+    case 'task_update': return 'updated'
+    case 'task_assign': return 'assigned'
+    case 'task_done': return 'done'
+    case 'task_cancel': return 'cancelled'
+    case 'task_pause': return args['paused'] === false ? 'resumed' : 'paused'
+    default: return undefined
   }
 }
+
 const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'propose_review', 'request_takeover', 'setup_complete', 'need_help'])
 
 export interface ProjectionInput {
@@ -64,7 +83,9 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         ? { kind: 'notice', id: notice.id, seq: notice.afterSeq, at: notice.at, text: notice.text }
         : notice.card.kind === 'thread'
           ? { kind: 'thread', id: notice.id, seq: notice.afterSeq, at: notice.at, event: notice.card.event, thread: thread! }
-          : { kind: 'routine', id: notice.id, seq: notice.afterSeq, at: notice.at, action: notice.card.action, name: notice.card.name, by: notice.card.by })
+          : notice.card.kind === 'task'
+            ? { kind: 'task', id: notice.id, seq: notice.afterSeq, at: notice.at, action: notice.card.action, taskId: notice.card.taskId, title: notice.card.title, by: notice.card.by }
+            : { kind: 'task', id: notice.id, seq: notice.afterSeq, at: notice.at, action: ROUTINE_CARD_ACTIONS[notice.card.action], taskId: '', title: notice.card.name, by: notice.card.by })
     }
   }
 
@@ -97,10 +118,6 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           if (summary.length > 0 && message.source?.['hidden'] !== true) {
             items.push({ kind: 'notice', id: message.id, seq: event.seq, at: event.time, text: summary })
           }
-          break
-        }
-        if (sender.kind === 'routine') {
-          items.push({ kind: 'routine', id: message.id, seq: event.seq, at: event.time, action: 'ran', name: sender.name })
           break
         }
         if (sender.kind === 'task') {
@@ -189,9 +206,12 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         }
         inners.forEach((inner, index) => {
           if (inner.name === 'thread_send') sentMessage(inner.args, message.id + '-' + String(index), event, undefined)
+          const innerTask = taskAction(inner.name, inner.args)
           const innerAction = routineAction(inner.name, inner.args)
-          if (innerAction !== undefined) {
-            items.push({ kind: 'routine', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, name: String(inner.args['title'] ?? inner.args['name'] ?? 'Routine') })
+          if (innerTask !== undefined) {
+            items.push({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerTask, taskId: String(inner.args['task_id'] ?? ''), title: String(inner.args['title'] ?? 'a Task') })
+          } else if (innerAction !== undefined) {
+            items.push({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, taskId: String(inner.args['id'] ?? ''), title: String(inner.args['title'] ?? inner.args['name'] ?? 'a Task') })
           } else if (inner.name === 'react' && lastMemberMessage >= 0) {
             const target = items[lastMemberMessage]
             if (target?.kind === 'message') items[lastMemberMessage] = { ...target, reaction: String(inner.args['emoji'] ?? '👍') }
@@ -200,9 +220,12 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         const result = parseResult(message)
         if (call.name === 'thread_send') sentMessage(call.args, message.id, event, result)
         const action = routineAction(call.name, call.args)
-        if (action !== undefined) {
-          const name = String(result['title'] ?? result['name'] ?? call.args['title'] ?? call.args['name'] ?? 'Routine')
-          items.push({ kind: 'routine', id: message.id, seq: event.seq, at: event.time, action, name })
+        const task = taskAction(call.name, call.args)
+        if (task !== undefined && typeof result['id'] === 'string') {
+          items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action: task, taskId: result['id'], title: String(result['title'] ?? 'a Task') })
+        } else if (action !== undefined) {
+          const title = String(result['title'] ?? result['name'] ?? call.args['title'] ?? call.args['name'] ?? 'a Task')
+          items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action, taskId: String(result['id'] ?? call.args['id'] ?? ''), title })
         } else if (QUESTION_TOOLS.has(call.name) && typeof (result['proposalId'] ?? result['requestId']) === 'string') {
           const proposal = input.proposal(String(result['proposalId'] ?? result['requestId']))
           if (proposal !== undefined) items.push({ kind: 'question', id: message.id, seq: event.seq, at: event.time, proposal })
@@ -242,13 +265,12 @@ export function chatTextOf(event: SessionEvent): ChatText | undefined {
   const text = visibleText(message, sender).trim()
   if (text.length === 0) return undefined
   const label = sender.kind === 'member' || sender.kind === 'robot' ? sender.name
-    : sender.kind === 'routine' ? `Routine ${sender.name}`
-      : sender.kind === 'task' ? `Task ${sender.name}`
+    : sender.kind === 'task' ? `Task ${sender.name}`
       : sender.kind === 'channel' ? `${sender.channel} ${sender.from}` : ''
   return { id: message.id, kind: 'message', sender: label, text }
 }
 
-/** Message sources that are people, Robots, Routines, Channels or Mr. Robot's platform notes. */
+/** Message sources that are people, Robots, Tasks (and the Routines they were before v1.13), Channels or Mr. Robot's platform notes. */
 const CHAT_SOURCES = new Set(['member', 'robot', 'routine', 'task', 'channel', 'platform'])
 
 function senderOf(source: Record<string, unknown> | undefined): Sender {
@@ -258,8 +280,9 @@ function senderOf(source: Record<string, unknown> | undefined): Sender {
     case 'robot':
       // A message stored before avatar seeds existed has none: the sender's id is its seed (ux-4fgy).
       return { kind: 'robot', robotId: String(source['robotId']), name: String(source['name']), avatarColor: String(source['avatarColor']), avatarSeed: typeof source['avatarSeed'] === 'string' && source['avatarSeed'] !== '' ? source['avatarSeed'] : String(source['robotId']) }
+    // A Routine's Wake-up stored before v1.13 is its Task's (mc-c2bb).
     case 'routine':
-      return { kind: 'routine', routineId: String(source['routineId']), name: String(source['name']) }
+      return { kind: 'task', taskId: String(source['routineId']), name: String(source['name']) }
     case 'task':
       return { kind: 'task', taskId: String(source['taskId']), name: String(source['name']) }
     case 'channel':

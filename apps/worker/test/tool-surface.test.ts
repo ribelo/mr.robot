@@ -71,19 +71,16 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
     expect(JSON.parse(results[3]!)).toEqual([])
   })
 
-  it('routine_set refuses after_seconds under 60 and every_seconds under 300, in Routine words (ts-lnox, ts-x0kl)', async () => {
-    const id = await robotWith({ tools: ['routines'] })
-    const [after, every, fine] = await say(id, [
-      { name: 'routine_set', args: { title: 'Soon', prompt: 'ping', after_seconds: 5 } },
-      { name: 'routine_set', args: { title: 'Often', prompt: 'ping', every_seconds: 120 } },
-      { name: 'routine_set', args: { title: 'Later', prompt: 'ping', after_seconds: 120 } },
+  it('task_create refuses a recurring rule under 5 minutes and two rules at once, in Task words (ts-lnox, ts-x0kl)', async () => {
+    const id = await robotWith({ tools: ['tasks'] })
+    const [often, both, fine] = await say(id, [
+      { name: 'task_create', args: { title: 'Often', instructions: 'ping', assignee: 'self', timing: { kind: 'recurring', every_minutes: 2 } } },
+      { name: 'task_create', args: { title: 'Two', instructions: 'ping', assignee: 'self', timing: { kind: 'recurring', every_minutes: 10, daily: { time: '09:00' } } } },
+      { name: 'task_create', args: { title: 'Later', instructions: 'ping', assignee: 'self', timing: { kind: 'recurring', every_minutes: 10 } } },
     ])
-    expect(after).toContain('after_seconds must be at least 60')
-    expect(every).toContain('at least 5 minutes')
-    expect(fine).not.toContain('must be at least')
-    const [both] = await say(id, [{ name: 'routine_set', args: { title: 'Two', prompt: 'ping', after_seconds: 120, every_seconds: 120 } }])
-    expect(both).toContain('Routine')
-    expect(both).not.toMatch(/reminder/i)
+    expect(often).toContain('A recurring Task must wait at least 5 minutes')
+    expect(both).toContain('a recurring Task needs exactly one of every_minutes, daily, weekly or cron')
+    expect(fine).not.toContain('at least')
   })
 
   it('robot_directory without recipients is an empty list with a hint (ts-nivs)', async () => {
@@ -153,21 +150,21 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
     const [refused] = await say(id, [{ name: 'propose_grants', args: { purpose: 'Lower myself', tools: [{ name: 'web', level: 'deny' }] } }])
     expect(refused).toContain('must be allow or ask')
     // The Conversation so far comes back too: the newest result is the last.
-    const asked = (await say(id, [{ name: 'propose_grants', args: { purpose: 'Read listing pages', tools: [{ name: 'web', level: 'ask' }, 'routines'] } }])).at(-1)
-    expect(JSON.parse(asked!).grants.tools).toEqual({ web: 'ask', routines: 'allow' })
+    const asked = (await say(id, [{ name: 'propose_grants', args: { purpose: 'Read listing pages', tools: [{ name: 'web', level: 'ask' }, 'tasks'] } }])).at(-1)
+    expect(JSON.parse(asked!).grants.tools).toEqual({ web: 'ask', tasks: 'allow' })
     const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
     if (question?.kind !== 'question') throw new Error('no grant question')
     scripts.set(id, [{ text: 'Thanks.' }])
     await api(ANNA, `/api/robots/${id}/proposals/${question.proposal.id}`, { body: { revision: question.proposal.revision, approve: true } })
     await settle(id)
-    expect((await grantsOf(id)).tools).toEqual({ files: 'allow', web: 'ask', routines: 'allow' })
+    expect((await grantsOf(id)).tools).toEqual({ files: 'allow', web: 'ask', tasks: 'allow' })
   })
 })
 
 describe('code mode declares only the tools a Robot may use (sk-3i46)', () => {
   it('has allow and ask tools in the SDK the model reads and no deny tool', async () => {
     const id = await robotWith({})
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true, grants: { tools: { files: 'allow', web: 'ask', browser: 'deny', exa: 'deny', routines: 'deny' } } } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true, grants: { tools: { files: 'allow', web: 'ask', browser: 'deny', exa: 'deny', tasks: 'deny' } } } })
     await say(id, [])
     const request = requests.get(id)!.at(-1)!
     // Code mode offers one tool; the SDK it declares is part of the system prompt.
@@ -262,7 +259,7 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     await say(id, [])
     const offered = lastTools(id)
     const names = offered.map((tool) => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'routine_set', 'routine_list', 'routine_pause', 'routine_delete', 'drive_replace', 'browser_wait', 'discord_accounts', 'host_write', 'host_run', 'login_fill', 'propose_member_file_edit']))
+    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'task_list', 'task_create', 'task_update', 'task_assign', 'task_focus', 'task_done', 'task_cancel', 'task_pause', 'drive_replace', 'browser_wait', 'discord_accounts', 'host_write', 'host_run', 'login_fill', 'propose_member_file_edit']))
     expect(names).not.toContain('web_search')
     expect(names).not.toContain('drive_import')
     expect(contractProblems(offered)).toEqual([])
@@ -270,10 +267,10 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     const describedAs = (name: string) => offered.find((tool) => tool.name === name)!.description
     expect(describedAs('web_fetch')).toContain('web_search_exa')
     expect(describedAs('web_fetch')).toContain('statusCode')
-    // DSH's schedule tools are not offered; the product's Routine tools are the only ones, in Routine words (sk-xs60).
-    expect(names.filter((name) => name.startsWith('schedule_'))).toEqual([])
-    for (const tool of offered.filter((entry) => entry.name.startsWith('routine_'))) expect(tool.description + JSON.stringify(tool.parameters)).not.toMatch(/reminder/i)
-    expect(describedAs('routine_set') + describedAs('routine_delete')).toMatch(/Routine/)
+    // DSH's schedule tools and the Routine tools before v1.13 are not offered; the Task tools speak of Tasks (sk-xs60, mc-r1aa).
+    expect(names.filter((name) => name.startsWith('schedule_') || name.startsWith('routine_'))).toEqual([])
+    for (const tool of offered.filter((entry) => entry.name.startsWith('task_'))) expect(tool.description + JSON.stringify(tool.parameters)).not.toMatch(/routine/i)
+    expect(describedAs('task_create') + describedAs('task_done')).toMatch(/Task/)
     expect(describedAs('browser_wait')).toMatch(/page title/)
     expect(describedAs('browser_wait')).toMatch(/30 000/)
     expect(describedAs('drive_replace')).toContain('Overwrite')
@@ -288,7 +285,7 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     await testRobot(mr).activateForTest()
     await say(mr, [])
     const offered = lastTools(mr)
-    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write', 'robot_list', 'robot_settings_set', 'routine_set', 'conversation_search', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
+    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write', 'robot_list', 'robot_settings_set', 'task_create', 'conversation_search', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
     expect(contractProblems(offered)).toEqual([])
     expect(await returnedWithoutArguments(mr, offered)).toEqual([])
   })
