@@ -55,6 +55,8 @@ import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/l
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
+import * as Tasks from './tasks.ts'
+import type { TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
 import { legacyHomeSpendLimit } from '../platform/spend-limit-migration.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
@@ -203,6 +205,7 @@ const invite = (email: string, role: MemberRole = 'member') => Effect.gen(functi
 const remove = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run("UPDATE member SET status = 'removed' WHERE id = ?", memberId)
+  yield* orphaned({ kind: 'member', memberId })
   const owned = yield* sql.all<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId)
   yield* Effect.forEach(owned, ({ id }) => endThreadsOf(id), { discard: true })
   yield* Effect.forEach(owned, ({ id }) => remote((env) => env.ROBOT.getByName(id).pause()), { concurrency: 'unbounded', discard: true })
@@ -471,6 +474,7 @@ const destroyRobot = (robotId: string) => Effect.gen(function* () {
   yield* endThreadsOf(robotId)
   yield* remote((env) => env.ROBOT.getByName(robotId).destroy(robotId))
   yield* sql.run('DELETE FROM robot WHERE id = ?', robotId)
+  yield* orphaned({ kind: 'robot', robotId })
   const others = yield* sql.all<{ id: string }>('SELECT id FROM robot')
   yield* Effect.forEach(others, (other) => remote((env) => env.ROBOT.getByName(other.id).dropRecipient(robotId)).pipe(Effect.catch(() => Effect.void)), { concurrency: 8, discard: true })
 })
@@ -1277,6 +1281,11 @@ const adminThreads = Effect.gen(function* () {
   }))
 })
 
+// ------------------------------------------------------------------ Tasks (v1.13)
+
+/** The open Tasks of a deleted Robot or a removed Member become unassigned (mc-t8hh). */
+const orphaned = (assignee: Exclude<TaskAssignee, { kind: 'nobody' }>) => Effect.asVoid(Tasks.orphanTasks(assignee))
+
 /** Failures the caller should see stay typed; anything else (vault, network) is a defect, i.e. a 500. */
 const orDie = <A, E, X>(effect: Effect.Effect<A, E, X>) => effect.pipe(Effect.catch((error: unknown) => (error !== null && typeof error === 'object' && '_tag' in error && ['NotFound', 'Invalid', 'Conflict'].includes((error as { _tag: string })._tag) ? Effect.fail(error as never) : Effect.die(error)))) as Effect.Effect<A, never, X>
 
@@ -1297,6 +1306,10 @@ export class Home extends DurableObject<Env> {
       last_line TEXT NOT NULL, last_at INTEGER NOT NULL
     )`)
     try { sql.exec("ALTER TABLE robot ADD COLUMN accounts TEXT NOT NULL DEFAULT '[]'") } catch { /* added before */ }
+    // v1.13 (mc-w1aa): the running Turn's cause and subject, and the last Wake-up, as the Robot reports them.
+    try { sql.exec('ALTER TABLE robot ADD COLUMN turn TEXT') } catch { /* added before */ }
+    try { sql.exec('ALTER TABLE robot ADD COLUMN last_wakeup TEXT') } catch { /* added before */ }
+    for (const statement of Tasks.TASK_SCHEMA) sql.exec(statement)
     // v1.12 (ux-2ft4): the Member's avatar as JSON; NULL until they choose one.
     try { sql.exec('ALTER TABLE member ADD COLUMN avatar TEXT') } catch { /* added before */ }
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
@@ -1368,6 +1381,27 @@ export class Home extends DurableObject<Env> {
   createRobot(ownerId: string, brief?: string, model?: ModelChoice): Promise<RegistryEntry> { return this.run(createRobot(ownerId, brief, model)) }
   syncMrRobots(): Promise<void> { return this.run(syncMrRobots) }
   adminView(adminId: string): Promise<AdminView> { return this.run(adminView(adminId)) }
+
+  // ---------------------------------------------------------------- Tasks (v1.13)
+
+  /** What a change to Tasks means outside their store: zones, the acceptance setting, the doers' plans. */
+  protected get taskPorts(): Tasks.TaskPorts {
+    const profile = (memberId: string) => this.env.MEMBER.getByName(memberId).profile()
+    return {
+      zoneOf: (memberId) => Effect.promise(() => profile(memberId).then((found) => found.timeZone, () => DEFAULT_TIME_ZONE)),
+      acceptsFrom: (memberId) => Effect.promise(() => profile(memberId).then((found) => found.acceptTasksFrom ?? [], () => [])),
+      changed: () => Effect.void,
+    }
+  }
+
+  listTasks(caller: Tasks.TaskCaller, filter: Tasks.TaskFilter): Promise<TaskPage> { return this.run(Tasks.listTasks(caller, filter)) }
+  task(caller: Tasks.TaskCaller, id: string): Promise<TaskView> { return this.run(Tasks.getTask(caller, id)) }
+  createTask(caller: Tasks.TaskCaller, input: TaskInput): Promise<TaskView> { return this.run(Tasks.createTask(this.taskPorts, caller, input)) }
+  updateTask(caller: Tasks.TaskCaller, id: string, patch: TaskPatch): Promise<TaskView> { return this.run(Tasks.updateTask(this.taskPorts, caller, id, patch)) }
+  finishTask(caller: Tasks.TaskCaller, id: string): Promise<TaskView> { return this.run(Tasks.finishTask(this.taskPorts, caller, id)) }
+  cancelTask(caller: Tasks.TaskCaller, id: string): Promise<TaskView> { return this.run(Tasks.cancelTask(this.taskPorts, caller, id)) }
+  pauseTask(caller: Tasks.TaskCaller, id: string, paused: boolean): Promise<TaskView> { return this.run(Tasks.pauseTask(this.taskPorts, caller, id, paused)) }
+  assignTask(caller: Tasks.TaskCaller, id: string, assignee: TaskAssignee): Promise<TaskView> { return this.run(Tasks.assignTask(this.taskPorts, caller, id, assignee)) }
   /** What a Member can grant: tool groups of plugins that are on, and their usable connections (v1.5). */
   async catalog(memberId: string, robotId: string): Promise<SettingsCatalog> {
     const base = await this.run(catalog(memberId, robotId))

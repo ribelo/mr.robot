@@ -560,6 +560,104 @@ export const RoutineView = Schema.Struct({
 })
 export type RoutineView = typeof RoutineView.Type
 
+// ---------------------------------------------------------------- Tasks (v1.13)
+
+/** Who does a Task (mc-t1aa): a Member, a Robot, or nobody yet. */
+export const TaskAssignee = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('nobody') }),
+  Schema.Struct({ kind: Schema.Literal('member'), memberId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('robot'), robotId: Schema.String }),
+])
+export type TaskAssignee = typeof TaskAssignee.Type
+
+/** The rule of a recurring Task: every N minutes, daily, on weekdays (ISO, Monday 1), or a five-field cron line. */
+export const RecurringSchedule = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('interval'), everyMinutes: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal('daily'), time: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('weekly'), time: Schema.String, weekdays: Schema.Array(Schema.Number) }),
+  Schema.Struct({ kind: Schema.Literal('cron'), expression: Schema.String }),
+])
+export type RecurringSchedule = typeof RecurringSchedule.Type
+
+/**
+ * When a Task wakes its doer (mc-t2bb), as Todoist models it: unscheduled (an optional deadline), scheduled
+ * (a moment and an optional deadline not before it), or recurring (a rule, its zone and the next occurrence;
+ * no deadline). Only a recurring Task can be paused. Moments are epoch milliseconds.
+ */
+export const TaskTiming = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('unscheduled'), deadline: Schema.NullOr(Schema.Number) }),
+  Schema.Struct({ kind: Schema.Literal('scheduled'), at: Schema.Number, deadline: Schema.NullOr(Schema.Number) }),
+  Schema.Struct({ kind: Schema.Literal('recurring'), schedule: RecurringSchedule, timeZone: Schema.String, next: Schema.Number, paused: Schema.Boolean }),
+])
+export type TaskTiming = typeof TaskTiming.Type
+
+/**
+ * A timing as a request gives it: the server computes a recurring Task's next occurrence. A recurring timing
+ * may name a deadline only so the refusal can say why it has none; the zone defaults to the caller's.
+ */
+export const TaskTimingInput = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('unscheduled'), deadline: Schema.optional(Schema.NullOr(Schema.Number)) }),
+  Schema.Struct({ kind: Schema.Literal('scheduled'), at: Schema.Number, deadline: Schema.optional(Schema.NullOr(Schema.Number)) }),
+  Schema.Struct({ kind: Schema.Literal('recurring'), schedule: RecurringSchedule, timeZone: Schema.optional(Schema.String), deadline: Schema.optional(Schema.NullOr(Schema.Number)) }),
+])
+export type TaskTimingInput = typeof TaskTimingInput.Type
+
+/** Open, done or cancelled (mc-t3cc); working is a fact about a Turn and failing a fact about an attempt. */
+export const TaskState = Schema.Literals(['open', 'done', 'cancelled'])
+export type TaskState = typeof TaskState.Type
+
+/** Whether the Home reminds a person before the Task's moment (mc-s3cc). */
+export const Remind = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('none') }),
+  Schema.Struct({ kind: Schema.Literal('before'), minutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }),
+])
+export type Remind = typeof Remind.Type
+
+export const AttemptOutcome = Schema.Literals(['running', 'ok', 'failed', 'skipped', 'interrupted'])
+export type AttemptOutcome = typeof AttemptOutcome.Type
+
+/** One Turn of a Robot on a Task (mc-t4dd): when it started and finished, how it ended, the first line of its reply. */
+export const Attempt = Schema.Struct({
+  robotId: Schema.String,
+  startedAt: Schema.Number,
+  finishedAt: Schema.NullOr(Schema.Number),
+  outcome: AttemptOutcome,
+  firstLine: Schema.String,
+})
+export type Attempt = typeof Attempt.Type
+
+/** A reference to the same work elsewhere (mc-t6ff): a Jira issue, later through a Connector. */
+export const TaskExternal = Schema.Struct({ kind: Schema.String, key: Schema.String, url: Schema.String })
+export type TaskExternal = typeof TaskExternal.Type
+
+const TaskTitle = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(200))
+
+/** A new Task as a person or a Robot gives it. */
+export const TaskInput = Schema.Struct({
+  title: TaskTitle,
+  instructions: Schema.optional(Schema.String),
+  assignee: TaskAssignee,
+  parentId: Schema.optional(Schema.NullOr(Schema.String)),
+  timing: Schema.optional(TaskTimingInput),
+  remind: Schema.optional(Remind),
+  external: Schema.optional(Schema.NullOr(TaskExternal)),
+})
+export type TaskInput = typeof TaskInput.Type
+
+/** A change to a Task's fields; the assignee, the state and a pause have their own actions. */
+export const TaskPatch = Schema.Struct({
+  title: Schema.optional(TaskTitle),
+  instructions: Schema.optional(Schema.String),
+  parentId: Schema.optional(Schema.NullOr(Schema.String)),
+  timing: Schema.optional(TaskTimingInput),
+  remind: Schema.optional(Remind),
+  external: Schema.optional(Schema.NullOr(TaskExternal)),
+})
+export type TaskPatch = typeof TaskPatch.Type
+
+export const TaskAssign = Schema.Struct({ assignee: TaskAssignee })
+export const TaskPause = Schema.Struct({ paused: Schema.Boolean })
+
 // ---------------------------------------------------------------- Conversation
 
 // ---------------------------------------------------------------- Grant proposals and questions
@@ -739,15 +837,49 @@ export const Attachment = Schema.Struct({
 })
 export type Attachment = typeof Attachment.Type
 
+const MemberSender = Schema.Struct({ kind: Schema.Literal('member'), memberId: Schema.String, name: Schema.String })
+const RobotSender = Schema.Struct({ kind: Schema.Literal('robot'), robotId: Schema.String, name: Schema.String, avatarColor: Schema.String, avatarSeed: Schema.String })
+const PlatformSender = Schema.Struct({ kind: Schema.Literal('platform') })
+
 /** Who sent a message into a Robot's Conversation. */
 export const Sender = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('member'), memberId: Schema.String, name: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('robot'), robotId: Schema.String, name: Schema.String, avatarColor: Schema.String, avatarSeed: Schema.String }),
+  MemberSender,
+  RobotSender,
   Schema.Struct({ kind: Schema.Literal('routine'), routineId: Schema.String, name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('channel'), channel: Schema.String, from: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('platform') }),
+  PlatformSender,
 ])
 export type Sender = typeof Sender.Type
+
+/** Who made or changed a Task: a person, a Robot, or the platform. */
+export const Actor = Schema.Union([MemberSender, RobotSender, PlatformSender])
+export type Actor = typeof Actor.Type
+
+/** One Task as a Member or a Robot sees it (mc-t1aa); `overdue` is computed when it is read. */
+export const TaskView = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  instructions: Schema.String,
+  createdBy: Actor,
+  assignee: TaskAssignee,
+  parentId: Schema.NullOr(Schema.String),
+  timing: TaskTiming,
+  remind: Remind,
+  state: TaskState,
+  external: Schema.NullOr(TaskExternal),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+  /** The last 20 attempts, newest first. */
+  attempts: Schema.Array(Attempt),
+  /** How many Tasks have this one as their parent. */
+  children: Schema.Number,
+  overdue: Schema.Boolean,
+})
+export type TaskView = typeof TaskView.Type
+
+/** One page of Tasks, open ones first; `next` is the page to ask for next (1-based), null on the last. */
+export const TaskPage = Schema.Struct({ tasks: Schema.Array(TaskView), next: Schema.NullOr(Schema.Number) })
+export type TaskPage = typeof TaskPage.Type
 
 /** One tool call as Standard, Detailed and Verbose show it (pl-6eir); text fields are truncated. */
 export const ToolCallView = Schema.Struct({

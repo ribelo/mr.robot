@@ -45,6 +45,8 @@ export interface MemberProfile {
   readonly quietHours: QuietHours | null
   readonly workDetails?: WorkDetails
   readonly theme?: ThemeChoice
+  /** The Members whose Robots may give this Member Tasks (mc-a1aa); absent: nobody's. */
+  readonly acceptTasksFrom?: readonly string[]
 }
 
 /** What a Member's programs need besides its SQLite: vaults, sign-in clients, push, the Home and its alarm. */

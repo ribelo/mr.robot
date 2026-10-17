@@ -30,7 +30,15 @@ import {
   RewindRequest,
   SendMessage,
   SettingsPatch,
+  TaskAssign,
+  TaskInput,
+  TaskPatch,
+  TaskPause,
+  TaskState,
   type Attachment,
+  type TaskAssignee,
+  type TaskPage,
+  type TaskView,
   type ConnectorKind,
   type Me,
   type MemberAvatar,
@@ -49,6 +57,7 @@ import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, ty
 import { actsAsPerson, pluginByName } from '../plugins/catalog.ts'
 import { connectPastedValues, sharingRefusal } from '../member/connect-pasted.ts'
 import { isSignInKind } from '@mr-robot/host-protocol'
+import type { TaskCaller, TaskFilter } from '../home/tasks.ts'
 
 export interface ApiContext {
   readonly request: Request
@@ -105,6 +114,42 @@ function admin(c: ApiContext): Effect.Effect<void, ApiError> {
 const TIME_ZONE_HEADER = 'X-Time-Zone'
 
 const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
+
+/**
+ * The caller of a Task route: the Member, recorded as themselves. The Home admin sees every Task with Whole Home
+ * (mc-m7gg): a list asks for it with scope=home; one Task's routes reach any Task of the Home for the admin.
+ */
+function taskCaller(c: ApiContext, wholeHome: boolean): TaskCaller {
+  return { kind: 'member', memberId: c.member.id, wholeHome: wholeHome && c.member.role === 'admin', actor: { kind: 'member', memberId: c.member.id, name: c.member.name } }
+}
+
+const isTaskState = Schema.is(TaskState)
+
+/** "member:<id>", "robot:<id>" or "nobody", as a list filter names an assignee. */
+function assigneeParam(value: string | null): TaskAssignee | undefined {
+  if (value === null) return undefined
+  if (value === 'nobody') return { kind: 'nobody' }
+  const [kind, ...rest] = value.split(':')
+  const id = rest.join(':')
+  if (id === '') return undefined
+  return kind === 'member' ? { kind: 'member', memberId: id } : kind === 'robot' ? { kind: 'robot', robotId: id } : undefined
+}
+
+/** The Tasks list's query: state (open by default, or all), words in the title, parent, assignee, grouping and page. */
+export function taskFilter(query: URLSearchParams): TaskFilter {
+  const state = query.get('state')
+  const group = query.get('group')
+  const assignee = assigneeParam(query.get('assignee'))
+  const page = Number(query.get('page') ?? query.get('taskPage') ?? '1')
+  return {
+    ...(state === 'all' || (state !== null && isTaskState(state)) ? { state } : {}),
+    ...(query.get('q') === null ? {} : { q: query.get('q')! }),
+    ...(query.get('parent') === null ? {} : { parentId: query.get('parent')! }),
+    ...(assignee === undefined ? {} : { assignee }),
+    ...(group === 'assignee' || group === 'parent' || group === 'time' ? { group } : {}),
+    ...(Number.isInteger(page) && page >= 1 ? { page } : {}),
+  }
+}
 
 export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ me
@@ -579,6 +624,31 @@ export const api = new Router<ApiContext>()
     const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
     yield* call(() => home(c.env).resetMember(c.member.id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
+  }))
+
+  // ------------------------------------------------------------ Tasks (v1.13)
+  .on('GET', '/api/tasks', (c) => {
+    const query = new URL(c.request.url).searchParams
+    return call((): Promise<TaskPage> => home(c.env).listTasks(taskCaller(c, query.get('scope') === 'home'), taskFilter(query)))
+  })
+  .on('POST', '/api/tasks', (c) => Effect.gen(function* () {
+    const input = yield* decodeBody(c.request, TaskInput)
+    return yield* call((): Promise<TaskView> => home(c.env).createTask(taskCaller(c, false), input))
+  }))
+  .on('GET', '/api/tasks/:id', (c, { id }) => call((): Promise<TaskView> => home(c.env).task(taskCaller(c, true), id)))
+  .on('PATCH', '/api/tasks/:id', (c, { id }) => Effect.gen(function* () {
+    const patch = yield* decodeBody(c.request, TaskPatch)
+    return yield* call((): Promise<TaskView> => home(c.env).updateTask(taskCaller(c, true), id, patch))
+  }))
+  .on('POST', '/api/tasks/:id/done', (c, { id }) => call((): Promise<TaskView> => home(c.env).finishTask(taskCaller(c, true), id)))
+  .on('POST', '/api/tasks/:id/cancel', (c, { id }) => call((): Promise<TaskView> => home(c.env).cancelTask(taskCaller(c, true), id)))
+  .on('POST', '/api/tasks/:id/pause', (c, { id }) => Effect.gen(function* () {
+    const { paused } = yield* decodeBody(c.request, TaskPause)
+    return yield* call((): Promise<TaskView> => home(c.env).pauseTask(taskCaller(c, true), id, paused))
+  }))
+  .on('POST', '/api/tasks/:id/assign', (c, { id }) => Effect.gen(function* () {
+    const { assignee } = yield* decodeBody(c.request, TaskAssign)
+    return yield* call((): Promise<TaskView> => home(c.env).assignTask(taskCaller(c, true), id, assignee))
   }))
 
   // ------------------------------------------------------------ admin (robot-x26m, robot-1rap, robot-d2uv)
