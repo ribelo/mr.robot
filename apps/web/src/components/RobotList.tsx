@@ -298,12 +298,12 @@ export function RobotList({ robots, groups, selected, meName, meAvatar, isAdmin,
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" />
       </label>
+      <button type="button" className="mission-link" onClick={() => go({ page: 'mission' })}>Mission Control</button>
       <ul className="robot-list">{list}</ul>
       <div className="sidebar-foot">
         <button type="button" className="me" title={meName} onClick={onProfile}>
           <MemberFace memberId={meId ?? ''} name={meName} avatar={meAvatar} /><span className="me-name">{meName}</span>
         </button>
-        <button type="button" className="link" onClick={() => go({ page: 'mission' })}>Mission Control</button>
         <button type="button" className="link" onClick={() => go({ page: 'plugins' })}>Plugins</button>
         {isAdmin ? <button type="button" className="link" onClick={onAdmin}>Admin</button> : null}
       </div>

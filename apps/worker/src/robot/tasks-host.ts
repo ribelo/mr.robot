@@ -52,17 +52,17 @@ const acting = (robotId: string | undefined, change: boolean): Effect.Effect<Act
 /** "self", "owner", "nobody", "robot:<id>", "member:<id, name or e-mail>" as the Home's assignee. */
 const parseAssignee = (text: string, caller: Acting['caller']) => Effect.gen(function* () {
   const value = text.trim()
-  if (value === 'self' || value === 'me') return { kind: 'robot', robotId: caller.robotId } as TaskAssignee
-  if (value === 'owner') return { kind: 'member', memberId: caller.ownerId } as TaskAssignee
-  if (value === 'nobody') return { kind: 'nobody' } as TaskAssignee
+  if (value === 'self' || value === 'me') return { kind: 'robot', robotId: caller.robotId } satisfies TaskAssignee
+  if (value === 'owner') return { kind: 'member', memberId: caller.ownerId } satisfies TaskAssignee
+  if (value === 'nobody') return { kind: 'nobody' } satisfies TaskAssignee
   const [kind, ...rest] = value.split(':')
   const id = rest.join(':').trim()
-  if (kind === 'robot' && id !== '') return { kind: 'robot', robotId: id } as TaskAssignee
+  if (kind === 'robot' && id !== '') return { kind: 'robot', robotId: id } satisfies TaskAssignee
   if (kind === 'member' && id !== '') {
     const members = (yield* home((stub) => stub.members())).filter((member) => member.status === 'active')
     const wanted = id.toLowerCase()
     const found = members.filter((member) => member.id === id || member.email.toLowerCase() === wanted || member.name.toLowerCase() === wanted)
-    if (found.length === 1) return { kind: 'member', memberId: found[0]!.id } as TaskAssignee
+    if (found.length === 1) return { kind: 'member', memberId: found[0]!.id } satisfies TaskAssignee
     return yield* invalid(found.length === 0 ? `No active Member "${id}" in this Home.` : `More than one Member is called "${id}"; give their e-mail.`)
   }
   return yield* invalid('assignee is "self", "owner", "nobody", "robot:<id>" or "member:<name or e-mail>"')
@@ -78,10 +78,10 @@ const parseTiming = (args: TaskTimingArgs, zone: string) => Effect.gen(function*
   const at = (text: string | undefined, field: string) => (text === undefined ? Effect.succeed(undefined) : moment(text, args.time_zone ?? zone, field))
   const deadline = yield* at(args.deadline, 'deadline')
   switch (args.kind) {
-    case 'unscheduled': return { kind: 'unscheduled', deadline: deadline ?? null } as TaskTimingInput
+    case 'unscheduled': return { kind: 'unscheduled', deadline: deadline ?? null } satisfies TaskTimingInput
     case 'scheduled': {
       if (args.at === undefined) return yield* invalid('a scheduled Task needs at')
-      return { kind: 'scheduled', at: (yield* at(args.at, 'at'))!, deadline: deadline ?? null } as TaskTimingInput
+      return { kind: 'scheduled', at: (yield* at(args.at, 'at'))!, deadline: deadline ?? null } satisfies TaskTimingInput
     }
     case 'recurring': {
       const rules = [
@@ -91,7 +91,7 @@ const parseTiming = (args: TaskTimingArgs, zone: string) => Effect.gen(function*
         ...(args.cron === undefined ? [] : [{ kind: 'cron' as const, expression: args.cron.expression }]),
       ]
       if (rules.length !== 1) return yield* invalid('a recurring Task needs exactly one of every_minutes, daily, weekly or cron')
-      return { kind: 'recurring', schedule: rules[0]!, timeZone: args.time_zone ?? zone, ...(deadline === undefined ? {} : { deadline }) } as TaskTimingInput
+      return { kind: 'recurring', schedule: rules[0]!, timeZone: args.time_zone ?? zone, ...(deadline === undefined ? {} : { deadline }) } satisfies TaskTimingInput
     }
     default: return yield* invalid('timing.kind is unscheduled, scheduled or recurring')
   }

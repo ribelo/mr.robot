@@ -78,7 +78,8 @@ const config = Effect.gen(function* () {
  * reach the target (the check robot_propose_grants makes). A change also needs the owner to own it,
  * as in the app: a Robot someone else shared with the Home can be read, not changed.
  */
-const target = (robotId: string, change: boolean) => Effect.gen(function* () {
+/** Also the Robot a Task tool with robot_id works as (v1.13 ticket 04). */
+export const reach = (robotId: string, change: boolean) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const current = yield* config
   if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot is a deputy')
@@ -107,19 +108,19 @@ export const list = Effect.gen(function* () {
 })
 
 export const conversation = (robotId: string, page: number) => Effect.gen(function* () {
-  const { robot } = yield* target(robotId, false)
+  const { robot } = yield* reach(robotId, false)
   return yield* ask(robot, 'conversationPage', page)
 })
 export const searchConversation = (robotId: string, query: string, page: number) => Effect.gen(function* () {
-  const { robot } = yield* target(robotId, false)
+  const { robot } = yield* reach(robotId, false)
   return yield* ask(robot, 'searchConversation', query, page)
 })
 export const trajectory = (robotId: string, itemId: string, before: number, after: number) => Effect.gen(function* () {
-  const { robot } = yield* target(robotId, false)
+  const { robot } = yield* reach(robotId, false)
   return yield* ask(robot, 'trajectoryAround', itemId, before, after)
 })
 export const files = (robotId: string) => Effect.gen(function* () {
-  const { robot } = yield* target(robotId, false)
+  const { robot } = yield* reach(robotId, false)
   return yield* ask(robot, 'files')
 })
 
@@ -129,17 +130,17 @@ const workspacePath = (path: string) => {
 }
 
 export const fileRead = (robotId: string, path: string) => Effect.gen(function* () {
-  const { robot } = yield* target(robotId, false)
+  const { robot } = yield* reach(robotId, false)
   const normalized = yield* workspacePath(path)
   return yield* ask(robot, 'fileContent', normalized)
 })
 export const grants = (robotId: string) => Effect.gen(function* () {
-  const { robot } = yield* target(robotId, false)
+  const { robot } = yield* reach(robotId, false)
   const [settings, openProposals] = yield* Effect.all([ask(robot, 'settings'), ask(robot, 'openProposals')])
   return { grants: settings.grants, openProposals }
 })
 export const settings = (robotId: string) => Effect.gen(function* () {
-  const { current, robot } = yield* target(robotId, false)
+  const { current, robot } = yield* reach(robotId, false)
   const platform = yield* RobotPlatform
   const [shown, models, accounts] = yield* Effect.all([ask(robot, 'settings'), promise(() => platform.env.HOME.getByName(HOME_ID).models(current.ownerId)), promise(() => platform.env.HOME.getByName(HOME_ID).accountsFor(current.ownerId))])
   return {
@@ -170,7 +171,7 @@ export const helpRequests = Effect.gen(function* () {
 
 /** help_answer: the Robot's own answer path, as Mr. Robot. Its refusals (not a help Ask, already closed) come back as words. */
 export const helpAnswer = (robotId: string, requestId: string, text: string) => Effect.gen(function* () {
-  const { current, robot } = yield* target(robotId, true)
+  const { current, robot } = yield* reach(robotId, true)
   const result = yield* ask(robot, 'answerHelp', requestId, text, { by: 'mr-robot', name: current.identity.name })
   if (result.ok) return { requestId, status: 'answered; the Robot is woken with your answer and the request is closed' }
   switch (result.reason) {
@@ -184,14 +185,14 @@ export const helpAnswer = (robotId: string, requestId: string, text: string) => 
 // ------------------------------------------------------------------ changes
 
 export const fileWrite = (robotId: string, path: string, content: string) => Effect.gen(function* () {
-  const { robot, by } = yield* target(robotId, true)
+  const { robot, by } = yield* reach(robotId, true)
   const normalized = yield* workspacePath(path)
   if (new TextEncoder().encode(content).length > MAX_FILE_BYTES) return yield* invalid('files up to 256 KB can be written this way')
   const saved = yield* ask(robot, 'saveFile', normalized, content, by)
   return { path: normalized, size: saved.size }
 })
 export const fileDelete = (robotId: string, path: string) => Effect.gen(function* () {
-  const { robot, by } = yield* target(robotId, true)
+  const { robot, by } = yield* reach(robotId, true)
   const normalized = yield* workspacePath(path)
   // A file that is not there is not reported to the Robot as deleted.
   yield* ask(robot, 'fileContent', normalized)
@@ -208,7 +209,7 @@ const FORBIDDEN: Record<string, string> = {
 
 /** The deputy's settings patch: only what DeputySettingsPatch lists decodes; grants, spend limit and sharing are refused by name. */
 export const settingsSet = (robotId: string, input: unknown) => Effect.gen(function* () {
-  const { current, robot, by } = yield* target(robotId, true)
+  const { current, robot, by } = yield* reach(robotId, true)
   const platform = yield* RobotPlatform
   const keys = typeof input === 'object' && input !== null ? Object.keys(input) : []
   const refused = keys.filter((key) => key in FORBIDDEN)
@@ -245,15 +246,13 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
 
 /** robot_configure: the whole identity (cd-28og). */
 export const configure = (robotId: string, change: { name?: string; title?: string; description?: string; avatarColor?: string }) => Effect.gen(function* () {
-  const { entry, robot, by } = yield* target(robotId, true)
+  const { entry, robot, by } = yield* reach(robotId, true)
   const given = Object.fromEntries(Object.entries(change).filter(([, value]) => typeof value === 'string' && value.trim() !== ''))
   if (typeof given['avatarColor'] === 'string' && !/^#[0-9a-fA-F]{6}$/.test(given['avatarColor'])) return yield* invalid('avatarColor is #rrggbb')
   const settings = yield* ask(robot, 'updateSettings', { identity: { ...entry.identity, ...given } }, by)
   return { id: robotId, identity: settings.identity as unknown }
 })
 
-/** The Robot a Task tool with robot_id works as (v1.13 ticket 04): the deputy's reach and ownership checks. */
-export const reach = (robotId: string, change: boolean) => target(robotId, change)
 
 export type Run = <A>(program: Effect.Effect<A, { readonly _tag: string; readonly message: string }, RobotState | RobotPlatform>) => Promise<A>
 

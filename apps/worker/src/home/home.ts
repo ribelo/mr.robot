@@ -380,14 +380,17 @@ const fleetPage = (memberId: string, wholeHome: boolean, q: string, page: number
   }
 })
 
+/** What Mission Control asks for: the Fleet's name search and page, and the Tasks table's filter (mc-m6ff). */
+export interface MissionQuery { readonly fleetQ: string; readonly fleetPage: number; readonly tasks: Tasks.TaskFilter }
+
 /** Mission Control (mc-m1aa): a page of the Fleet and a page of the Tasks, for a Member or, with Whole Home, the admin. */
-const mission = (caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, query: { readonly q: string; readonly fleetPage: number; readonly tasks: Tasks.TaskFilter }) => Effect.gen(function* () {
-  const fleet = yield* fleetPage(caller.memberId, caller.wholeHome, query.q, query.fleetPage)
-  const tasks = yield* Tasks.listTasks(caller, { ...query.tasks, ...(query.q.trim() === '' ? {} : { q: query.q }) })
+const mission = (caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, query: MissionQuery) => Effect.gen(function* () {
+  const fleet = yield* fleetPage(caller.memberId, caller.wholeHome, query.fleetQ, query.fleetPage)
+  const tasks = yield* Tasks.listTasks(caller, query.tasks)
   return {
     fleet: fleet.fleet, fleetNext: fleet.next, tasks: tasks.tasks, tasksNext: tasks.next,
     counts: { ...fleet.counts, openTasks: yield* Tasks.countOpenTasks(caller) },
-  } as MissionView
+  } satisfies MissionView
 })
 
 /** Every Robot, for the admin fleet view. */
@@ -1534,7 +1537,7 @@ export class Home extends DurableObject<Env> {
     await this.run(this.planned([]))
   }
 
-  mission(caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, query: { readonly q: string; readonly fleetPage: number; readonly tasks: Tasks.TaskFilter }): Promise<MissionView> { return this.run(mission(caller, query)) }
+  mission(caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, query: MissionQuery): Promise<MissionView> { return this.run(mission(caller, query)) }
   listTasks(caller: Tasks.TaskCaller, filter: Tasks.TaskFilter): Promise<TaskPage> { return this.run(Tasks.listTasks(caller, filter)) }
   task(caller: Tasks.TaskCaller, id: string): Promise<TaskView> { return this.run(Tasks.getTask(caller, id)) }
   createTask(caller: Tasks.TaskCaller, input: TaskInput): Promise<TaskView> { return this.run(Tasks.createTask(this.taskPorts, caller, input)) }

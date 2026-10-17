@@ -3,6 +3,7 @@
  * when a command or the live feed invalidates their keys; commands go through one atom.
  */
 import { useAtomSet } from '@effect/atom-react'
+import type { MissionGroup, MissionState } from '@mr-robot/protocol'
 import * as Effect from 'effect/Effect'
 import type * as Exit from 'effect/Exit'
 import { Atom, Reactivity } from 'effect/reactivity'
@@ -77,8 +78,11 @@ export const homeMembersAtom = query((api) => api.homeMembers, [keys.me])
 /** What Mission Control shows: its filters, and how many pages of each table are loaded. */
 export interface MissionQuery {
   readonly scope: 'mine' | 'home'
-  readonly state: string
-  readonly group: string
+  readonly state: MissionState
+  readonly group: MissionGroup
+  /** A name in the Fleet. */
+  readonly fleetQ: string
+  /** Words in a Task's title. */
   readonly q: string
   readonly fleetPages: number
   readonly taskPages: number
@@ -89,9 +93,10 @@ export interface MissionQuery {
  * from the server one page at a time and joined (mc-m3cc). Robots and Tasks changing make it read again.
  */
 export const missionAtom = Atom.family((key: string) => {
+  // SAFETY: the only keys of this family are JSON.stringify of a MissionQuery (MissionControl builds them).
   const wanted = JSON.parse(key) as MissionQuery
   return query((api) => Effect.gen(function* () {
-    const base = new URLSearchParams({ scope: wanted.scope, state: wanted.state, group: wanted.group, q: wanted.q })
+    const base = new URLSearchParams({ scope: wanted.scope, state: wanted.state, group: wanted.group, fleetQ: wanted.fleetQ, q: wanted.q })
     const first = yield* api.mission(base.toString())
     let view = first
     for (let page = 2; page <= Math.max(wanted.fleetPages, wanted.taskPages); page += 1) {

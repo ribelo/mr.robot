@@ -50,7 +50,7 @@ function timingOf(row: RoutineSql, now: number): { timing: TaskTiming; done: boo
   const legacy = JSON.parse(row.schedule) as LegacySchedule
   const once = record === undefined ? (legacy.kind === 'once' ? onceAt(legacy.at, zone) : undefined) : record.kind === 'after' || record.kind === 'at' ? Date.parse(record.scheduledAt) : undefined
   if (once !== undefined) return { timing: { kind: 'scheduled', at: once, deadline: null }, done: row.next_run === null }
-  const schedule: RecurringSchedule = record === undefined ? legacy as RecurringSchedule
+  const schedule: RecurringSchedule = record === undefined ? (legacy.kind === 'once' ? { kind: 'daily', time: '09:00' } : legacy)
     : record.kind === 'every' ? { kind: 'interval', everyMinutes: Math.max(5, Math.round((record.everySeconds ?? 300) / 60)) }
       : record.kind === 'daily' ? { kind: 'daily', time: (record.time ?? '09:00').slice(0, 5) }
         : record.kind === 'weekly' ? { kind: 'weekly', time: (record.time ?? '09:00').slice(0, 5), weekdays: [...(record.weekdays ?? [1])] }

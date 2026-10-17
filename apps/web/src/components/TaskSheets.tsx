@@ -113,6 +113,7 @@ export function TaskSheet({ taskId, working = false, onClose, onBack, onOpenTask
 
 function TaskDetail({ task, working, onClose, onBack, onOpenTask, onEdit, onAddChild }: { task: TaskView; working: boolean; onClose: () => void; onBack?: () => void; onOpenTask?: (id: string) => void; onEdit: () => void; onAddChild: () => void }) {
   const names = useNames()
+  const parentId = task.parentId
   const children = AsyncResult.getOrElse(useAtomValue(tasksAtom(`state=all&parent=${encodeURIComponent(task.id)}`)), () => ({ tasks: [], next: null })).tasks
   return (
     <Sheet title={task.title} onClose={onClose} {...(onBack === undefined ? {} : { onBack })} footer={task.state === 'open' ? <TaskActions task={task} working={working} onEdit={onEdit} onAddChild={onAddChild} /> : null}>
@@ -122,7 +123,7 @@ function TaskDetail({ task, working, onClose, onBack, onOpenTask, onEdit, onAddC
         <div><dt>When</dt><dd>{whenText(task.timing)}{task.timing.kind === 'recurring' ? <div className="muted">{task.timing.timeZone}</div> : null}</dd></div>
         {task.remind.kind === 'before' ? <div><dt>Remind</dt><dd>{task.remind.minutes} minutes before</dd></div> : null}
         <div><dt>Created by</dt><dd>{task.createdBy.kind === 'platform' ? 'the platform' : task.createdBy.name}</dd></div>
-        {task.parentId === null ? null : <div><dt>Part of</dt><dd><button type="button" className="link" onClick={() => onOpenTask?.(task.parentId!)}>the parent task</button></dd></div>}
+        {parentId === null ? null : <div><dt>Part of</dt><dd><button type="button" className="link" onClick={() => onOpenTask?.(parentId)}>the parent task</button></dd></div>}
       </dl>
       <h3 className="panel-section">Instructions</h3>
       <div className={task.instructions === '' ? 'detail-block muted' : 'detail-block'}>{task.instructions === '' ? 'None' : task.instructions}</div>

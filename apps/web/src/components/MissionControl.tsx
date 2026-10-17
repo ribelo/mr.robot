@@ -88,6 +88,7 @@ export function MissionControl({ me }: { me: Me }) {
   const command = useCommand()
   const [prefs, setPrefs] = useState<MissionPrefs>(me.mission)
   const [q, setQ] = useState('')
+  const [fleetQ, setFleetQ] = useState('')
   const [pages, setPages] = useState({ fleet: 1, tasks: 1 })
   const [openTask, setOpenTask] = useState<string>()
   const [form, setForm] = useState<{ readonly parentId?: string; readonly task?: TaskView }>()
@@ -97,7 +98,7 @@ export function MissionControl({ me }: { me: Me }) {
     setPages({ fleet: 1, tasks: 1 })
     void command((api) => api.updateMe({ mission: patch }), [keys.me])
   }
-  const wanted: MissionQuery = { scope: admin && prefs.wholeHome ? 'home' : 'mine', state: prefs.state, group: prefs.group, q: q.trim(), fleetPages: pages.fleet, taskPages: pages.tasks }
+  const wanted: MissionQuery = { scope: admin && prefs.wholeHome ? 'home' : 'mine', state: prefs.state, group: prefs.group, fleetQ: fleetQ.trim(), q: q.trim(), fleetPages: pages.fleet, taskPages: pages.tasks }
   const key = JSON.stringify(wanted)
   const result = useAtomValue(missionAtom(key))
   const refresh = useAtomRefresh(missionAtom(key))
@@ -118,7 +119,8 @@ export function MissionControl({ me }: { me: Me }) {
         Mission Control
       </h1>
       <div className="mission-bar">
-        <input type="search" aria-label="Search" placeholder="Search robots and tasks" value={q} onChange={(event) => { setQ(event.target.value); setPages({ fleet: 1, tasks: 1 }) }} />
+        <input type="search" aria-label="Search robots" placeholder="Search robots by name" value={fleetQ} onChange={(event) => { setFleetQ(event.target.value); setPages((current) => ({ ...current, fleet: 1 })) }} />
+        <input type="search" aria-label="Search tasks" placeholder="Search tasks by title" value={q} onChange={(event) => { setQ(event.target.value); setPages((current) => ({ ...current, tasks: 1 })) }} />
         <div className="segmented compact" role="radiogroup" aria-label="Show tasks">
           {STATES.map((option) => <button key={option.id} type="button" role="radio" aria-checked={prefs.state === option.id} className={prefs.state === option.id ? 'segment active' : 'segment'} onClick={() => remember({ state: option.id })}>{option.label}</button>)}
         </div>
@@ -246,7 +248,12 @@ function TaskCells({ task, names, parentTitle, onMenu }: { task: TaskView; names
       <span className="task-when">{whenText(task.timing)}</span>
       <span className="muted">{lastAttemptText(task)}</span>
       <span className="muted">{task.children === 0 ? '' : task.children}</span>
-      <span>{task.state === 'open' ? <button type="button" className="icon-button small" aria-label={`Actions of ${task.title}`} onClick={(event) => { event.stopPropagation(); onMenu(event.clientX, event.clientY) }}>⋯</button> : null}</span>
+      <span>{task.state === 'open' ? <button type="button" className="icon-button small" aria-label={`Actions of ${task.title}`} onClick={(event) => {
+        event.stopPropagation()
+        // Under the button, whether it was clicked or pressed with the keyboard.
+        const box = event.currentTarget.getBoundingClientRect()
+        onMenu(box.right - 250, box.bottom + 4)
+      }}>⋯</button> : null}</span>
     </>
   )
 }

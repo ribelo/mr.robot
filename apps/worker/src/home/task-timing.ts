@@ -35,6 +35,7 @@ export function parseTiming(input: TaskTimingInput | undefined, zone: string, no
       if (input.deadline !== undefined && input.deadline !== null) return refused('A recurring Task has no deadline. Put the preparation in a child Task with its own date.')
       const timeZone = parseTimeZone(input.timeZone ?? zone)
       if (timeZone === undefined) return refused(`"${input.timeZone ?? zone}" is not a time zone; use a name like Europe/Warsaw`)
+      if (input.schedule.kind === 'interval' && !(input.schedule.everyMinutes >= MIN_OCCURRENCE_GAP_MINUTES)) return refused(TOO_FREQUENT)
       try {
         validateSchedule(input.schedule, timeZone)
         if (input.schedule.kind === 'cron' && cronMinGapMinutes(input.schedule.expression) < MIN_OCCURRENCE_GAP_MINUTES) return refused(`${TOO_FREQUENT} This cron expression occurs more often.`)
@@ -42,8 +43,7 @@ export function parseTiming(input: TaskTimingInput | undefined, zone: string, no
         if (next === null) return refused('This schedule never occurs.')
         return { ok: true, value: { kind: 'recurring', schedule: input.schedule, timeZone, next, paused: false } }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        return refused(message === 'an interval must be at least 5 minutes' ? TOO_FREQUENT : message)
+        return refused(error instanceof Error ? error.message : String(error))
       }
     }
   }

@@ -50,7 +50,7 @@ describe('Mission Control (v1.13 ticket 06)', () => {
     expect(ids).not.toContain(bens)
     expect(mine.fleet[0]).toMatchObject({ fleetState: 'working', turn: { wakeup: { kind: 'member', from: 'Anna' }, task: null } })
     expect(mine.counts).toMatchObject({ working: 1, waiting: 1 })
-    expect((await mission(ANNA, '?q=rec')).fleet.map((robot) => robot.id)).toEqual([recent])
+    expect((await mission(ANNA, '?fleetQ=rec')).fleet.map((robot) => robot.id)).toEqual([recent])
 
     expect((await mission(ANNA, '?scope=home')).fleet.map((robot) => robot.id)).toContain(bens)
     expect((await mission(BEN, '?scope=home')).fleet.map((robot) => robot.id)).not.toContain(busy)

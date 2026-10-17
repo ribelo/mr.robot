@@ -119,8 +119,14 @@ const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
 
 /**
  * The caller of a Task route: the Member, recorded as themselves. The Home admin sees every Task with Whole Home
- * (mc-m7gg): a list asks for it with scope=home; one Task's routes reach any Task of the Home for the admin.
+ * (mc-m7gg): a list asks for it with scope=home; one Task's routes follow the admin's remembered switch.
  */
+/** One Task's routes reach every Task of the Home only while the admin has Whole Home on (mc-m7gg). */
+function taskCallerByPrefs(c: ApiContext): Effect.Effect<Extract<TaskCaller, { kind: 'member' }>, ApiError> {
+  if (c.member.role !== 'admin') return Effect.succeed(taskCaller(c, false))
+  return Effect.map(call(() => c.env.MEMBER.getByName(c.member.id).profile()), (profile) => taskCaller(c, profile.mission?.wholeHome === true))
+}
+
 function taskCaller(c: ApiContext, wholeHome: boolean): Extract<TaskCaller, { kind: 'member' }> {
   return { kind: 'member', memberId: c.member.id, wholeHome: wholeHome && c.member.role === 'admin', actor: { kind: 'member', memberId: c.member.id, name: c.member.name } }
 }
@@ -143,10 +149,12 @@ export function taskFilter(query: URLSearchParams): TaskFilter {
   const group = query.get('group')
   const assignee = assigneeParam(query.get('assignee'))
   const page = Number(query.get('page') ?? query.get('taskPage') ?? '1')
+  const q = query.get('q')
+  const parent = query.get('parent')
   return {
     ...(state === 'all' || (state !== null && isTaskState(state)) ? { state } : {}),
-    ...(query.get('q') === null ? {} : { q: query.get('q')! }),
-    ...(query.get('parent') === null ? {} : { parentId: query.get('parent')! }),
+    ...(q === null ? {} : { q }),
+    ...(parent === null ? {} : { parentId: parent }),
     ...(assignee === undefined ? {} : { assignee }),
     ...(group === 'assignee' || group === 'parent' || group === 'time' ? { group } : {}),
     ...(Number.isInteger(page) && page >= 1 ? { page } : {}),
@@ -635,8 +643,8 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/mission', (c) => {
     const query = new URL(c.request.url).searchParams
     const page = Number(query.get('fleetPage') ?? '1')
-    const caller = taskCaller(c, query.get('scope') === 'home') as Extract<TaskCaller, { kind: 'member' }>
-    return call((): Promise<MissionView> => home(c.env).mission(caller, { q: query.get('q') ?? '', fleetPage: Number.isInteger(page) && page >= 1 ? page : 1, tasks: (({ q: _q, ...filter }) => filter)(taskFilter(query)) }))
+    const caller = taskCaller(c, query.get('scope') === 'home')
+    return call((): Promise<MissionView> => home(c.env).mission(caller, { fleetQ: query.get('fleetQ') ?? '', fleetPage: Number.isInteger(page) && page >= 1 ? page : 1, tasks: taskFilter(query) }))
   })
 
   // ------------------------------------------------------------ Tasks (v1.13)
@@ -650,21 +658,24 @@ export const api = new Router<ApiContext>()
     const input = yield* decodeBody(c.request, TaskInput)
     return yield* call((): Promise<TaskView> => home(c.env).createTask(taskCaller(c, false), input))
   }))
-  .on('GET', '/api/tasks/:id', (c, { id }) => call((): Promise<TaskView> => home(c.env).task(taskCaller(c, true), id)))
+  .on('GET', '/api/tasks/:id', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).task(caller, id))))
   .on('PATCH', '/api/tasks/:id', (c, { id }) => Effect.gen(function* () {
     const patch = yield* decodeBody(c.request, TaskPatch)
-    return yield* call((): Promise<TaskView> => home(c.env).updateTask(taskCaller(c, true), id, patch))
+    const caller = yield* taskCallerByPrefs(c)
+    return yield* call((): Promise<TaskView> => home(c.env).updateTask(caller, id, patch))
   }))
-  .on('POST', '/api/tasks/:id/done', (c, { id }) => call((): Promise<TaskView> => home(c.env).finishTask(taskCaller(c, true), id)))
-  .on('POST', '/api/tasks/:id/cancel', (c, { id }) => call((): Promise<TaskView> => home(c.env).cancelTask(taskCaller(c, true), id)))
+  .on('POST', '/api/tasks/:id/done', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).finishTask(caller, id))))
+  .on('POST', '/api/tasks/:id/cancel', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).cancelTask(caller, id))))
   .on('POST', '/api/tasks/:id/pause', (c, { id }) => Effect.gen(function* () {
     const { paused } = yield* decodeBody(c.request, TaskPause)
-    return yield* call((): Promise<TaskView> => home(c.env).pauseTask(taskCaller(c, true), id, paused))
+    const caller = yield* taskCallerByPrefs(c)
+    return yield* call((): Promise<TaskView> => home(c.env).pauseTask(caller, id, paused))
   }))
-  .on('POST', '/api/tasks/:id/run', (c, { id }) => call((): Promise<TaskView> => home(c.env).runTask(taskCaller(c, true), id)))
+  .on('POST', '/api/tasks/:id/run', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).runTask(caller, id))))
   .on('POST', '/api/tasks/:id/assign', (c, { id }) => Effect.gen(function* () {
     const { assignee } = yield* decodeBody(c.request, TaskAssign)
-    return yield* call((): Promise<TaskView> => home(c.env).assignTask(taskCaller(c, true), id, assignee))
+    const caller = yield* taskCallerByPrefs(c)
+    return yield* call((): Promise<TaskView> => home(c.env).assignTask(caller, id, assignee))
   }))
 
   // ------------------------------------------------------------ admin (robot-x26m, robot-1rap, robot-d2uv)

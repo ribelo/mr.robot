@@ -933,8 +933,8 @@ export const ChatItem = Schema.Union([
   /** A Thread card (ch-iy16): what happened to the Thread, with its state now. */
   Schema.Struct({ kind: Schema.Literal('thread'), ...itemFields, event: ThreadEvent, thread: ThreadView }),
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
-  /** A Task card (mc-c1aa); `by` names who changed it when it was not this Robot. */
-  Schema.Struct({ kind: Schema.Literal('task'), ...itemFields, action: TaskAction, taskId: Schema.String, title: Schema.String, by: Schema.optional(Schema.String) }),
+  /** A Task card (mc-c1aa); `by` names who changed it when it was not this Robot. `taskId` is null on a card stored before v1.13 that named none. */
+  Schema.Struct({ kind: Schema.Literal('task'), ...itemFields, action: TaskAction, taskId: Schema.NullOr(Schema.String), title: Schema.String, by: Schema.optional(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('question'), ...itemFields, proposal: ProposalView }),
   Schema.Struct({ kind: Schema.Literal('notice'), ...itemFields, text: Schema.String }),
   /** Tools the Robot used in one step, shown collapsed (robot-gr94). */

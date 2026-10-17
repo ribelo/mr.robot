@@ -5,7 +5,7 @@
  * elsewhere (a Robot's next moment, a reminder, a card in a Conversation) goes out through TaskPorts.
  */
 import * as Effect from 'effect/Effect'
-import type { Actor, Attempt, AttemptOutcome, Remind, TaskAssignee, TaskExternal, TaskInput, TaskPage, TaskPatch, TaskState, TaskTiming, TaskView } from '@mr-robot/protocol'
+import type { Actor, Attempt, AttemptOutcome, Remind, TaskAction, TaskAssignee, TaskExternal, TaskInput, TaskPage, TaskPatch, TaskState, TaskTiming, TaskView } from '@mr-robot/protocol'
 import { conflict, invalid, notFound, Sql, type DurableError } from '../platform/durable.ts'
 import { advanced, overdue, parseTiming, pausedTiming, reminderAt, wakeAt } from './task-timing.ts'
 import { nextRun } from '../robot/schedule.ts'
@@ -64,8 +64,6 @@ export interface TaskRow {
   readonly updatedAt: number
 }
 
-export type TaskAction = 'created' | 'updated' | 'assigned' | 'done' | 'cancelled' | 'paused' | 'resumed' | 'ran'
-
 /** A change to one Task, for what follows from it outside the Task store. */
 export interface TaskChange {
   readonly action: TaskAction
@@ -91,8 +89,9 @@ type TaskSql = {
 
 function assigneeOf(kind: TaskAssignee['kind'], id: string | null): TaskAssignee {
   switch (kind) {
-    case 'member': return { kind: 'member', memberId: id ?? '' }
-    case 'robot': return { kind: 'robot', robotId: id ?? '' }
+    // The store writes an id with every Member and Robot; a row without one has no doer.
+    case 'member': return id === null ? { kind: 'nobody' } : { kind: 'member', memberId: id }
+    case 'robot': return id === null ? { kind: 'nobody' } : { kind: 'robot', robotId: id }
     case 'nobody': return { kind: 'nobody' }
   }
 }
@@ -238,7 +237,7 @@ export const listTasks = (caller: TaskCaller, filter: TaskFilter) => Effect.gen(
     ...values, TASK_PAGE_SIZE + 1, (page - 1) * TASK_PAGE_SIZE,
   )
   const tasks = yield* taskViews(rows.slice(0, TASK_PAGE_SIZE).map(taskFromSql))
-  return { tasks, next: rows.length > TASK_PAGE_SIZE ? page + 1 : null } as TaskPage
+  return { tasks, next: rows.length > TASK_PAGE_SIZE ? page + 1 : null } satisfies TaskPage
 })
 
 /** How many open Tasks the caller sees (Mission Control's count). */
@@ -339,10 +338,25 @@ export const createTask = (ports: TaskPorts, caller: TaskCaller, input: TaskInpu
   return yield* commit(ports, { action: 'created', before: null, after: task, actor: caller.actor })
 })
 
+/**
+ * The timing an edit leaves (mc-s2bb, mc-t3cc): the same rule, zone or moment keeps the stored timing, so a form
+ * that sends the timing again does not resume a paused Task, move its next occurrence or fire a fired Task again.
+ * A new rule keeps the pause.
+ */
+function kept(before: TaskTiming, after: TaskTiming): TaskTiming {
+  if (before.kind === 'recurring' && after.kind === 'recurring') {
+    return JSON.stringify(before.schedule) === JSON.stringify(after.schedule) && before.timeZone === after.timeZone ? before : { ...after, paused: before.paused }
+  }
+  if (before.kind === 'scheduled' && after.kind === 'scheduled' && before.at === after.at && before.deadline === after.deadline) return before
+  if (before.kind === 'unscheduled' && after.kind === 'unscheduled' && before.deadline === after.deadline) return before
+  return after
+}
+
 export const updateTask = (ports: TaskPorts, caller: TaskCaller, id: string, patch: TaskPatch, now = Date.now()) => Effect.gen(function* () {
   const before = yield* visibleTask(caller, id)
-  const timing = patch.timing === undefined ? before.timing : yield* timingFor(ports, caller, patch.timing, now)
-  if (patch.timing !== undefined) yield* withinLimit(before.assignee, timing, id)
+  const timing = patch.timing === undefined ? before.timing : kept(before.timing, yield* timingFor(ports, caller, patch.timing, now))
+  const sameTiming = timing === before.timing
+  if (!sameTiming) yield* withinLimit(before.assignee, timing, id)
   const parentId = patch.parentId === undefined ? before.parentId : patch.parentId
   if (parentId !== before.parentId) yield* validParent(caller, parentId, id)
   const after: TaskRow = {
@@ -352,8 +366,8 @@ export const updateTask = (ports: TaskPorts, caller: TaskCaller, id: string, pat
     ...(patch.external === undefined ? {} : { external: patch.external }),
     ...(patch.remind === undefined ? {} : { remind: remindFor(before.assignee, patch.remind), remindedFor: null }),
     parentId, timing,
-    wakeAt: patch.timing === undefined ? before.wakeAt : wakeAt(timing, before.state),
-    ...(patch.timing === undefined ? {} : { remindedFor: null }),
+    wakeAt: sameTiming ? before.wakeAt : wakeAt(timing, before.state),
+    ...(sameTiming ? {} : { remindedFor: null }),
     updatedAt: now,
   }
   return yield* commit(ports, { action: 'updated', before, after, actor: caller.actor })
@@ -388,15 +402,19 @@ export const pauseTask = (ports: TaskPorts, caller: TaskCaller, id: string, paus
   return yield* commit(ports, { action: pause ? 'paused' : 'resumed', before, after: { ...before, timing, wakeAt: wakeAt(timing, 'open'), updatedAt: now }, actor: caller.actor })
 })
 
+/** Whether a Robot's running Turn serves the Task, as the Robots report it to the registry (mc-w2bb). */
+const robotWorksOn = (taskId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.first<{ id: string }>("SELECT id FROM robot WHERE json_extract(turn, '$.task.id') = ? LIMIT 1", taskId)) !== undefined
+})
+
 /**
  * Give the Task to another doer (mc-n2bb): never while a Robot works on it. `working` names the Robot whose
  * running Turn serves the Task, as the Robots report it to the registry.
  */
 export const assignTask = (ports: TaskPorts, caller: TaskCaller, id: string, assignee: TaskAssignee, now = Date.now()) => Effect.gen(function* () {
   const before = yield* visibleTask(caller, id)
-  const sql = yield* Sql
-  const working = yield* sql.first<{ id: string }>("SELECT id FROM robot WHERE json_extract(turn, '$.task.id') = ? LIMIT 1", id)
-  if (working !== undefined) return yield* Effect.fail(conflict('A Robot is working on this Task now. Interrupt it or wait until its Turn ends, then assign the Task.'))
+  if (yield* robotWorksOn(id)) return yield* Effect.fail(conflict('A Robot is working on this Task now. Interrupt it or wait until its Turn ends, then assign the Task.'))
   yield* mayAssign(ports, caller, assignee)
   yield* withinLimit(assignee, before.timing, id)
   const after: TaskRow = { ...before, assignee, remind: remindFor(assignee, before.remind), remindedFor: null, updatedAt: now }
@@ -411,8 +429,7 @@ export const runTask = (caller: TaskCaller, id: string, queue: (robotId: string,
   const task = yield* visibleTask(caller, id)
   if (task.state !== 'open') return yield* Effect.fail(conflict(`This Task is already ${task.state}.`))
   if (task.assignee.kind !== 'robot') return yield* Effect.fail(invalid('Only a Task of a Robot can be run now.'))
-  const sql = yield* Sql
-  if ((yield* sql.first<{ id: string }>("SELECT id FROM robot WHERE json_extract(turn, '$.task.id') = ? LIMIT 1", id)) !== undefined) return yield* Effect.fail(conflict('A Robot is working on this Task now.'))
+  if (yield* robotWorksOn(id)) return yield* Effect.fail(conflict('A Robot is working on this Task now.'))
   if (!(yield* queue(task.assignee.robotId, { id: task.id, title: task.title, instructions: task.instructions }))) return yield* Effect.fail(conflict('This Task already waits for its Robot.'))
   return yield* view(task)
 })
@@ -533,8 +550,8 @@ export const importRoutines = (robot: { readonly id: string; readonly ownerId: s
       id: routine.id, title: routine.title, instructions: routine.instructions,
       createdBy: { kind: 'robot', robotId: robot.id, name: robot.identity.name, avatarColor: robot.identity.avatarColor, avatarSeed: robot.identity.avatarSeed },
       creatorMember: robot.ownerId, assignee: { kind: 'robot', robotId: robot.id }, parentId: null, timing: routine.timing,
-      // A one-shot that is still to come waits for its moment; one that ran is done.
-      wakeAt: routine.timing.kind === 'scheduled' && routine.timing.at <= now ? null : wakeAt(routine.timing, state),
+      // A one-shot that ran is done; one that has not, fires at its moment, or at once when that passed (robot-v1gb).
+      wakeAt: wakeAt(routine.timing, state),
       remind: { kind: 'none' }, remindedFor: null, state, external: null, createdAt: routine.createdAt, updatedAt: now,
     })
     for (const attempt of [...routine.attempts].reverse()) yield* addAttempt(routine.id, robot.id, attempt.outcome, attempt.startedAt, attempt.finishedAt, attempt.firstLine)

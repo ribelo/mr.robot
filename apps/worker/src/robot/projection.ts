@@ -85,7 +85,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           ? { kind: 'thread', id: notice.id, seq: notice.afterSeq, at: notice.at, event: notice.card.event, thread: thread! }
           : notice.card.kind === 'task'
             ? { kind: 'task', id: notice.id, seq: notice.afterSeq, at: notice.at, action: notice.card.action, taskId: notice.card.taskId, title: notice.card.title, by: notice.card.by }
-            : { kind: 'task', id: notice.id, seq: notice.afterSeq, at: notice.at, action: ROUTINE_CARD_ACTIONS[notice.card.action], taskId: '', title: notice.card.name, by: notice.card.by })
+            : { kind: 'task', id: notice.id, seq: notice.afterSeq, at: notice.at, action: ROUTINE_CARD_ACTIONS[notice.card.action], taskId: null, title: notice.card.name, by: notice.card.by })
     }
   }
 
@@ -209,9 +209,9 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           const innerTask = taskAction(inner.name, inner.args)
           const innerAction = routineAction(inner.name, inner.args)
           if (innerTask !== undefined) {
-            items.push({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerTask, taskId: String(inner.args['task_id'] ?? ''), title: String(inner.args['title'] ?? 'a Task') })
+            items.push({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerTask, taskId: typeof inner.args['task_id'] === 'string' ? inner.args['task_id'] : null, title: String(inner.args['title'] ?? 'a Task') })
           } else if (innerAction !== undefined) {
-            items.push({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, taskId: String(inner.args['id'] ?? ''), title: String(inner.args['title'] ?? inner.args['name'] ?? 'a Task') })
+            items.push({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, taskId: typeof inner.args['id'] === 'string' ? inner.args['id'] : null, title: String(inner.args['title'] ?? inner.args['name'] ?? 'a Task') })
           } else if (inner.name === 'react' && lastMemberMessage >= 0) {
             const target = items[lastMemberMessage]
             if (target?.kind === 'message') items[lastMemberMessage] = { ...target, reaction: String(inner.args['emoji'] ?? '👍') }
@@ -225,7 +225,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action: task, taskId: result['id'], title: String(result['title'] ?? 'a Task') })
         } else if (action !== undefined) {
           const title = String(result['title'] ?? result['name'] ?? call.args['title'] ?? call.args['name'] ?? 'a Task')
-          items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action, taskId: String(result['id'] ?? call.args['id'] ?? ''), title })
+          items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action, taskId: typeof (result['id'] ?? call.args['id']) === 'string' ? String(result['id'] ?? call.args['id']) : null, title })
         } else if (QUESTION_TOOLS.has(call.name) && typeof (result['proposalId'] ?? result['requestId']) === 'string') {
           const proposal = input.proposal(String(result['proposalId'] ?? result['requestId']))
           if (proposal !== undefined) items.push({ kind: 'question', id: message.id, seq: event.seq, at: event.time, proposal })

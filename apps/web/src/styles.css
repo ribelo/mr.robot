@@ -637,7 +637,10 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .mission-body { display: flex; gap: 12px; flex: 1; min-height: 0; }
 .mission-tables { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 0; min-height: 0; }
 .mission-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.mission-bar input[type="search"] { width: 220px; }
+.mission-bar input[type="search"] { width: 220px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; outline: none; }
+.mission-bar label.inline { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; }
+.mission-link { margin: 0 12px 6px; padding: 7px 10px; border-radius: 10px; text-align: left; color: var(--text); font-weight: 500; }
+.mission-link:hover { background: var(--hover); }
 .mission-bar .spacer { flex: 1; }
 .mission-section { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .mission-section h2 { margin: 6px 0 4px; font-size: 13.5px; }

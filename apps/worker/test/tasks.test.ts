@@ -53,6 +53,9 @@ describe('Tasks at the Home (v1.13 ticket 01)', () => {
     const first = (weekly.timing as { next: number }).next
     expect(first).toBeGreaterThan(Date.now())
     expect((await api<TaskView>(ANNA, `/api/tasks/${weekly.id}/pause`, { body: { paused: true } })).body.timing).toMatchObject({ paused: true })
+    // An edit that sends the same rule again keeps the pause and the next occurrence (mc-t3cc).
+    const resent = await api<TaskView>(ANNA, `/api/tasks/${weekly.id}`, { method: 'PATCH', body: { title: 'Water the plants', timing: { kind: 'recurring', schedule: { kind: 'weekly', time: '09:00', weekdays: [6] }, timeZone: 'Europe/Warsaw' } } })
+    expect(resent.body.timing).toMatchObject({ paused: true, next: first })
     expect((await api<TaskView>(ANNA, `/api/tasks/${weekly.id}/pause`, { body: { paused: false } })).body.timing).toMatchObject({ paused: false, next: first })
     // Done on a recurring Task handles one occurrence; the Task stays open with the next one (mc-s2bb).
     const handled = (await api<TaskView>(ANNA, `/api/tasks/${weekly.id}/done`, { body: {} })).body
@@ -101,6 +104,10 @@ describe('Tasks at the Home (v1.13 ticket 01)', () => {
     expect((await listed(BEN)).sort()).toEqual(['Ben alone', 'For Ben', 'For the shared Robot'])
     expect((await listed(ANNA)).sort()).toEqual(['Anna alone', 'For Ben', 'For the private Robot', 'For the shared Robot'])
     expect((await listed(ANNA, '?scope=home')).length).toBe(5)
+    // One Task's routes follow the admin's remembered Whole Home switch (mc-m7gg).
+    expect((await api(ANNA, `/api/tasks/${bens.id}`)).status).toBe(404)
+    await api(ANNA, '/api/me', { method: 'PATCH', body: { mission: { wholeHome: true } } })
+    expect((await api(ANNA, `/api/tasks/${bens.id}`)).status).toBe(200)
     // Whole Home is the admin's alone; for Ben it is his own view.
     expect((await listed(BEN, '?scope=home')).length).toBe(3)
     expect((await api(BEN, `/api/tasks/${forBen.id}`)).status).toBe(200)
