@@ -28,6 +28,8 @@ const view: MissionView = {
   counts: { robots: 2, working: 1, waiting: 0, openTasks: 3 },
 }
 
+const chief = robot('mr-1', 'Mr. Robot', { kind: 'mr-robot' })
+
 interface Call { readonly method: string; readonly path: string; readonly body: unknown }
 let calls: Call[]
 
@@ -41,7 +43,8 @@ beforeEach(() => {
     calls.push({ method: init?.method ?? 'GET', path: url.pathname + url.search, body: text === undefined ? undefined : JSON.parse(text) })
     if (url.pathname === '/api/mission') return Response.json(view)
     if (url.pathname === '/api/members') return Response.json([{ id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' } }])
-    if (url.pathname === '/api/robots') return Response.json(view.fleet)
+    if (url.pathname === '/api/robots') return Response.json([...view.fleet, chief])
+    if (url.pathname === '/api/robots/mr-1/conversation') return Response.json({ robotId: 'mr-1', items: [{ kind: 'reply', id: 'c-1', seq: 1, at: now, text: 'I added the task: call mum on Friday at six.' }], working: false })
     if (url.pathname.startsWith('/api/tasks/')) return Response.json(view.tasks.find((entry) => url.pathname.endsWith(entry.id)))
     if (url.pathname === '/api/tasks') return Response.json({ tasks: [], next: null })
     return Response.json({ ok: true })
@@ -128,5 +131,15 @@ describe('Mission Control (v1.13 ticket 06)', () => {
     render(<RegistryProvider><RobotConversation route={{ page: 'robot', id: 'r-1', panel: false, from: 'mission' }} me={me} robot={shopper} conversation={conversation} panel={panel} stream={null} onSheet={() => {}} /></RegistryProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     await waitFor(() => expect(location.hash).toBe('#/mission'))
+  })
+
+  it('opens Mr. Robot in a side drawer with his Conversation and Composer, and remembers it (mc-n4dd)', async () => {
+    await mission({ ...me, mission: { ...me.mission, drawer: true } })
+    const drawer = await screen.findByRole('complementary', { name: 'Mr. Robot' })
+    expect(await within(drawer).findByText('I added the task: call mum on Friday at six.')).toBeTruthy()
+    expect(within(drawer).getByPlaceholderText('Message Mr. Robot')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Mr. Robot', pressed: true }))
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Mr. Robot' })).toBeNull())
+    expect(calls.find((call) => call.method === 'PATCH' && call.path === '/api/me')!.body).toEqual({ mission: { drawer: false } })
   })
 })

@@ -660,3 +660,4 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .task-menu .task-actions { flex-direction: column; align-items: stretch; }
 .schedule-editor { display: flex; flex-direction: column; gap: 8px; }
 .weekdays { display: flex; flex-wrap: wrap; gap: 8px; }
+.mission-drawer .chat-frame { flex: 1; min-height: 0; }

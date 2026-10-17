@@ -7,7 +7,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/reactivity'
 import type { LastWakeup, Me, MissionGroup, MissionPrefs, MissionState, MissionView, RobotSummary, TaskView, WakeupCause } from '@mr-robot/protocol'
-import { keys, missionAtom, useCommand, type MissionQuery } from '../client/api-atoms.ts'
+import { keys, missionAtom, robotsAtom, useCommand, type MissionQuery } from '../client/api-atoms.ts'
+import { MrRobotDrawer } from './MrRobotDrawer.tsx'
 import { go } from '../route.ts'
 import { renderResult } from './AtomView.tsx'
 import { Avatar } from './Avatar.tsx'
@@ -108,6 +109,7 @@ export function MissionControl({ me }: { me: Me }) {
   // A new query keeps the last tables on screen until its answer comes.
   const [shown, setShown] = useState<MissionView>()
   useEffect(() => { if (AsyncResult.isSuccess(result)) setShown(result.value) }, [result])
+  const chief = AsyncResult.getOrElse(useAtomValue(robotsAtom), () => []).find((robot) => robot.kind === 'mr-robot' && robot.ownerId === me.id)
 
   return (
     <div className="page mission">
@@ -125,6 +127,7 @@ export function MissionControl({ me }: { me: Me }) {
         </div>
         <span className="spacer" />
         <button type="button" className="button button-primary" onClick={() => setForm({})}>New task</button>
+        {chief === undefined ? null : <button type="button" className={prefs.drawer ? 'button active' : 'button'} aria-pressed={prefs.drawer} onClick={() => remember({ drawer: !prefs.drawer })}>{chief.identity.name}</button>}
         {admin ? (
           <label className="inline">
             Whole Home
@@ -140,6 +143,7 @@ export function MissionControl({ me }: { me: Me }) {
               onMoreFleet={() => setPages((current) => ({ ...current, fleet: current.fleet + 1 }))}
               onMoreTasks={() => setPages((current) => ({ ...current, tasks: current.tasks + 1 }))} />}
         </div>
+        {prefs.drawer && chief !== undefined ? <MrRobotDrawer me={me} chief={chief} onTurnEnded={refresh} /> : null}
       </div>
       {openTask === undefined ? null : <TaskSheet taskId={openTask} working={shown?.fleet.some((robot) => robot.turn?.task?.id === openTask) === true} onClose={() => setOpenTask(undefined)} onOpenTask={setOpenTask} />}
       {form === undefined ? null : <TaskForm {...(form.task === undefined ? {} : { task: form.task })} {...(form.parentId === undefined ? {} : { parentId: form.parentId })} onClose={() => setForm(undefined)} />}
