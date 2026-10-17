@@ -8,7 +8,8 @@ import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
 import type { AccountUsage, Me, ProviderView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
 import { applyTheme } from '../theme/theme.ts'
-import { keys, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
+import { homeMembersAtom, keys, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
+import { AsyncResult } from 'effect/reactivity'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
 import { InlineEdit } from './InlineEdit.tsx'
@@ -42,20 +43,22 @@ export function Profile({ me }: { me: Me }) {
   )
 }
 
-/** Name, nickname, time zone, quiet hours and the notifications of this device (ux-etwn, ux-i8ff). */
+/** Name, nickname, time zone, quiet hours, whose Robots may give you Tasks, and the notifications of this device (ux-etwn, ux-i8ff, mc-a1aa). */
 function You({ me }: { me: Me }) {
   const command = useCommand()
   const [name, setName] = useState(me.name)
   const [nickname, setNickname] = useState(me.nickname ?? '')
   const [timeZone, setTimeZone] = useState(me.timeZone)
   const [quiet, setQuiet] = useState(me.quietHours ?? { start: '', end: '' })
+  const [accept, setAccept] = useState<readonly string[]>(me.acceptTasksFrom)
+  const others = AsyncResult.getOrElse(useAtomValue(homeMembersAtom), () => []).filter((member) => member.id !== me.id)
   const [error, setError] = useState<string>()
   const nativeNotifications = hostBridge()?.nativeNotifications === true
   const save = async () => {
     // Only a zone the person typed is sent: it pins the zone, so saving other fields must not.
     const zone = timeZone.trim() !== me.timeZone ? { timeZone: timeZone.trim() } : {}
     // A blank nickname removes it.
-    const exit = await command((api) => api.updateMe({ name, nickname, ...zone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null }), [keys.me, keys.robots, keys.admin])
+    const exit = await command((api) => api.updateMe({ name, nickname, ...zone, quietHours: quiet.start !== '' && quiet.end !== '' ? quiet : null, acceptTasksFrom: accept }), [keys.me, keys.robots, keys.admin])
     setError(exitFailure(exit))
     return exit
   }
@@ -81,6 +84,18 @@ function You({ me }: { me: Me }) {
         <label>Quiet from<input type="time" value={quiet.start} onChange={(event) => setQuiet({ ...quiet, start: event.target.value })} /></label>
         <label>until<input type="time" value={quiet.end} onChange={(event) => setQuiet({ ...quiet, end: event.target.value })} /></label>
       </div>
+      {others.length === 0 ? null : (
+        <fieldset className="accept-tasks">
+          <legend>Accept tasks from the Robots of…</legend>
+          <div className="muted">Their Robots may give you Tasks; everyone else's Robots ask them instead. Off for everyone until you turn it on.</div>
+          {others.map((member) => (
+            <label key={member.id} className="inline">
+              <input type="checkbox" checked={accept.includes(member.id)} onChange={(event) => setAccept(event.target.checked ? [...accept, member.id] : accept.filter((id) => id !== member.id))} />
+              {member.name}
+            </label>
+          ))}
+        </fieldset>
+      )}
       {/* In the desktop app notifications arrive over its own connection, natively (pl-b5vp): nothing to switch (ux-bune). */}
       {nativeNotifications ? <div className="muted">The Mr. Robot app shows notifications on this computer; quiet hours hold them until morning.</div> : null}
       <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} /></div>

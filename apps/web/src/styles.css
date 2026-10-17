@@ -661,3 +661,5 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .schedule-editor { display: flex; flex-direction: column; gap: 8px; }
 .weekdays { display: flex; flex-wrap: wrap; gap: 8px; }
 .mission-drawer .chat-frame { flex: 1; min-height: 0; }
+.accept-tasks { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.accept-tasks legend { padding: 0; margin-bottom: 4px; }

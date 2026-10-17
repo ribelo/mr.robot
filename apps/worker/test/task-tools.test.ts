@@ -82,6 +82,20 @@ describe('a Robot works with Tasks through the tools (v1.13 ticket 04)', () => {
     expect(items.filter((item) => item.kind === 'task')).toEqual([expect.objectContaining({ action: 'created', taskId: task.id, title: 'Call the dentist' })])
   })
 
+  it('gives another Member a Task once that Member accepts Tasks from its owner\'s Robots (mc-a1aa, mc-a2bb)', async () => {
+    const id = await robot(ANNA, ['tasks'])
+    const ask = async () => (await calls(id, [{ name: 'task_create', args: { title: 'Sign the lease', assignee: 'member:ben@example.com' } }]))[0]!
+    expect(await ask()).toContain('Accept tasks from the Robots of…')
+    // Only real Members other than Ben himself can be named; an unknown id is dropped.
+    expect((await api(BEN, '/api/me', { method: 'PATCH', body: { acceptTasksFrom: [annaId, benId, 'm-nobody'] } })).status).toBe(200)
+    expect((await api<Me>(BEN, '/api/me')).body.acceptTasksFrom).toEqual([annaId])
+    const made = JSON.parse(await ask()) as { id: string; assignee: string }
+    expect(made.assignee).toBe('member:Ben')
+    expect((await api<TaskView>(BEN, `/api/tasks/${made.id}`)).body).toMatchObject({ title: 'Sign the lease', assignee: { kind: 'member', memberId: benId } })
+    await api(BEN, '/api/me', { method: 'PATCH', body: { acceptTasksFrom: [] } })
+    expect(await ask()).toContain('does not accept Tasks from the Robots of Anna')
+  })
+
   it('task_focus makes a message Turn work on a Task once; task_done finishes it with its line (mc-w3cc, mc-w4dd)', async () => {
     const id = await robot(ANNA, ['tasks'])
     const shopping = await create(ANNA, { title: 'Shopping', assignee: { kind: 'robot', robotId: id } })
