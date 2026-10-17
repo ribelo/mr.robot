@@ -12,6 +12,8 @@ export interface DeviceSubscription {
 }
 
 export interface PushNotification {
+  /** A Robot's notification, or the Home's reminder of a Task (mc-s3cc). */
+  readonly kind: 'robot' | 'reminder'
   readonly title: string
   readonly body: string
   /** Deep link into the PWA, e.g. /#/r/<robot id>. */

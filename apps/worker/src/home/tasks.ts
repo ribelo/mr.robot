@@ -7,7 +7,8 @@
 import * as Effect from 'effect/Effect'
 import type { Actor, Attempt, AttemptOutcome, Remind, TaskAssignee, TaskExternal, TaskInput, TaskPage, TaskPatch, TaskState, TaskTiming, TaskView } from '@mr-robot/protocol'
 import { conflict, invalid, notFound, Sql, type DurableError } from '../platform/durable.ts'
-import { advanced, overdue, parseTiming, pausedTiming, wakeAt } from './task-timing.ts'
+import { advanced, overdue, parseTiming, pausedTiming, reminderAt, wakeAt } from './task-timing.ts'
+import { nextRun } from '../robot/schedule.ts'
 
 export const TASK_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS task (
@@ -78,7 +79,7 @@ export interface TaskPorts {
   /** The Members whose Robots may give this Member Tasks (mc-a1aa). */
   readonly acceptsFrom: (memberId: string) => Effect.Effect<readonly string[]>
   /** A Task changed: plan the doers' moments again, tell their Conversations. */
-  readonly changed: (change: TaskChange) => Effect.Effect<void>
+  readonly changed: (change: TaskChange) => Effect.Effect<void, never, Sql>
 }
 
 type TaskSql = {
@@ -403,4 +404,89 @@ export const orphanTasks = (assignee: Exclude<TaskAssignee, { kind: 'nobody' }>,
   const rows = yield* sql.all<TaskSql>("SELECT * FROM task WHERE assignee_kind = ? AND assignee_id = ? AND state = 'open'", assignee.kind, assigneeId(assignee))
   yield* sql.run("UPDATE task SET assignee_kind = 'nobody', assignee_id = NULL, remind = ?, updated_at = ? WHERE assignee_kind = ? AND assignee_id = ? AND state = 'open'", JSON.stringify({ kind: 'none' }), now, assignee.kind, assigneeId(assignee))
   return rows.map(taskFromSql)
+})
+
+// ------------------------------------------------------------------ scheduling (v1.13 ticket 02)
+
+/** The moment of a Robot's earliest due Task: the one number the Robot keeps (mc-s1aa). Unassigned Tasks never wake anyone (mc-s5ee). */
+export const nextDueOf = (robotId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.first<{ at: number | null }>("SELECT MIN(wake_at) AS at FROM task WHERE assignee_kind = 'robot' AND assignee_id = ? AND state = 'open' AND wake_at IS NOT NULL", robotId))?.at ?? null
+})
+
+/** A due Task as the Robot queues it: a Task Wake-up with the instructions as its text. */
+export interface DueTask {
+  readonly id: string
+  readonly title: string
+  readonly instructions: string
+}
+
+/**
+ * The Robot's alarm asks for its due Tasks (mc-s1aa, mc-s2bb). Handing a Task out is handling its occurrence:
+ * a scheduled Task fires once; a recurring one moves to its next occurrence after now, so occurrences missed
+ * while the platform was down collapse into this one (robot-v1gb). Answers with the Robot's next moment.
+ */
+export const takeDue = (robotId: string, now = Date.now()) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const rows = (yield* sql.all<TaskSql>("SELECT * FROM task WHERE assignee_kind = 'robot' AND assignee_id = ? AND state = 'open' AND wake_at IS NOT NULL AND wake_at <= ? ORDER BY wake_at", robotId, now)).map(taskFromSql)
+  for (const task of rows) {
+    const timing = task.timing.kind === 'recurring' ? advanced(task.timing, now) : task.timing
+    yield* saveTask({ ...task, timing, wakeAt: timing.kind === 'recurring' ? wakeAt(timing, 'open') : null, updatedAt: now })
+  }
+  return { tasks: rows.map((task): DueTask => ({ id: task.id, title: task.title, instructions: task.instructions })), nextDue: yield* nextDueOf(robotId) }
+})
+
+/** Record one attempt; only the newest ATTEMPTS_KEPT of the Task stay (mc-t4dd). @returns its id. */
+export const addAttempt = (taskId: string, robotId: string, outcome: AttemptOutcome, startedAt: number, finishedAt: number | null, firstLine: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  yield* sql.run('INSERT INTO task_attempt (task_id, robot_id, started_at, finished_at, outcome, first_line) VALUES (?, ?, ?, ?, ?, ?)', taskId, robotId, startedAt, finishedAt, outcome, firstLine)
+  const id = (yield* sql.first<{ id: number }>('SELECT last_insert_rowid() AS id'))!.id
+  yield* sql.run(
+    'DELETE FROM task_attempt WHERE task_id = ? AND id NOT IN (SELECT id FROM task_attempt WHERE task_id = ? ORDER BY started_at DESC, id DESC LIMIT ?)',
+    taskId, taskId, ATTEMPTS_KEPT,
+  )
+  return id
+})
+
+/** Open Tasks of people whose reminder has not gone out for their current occurrence. */
+const unreminded = Effect.gen(function* () {
+  const sql = yield* Sql
+  return (yield* sql.all<TaskSql>("SELECT * FROM task WHERE assignee_kind = 'member' AND state = 'open' AND wake_at IS NOT NULL AND reminded_for IS NOT wake_at")).map(taskFromSql)
+    .flatMap((task) => {
+      const at = reminderAt(task.assignee, task.timing, task.remind, task.wakeAt)
+      return at === null ? [] : [{ task, at }]
+    })
+})
+
+/** When the Home's alarm next has a reminder to send; null when none waits. */
+export const nextReminder = Effect.map(unreminded, (pending) => (pending.length === 0 ? null : Math.min(...pending.map((entry) => entry.at))))
+
+/**
+ * The reminders due now (mc-s3cc, mc-s4dd), each marked sent for its occurrence before it goes out: one reminder
+ * per occurrence, and an unhandled recurring occurrence is not reminded again.
+ */
+export const takeReminders = (now = Date.now()) => Effect.gen(function* () {
+  const due = (yield* unreminded).filter((entry) => entry.at <= now).map((entry) => entry.task)
+  for (const task of due) yield* saveTask({ ...task, remindedFor: task.wakeAt })
+  return due
+})
+
+/**
+ * The owner's zone changed (v1.11 ticket 08): a recurring Task a Member or their Robots made in the old zone keeps
+ * its local time in the new one. A Task given its own zone stays. @returns the Tasks that moved.
+ */
+export const rezoneTasks = (memberId: string, from: string, to: string, now = Date.now()) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const rows = (yield* sql.all<TaskSql>("SELECT * FROM task WHERE creator_member = ? AND state = 'open' AND json_extract(timing, '$.kind') = 'recurring' AND json_extract(timing, '$.timeZone') = ?", memberId, from)).map(taskFromSql)
+  const moved: TaskRow[] = []
+  for (const task of rows) {
+    if (task.timing.kind !== 'recurring' || task.timing.schedule.kind === 'interval') continue
+    const next = nextRun(task.timing.schedule, to, now, now)
+    if (next === null) continue
+    const timing = { ...task.timing, timeZone: to, next }
+    const after = { ...task, timing, wakeAt: wakeAt(timing, task.state), updatedAt: now }
+    yield* saveTask(after)
+    moved.push(after)
+  }
+  return moved
 })

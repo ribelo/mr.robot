@@ -10,10 +10,14 @@ declare module '@deepseek-ai/dsh-llm' {
     member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[]; clientId?: string } & ContextFormed
     robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; avatarSeed: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string } & ContextFormed
     routine: { kind: 'routine'; routineId: string; name: string } & ContextFormed
+    task: { kind: 'task'; taskId: string; name: string; by: TaskRunBy } & ContextFormed
     channel: { kind: 'channel'; channel: string; from: string } & ContextFormed
     platform: { kind: 'platform'; summary: string } & ContextFormed
   }
 }
+
+/** Who started a Task's Turn (mc-s1aa): its schedule, a person (Run now), or a Robot. */
+export type TaskRunBy = 'schedule' | 'member' | 'robot'
 
 /** A scope on one line, for the label the model reads before a Thread message. */
 export const oneLine = (text: string): string => text.replace(/\s*\n\s*/g, ' ⏎ ').trim()
@@ -51,6 +55,8 @@ export interface WakeupMessageInput {
   readonly helpAnswer?: HelpAnswerWake
   /** The platform message is the owner's answer to a tool-call Ask (sk-ed7r). */
   readonly toolCallAnswer?: ToolCallAnswerLabel
+  /** A Task's Wake-up: who started it, and the person's name for Run now. */
+  readonly taskRun?: { readonly by: TaskRunBy; readonly who?: string }
 }
 
 /** The owner's answer to a tool-call Ask, as its label names it. */
@@ -148,6 +154,16 @@ function sourceMessage(input: WakeupMessageInput): UserMessage {
         content: [{ type: 'text', text: `[Routine "${sender.name}" (${sender.routineId}) is due. Nobody is watching this turn.]\n${input.text}` }],
         source: { kind: 'routine', routineId: sender.routineId, name: sender.name },
       })
+    case 'task': {
+      const run = input.taskRun ?? { by: 'schedule' as const }
+      const head = run.by === 'schedule'
+        ? `[Task "${sender.name}" (${sender.taskId}) is due. Nobody is watching this turn. When the Task is finished, call task_done.]`
+        : `[Task "${sender.name}" (${sender.taskId}): ${run.who ?? 'your owner'} asked you to run it now. When the Task is finished, call task_done.]`
+      return createUserMessage({
+        content: [{ type: 'text', text: `${head}\n${input.text}` }],
+        source: { kind: 'task', taskId: sender.taskId, name: sender.name, by: run.by },
+      })
+    }
     case 'channel':
       return createUserMessage({
         content: [{ type: 'text', text: `[${sender.channel} message from ${sender.from}]\n${input.text}${files}` }],

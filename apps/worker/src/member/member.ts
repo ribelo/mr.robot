@@ -609,14 +609,24 @@ const deliver = (notification: PushNotification) => Effect.gen(function* () {
  * A Robot wants this Member to hear something. Inside the Member's quiet hours it waits
  * for their end (robot-bden); otherwise it goes to every device now.
  */
-const notify = (event: { robotId: string; robotName: string; kind: NotificationKind; body: string }) => Effect.gen(function* () {
-  const notification: PushNotification = {
-    title: event.kind === 'finished' ? event.robotName : `${event.robotName} ${event.kind === 'needs you' ? 'needs you' : 'is blocked'}`,
-    body: event.body.slice(0, 400),
-    url: `/#/r/${encodeURIComponent(event.robotId)}`,
-    tag: `${event.robotId}-${event.kind}`,
-    urgency: event.kind === 'finished' ? 'normal' : 'high',
-  }
+const notify = (event: { robotId: string; robotName: string; kind: NotificationKind; body: string }) => push({
+  kind: 'robot',
+  title: event.kind === 'finished' ? event.robotName : `${event.robotName} ${event.kind === 'needs you' ? 'needs you' : 'is blocked'}`,
+  body: event.body.slice(0, 400),
+  url: `/#/r/${encodeURIComponent(event.robotId)}`,
+  tag: `${event.robotId}-${event.kind}`,
+  urgency: event.kind === 'finished' ? 'normal' : 'high',
+})
+
+/** The Home reminds this Member of a Task's moment (mc-s3cc): a push of its own, no Robot woken; quiet hours apply. */
+const remind = (task: { taskId: string; title: string; at: number }) => Effect.gen(function* () {
+  const me = yield* profile
+  const clock = new Intl.DateTimeFormat('en-GB', { timeZone: me.timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(task.at)
+  return yield* push({ kind: 'reminder', title: task.title.slice(0, 120), body: `${task.at < Date.now() ? 'Was due' : 'Due'} ${clock}`, url: '/#/mission', tag: `task-${task.taskId}`, urgency: 'high' })
+})
+
+/** Inside the Member's quiet hours a notification waits for their end (robot-bden); otherwise it goes to every device now. */
+const push = (notification: PushNotification) => Effect.gen(function* () {
   const until = yield* quietUntil(Date.now())
   if (until !== null) {
     const sql = yield* Sql
@@ -646,7 +656,7 @@ const deliverDue = (now: number) => Effect.gen(function* () {
 export const MemberProgram = {
   profile, init, updateProfile, file, files, writeFile, accounts, addApiKey, startOAuth, finishOAuth, updateAccount, removeAccount, credential, accountCredential,
   listPrefs, setListPref, markSeen, groups, createGroup, updateGroup, removeGroup, orderGroups, setSecret, secret, takeSecret, secretNames, logins, addUsage, usage,
-  addPushDevice, removePushDevice, pushDevices, notify, deliver, deliverDue,
+  addPushDevice, removePushDevice, pushDevices, notify, remind, deliver, deliverDue,
 }
 
 /** Vault failures are not the caller's fault: they surface as defects (500s). */
@@ -724,7 +734,7 @@ export class Member extends DurableObject<Env> {
   /** The profile zone changed: every Robot of this Member follows it and is told (v1.11 ticket 08). */
   private async zoneMoved(before: MemberProfile, after: MemberProfile): Promise<void> {
     if (before.timeZone === after.timeZone) return
-    await this.env.HOME.getByName(HOME_ID).timeZoneChanged(after.id, after.timeZone).catch((error: unknown) => console.warn('time zone change not delivered', error))
+    await this.env.HOME.getByName(HOME_ID).timeZoneChanged(after.id, after.timeZone, before.timeZone).catch((error: unknown) => console.warn('time zone change not delivered', error))
   }
   file(name: MemberFileName): Promise<string> { return this.run(file(name)) }
   files(): Promise<Record<MemberFileName, string>> { return this.run(files) }
@@ -798,6 +808,7 @@ export class Member extends DurableObject<Env> {
   removePushDevice(endpoint: string): Promise<void> { return this.run(removePushDevice(endpoint)) }
   pushDevices(): Promise<Array<{ endpoint: string; device: string; createdAt: number }>> { return this.run(pushDevices) }
   notify(event: { robotId: string; robotName: string; kind: NotificationKind; body: string }): Promise<'sent' | 'deferred'> { return this.run(notify(event)) }
+  remind(task: { taskId: string; title: string; at: number }): Promise<'sent' | 'deferred'> { return this.run(remind(task)) }
 
   override async alarm(): Promise<void> {
     await this.run(deliverDue(Date.now()))

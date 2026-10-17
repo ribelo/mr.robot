@@ -655,6 +655,14 @@ export const TaskPatch = Schema.Struct({
 })
 export type TaskPatch = typeof TaskPatch.Type
 
+/** What happened to a Task, as its card in a Conversation says (mc-c1aa). */
+export const TaskAction = Schema.Literals(['created', 'updated', 'assigned', 'done', 'cancelled', 'paused', 'resumed', 'ran'])
+export type TaskAction = typeof TaskAction.Type
+
+/** What starts a Turn (GLOSSARY: Wake-up). */
+export const WakeupKind = Schema.Literals(['member', 'task', 'robot', 'channel', 'takeover', 'platform'])
+export type WakeupKind = typeof WakeupKind.Type
+
 export const TaskAssign = Schema.Struct({ assignee: TaskAssignee })
 export const TaskPause = Schema.Struct({ paused: Schema.Boolean })
 
@@ -846,6 +854,8 @@ export const Sender = Schema.Union([
   MemberSender,
   RobotSender,
   Schema.Struct({ kind: Schema.Literal('routine'), routineId: Schema.String, name: Schema.String }),
+  /** A Task whose moment came, or that a person ran now (mc-s1aa). */
+  Schema.Struct({ kind: Schema.Literal('task'), taskId: Schema.String, name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('channel'), channel: Schema.String, from: Schema.String }),
   PlatformSender,
 ])
@@ -909,6 +919,8 @@ export const ChatItem = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
   /** A Routine card; `by` names who changed it when it was not the Robot itself (Mr. Robot, cd-n9pi). */
   Schema.Struct({ kind: Schema.Literal('routine'), ...itemFields, action: Schema.Literals(['created', 'updated', 'deleted', 'ran', 'paused', 'resumed']), name: Schema.String, by: Schema.optional(Schema.String) }),
+  /** A Task card (mc-c1aa); `by` names who changed it when it was not this Robot. */
+  Schema.Struct({ kind: Schema.Literal('task'), ...itemFields, action: TaskAction, taskId: Schema.String, title: Schema.String, by: Schema.optional(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('question'), ...itemFields, proposal: ProposalView }),
   Schema.Struct({ kind: Schema.Literal('notice'), ...itemFields, text: Schema.String }),
   /** Tools the Robot used in one step, shown collapsed (robot-gr94). */

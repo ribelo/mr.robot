@@ -103,6 +103,10 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           items.push({ kind: 'routine', id: message.id, seq: event.seq, at: event.time, action: 'ran', name: sender.name })
           break
         }
+        if (sender.kind === 'task') {
+          items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action: 'ran', taskId: sender.taskId, title: sender.name })
+          break
+        }
         items.push({
           kind: 'message',
           id: message.id,
@@ -239,12 +243,13 @@ export function chatTextOf(event: SessionEvent): ChatText | undefined {
   if (text.length === 0) return undefined
   const label = sender.kind === 'member' || sender.kind === 'robot' ? sender.name
     : sender.kind === 'routine' ? `Routine ${sender.name}`
+      : sender.kind === 'task' ? `Task ${sender.name}`
       : sender.kind === 'channel' ? `${sender.channel} ${sender.from}` : ''
   return { id: message.id, kind: 'message', sender: label, text }
 }
 
 /** Message sources that are people, Robots, Routines, Channels or Mr. Robot's platform notes. */
-const CHAT_SOURCES = new Set(['member', 'robot', 'routine', 'channel', 'platform'])
+const CHAT_SOURCES = new Set(['member', 'robot', 'routine', 'task', 'channel', 'platform'])
 
 function senderOf(source: Record<string, unknown> | undefined): Sender {
   switch (source?.['kind']) {
@@ -255,6 +260,8 @@ function senderOf(source: Record<string, unknown> | undefined): Sender {
       return { kind: 'robot', robotId: String(source['robotId']), name: String(source['name']), avatarColor: String(source['avatarColor']), avatarSeed: typeof source['avatarSeed'] === 'string' && source['avatarSeed'] !== '' ? source['avatarSeed'] : String(source['robotId']) }
     case 'routine':
       return { kind: 'routine', routineId: String(source['routineId']), name: String(source['name']) }
+    case 'task':
+      return { kind: 'task', taskId: String(source['taskId']), name: String(source['name']) }
     case 'channel':
       return { kind: 'channel', channel: String(source['channel']), from: String(source['from']) }
     case 'platform':

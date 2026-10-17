@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react'
 import { useMeasuredRows, useRowWindow } from './row-window.ts'
-import type { ChatItem, GrantLevels, ProposalView, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
+import type { ChatItem, GrantLevels, ProposalView, TaskAction, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
 import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
@@ -187,6 +187,13 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
           <span className="routine-name"><ClockIcon /> {item.name}</span>
         </div>
       )
+    case 'task':
+      return (
+        <div className="chat-separator routine-line">
+          {item.action === 'ran' ? null : <span>{item.by === undefined ? taskVerb(item.action) : `Task ${item.action} by ${item.by}`} </span>}
+          <span className="routine-name"><ClockIcon /> {item.title}</span>
+        </div>
+      )
     case 'notice':
       return <div className="chat-separator notice">{item.text}</div>
     case 'thread':
@@ -208,6 +215,19 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
 
 function routineVerb(action: 'created' | 'updated' | 'deleted' | 'ran' | 'paused' | 'resumed'): string {
   return action === 'created' ? 'Created routine' : action === 'updated' ? 'Updated routine' : action === 'deleted' ? 'Deleted routine' : action === 'paused' ? 'Paused routine' : action === 'resumed' ? 'Resumed routine' : ''
+}
+
+function taskVerb(action: TaskAction): string {
+  switch (action) {
+    case 'created': return 'Created task'
+    case 'updated': return 'Updated task'
+    case 'assigned': return 'Assigned task'
+    case 'done': return 'Done'
+    case 'cancelled': return 'Cancelled task'
+    case 'paused': return 'Paused task'
+    case 'resumed': return 'Resumed task'
+    case 'ran': return ''
+  }
 }
 
 export function askTitle(proposal: ProposalView): string {

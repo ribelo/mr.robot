@@ -1012,6 +1012,38 @@ export const fireRoutines = (now: number) => Effect.gen(function* () {
   }
 })
 
+/** The kv key of the one moment the Robot keeps of its Tasks: when its earliest due Task wakes it (mc-s1aa). */
+export const NEXT_DUE = 'next-due'
+
+/** The Home planned this Robot's earliest due Task. */
+export const setNextDue = (at: number | null) => Effect.gen(function* () {
+  const store = yield* RobotState
+  if (store.config() === undefined) return
+  if (at === null) store.delete(NEXT_DUE)
+  else store.set(NEXT_DUE, at)
+  yield* (yield* RobotPlatform).rearm()
+})
+
+/**
+ * The moment came: the Home hands out the due Tasks and moves them on; each becomes one Task Wake-up. A Task
+ * whose earlier Wake-up is still queued or running is skipped, so a Task cannot flood its Robot (cd-d14a).
+ */
+export const fireTasks = (now: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const due = store.get<number>(NEXT_DUE)
+  if (due === undefined || due > now) return
+  const current = yield* config
+  const home = platform.env.HOME.getByName(HOME_ID)
+  const answer = yield* promise(() => home.dueTasks(current.id))
+  for (const task of answer.tasks) {
+    if (store.taskQueued(task.id)) yield* promise(() => home.taskSkipped(task.id, current.id, 'The previous run had not finished.'))
+    else store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
+  }
+  if (answer.nextDue === null) store.delete(NEXT_DUE)
+  else store.set(NEXT_DUE, answer.nextDue)
+})
+
 /** The next alarm: a heartbeat while work runs, the earliest Routine, outbox retry, screen check or screenshot sweep. */
 export const rearm = Effect.gen(function* () {
   const store = yield* RobotState
@@ -1024,10 +1056,12 @@ export const rearm = Effect.gen(function* () {
   const sweep = store.get<number>('screens-sweep-next')
   const resume = store.get<number>('chain-resume-at')
   const escalation = store.nextHelpEscalation()
+  const taskDue = store.get<number>(NEXT_DUE)
   // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
   const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
   const candidates = [
     ...(escalation === undefined ? [] : [escalation]),
+    ...(taskDue === undefined ? [] : [taskDue]),
     ...(signInEnds === undefined ? [] : [signInEnds]),
     ...(resume === undefined ? [] : [resume]),
     ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) ? [Date.now() + HEARTBEAT_MS] : []),

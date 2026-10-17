@@ -69,7 +69,7 @@ export interface RobotConfig {
   readonly createdAt: number
 }
 
-export type WakeupKind = 'member' | 'routine' | 'robot' | 'channel' | 'takeover' | 'platform'
+export type WakeupKind = 'member' | 'routine' | 'task' | 'robot' | 'channel' | 'takeover' | 'platform'
 
 export interface Wakeup {
   readonly id: number
@@ -582,6 +582,11 @@ export class RobotStore {
   wakeup(id: number): Wakeup | undefined {
     const row = this.sql.exec<WakeupSql>('SELECT * FROM wakeup WHERE id = ?', id).toArray()[0]
     return row === undefined ? undefined : wakeupFromSql(row)
+  }
+
+  /** Whether a Wake-up of this Task is queued or its Turn is running. */
+  taskQueued(taskId: string): boolean {
+    return this.sql.exec("SELECT 1 FROM wakeup WHERE kind = 'task' AND json_extract(payload, '$.taskId') = ?", taskId).toArray().length > 0
   }
 
   pendingWakeups(): number {

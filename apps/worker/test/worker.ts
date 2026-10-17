@@ -33,6 +33,18 @@ export class Home extends ProductionHome {
     return this.ctx.storage.getAlarm()
   }
 
+  /** Pretend the platform was down for `ms`: every Task's moment moves into the past, and the Robots and the alarm hear it. */
+  async backdateTasksForTest(ms: number): Promise<void> {
+    const sql = this.ctx.storage.sql
+    sql.exec("UPDATE task SET wake_at = wake_at - ?, timing = CASE json_extract(timing, '$.kind') WHEN 'recurring' THEN json_set(timing, '$.next', json_extract(timing, '$.next') - ?) WHEN 'scheduled' THEN json_set(timing, '$.at', json_extract(timing, '$.at') - ?) ELSE timing END WHERE wake_at IS NOT NULL", ms, ms, ms)
+    const robots = sql.exec<{ id: string }>("SELECT DISTINCT assignee_id AS id FROM task WHERE assignee_kind = 'robot'").toArray()
+    for (const { id } of robots) {
+      const at = sql.exec<{ at: number | null }>("SELECT MIN(wake_at) AS at FROM task WHERE assignee_kind = 'robot' AND assignee_id = ? AND state = 'open'", id).one().at
+      await this.env.ROBOT.getByName(id).setNextDue(at)
+    }
+    await this.ctx.storage.setAlarm(Date.now() + 1)
+  }
+
   /** The spend limits as stored before v1.12 (a number of USD or null), migrated as at start (ux-ommv). */
   async legacySpendLimitsForTest(robot: number | null, member: number | null): Promise<void> {
     const sql = this.ctx.storage.sql

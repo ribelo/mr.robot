@@ -65,7 +65,7 @@ import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts
 import type { ChainEntry, HomeSpendLimit, ProviderView } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
-import { wakeupMessage, type HelpAnswerWake, type ThreadWake } from '../agent/sources.ts'
+import { wakeupMessage, type HelpAnswerWake, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
@@ -383,6 +383,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.config()
     if (config !== undefined && config.status !== 'deleted') await this.expireCapture(Date.now()).catch((error: unknown) => console.warn('sign-in not ended', error))
     if (config !== undefined && config.status !== 'deleted') await this.fireRoutines(Date.now())
+    if (config !== undefined && config.status !== 'deleted') await this.program(Programs.fireTasks(Date.now())).catch((error: unknown) => console.warn('due Tasks not fetched', error))
     // Due Routines start at once; housekeeping below must not delay their Turns.
     if (this.store.pendingWakeups() > 0) this.drain()
     if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
@@ -406,6 +407,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.program(Programs.fireRoutines(now))
   }
 
+
+  /** The Home planned this Robot's earliest due Task (mc-s1aa): the alarm comes then. */
+  setNextDue(at: number | null): Promise<void> {
+    return this.program(Programs.setNextDue(at))
+  }
 
   /** The Routine rules (creation, limits, edits) over the routine table; the alarm fires what it stores. */
   private schedule(): AlarmSchedule {
@@ -487,6 +493,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         ...(wakeup.payload['thread'] !== undefined && wakeup.kind === 'robot' ? { thread: wakeup.payload['thread'] as ThreadWake } : {}),
         ...(wakeup.payload['helpAnswer'] !== undefined && wakeup.kind === 'platform' ? { helpAnswer: wakeup.payload['helpAnswer'] as HelpAnswerWake } : {}),
         ...optionalString(wakeup.payload, 'clientId'),
+        ...(wakeup.kind === 'task' ? { taskRun: taskRunOf(wakeup.payload) } : {}),
         woke: { at: Date.now(), timeZone: this.store.requireConfig().timeZone },
       }))
     } else {
@@ -569,7 +576,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (failedTurn) await this.chainFailure(startSeq).catch((error: unknown) => console.warn('model chain not advanced', error))
     else await this.chainSucceeded().catch(() => undefined)
     const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
-    if (!failedTurn && wakeup.kind !== 'routine' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
+    if (!failedTurn && wakeup.kind !== 'routine' && wakeup.kind !== 'task' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
       // A Turn that ends with nothing to show (e.g. a reasoning model spent its output cap thinking) is not silent.
       const config = this.store.requireConfig()
       this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${config.identity.name} finished without a reply. If this repeats, raise its context budget in Advanced settings.`, Date.now())
@@ -1236,7 +1243,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     try {
       return await call()
     } catch (error) {
-      if (error instanceof Error && error.name === 'HostOffline' && this.currentWakeup === 'routine') {
+      if (error instanceof Error && error.name === 'HostOffline' && (this.currentWakeup === 'routine' || this.currentWakeup === 'task')) {
         await this.notifyMembers('needs you', `could not finish a routine: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
       }
       throw error instanceof Error && error.name === 'HostOffline' ? new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running; do not switch to a cloud browser.`) : error
@@ -2819,4 +2826,10 @@ const MEDIA_TYPES: Record<string, string> = {
 /** The content type a file is served with; HTML and SVG-like scripts are never rendered as pages. */
 function mediaTypeOf(path: string): string {
   return MEDIA_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
+}
+
+/** Who started a Task Wake-up, from its payload: the schedule unless a person or a Robot ran it now. */
+function taskRunOf(payload: Record<string, unknown>): { by: TaskRunBy; who?: string } {
+  const by = payload['by'] === 'member' || payload['by'] === 'robot' ? payload['by'] : 'schedule'
+  return typeof payload['who'] === 'string' ? { by, who: payload['who'] } : { by }
 }

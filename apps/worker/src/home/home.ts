@@ -1390,8 +1390,45 @@ export class Home extends DurableObject<Env> {
     return {
       zoneOf: (memberId) => Effect.promise(() => profile(memberId).then((found) => found.timeZone, () => DEFAULT_TIME_ZONE)),
       acceptsFrom: (memberId) => Effect.promise(() => profile(memberId).then((found) => found.acceptTasksFrom ?? [], () => [])),
-      changed: () => Effect.void,
+      changed: (change) => this.planned([change.before?.assignee, change.after.assignee]),
     }
+  }
+
+  /** Plan again after Tasks changed: each Robot's earliest due moment (mc-s1aa), and the Home's next reminder (mc-s3cc). */
+  private planned(assignees: ReadonlyArray<TaskAssignee | undefined>): Effect.Effect<void, never, Sql> {
+    const env = this.env
+    const storage = this.ctx.storage
+    return Effect.gen(function* () {
+      const robots = new Set(assignees.flatMap((assignee) => (assignee?.kind === 'robot' ? [assignee.robotId] : [])))
+      for (const robotId of robots) {
+        const at = yield* Tasks.nextDueOf(robotId)
+        yield* Effect.promise(() => env.ROBOT.getByName(robotId).setNextDue(at).catch((error: unknown) => console.warn('next due not told', robotId, error)))
+      }
+      const reminder = yield* Tasks.nextReminder
+      if (reminder !== null) yield* Effect.promise(async () => {
+        const current = await storage.getAlarm()
+        if (current === null || current > reminder) await storage.setAlarm(Math.max(reminder, Date.now() + 1))
+      })
+    })
+  }
+
+  /** A Robot's alarm asks for its due Tasks; the Home hands them out and moves them on (mc-s1aa, mc-s2bb). */
+  dueTasks(robotId: string): Promise<{ tasks: Tasks.DueTask[]; nextDue: number | null }> { return this.run(Tasks.takeDue(robotId)) }
+
+  /** A due Task whose earlier Wake-up has not been served yet: the occurrence is skipped (cd-d14a). */
+  taskSkipped(taskId: string, robotId: string, reason: string): Promise<void> {
+    const now = Date.now()
+    return this.run(Effect.asVoid(Tasks.addAttempt(taskId, robotId, 'skipped', now, now, reason)))
+  }
+
+  /** The reminders due now go to their people's devices (mc-s3cc), then the alarm waits for the next. */
+  private async remindPeople(): Promise<void> {
+    const due = await this.run(Tasks.takeReminders())
+    for (const task of due) {
+      if (task.assignee.kind !== 'member') continue
+      await this.env.MEMBER.getByName(task.assignee.memberId).remind({ taskId: task.id, title: task.title, at: task.wakeAt ?? Date.now() }).catch((error: unknown) => console.warn('reminder not sent', task.id, error))
+    }
+    await this.run(this.planned([]))
   }
 
   listTasks(caller: Tasks.TaskCaller, filter: Tasks.TaskFilter): Promise<TaskPage> { return this.run(Tasks.listTasks(caller, filter)) }
@@ -1497,7 +1534,11 @@ export class Home extends DurableObject<Env> {
   }
 
   /** A Member's profile zone changed: each of their Robots follows it, recomputes its Routines and notes it. */
-  async timeZoneChanged(memberId: string, timeZone: string): Promise<void> {
+  async timeZoneChanged(memberId: string, timeZone: string, from?: string): Promise<void> {
+    if (from !== undefined && from !== timeZone) {
+      const moved = await this.run(Tasks.rezoneTasks(memberId, from, timeZone))
+      await this.run(this.planned(moved.map((task) => task.assignee)))
+    }
     const robots = this.ctx.storage.sql.exec<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId).toArray()
     await Promise.all(robots.map((robot) => this.env.ROBOT.getByName(robot.id).timeZoneChanged(timeZone).catch((error: unknown) => console.warn('time zone change not delivered', robot.id, error))))
   }
@@ -1705,6 +1746,7 @@ export class Home extends DurableObject<Env> {
 
   /** The Home's alarm keeps the Discord gateway alive: heartbeats, and reconnects after a drop or a restart. */
   override async alarm(): Promise<void> {
+    await this.remindPeople().catch((error: unknown) => console.warn('reminders not sent', error))
     await this.run(lapseThreads).catch((error: unknown) => console.warn('idle Threads not closed', error))
     await this.ensureDiscordGateway()
     await this.run(rearmThreads)
