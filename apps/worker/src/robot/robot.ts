@@ -429,6 +429,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { interrupted: true }
   }
 
+  /** A person ran one of this Robot's Tasks now (mc-n1aa): a Task Wake-up, unless one of that Task already waits. */
+  async runTask(task: { id: string; title: string; instructions: string }, who: string): Promise<boolean> {
+    if (this.store.taskQueued(task.id)) return false
+    await this.wake({ kind: 'task', sender: { kind: 'task', taskId: task.id, name: task.title }, text: task.instructions, payload: { taskId: task.id, by: 'member', who } })
+    return true
+  }
+
   /** Someone else changed one of this Robot's Tasks: its Conversation shows a card naming who (mc-c1aa). */
   async taskCard(card: TaskCard): Promise<void> {
     const config = this.store.config()

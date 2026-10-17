@@ -1542,6 +1542,11 @@ export class Home extends DurableObject<Env> {
   finishTask(caller: Tasks.TaskCaller, id: string): Promise<TaskView> { return this.run(Tasks.finishTask(this.taskPorts, caller, id)) }
   cancelTask(caller: Tasks.TaskCaller, id: string): Promise<TaskView> { return this.run(Tasks.cancelTask(this.taskPorts, caller, id)) }
   pauseTask(caller: Tasks.TaskCaller, id: string, paused: boolean): Promise<TaskView> { return this.run(Tasks.pauseTask(this.taskPorts, caller, id, paused)) }
+  /** Run now (mc-n1aa): the Task's Robot queues a Task Wake-up that names the person. */
+  runTask(caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, id: string): Promise<TaskView> {
+    const who = caller.actor.kind === 'member' ? caller.actor.name : 'a person'
+    return this.run(Tasks.runTask(caller, id, (robotId, task) => Effect.promise(() => this.env.ROBOT.getByName(robotId).runTask(task, who))))
+  }
   assignTask(caller: Tasks.TaskCaller, id: string, assignee: TaskAssignee): Promise<TaskView> { return this.run(Tasks.assignTask(this.taskPorts, caller, id, assignee)) }
   /** What a Member can grant: tool groups of plugins that are on, and their usable connections (v1.5). */
   async catalog(memberId: string, robotId: string): Promise<SettingsCatalog> {

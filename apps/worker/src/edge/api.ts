@@ -661,6 +661,7 @@ export const api = new Router<ApiContext>()
     const { paused } = yield* decodeBody(c.request, TaskPause)
     return yield* call((): Promise<TaskView> => home(c.env).pauseTask(taskCaller(c, true), id, paused))
   }))
+  .on('POST', '/api/tasks/:id/run', (c, { id }) => call((): Promise<TaskView> => home(c.env).runTask(taskCaller(c, true), id)))
   .on('POST', '/api/tasks/:id/assign', (c, { id }) => Effect.gen(function* () {
     const { assignee } = yield* decodeBody(c.request, TaskAssign)
     return yield* call((): Promise<TaskView> => home(c.env).assignTask(taskCaller(c, true), id, assignee))

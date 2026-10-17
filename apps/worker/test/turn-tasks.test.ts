@@ -2,7 +2,9 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, RobotSummary, TaskView } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
-import { scripts } from './stub-llm.ts'
+import { requests, scripts } from './stub-llm.ts'
+
+const requestsOf = (id: string) => requests.get(id) ?? []
 
 const ANNA = 'anna@example.com'
 
@@ -94,5 +96,23 @@ describe('The Turn knows its cause and subject (v1.13 ticket 03)', () => {
     await api(ANNA, `/api/robots/${id}/interrupt`, { body: {} })
     await settle(id)
     expect((await row(id)).lastWakeup).toEqual({ wakeup: { kind: 'member', from: 'Anna' }, task: null })
+  })
+
+  it('Run now queues a Task Wake-up naming the person; refused while it waits and for a Task of a person (mc-n1aa, v1.13 ticket 07)', async () => {
+    const id = await activeRobot()
+    const shopping = (await api<TaskView>(ANNA, '/api/tasks', { body: { title: 'Shopping', instructions: 'Buy milk.', assignee: { kind: 'robot', robotId: id } } })).body
+    const mine = (await api<TaskView>(ANNA, '/api/tasks', { body: { title: 'Mine', assignee: { kind: 'nobody' } } })).body
+    await api(ANNA, `/api/robots/${id}/pause`, { body: {} })
+    expect((await api(ANNA, `/api/tasks/${shopping.id}/run`, { body: {} })).status).toBe(200)
+    expect((await api<{ error: string }>(ANNA, `/api/tasks/${shopping.id}/run`, { body: {} })).body.error).toBe('This Task already waits for its Robot.')
+    expect((await api<{ error: string }>(ANNA, `/api/tasks/${mine.id}/run`, { body: {} })).body.error).toBe('Only a Task of a Robot can be run now.')
+    scripts.set(id, [{ hang: true }])
+    await api(ANNA, `/api/robots/${id}/resume`, { body: {} })
+    const summary = await working(id)
+    expect(summary.turn).toMatchObject({ wakeup: { kind: 'task', from: 'Anna' }, task: { id: shopping.id, title: 'Shopping' } })
+    expect(JSON.stringify(requestsOf(id).at(-1)!.messages.at(-1))).toContain(`Task \\"Shopping\\" (${shopping.id}): Anna asked you to run it now.`)
+    expect((await api(ANNA, `/api/tasks/${shopping.id}/run`, { body: {} })).status).toBe(409)
+    await api(ANNA, `/api/robots/${id}/interrupt`, { body: {} })
+    await settle(id)
   })
 })

@@ -89,7 +89,7 @@ describe('Robot and Task sheets (robot-lulc, mc-m9ii)', () => {
     render(<RegistryProvider><TaskSheet taskId="t-1" onClose={vi.fn()} /></RegistryProvider>)
     expect(await screen.findByText('Work the queue')).toBeTruthy()
     expect(screen.getByText('Europe/Warsaw')).toBeTruthy()
-    expect(await screen.findByText('Sales Outbound')).toBeTruthy()
+    expect(await screen.findByText('Sales Outbound', { selector: 'dd' })).toBeTruthy()
     expect(screen.getByText('Queue worked: 12 leads.')).toBeTruthy()
     expect(screen.getByText('Skipped: The previous run had not finished.')).toBeTruthy()
     fireEvent.click(screen.getByText('Pause'))

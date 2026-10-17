@@ -11,7 +11,7 @@ import { keys, missionAtom, useCommand, type MissionQuery } from '../client/api-
 import { go } from '../route.ts'
 import { renderResult } from './AtomView.tsx'
 import { Avatar } from './Avatar.tsx'
-import { TaskSheet, stateText, useNames } from './TaskSheets.tsx'
+import { TaskActions, TaskForm, TaskSheet, stateText, useNames } from './TaskSheets.tsx'
 import { WindowedTable } from './WindowedTable.tsx'
 import { assigneeKey, assigneeText, lastAttemptText, momentOf, whenText, type Names } from './task-words.ts'
 
@@ -89,6 +89,7 @@ export function MissionControl({ me }: { me: Me }) {
   const [q, setQ] = useState('')
   const [pages, setPages] = useState({ fleet: 1, tasks: 1 })
   const [openTask, setOpenTask] = useState<string>()
+  const [form, setForm] = useState<{ readonly parentId?: string; readonly task?: TaskView }>()
   const admin = me.role === 'admin'
   const remember = (patch: Partial<MissionPrefs>) => {
     setPrefs((current) => ({ ...current, ...patch }))
@@ -123,6 +124,7 @@ export function MissionControl({ me }: { me: Me }) {
           {GROUPS.map((option) => <button key={option.id} type="button" role="radio" aria-checked={prefs.group === option.id} className={prefs.group === option.id ? 'segment active' : 'segment'} onClick={() => remember({ group: option.id })}>{option.label}</button>)}
         </div>
         <span className="spacer" />
+        <button type="button" className="button button-primary" onClick={() => setForm({})}>New task</button>
         {admin ? (
           <label className="inline">
             Whole Home
@@ -134,32 +136,37 @@ export function MissionControl({ me }: { me: Me }) {
         <div className="mission-tables">
           {shown === undefined
             ? renderResult(result, { what: 'Mission Control', retry: refresh }, () => null)
-            : <MissionTables view={shown} prefs={prefs} wholeHome={wanted.scope === 'home'} onOpenTask={setOpenTask}
+            : <MissionTables view={shown} prefs={prefs} wholeHome={wanted.scope === 'home'} onOpenTask={setOpenTask} onForm={setForm}
               onMoreFleet={() => setPages((current) => ({ ...current, fleet: current.fleet + 1 }))}
               onMoreTasks={() => setPages((current) => ({ ...current, tasks: current.tasks + 1 }))} />}
         </div>
       </div>
-      {openTask === undefined ? null : <TaskSheet taskId={openTask} onClose={() => setOpenTask(undefined)} onOpenTask={setOpenTask} />}
+      {openTask === undefined ? null : <TaskSheet taskId={openTask} working={shown?.fleet.some((robot) => robot.turn?.task?.id === openTask) === true} onClose={() => setOpenTask(undefined)} onOpenTask={setOpenTask} />}
+      {form === undefined ? null : <TaskForm {...(form.task === undefined ? {} : { task: form.task })} {...(form.parentId === undefined ? {} : { parentId: form.parentId })} onClose={() => setForm(undefined)} />}
     </div>
   )
 }
 
-function MissionTables({ view, prefs, wholeHome, onOpenTask, onMoreFleet, onMoreTasks }: {
+function MissionTables({ view, prefs, wholeHome, onOpenTask, onForm, onMoreFleet, onMoreTasks }: {
   view: MissionView
   prefs: MissionPrefs
   wholeHome: boolean
   onOpenTask: (id: string) => void
+  onForm: (form: { readonly parentId?: string; readonly task?: TaskView }) => void
   onMoreFleet: () => void
   onMoreTasks: () => void
 }) {
   const names = useNames()
+  const command = useCommand()
   const now = Date.now()
+  const [menu, setMenu] = useState<{ readonly task: TaskView; readonly x: number; readonly y: number }>()
+  const workingOn = new Set(view.fleet.flatMap((robot) => (robot.turn?.task === null || robot.turn?.task === undefined ? [] : [robot.turn.task.id])))
   const rows = useMemo(() => groupTasks(view.tasks, prefs.group, names, now), [view.tasks, prefs.group, names, now])
   const titles = useMemo(() => new Map(view.tasks.map((task) => [task.id, task.title])), [view.tasks])
   const moreFleet = useCallback(() => { if (view.fleetNext !== null) onMoreFleet() }, [view.fleetNext, onMoreFleet])
   const moreTasks = useCallback(() => { if (view.tasksNext !== null) onMoreTasks() }, [view.tasksNext, onMoreTasks])
-  const fleetColumns = `22px minmax(110px, 1.3fr) 108px minmax(110px, 1.2fr) minmax(100px, 1.2fr) minmax(80px, 0.9fr) 56px minmax(140px, 2.2fr)${wholeHome ? ' minmax(80px, 0.8fr)' : ''}`
-  const taskColumns = '84px minmax(160px, 2.4fr) minmax(90px, 1fr) minmax(130px, 1.5fr) minmax(130px, 1.8fr) 46px'
+  const fleetColumns = `22px minmax(110px, 1.3fr) 108px minmax(110px, 1.2fr) minmax(100px, 1.2fr) minmax(80px, 0.9fr) 56px minmax(140px, 2.2fr)${wholeHome ? ' minmax(80px, 0.8fr)' : ''} 76px`
+  const taskColumns = '84px minmax(160px, 2.4fr) minmax(90px, 1fr) minmax(130px, 1.5fr) minmax(130px, 1.8fr) 46px 30px'
   return (
     <>
       <section className="mission-section" aria-label="Fleet">
@@ -170,8 +177,9 @@ function MissionTables({ view, prefs, wholeHome, onOpenTask, onMoreFleet, onMore
           rowKey={(robot) => robot.id}
           rowHeight={ROW_HEIGHT}
           columns={fleetColumns}
-          header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Last line</span>{wholeHome ? <span>Owner</span> : null}</>}
-          renderRow={(robot) => <FleetCells robot={robot} now={now} wholeHome={wholeHome} />}
+          header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Last line</span>{wholeHome ? <span>Owner</span> : null}<span /></>}
+          renderRow={(robot) => <FleetCells robot={robot} now={now} wholeHome={wholeHome}
+            onInterrupt={() => void command((api) => api.interrupt(robot.id), [keys.robots, keys.tasks, keys.robot(robot.id)])} />}
           onRowClick={(robot) => go({ page: 'robot', id: robot.id, panel: false, from: 'mission' })}
           onEnd={moreFleet}
         />
@@ -184,20 +192,30 @@ function MissionTables({ view, prefs, wholeHome, onOpenTask, onMoreFleet, onMore
           rowKey={(row) => (row.kind === 'group' ? `group:${row.key}` : row.task.id)}
           rowHeight={ROW_HEIGHT}
           columns={taskColumns}
-          header={<><span>State</span><span>Title</span><span>Doer</span><span>When</span><span>Last attempt</span><span>Sub</span></>}
+          header={<><span>State</span><span>Title</span><span>Doer</span><span>When</span><span>Last attempt</span><span>Sub</span><span /></>}
           rowClass={(row) => (row.kind === 'group' ? 'wt-group' : row.task.overdue ? 'wt-overdue' : '')}
           renderRow={(row) => (row.kind === 'group'
             ? <span style={{ gridColumn: '1 / -1' }}>{row.label} · {row.count}</span>
-            : <TaskCells task={row.task} names={names} parentTitle={row.task.parentId === null ? undefined : titles.get(row.task.parentId)} />)}
+            : <TaskCells task={row.task} names={names} parentTitle={row.task.parentId === null ? undefined : titles.get(row.task.parentId)}
+              onMenu={(x, y) => setMenu({ task: row.task, x, y })} />)}
           onRowClick={(row) => { if (row.kind === 'task') onOpenTask(row.task.id) }}
           onEnd={moreTasks}
         />
       </section>
+      {menu === undefined ? null : (
+        <div className="menu-backdrop" onClick={() => setMenu(undefined)}>
+          <div className="task-menu" role="menu" aria-label={`Actions of ${menu.task.title}`} style={{ left: Math.min(menu.x, window.innerWidth - 260), top: Math.min(menu.y, window.innerHeight - 320) }} onClick={(event) => event.stopPropagation()}>
+            <TaskActions task={menu.task} working={workingOn.has(menu.task.id)} onDone={() => setMenu(undefined)}
+              onAddChild={() => { setMenu(undefined); onForm({ parentId: menu.task.id }) }}
+              onEdit={() => { setMenu(undefined); onForm({ task: menu.task }) }} />
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
-function FleetCells({ robot, now, wholeHome }: { robot: RobotSummary; now: number; wholeHome: boolean }) {
+function FleetCells({ robot, now, wholeHome, onInterrupt }: { robot: RobotSummary; now: number; wholeHome: boolean; onInterrupt: () => void }) {
   const cause: LastWakeup | null = robot.turn ?? robot.lastWakeup
   return (
     <>
@@ -210,11 +228,12 @@ function FleetCells({ robot, now, wholeHome }: { robot: RobotSummary; now: numbe
       <span>{robot.turn === null ? '' : sinceText(robot.turn.since, now)}</span>
       <span className="muted">{robot.lastLine}</span>
       {wholeHome ? <span className="muted">{robot.ownerName}</span> : null}
+      <span>{robot.turn === null ? null : <button type="button" className="link danger" onClick={(event) => { event.stopPropagation(); onInterrupt() }}>Interrupt</button>}</span>
     </>
   )
 }
 
-function TaskCells({ task, names, parentTitle }: { task: TaskView; names: Names; parentTitle: string | undefined }) {
+function TaskCells({ task, names, parentTitle, onMenu }: { task: TaskView; names: Names; parentTitle: string | undefined; onMenu: (x: number, y: number) => void }) {
   return (
     <>
       <span>{stateText(task)}</span>
@@ -223,6 +242,7 @@ function TaskCells({ task, names, parentTitle }: { task: TaskView; names: Names;
       <span className="task-when">{whenText(task.timing)}</span>
       <span className="muted">{lastAttemptText(task)}</span>
       <span className="muted">{task.children === 0 ? '' : task.children}</span>
+      <span>{task.state === 'open' ? <button type="button" className="icon-button small" aria-label={`Actions of ${task.title}`} onClick={(event) => { event.stopPropagation(); onMenu(event.clientX, event.clientY) }}>⋯</button> : null}</span>
     </>
   )
 }

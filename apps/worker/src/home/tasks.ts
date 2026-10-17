@@ -404,6 +404,20 @@ export const assignTask = (ports: TaskPorts, caller: TaskCaller, id: string, ass
 })
 
 /**
+ * Run now (mc-n1aa): an open Task of a Robot that nobody works on is handed to its Robot, which queues a Task
+ * Wake-up. `queue` asks the Robot and answers false when that Task's Wake-up already waits.
+ */
+export const runTask = (caller: TaskCaller, id: string, queue: (robotId: string, task: DueTask) => Effect.Effect<boolean>) => Effect.gen(function* () {
+  const task = yield* visibleTask(caller, id)
+  if (task.state !== 'open') return yield* Effect.fail(conflict(`This Task is already ${task.state}.`))
+  if (task.assignee.kind !== 'robot') return yield* Effect.fail(invalid('Only a Task of a Robot can be run now.'))
+  const sql = yield* Sql
+  if ((yield* sql.first<{ id: string }>("SELECT id FROM robot WHERE json_extract(turn, '$.task.id') = ? LIMIT 1", id)) !== undefined) return yield* Effect.fail(conflict('A Robot is working on this Task now.'))
+  if (!(yield* queue(task.assignee.robotId, { id: task.id, title: task.title, instructions: task.instructions }))) return yield* Effect.fail(conflict('This Task already waits for its Robot.'))
+  return yield* view(task)
+})
+
+/**
  * A Robot was deleted or a Member removed (mc-t8hh): their open Tasks become unassigned, not deleted.
  * @returns the Tasks that changed.
  */
