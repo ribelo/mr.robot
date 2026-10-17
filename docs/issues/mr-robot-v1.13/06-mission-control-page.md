@@ -6,10 +6,10 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Route, sidebar and home entry; `GET /api/mission` with paging, filters, grouping; MissionView in the protocol
-- [ ] WindowedTable; Fleet and Tasks tables; group headers; overdue mark
-- [ ] Whole Home switch (admin only); preferences remembered
-- [ ] Back from a Robot opened here returns here
-- [ ] Component tests: window rendering, row contents, grouping and filters, admin switch, back; workerd test for paging and ordering
+- [x] Route, sidebar and home entry; `GET /api/mission` with paging, filters, grouping; MissionView in the protocol
+- [x] WindowedTable; Fleet and Tasks tables; group headers; overdue mark
+- [x] Whole Home switch (admin only); preferences remembered
+- [x] Back from a Robot opened here returns here
+- [x] Component tests: window rendering, row contents, grouping and filters, admin switch, back; workerd test for paging and ordering

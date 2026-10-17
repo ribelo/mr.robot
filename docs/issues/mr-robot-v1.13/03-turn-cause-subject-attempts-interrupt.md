@@ -6,9 +6,9 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `turn.task_id`; attempt start and finish on the Home; `interrupted` outcome
-- [ ] Registry row with cause, subject, activity, since; RobotSummary fields
-- [ ] Interrupt route and Robot method; notice in the Conversation
-- [ ] Workerd tests: attempt lifecycle, focus once per Turn, registry row, interrupt
+- [x] `turn.task_id`; attempt start and finish on the Home; `interrupted` outcome
+- [x] Registry row with cause, subject, activity, since; RobotSummary fields
+- [x] Interrupt route and Robot method; notice in the Conversation
+- [x] Workerd tests: attempt lifecycle, focus once per Turn, registry row, interrupt

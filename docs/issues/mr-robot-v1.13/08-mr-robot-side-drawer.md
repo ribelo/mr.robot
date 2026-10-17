@@ -6,8 +6,8 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Drawer with embedded ChatView and Composer; remembered open state
-- [ ] Refresh of the tables after a Turn
-- [ ] Component test: drawer renders the chief's Conversation and the composer
+- [x] Drawer with embedded ChatView and Composer; remembered open state
+- [x] Refresh of the tables after a Turn
+- [x] Component test: drawer renders the chief's Conversation and the composer

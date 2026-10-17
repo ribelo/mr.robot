@@ -6,9 +6,9 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Tool group `tasks` with the eight tools; grant migration; deputy tools removed
-- [ ] Assignment rules in the tool host; refusal messages
-- [ ] Prompt section and product docs
-- [ ] Workerd tests with the scripted model: list visibility, create for owner, refusal to a non-accepting Member, focus and done through the tools; tool-surface contract test updated
+- [x] Tool group `tasks` with the eight tools; grant migration; deputy tools removed
+- [x] Assignment rules in the tool host; refusal messages
+- [x] Prompt section and product docs
+- [x] Workerd tests with the scripted model: list visibility, create for owner, refusal to a non-accepting Member, focus and done through the tools; tool-surface contract test updated

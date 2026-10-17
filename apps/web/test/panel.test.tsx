@@ -72,7 +72,7 @@ describe('Robot and Task sheets (robot-lulc, mc-m9ii)', () => {
       const text = raw === undefined || raw === null ? undefined : ArrayBuffer.isView(raw) ? new TextDecoder().decode(raw) : String(raw)
       calls.push({ path, method: init?.method ?? 'GET', body: text === undefined ? undefined : JSON.parse(text) })
       if (path.endsWith('/panel')) return Response.json(panel)
-      // The server answers a settings change with the saved settings, a routine change with the routine.
+      // The server answers a settings change with the saved settings, a Task change with the Task.
       if (path.endsWith('/settings')) return Response.json(panel.settings)
       if (path === '/api/tasks/t-1') return Response.json(task)
       if (path === '/api/tasks') return Response.json({ tasks: [], next: null })

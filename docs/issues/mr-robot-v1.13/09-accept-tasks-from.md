@@ -6,7 +6,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Profile field and API; UI in You
-- [ ] Workerd test: assignment refused, then accepted after the setting changes
+- [x] Profile field and API; UI in You
+- [x] Workerd test: assignment refused, then accepted after the setting changes

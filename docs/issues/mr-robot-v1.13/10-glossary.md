@@ -6,7 +6,7 @@
 
 **Blocked by:** 04, 05, 07
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Glossary entries
-- [ ] No "Routine" left outside the migration code
+- [x] Glossary entries
+- [x] No "Routine" left outside the migration code

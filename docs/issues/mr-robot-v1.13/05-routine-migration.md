@@ -6,8 +6,8 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `exportRoutines()` on the Robot; Home migration in batches with retry; Admin count
-- [ ] Read-time mapping of old chat items and senders
-- [ ] Workerd test: a Robot with Routines and runs migrates to Tasks with attempts; old items decode
+- [x] `exportRoutines()` on the Robot; Home migration in batches with retry; Admin count
+- [x] Read-time mapping of old chat items and senders
+- [x] Workerd test: a Robot with Routines and runs migrates to Tasks with attempts; old items decode

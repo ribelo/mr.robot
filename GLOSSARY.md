@@ -4,13 +4,16 @@ Vocabulary for Mr. Robot. Specs, code and tests use these words and no synonyms.
 
 - **Home** — one deployment's group of people who may share secrets, subscriptions, skills and robots. v1 deploys one Home.
 - **Member** — a person signed in through Cloudflare Access who belongs to a Home. The first Member is the Home admin.
-- **Robot** — a persistent worker owned by a Member: one Durable Object, one endless Conversation, its own Persona files, Routines, Grants and Workspace. Not a chat session and not a subagent.
-- **Mr. Robot** — the personal chief Robot every Member gets on first sign-in; it may create Robots and holds recipient Grants to every Robot the Member can reach.
+- **Robot** — a persistent worker owned by a Member: one Durable Object, one endless Conversation, its own Persona files, Grants and Workspace. Its work is kept as Tasks at the Home. Not a chat session and not a subagent.
+- **Mr. Robot** — the personal chief Robot every Member gets on first sign-in; it may create Robots, holds recipient Grants to every Robot the Member can reach, and creates and changes Tasks as one of them (robot_id). Sits in a side drawer of Mission Control.
 - **Conversation** — the single, endless exchange with a Robot. Rendered simply as chat or fully as the Trajectory; both are the same DSH session log.
-- **Trajectory** — the full session log view: turns, tool calls, results, executed code.
+- **Trajectory** — the full session log view: Turns with their Wake-up and Task, tool calls, results, executed code.
 - **Turn** — one agent-loop run of a Robot, from a Wake-up to the Robot going back to sleep. One Turn at a time per Robot.
-- **Wake-up** — what starts a Turn: a Member message, a Routine occurrence, a Robot message, a Channel event, or a Takeover returned.
-- **Routine** — a schedule (one-shot, interval, daily, weekly, cron) with a prompt, owned and edited by the Robot, backed by a Durable Object alarm. Shown as "Created routine" cards in the Conversation.
+- **Wake-up** — what starts a Turn: a Member message, a Task whose moment came or that a person ran now, a Robot message, a Channel event, a Takeover returned, or a platform notice. The Turn records its Wake-up as its cause.
+- **Task** — something to do: a title, instructions, who created it, its doer (a Member, a Robot, or nobody), an optional parent Task, a Timing, and a state of open, done or cancelled. Never "in progress" or "failed": working is a fact about a Turn, failing a fact about an Attempt. Kept by the Home. Only task_done makes a Robot's Task done.
+- **Timing** — when a Task wakes its doer: *unscheduled* (on the list, an optional deadline), *scheduled* (a moment, an optional deadline not before it) or *recurring* (a rule, a time zone and the next occurrence; no deadline; only a recurring Task can be paused).
+- **Attempt** — one Turn of a Robot on a Task: started, finished, outcome (running, ok, failed, skipped, interrupted) and the first line of the reply. A Task keeps its last 20. Overdue is derived: a scheduled Task whose moment passed without an Attempt.
+- **Mission Control** — a Member's page with two dense tables: the Fleet (each Robot he reaches: state, what woke it, the Task it works on, the running tool, since when) and the Tasks he sees, grouped by doer, parent or time. The Home admin's Whole Home switch widens both to every Robot and Task.
 - **Rewind** — replacing the live session with one seeded from the log up to a chosen point; the old log goes to the Robot's archive and the Rewind can be undone.
 - **Grant** — permission a Member gives a Robot: a tool, a skill, a recipient Robot, a secret. Everything is off until granted.
 - **Grant proposal** — a Robot's request for additional Grants, stored exactly and answered by the owner; the stored proposal is applied, never prose.

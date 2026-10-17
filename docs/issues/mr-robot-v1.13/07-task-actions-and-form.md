@@ -6,9 +6,9 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Row actions and their API calls; Run now route
-- [ ] Task form with the timing segments and the allowed fields
-- [ ] Task chat cards; panel Tasks section; Admin table removed
-- [ ] Component tests: actions call the API, form refusals and field visibility; workerd test for Run now
+- [x] Row actions and their API calls; Run now route
+- [x] Task form with the timing segments and the allowed fields
+- [x] Task chat cards; panel Tasks section; Admin table removed
+- [x] Component tests: actions call the API, form refusals and field visibility; workerd test for Run now

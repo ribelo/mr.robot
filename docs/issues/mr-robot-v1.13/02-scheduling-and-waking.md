@@ -6,10 +6,10 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Robot: `nextDueAt` replaces the routine alarm source; alarm asks the Home for due Tasks and queues Task Wake-ups
-- [ ] Home: due computation, advance on handled, missed-occurrence collapse, limits
-- [ ] Home alarm: reminder push once per occurrence; overdue recurring reminds once
-- [ ] WakeupKind `task` and Sender `task` in the protocol; old `routine` mapped on read
-- [ ] Workerd tests: fires once, advance rules, collapse, nobody fires nothing, limits, reminder through the stubbed push transport
+- [x] Robot: `nextDueAt` replaces the routine alarm source; alarm asks the Home for due Tasks and queues Task Wake-ups
+- [x] Home: due computation, advance on handled, missed-occurrence collapse, limits
+- [x] Home alarm: reminder push once per occurrence; overdue recurring reminds once
+- [x] WakeupKind `task` and Sender `task` in the protocol; old `routine` mapped on read
+- [x] Workerd tests: fires once, advance rules, collapse, nobody fires nothing, limits, reminder through the stubbed push transport

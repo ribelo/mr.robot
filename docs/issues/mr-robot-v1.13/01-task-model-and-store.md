@@ -6,10 +6,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Protocol: TaskAssignee, TaskTiming, TaskState, Remind, Attempt, TaskView, Actor, TaskInput, TaskPatch
-- [ ] Home store: tables, indexes, CRUD, attempts (last 20 in the view), children count, overdue computed on read
-- [ ] API routes with visibility and assignment rules; refusals with messages
-- [ ] Orphaning on Robot delete and Member removal
-- [ ] Workerd tests through the API for the round trip, the refusals, visibility, orphaning
+- [x] Protocol: TaskAssignee, TaskTiming, TaskState, Remind, Attempt, TaskView, Actor, TaskInput, TaskPatch
+- [x] Home store: tables, indexes, CRUD, attempts (last 20 in the view), children count, overdue computed on read
+- [x] API routes with visibility and assignment rules; refusals with messages
+- [x] Orphaning on Robot delete and Member removal
+- [x] Workerd tests through the API for the round trip, the refusals, visibility, orphaning
