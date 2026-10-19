@@ -60,6 +60,10 @@ export interface RobotConfig {
   /** The secret in this Robot's webhook address (v1.6 ticket 07); created on first use. */
   readonly webhookKey?: string
   readonly compactionInstruction: string
+  /** The idle plugins (v1.14); absent on Robots made before them: the default of their kind (idle.ts). */
+  readonly cacheWarming?: boolean
+  readonly idleCompaction?: boolean
+  readonly idleCompactionFloorTokens?: number
   readonly notifications: NotificationSettings
   /** The Robot's own monthly spend limit, or the Home's (ux-q8ve). */
   readonly spendLimit: RobotSpendLimit

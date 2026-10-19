@@ -15,6 +15,8 @@ import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
 import { LlmError, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { OpencodePool } from '../providers/opencode-go.ts'
+import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
+import { IDLE_MEMORY_NOTE, IDLE_MEMORY_STEPS, idlePlan, idleSettings, type IdleStep } from './idle.ts'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {
   HostView,
@@ -65,7 +67,7 @@ import { capabilitiesView, capabilityItems, usableLevel, usableNames, type Capab
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, UserMessage } from '@deepseek-ai/dsh-llm'
 import { joinable } from './delivery.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
@@ -128,7 +130,7 @@ import { causeOf, LAST_WAKEUP, runningTool } from './views.ts'
 import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
-import { MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
+import { IDLE_PLAN, MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
 export type { AnswerResult, HelpAnswerer, HelpAnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, storedToolCall, type ActiveTurn, type TaskCard, type ProposalRow, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
 
@@ -390,6 +392,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config !== undefined) await this.deliverOutbox()
     if (config !== undefined && config.status !== 'deleted') this.resumeChain(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.escalateHelp(Date.now()).catch((error: unknown) => console.warn('help not escalated', error))
+    if (config !== undefined && config.status === 'active') await this.runIdle(Date.now()).catch((error: unknown) => console.warn('idle work failed', error))
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
   }
@@ -537,7 +540,86 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const turn = this.store.activeTurn()
     this.store.endTurn(wakeup.id)
     await this.afterTurn(wakeup, turn)
+    this.planIdle()
     await this.rearm()
+    await this.changed()
+  }
+
+  // ---------------------------------------------------------------- idle: cache warming and idle compaction (v1.14 ticket 09)
+
+  /** The last ordinary request of the Robot's own session, as sent: what cache warming replays. */
+  private lastRequest: { sessionId: string; options: GenerateOptions } | undefined
+
+  /** A Turn ended: with nothing queued, the idle moments are planned and the request to replay is kept (ao-8hi8). */
+  private planIdle(): void {
+    const config = this.store.requireConfig()
+    if (config.status !== 'active' || this.store.pendingWakeups() > 0) return this.store.delete(IDLE_PLAN)
+    const plan = idlePlan(config, config.model.provider, Date.now())
+    if (plan.length === 0) return this.store.delete(IDLE_PLAN)
+    this.store.set(IDLE_PLAN, plan)
+    const last = this.lastRequest
+    if (plan.some((step) => step.action === 'warm') && last !== undefined && last.sessionId === config.liveSessionId) {
+      const { signal: _signal, ...options } = last.options
+      this.store.set(WARM_REQUEST, { provider: config.model.provider, model: config.model.model, effort: config.model.effort, options })
+    }
+  }
+
+  /** The alarm's idle duty: the next planned moment, only while no Turn runs and nothing is queued. */
+  private async runIdle(now: number): Promise<void> {
+    const plan = this.store.get<IdleStep[]>(IDLE_PLAN)
+    const step = plan?.[0]
+    if (plan === undefined || step === undefined || step.at > now) return
+    if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0 || this.pumping !== undefined) return
+    const rest = plan.slice(1)
+    if (rest.length === 0) this.store.delete(IDLE_PLAN)
+    else this.store.set(IDLE_PLAN, rest)
+    // A warming that comes much later than planned finds the cache gone: it is skipped, not run late.
+    if (step.action === 'warm') { if (now - step.at < IDLE_LATE_MS) await this.warmCache() }
+    else await this.idleCompact()
+  }
+
+  /** Replay the last request for one output token (ao-jlr0); it is a cache read, billed as the Robot's model cost. */
+  private async warmCache(): Promise<void> {
+    const config = this.store.requireConfig()
+    const saved = this.store.get<{ provider: string; model: string; effort: string; options: GenerateOptions }>(WARM_REQUEST)
+    if (saved === undefined || saved.provider !== config.model.provider || saved.model !== config.model.model || !warmable(saved.model, saved.effort)) return
+    const chosen = (await this.home().modelList()).find((option) => option.provider === saved.provider && option.model === saved.model)
+    const adapter = this.adapter(saved.provider, chosen?.contextWindow, saved.model, chosen?.wire)
+    let usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } | undefined
+    for await (const chunk of adapter.stream({ ...saved.options, maxTokens: 1, purpose: CACHE_WARM as never, signal: AbortSignal.timeout(120_000) })) {
+      if (chunk.type === 'usage') usage = chunk.usage as typeof usage
+    }
+    if (usage === undefined) return
+    const [input, output, cached] = [usage.inputTokens ?? 0, usage.outputTokens ?? 0, usage.cacheReadTokens ?? 0]
+    const price = chosen?.price
+    await this.recordUsage('robot', input, output, price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000)
+  }
+
+  /**
+   * Compact once while idle, on the warm prefix (ao-f4sp): a context below the floor is left alone (ao-z22f). First
+   * one bounded platform step for memory (ao-7bq9); a Wake-up during it means the compaction does not happen now.
+   */
+  private async idleCompact(): Promise<void> {
+    const config = this.store.requireConfig()
+    const { agent, ctx } = await this.agent()
+    if (ctx.tokenMeter.measure(agent.session).totalTokens < idleSettings(config).idleCompactionFloorTokens) return
+    const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
+    let steps = 0
+    const stop = ctx.on('session/event', (session, event) => {
+      if (session === agent.session && event.type === 'step/start' && ++steps >= IDLE_MEMORY_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
+    })
+    try {
+      agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: IDLE_MEMORY_NOTE, summary: 'Idle: saving memory before compaction', woke: { at: Date.now(), timeZone: config.timeZone } }))
+      await agent.whenIdle()
+    } finally {
+      stop()
+    }
+    await ctx.sessions.flush(agent.session)
+    if (this.store.activeTurn() === undefined && this.store.pendingWakeups() === 0) {
+      await ctx.compaction.compactNow(agent, AbortSignal.timeout(300_000)).catch((error: unknown) => console.warn('idle compaction did not run', error))
+      await ctx.sessions.flush(agent.session)
+    }
+    await this.accountTurn(startSeq)
     await this.changed()
   }
 
@@ -1055,6 +1137,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // A compacted context lost the memory baseline; the next step brings it back fresh (pl-552r).
       onCompacted: () => this.store.delete('memory-baseline'),
       onStream: (frame) => this.streamed(frame),
+      onRequest: (options) => {
+        if (options.sessionId !== undefined) this.lastRequest = { sessionId: String(options.sessionId), options }
+      },
       prompt,
       mounts,
       spill: { workspace: this.workspace, fileTools: mounts.some((entry) => (entry.plugin as unknown) === Files) },
@@ -2912,6 +2997,10 @@ const DONE_LINE = 'task-done-line'
 
 /** The kv key of who interrupted the running Turn, until the Turn has ended. */
 const INTERRUPTED_BY = 'interrupted-by'
+/** The last request of the Robot's session, kept for cache warming while idle (ao-jlr0). */
+const WARM_REQUEST = 'warm-request'
+/** A warming more than this late is skipped: the cache it would refresh is gone. */
+const IDLE_LATE_MS = 5 * 60_000
 
 /** Who started a Task Wake-up, from its payload: the schedule unless a person or a Robot ran it now. */
 function taskRunOf(payload: Record<string, unknown>): { by: TaskRunBy; who?: string } {

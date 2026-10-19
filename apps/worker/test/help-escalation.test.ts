@@ -142,7 +142,8 @@ describe('escalation to Mr. Robot (sk-35i9, sk-myhb)', () => {
     await pass(robot, 31 * MINUTE)
     await settle(mr)
     expect(turns(mr)).toBe(before)
-    expect(await testRobot(robot).alarmForTest()).toBeNull()
+    // Only the idle moment after its last Turn is left (v1.14 ticket 09).
+    expect(await testRobot(robot).alarmForTest()).toBe((await testRobot(robot).idlePlanForTest())[0]?.at ?? null)
   })
 
   it("wakes the Robot's owner's Mr. Robot, not anyone else's", async () => {

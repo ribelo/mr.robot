@@ -16,7 +16,7 @@ import {
  * so capping it here makes compaction trigger at the Robot's budget.
  */
 export class BudgetedAdapter extends LlmAdapter {
-  constructor(private readonly inner: LlmAdapter, private readonly budget: number) {
+  constructor(private readonly inner: LlmAdapter, private readonly budget: number, private readonly onRequest?: (options: GenerateOptions) => void) {
     super()
   }
 
@@ -42,10 +42,18 @@ export class BudgetedAdapter extends LlmAdapter {
 
   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
     const prepared = await this.inner.prepareCall(provider, model, signal)
-    return { ...prepared, model: this.cap(prepared.model) }
+    return {
+      model: this.cap(prepared.model),
+      stream: (options) => {
+        if (options.purpose === undefined) this.onRequest?.(options)
+        return prepared.stream(options)
+      },
+    }
   }
 
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    // An ordinary conversation request is what cache warming replays later (ao-jlr0).
+    if (options.purpose === undefined) this.onRequest?.(options)
     return this.inner.stream(options)
   }
 

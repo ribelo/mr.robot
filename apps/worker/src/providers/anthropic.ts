@@ -33,6 +33,17 @@ export function adaptiveEffort(model: string, effort: string): { adaptive: false
 
 /** Prompt-cache lifetime: '1h' (long retention, the default) or '5m' (Anthropic's short default). */
 export type CacheTtl = '1h' | '5m'
+
+/** The request purpose of a cache-warming replay. */
+export const CACHE_WARM = 'cache-warm'
+
+/**
+ * Whether a request can be replayed for one output token: not with a fixed thinking budget, which must be
+ * below max_tokens; adaptive thinking and no thinking can (as the owner's desktop warmer decides).
+ */
+export function warmable(model: string, effort: string): boolean {
+  return effort === 'off' || adaptiveEffort(model, effort).adaptive
+}
 const EXTENDED_TTL_BETA = 'extended-cache-ttl-2025-04-11'
 
 /** Mark the last block of a list as a cache breakpoint. */
@@ -139,7 +150,9 @@ export class AnthropicAdapter extends LlmAdapter {
     const effort = options.reasoningEffort === undefined ? 'off' : String(options.reasoningEffort)
     const adaptive = adaptiveEffort(options.model, effort)
     const budget = adaptive.adaptive ? undefined : BUDGETS[effort]
-    const maxTokens = Math.max(options.maxTokens ?? 16_000, adaptive.adaptive && adaptive.effort !== null ? 32_000 : (budget ?? 0) + 4_000)
+    // A cache-warming request replays the last request for one output token: the provider reads the whole prefix (ao-jlr0).
+    const warming = (options.purpose as string | undefined) === CACHE_WARM
+    const maxTokens = warming ? 1 : Math.max(options.maxTokens ?? 16_000, adaptive.adaptive && adaptive.effort !== null ? 32_000 : (budget ?? 0) + 4_000)
     // Newer models omit thinking text unless asked; the summary is what the chat shows (pl-jzr7).
     const thinking = adaptive.adaptive
       ? (adaptive.effort === null ? {} : { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: adaptive.effort } })

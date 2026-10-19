@@ -224,6 +224,18 @@ export class Robot extends ProductionRobot {
     this.store.delete('bank-retired')
   }
 
+  /** The idle moments planned after the last Turn (v1.14 ticket 09). */
+  async idlePlanForTest(): Promise<Array<{ at: number; action: string }>> {
+    return this.store.get<Array<{ at: number; action: string }>>('idle-plan') ?? []
+  }
+
+  /** The next idle moment is now, and the alarm with it. */
+  async idleDueForTest(): Promise<void> {
+    const plan = this.store.get<Array<{ at: number; action: string }>>('idle-plan') ?? []
+    if (plan.length > 0) this.store.set('idle-plan', [{ ...plan[0]!, at: Date.now() - 1 }, ...plan.slice(1)])
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
+  }
+
   /** The screenshot sweep is due now (and the alarm with it). */
   async sweepDueForTest(): Promise<void> {
     this.store.set('screens-sweep-next', 1)

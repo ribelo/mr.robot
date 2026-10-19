@@ -235,6 +235,9 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
     ...(patch.discordProactive === undefined ? {} : { discordProactive: patch.discordProactive }),
     ...(patch.browserBackend === undefined ? {} : { browserBackend: patch.browserBackend }),
     ...(patch.wakeOnScreenNotifications === undefined ? {} : { wakeOnScreenNotifications: patch.wakeOnScreenNotifications }),
+    ...(patch.cacheWarming === undefined ? {} : { cacheWarming: patch.cacheWarming }),
+    ...(patch.idleCompaction === undefined ? {} : { idleCompaction: patch.idleCompaction }),
+    ...(patch.idleCompactionFloorTokens === undefined ? {} : { idleCompactionFloorTokens: patch.idleCompactionFloorTokens }),
     ...(patch.notifications === undefined ? {} : { notifications: {
       enabled: patch.notifications.enabled ?? shown.notifications.enabled,
       members: shown.notifications.members,

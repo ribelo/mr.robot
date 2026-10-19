@@ -430,6 +430,12 @@ export const RobotSettings = Schema.Struct({
   discordChannel: Schema.NullOr(Schema.String),
   /** Also send the Robot's own messages (Task results, notifications) to its Discord channel; replies to Discord messages always go back. */
   discordProactive: Schema.Boolean,
+  /** Refresh the provider's prompt cache while idle (ao-jlr0); on for Mr. Robot by default. */
+  cacheWarming: Schema.Boolean,
+  /** Compact once shortly before the cache expires while idle (ao-f4sp); on for other Robots by default. */
+  idleCompaction: Schema.Boolean,
+  /** A context below this many tokens is not compacted while idle (ao-z22f). */
+  idleCompactionFloorTokens: Schema.Number,
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -457,6 +463,9 @@ export const DeputySettingsPatch = Schema.Struct({
   browserBackend: Schema.optional(Schema.NullOr(BrowserBackend)),
   notifications: Schema.optional(Schema.Struct({ enabled: Schema.optional(Schema.Boolean), channels: Schema.optional(Schema.Array(Schema.String)) })),
   wakeOnScreenNotifications: Schema.optional(Schema.Boolean),
+  cacheWarming: Schema.optional(Schema.Boolean),
+  idleCompaction: Schema.optional(Schema.Boolean),
+  idleCompactionFloorTokens: Schema.optional(Schema.Number),
 })
 export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
 
@@ -476,6 +485,9 @@ export const SettingsPatch = Schema.Struct({
   spendLimit: Schema.optional(RobotSpendLimit),
   discordChannel: Schema.optional(Schema.NullOr(Schema.String)),
   discordProactive: Schema.optional(Schema.Boolean),
+  cacheWarming: Schema.optional(Schema.Boolean),
+  idleCompaction: Schema.optional(Schema.Boolean),
+  idleCompactionFloorTokens: Schema.optional(Schema.Number),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 

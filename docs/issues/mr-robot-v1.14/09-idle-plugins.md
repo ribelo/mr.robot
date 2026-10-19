@@ -4,12 +4,14 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Settings and defaults at creation: Mr. Robot warming on / compaction off; other Robots the reverse (ao-jlr0, ao-f4sp)
-- [ ] Workerd test: a Turn ending with an empty queue sets the idle alarm; a Wake-up before it clears the plan and no warming or compaction happens (ao-8hi8)
-- [ ] Workerd test with the scripted model: warming requests at 54, 108, 162 minutes replay the cached prefix (ao-jlr0)
-- [ ] Workerd test: idle compaction at 54 minutes runs the memory step first, then compacts, and the next Turn starts from the summary with a fresh memory baseline (ao-f4sp, ao-7bq9)
-- [ ] Workerd test: a context below the floor is not compacted (ao-z22f)
-- [ ] Workerd test: a Provider without a cache window gets no warming request (ao-c3er)
-- [ ] Deputy settings tool and advanced settings edit both switches and the floor (ao-5zin)
+- [x] Settings and defaults at creation: Mr. Robot warming on / compaction off; other Robots the reverse (ao-jlr0, ao-f4sp)
+- [x] Workerd test: a Turn ending with an empty queue sets the idle alarm; a Wake-up before it clears the plan and no warming or compaction happens (ao-8hi8)
+- [x] Workerd test with the scripted model: warming requests at 54, 108, 162 minutes replay the cached prefix (ao-jlr0)
+- [x] Workerd test: idle compaction at 54 minutes runs the memory step first, then compacts, and the next Turn starts from the summary with a fresh memory baseline (ao-f4sp, ao-7bq9)
+- [x] Workerd test: a context below the floor is not compacted (ao-z22f)
+- [x] Workerd test: a Provider without a cache window gets no warming request (ao-c3er)
+- [x] Deputy settings tool and advanced settings edit both switches and the floor (ao-5zin)
+
+**Closing note:** The moments count from the end of the Turn (the owner's desktop warmer counts from the last model request; the two differ by the length of the last step). Only Claude (provider `anthropic`) has a known window (one hour). The replay is the last ordinary request of the Robot's session, kept in the Robot's storage when the idle plan is made, sent with one output token; the Anthropic adapter honours that limit for a `cache-warm` request. A model with a fixed thinking budget is not warmed (its budget must be below max_tokens). When both switches are on, the idle compaction at 54 minutes replaces the warming. A warming more than five minutes late is skipped. The memory step is limited to four steps; a Wake-up during it cancels the compaction. Warming and the memory step are billed as the Robot's model cost.

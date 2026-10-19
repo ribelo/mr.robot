@@ -55,7 +55,8 @@ describe('The Home fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', (
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
     expect(await taskTurns(id)).toBe(1)
-    expect(await testRobot(id).alarmForTest()).toBeNull()
+    // Only the idle moment after its last Turn is left (v1.14 ticket 09).
+    expect(await testRobot(id).alarmForTest()).toBe((await testRobot(id).idlePlanForTest())[0]?.at ?? null)
   })
 
   it('missed occurrences of a recurring Task collapse into one, and its next moves past now (mc-s2bb)', async () => {

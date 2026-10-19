@@ -1,7 +1,7 @@
 import { RegistryProvider } from '@effect/atom-react'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { emptyGrants, type CatalogConnection, type HostView, type RobotPanel, type SettingsCatalog } from '@mr-robot/protocol'
+import { emptyGrants, type CatalogConnection, type HostView, type RobotPanel, type SettingsCatalog, type SettingsPatch } from '@mr-robot/protocol'
 import { AdvancedSettings } from '../src/components/AdvancedSettings.tsx'
 
 afterEach(() => {
@@ -15,7 +15,7 @@ const panel: RobotPanel = {
   settings: {
     identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: { ...emptyGrants, hosts: { 'h-desk:files': 'ask' } },
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true,
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000,
   },
   tasks: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, breakdown: { model: { robot: 0, review: 0, subagent: 0 }, browser: 0, computer: 0, services: 0, total: 0 }, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } }, canEdit: true, takeover: null,
 }
@@ -65,3 +65,22 @@ describe('Robot settings: Connections and Hosts (ux-5g3w, ux-q8o6)', () => {
     expect(levelOf('Desk · shell')).toBe('deny')
   })
 })
+
+describe('Robot settings: while idle (ao-jlr0, ao-f4sp, ao-z22f)', () => {
+  it('shows cache warming, idle compaction and the floor as stored, and saves the changes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
+    const saved: SettingsPatch[] = []
+    render(<RegistryProvider><AdvancedSettings panel={panel} catalog={catalog} onSave={async (patch) => { saved.push(patch); return true }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
+    const warming = screen.getByRole('checkbox', { name: /^Cache warming/ }) as HTMLInputElement
+    const compaction = screen.getByRole('checkbox', { name: /^Idle compaction/ }) as HTMLInputElement
+    const floor = screen.getByLabelText('Compact only above (tokens)') as HTMLInputElement
+    expect([warming.checked, compaction.checked, floor.value]).toEqual([false, true, '20000'])
+    fireEvent.click(warming)
+    fireEvent.click(compaction)
+    fireEvent.change(floor, { target: { value: '50000' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).at(-1)!)
+    await waitFor(() => expect(saved).toHaveLength(1))
+    expect(saved[0]).toMatchObject({ cacheWarming: true, idleCompaction: false, idleCompactionFloorTokens: 50000 })
+  })
+})
+

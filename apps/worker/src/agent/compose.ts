@@ -8,7 +8,7 @@ import * as Effect from 'effect/Effect'
 import type * as Scope from 'effect/Scope'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import LlmRuntime, { ReasoningEffortId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { ReasoningEffortId, type GenerateOptions, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -48,6 +48,8 @@ export interface CompositionInput {
   readonly mounts: readonly Mount[]
   /** Code mode (robot-5ewr): plugin that provides ctx.ptcRuntime, or undefined for direct tool calls. */
   readonly ptcRuntime?: (ctx: Context) => Promise<void>
+  /** Every ordinary model request, as sent (cache warming replays the last one, ao-jlr0). */
+  readonly onRequest?: (options: GenerateOptions) => void
   /** Where an oversized tool result is kept whole (ao-hf02); the inline budget follows the context budget. */
   readonly spill: WorkspaceSpillConfig
 }
@@ -62,7 +64,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
   const ctx = new Context()
   try {
     await ctx.plugin(LlmRuntime)
-    ctx.llm.registerAdapter([input.provider], new BudgetedAdapter(input.adapter, input.contextBudget))
+    ctx.llm.registerAdapter([input.provider], new BudgetedAdapter(input.adapter, input.contextBudget, input.onRequest))
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SqliteSessionLog, {

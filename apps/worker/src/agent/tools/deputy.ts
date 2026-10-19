@@ -160,7 +160,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
     }),
     tool<{ robot_id: string } & Record<string, unknown>>({
       name: 'robot_settings_set',
-      description: "Change another Robot's settings. Allowed: chain (its ordered model chain: entries {account, owner, provider, model, effort}; account ids and owners from robot_settings or your owner's Providers; the Robot moves to the next entry only when an account hits a limit or breaks), model {provider, model} (changes the active chain entry), thinking (off, low, medium, high, xhigh, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Home default), notifications {enabled, channels}, wakeOnScreenNotifications. Grants, spendLimit and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
+      description: "Change another Robot's settings. Allowed: chain (its ordered model chain: entries {account, owner, provider, model, effort}; account ids and owners from robot_settings or your owner's Providers; the Robot moves to the next entry only when an account hits a limit or breaks), model {provider, model} (changes the active chain entry), thinking (off, low, medium, high, xhigh, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Home default), notifications {enabled, channels}, wakeOnScreenNotifications, cacheWarming, idleCompaction, idleCompactionFloorTokens. Grants, spendLimit and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
       parameters: {
         properties: {
           robot_id: robotId,
@@ -175,6 +175,9 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
           browserBackend: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'browser-run, container, container-vpn, container-proxy, host:<id>' },
           notifications: { type: 'object', properties: { enabled: { type: 'boolean' }, channels: { type: 'array', items: { type: 'string' } } }, description: 'Notifications on or off, and the channels they go to' },
           wakeOnScreenNotifications: { type: 'boolean', description: 'Keep the browser open and wake the Robot when a page shows a notification' },
+          cacheWarming: { type: 'boolean', description: "Refresh the model's prompt cache while the Robot is idle, so the next message is cheap" },
+          idleCompaction: { type: 'boolean', description: 'Compact once while idle, shortly before the prompt cache expires' },
+          idleCompactionFloorTokens: { type: 'integer', description: 'A context below this many tokens is not compacted while idle' },
         },
         required: ['robot_id'],
       },

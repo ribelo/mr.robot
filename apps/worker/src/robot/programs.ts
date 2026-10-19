@@ -22,6 +22,7 @@ import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 import { deliveryOf, robotMessageDelivery } from './delivery.ts'
+import { DEFAULT_IDLE_FLOOR_TOKENS, idleSettings, type IdleStep } from './idle.ts'
 
 export const MAX_CHAIN_HOPS = 8
 export { THREAD_PAUSE_AT }
@@ -120,6 +121,8 @@ export const wake = (input: WakeInput) => Effect.gen(function* () {
   const recent = store.get<ReadonlyArray<readonly [string, number]>>(RECENT_CLIENT_IDS) ?? []
   const seen = input.clientId === undefined ? undefined : recent.find(([clientId]) => clientId === input.clientId)
   if (seen !== undefined) return seen[1]
+  // Any Wake-up ends the idle wait: no warming or idle compaction is due any more (ao-8hi8).
+  store.delete(IDLE_PLAN)
   const id = store.enqueue(input.kind, input.sender, input.text, {
     ...input.payload,
     attachments: input.attachments ?? [],
@@ -352,6 +355,7 @@ export const settingsWith = (home: HomeSpendLimit) => Effect.gen(function* () {
     notifications: { ...current.notifications, channels: current.notifications.channels.filter((channel) => channel !== 'discord') },
     spendLimit: current.spendLimit,
     homeSpendLimit: home,
+    ...idleSettings(current),
   } as RobotSettings
 })
 
@@ -423,6 +427,10 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(before.notifications.enabled !== after.notifications.enabled, `switched notifications ${after.notifications.enabled ? 'on' : 'off'}.`)
   note(before.notifications.channels.join(',') !== after.notifications.channels.join(','), `changed notification channels to ${after.notifications.channels.join(', ')}.`)
   note((before.wakeOnScreenNotifications === true) !== (after.wakeOnScreenNotifications === true), `switched waking on screen notifications ${after.wakeOnScreenNotifications === true ? 'on' : 'off'}.`)
+  const [idleBefore, idleAfter] = [idleSettings(before), idleSettings(after)]
+  note(idleBefore.cacheWarming !== idleAfter.cacheWarming, `switched cache warming ${idleAfter.cacheWarming ? 'on' : 'off'}.`)
+  note(idleBefore.idleCompaction !== idleAfter.idleCompaction, `switched idle compaction ${idleAfter.idleCompaction ? 'on' : 'off'}.`)
+  note(idleBefore.idleCompactionFloorTokens !== idleAfter.idleCompactionFloorTokens, `changed the idle compaction floor to ${idleAfter.idleCompactionFloorTokens} tokens.`)
   return notes
 }
 
@@ -456,6 +464,9 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
       ...(patch.discordProactive === undefined ? {} : { discordProactive: patch.discordProactive }),
       ...(patch.notifications === undefined ? {} : { notifications: { ...patch.notifications, channels: [...new Set(['pwa', ...patch.notifications.channels.filter((channel) => channel !== 'discord')])] } }),
       ...(patch.spendLimit === undefined ? {} : { spendLimit: patch.spendLimit }),
+      ...(patch.cacheWarming === undefined ? {} : { cacheWarming: patch.cacheWarming }),
+      ...(patch.idleCompaction === undefined ? {} : { idleCompaction: patch.idleCompaction }),
+      ...(patch.idleCompactionFloorTokens === undefined ? {} : { idleCompactionFloorTokens: Math.max(0, Math.round(patch.idleCompactionFloorTokens)) }),
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))
   })
@@ -855,6 +866,8 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   const config: RobotConfig = {
     id: init.id, ownerId: init.ownerId, kind: init.kind, identity: init.identity, sharing: init.sharing, status: init.status,
     blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: init.kind === 'mr-robot' ? MR_ROBOT_COMPACTION : '',
+    // Mr. Robot, talked to all day, keeps his cache warm; other Robots compact while idle (ao-jlr0, ao-f4sp).
+    cacheWarming: init.kind === 'mr-robot', idleCompaction: init.kind !== 'mr-robot', idleCompactionFloorTokens: DEFAULT_IDLE_FLOOR_TOKENS,
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, timeZone: init.timeZone,
     liveSessionId: `s-${crypto.randomUUID()}`, revision: 1, createdAt: Date.now(),
   }
@@ -873,6 +886,8 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
 
 /** The kv key of the one moment the Robot keeps of its Tasks: when its earliest due Task wakes it (mc-s1aa). */
 export const NEXT_DUE = 'next-due'
+/** The kv key of the idle plan (idle.ts): the moments left for warming or idle compaction. */
+export const IDLE_PLAN = 'idle-plan'
 
 /** The Home planned this Robot's earliest due Task. */
 export const setNextDue = (at: number | null) => Effect.gen(function* () {
@@ -918,7 +933,9 @@ export const rearm = Effect.gen(function* () {
   const taskDue = store.get<number>(NEXT_DUE)
   // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
   const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
+  const idle = store.get<readonly IdleStep[]>(IDLE_PLAN)?.[0]?.at
   const candidates = [
+    ...(idle === undefined || !runnable ? [] : [idle]),
     ...(escalation === undefined ? [] : [escalation]),
     ...(taskDue === undefined ? [] : [taskDue]),
     ...(signInEnds === undefined ? [] : [signInEnds]),

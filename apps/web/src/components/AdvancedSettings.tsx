@@ -57,6 +57,9 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       codeMode: draft.codeMode,
       browserBackend: draft.browserBackend,
       compactionInstruction: draft.compactionInstruction,
+      cacheWarming: draft.cacheWarming,
+      idleCompaction: draft.idleCompaction,
+      idleCompactionFloorTokens: draft.idleCompactionFloorTokens,
       grants: draft.grants,
       sharing: draft.sharing,
       notifications: draft.notifications,
@@ -84,6 +87,18 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </label>
       <label>Compaction instruction
         <textarea rows={3} value={draft.compactionInstruction} placeholder="What must survive when the conversation is compacted" onChange={(event) => setDraft({ ...draft, compactionInstruction: event.target.value })} />
+      </label>
+
+      <h2>While idle</h2>
+      <div className="muted">Nothing happens during a Turn or while work waits; a new message cancels it.</div>
+      <label className="check"><input type="checkbox" checked={draft.cacheWarming} onChange={(event) => setDraft({ ...draft, cacheWarming: event.target.checked })} />
+        <span>Cache warming<small>Refresh the model's prompt cache at 54, 108 and 162 minutes of idle, so the next message is cheap. Only for models with a known cache window (Claude).</small></span>
+      </label>
+      <label className="check"><input type="checkbox" checked={draft.idleCompaction} onChange={(event) => setDraft({ ...draft, idleCompaction: event.target.checked })} />
+        <span>Idle compaction<small>Compact once, shortly before the cache expires, after a step to save memory; the next Wake-up starts from a short summary.</small></span>
+      </label>
+      <label>Compact only above (tokens)
+        <input type="number" min={0} step={1000} value={draft.idleCompactionFloorTokens} onChange={(event) => setDraft({ ...draft, idleCompactionFloorTokens: Math.max(0, Number(event.target.value)) })} />
       </label>
 
       <h2>Tools</h2>
