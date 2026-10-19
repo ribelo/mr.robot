@@ -11,6 +11,8 @@ export interface Env {
   readonly BROWSER: Fetcher
   /** Chrome in Cloudflare Containers (v1.1 ticket 02); absent until deployed. */
   readonly CHROME?: DurableObjectNamespace<import('./browser/chrome.ts').ChromeContainer>
+  /** The Robots' computers (v1.14 ticket 10); absent until deployed. */
+  readonly COMPUTER?: DurableObjectNamespace<import('./computer/container.ts').ComputerContainer>
   readonly AI: Ai
   readonly LOADER: WorkerLoader
   readonly HOME_NAME: string

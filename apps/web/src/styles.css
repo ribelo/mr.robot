@@ -192,6 +192,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .cost-breakdown td { text-align: right; font-variant-numeric: tabular-nums; }
 .cost-breakdown .cost-sub th { padding-left: 12px; }
 .cost-breakdown .cost-total th, .cost-breakdown .cost-total td { font-weight: 600; border-top: 1px solid var(--line, currentColor); padding-top: 3px; }
+.computer-state { display: flex; align-items: center; gap: 10px; }
 .cost-robots { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; }
 
 .settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }

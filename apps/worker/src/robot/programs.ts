@@ -953,7 +953,11 @@ export const rearm = Effect.gen(function* () {
   // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
   const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
   const idle = store.get<readonly IdleStep[]>(IDLE_PLAN)?.[0]?.at
+  // The computer stops ten minutes after its last command (ao-joux).
+  const computer = store.get<{ state: string; lastCommandAt?: number }>('computer')
+  const computerStop = computer?.state === 'running' && computer.lastCommandAt !== undefined ? computer.lastCommandAt + 10 * 60_000 : undefined
   const candidates = [
+    ...(computerStop === undefined ? [] : [computerStop]),
     ...(idle === undefined || !runnable ? [] : [idle]),
     ...(escalation === undefined ? [] : [escalation]),
     ...(taskDue === undefined ? [] : [taskDue]),

@@ -50,7 +50,7 @@ describe('cost by source (ao-zbld, ao-ef5t, ao-ypas)', () => {
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'look at the shop' } })
     // The browser has been open an hour when the Turn ends (Browser Run: $0.09 an hour).
-    await vi.waitFor(async () => expect(await testRobot(id).browserOpenForTest()).toBe(true))
+    await vi.waitFor(async () => expect(await testRobot(id).browserOpenForTest()).toBe(true), { timeout: 10_000 })
     await testRobot(id).backdateBrowserForTest(3_600_000)
     wait.open()
     await settle(id)

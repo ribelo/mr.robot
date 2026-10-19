@@ -14,7 +14,7 @@ import { homeDefaults, proposalView, RobotPlatform, RobotState, settingsWith } f
 import { projectChat } from './projection.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, Wakeup } from './store.ts'
-import type { LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause } from '@mr-robot/protocol'
+import type { ComputerView, LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause } from '@mr-robot/protocol'
 import { SubagentStore } from './subagent-store.ts'
 
 /** What woke the Robot, as its fleet row names it (mc-w1aa). */
@@ -321,10 +321,18 @@ const usage = (home: HomeSpendLimit) => Effect.gen(function* () {
   const month = currentMonth()
   const browser = store.browserUsage(month).map((row) => ({ backend: row.backend, minutes: Math.round(row.ms / 6_000) / 10, costUsd: row.costUsd }))
   const services = store.serviceUsage(month)
-  return { month, ...store.usage(month), breakdown: store.costBreakdown(month), limit: effectiveSpendLimit((yield* config).spendLimit, home), ...(browser.length === 0 ? {} : { browser }), ...(services.length === 0 ? {} : { services }) } as UsageView
+  const computer = store.computerUsage(month)
+  return { month, ...store.usage(month), breakdown: store.costBreakdown(month), ...(computer.ms === 0 ? {} : { computerMinutes: Math.round(computer.ms / 6_000) / 10 }), limit: effectiveSpendLimit((yield* config).spendLimit, home), ...(browser.length === 0 ? {} : { browser }), ...(services.length === 0 ? {} : { services }) } as UsageView
 })
 
 interface TakeoverRow { readonly reason: string; readonly claimedBy: string | null }
+
+type StoredComputer = { readonly state: ComputerView['state']; readonly since?: number; readonly lastCommandAt?: number }
+
+/** The computer as the panel shows it (ao-9q18): off, booting, running or stopping, since when and its last command. */
+function computerView(stored: StoredComputer | undefined): ComputerView {
+  return stored === undefined || stored.state === 'off' ? { state: 'off', since: null, lastCommandAt: null } : { state: stored.state, since: stored.since ?? null, lastCommandAt: stored.lastCommandAt ?? null }
+}
 
 /** The robot panel (robot-z3ud). */
 export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly TaskView[]) => Effect.gen(function* () {
@@ -340,6 +348,7 @@ export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly T
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
     ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),
+    ...(store.mayUse('tool', 'computer') ? { computer: computerView(store.get<StoredComputer>('computer')) } : {}),
     // Requests for help still waiting, oldest first (sk-fmvh).
     help: store.proposals('open').flatMap((row) => row.kind === 'help' && row.help !== undefined ? [{ id: row.id, text: row.help.need, urgent: row.help.urgent, created: row.help.created, escalated: row.help.escalated }] : []),
   } as RobotPanel

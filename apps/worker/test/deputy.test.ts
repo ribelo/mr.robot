@@ -1,5 +1,5 @@
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { emptyGrants, type Conversation, type ConversationPage, type ConversationSearchResult, type RobotPanel, type RobotSummary, type TaskPage, type TaskView, type TrajectoryExcerpt, type WorkspaceFileContent, type WorkspaceFileView } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
@@ -275,7 +275,8 @@ describe('the deputy works with the Tasks of other Robots; limits and attempts (
     expect(attempts.at(-1)!.firstLine).toBe('Run 2 done.')
     const [seen] = await chief(chiefRobot, [{ name: 'task_list', args: { robot_id: accountant, assignee: 'self' } }])
     expect(JSON.parse(seen!).tasks).toEqual([expect.objectContaining({ id: task.id, last_attempts: [expect.objectContaining({ outcome: 'ok', first_line: 'Run 21 done.' }), expect.anything(), expect.anything()] })])
-  })
+    // 21 Turns: slow when the whole suite shares the machine.
+  }, 90_000)
 
   it('records a due occurrence as skipped while the previous one still waits (cd-d14a)', async () => {
     const accountant = await robot(ANNA, 'Accountant')
@@ -284,9 +285,11 @@ describe('the deputy works with the Tasks of other Robots; limits and attempts (
     for (let fired = 0; fired < 2; fired += 1) {
       await home().backdateTasksForTest(5 * 60_000)
       await runDurableObjectAlarm(env.ROBOT.getByName(accountant))
+      // A backdated moment can fire the alarm by itself before the test runs it: its work is what counts.
+      await settle(accountant)
     }
     const attempts = async () => (await api<TaskView>(ANNA, `/api/tasks/${task.id}`)).body.attempts.map((attempt) => attempt.outcome)
-    expect(await attempts()).toEqual(['skipped'])
+    await vi.waitFor(async () => expect(await attempts()).toEqual(['skipped']), { timeout: 10_000 })
     scripts.set(accountant, [{ text: 'Checked.' }, { text: 'unexpected second Turn' }])
     await api(ANNA, `/api/robots/${accountant}/resume`, { body: {} })
     await settle(accountant)

@@ -152,7 +152,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 15
+const SCHEMA_VERSION = 16
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -173,6 +173,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // The computer's running time per month (v1.14 ticket 10, ao-54j2).
+  16: ['CREATE TABLE IF NOT EXISTS computer_usage (month TEXT PRIMARY KEY, ms INTEGER NOT NULL, cost_usd REAL NOT NULL) WITHOUT ROWID'],
   // Subagents (v1.14 ticket 06): a grant item carries a payload (the subagents grant's model list); the child sessions.
   15: [
     (sql) => addColumns(sql, 'grant_item', ['payload TEXT']),
@@ -686,6 +688,15 @@ export class RobotStore {
       'INSERT INTO browser_usage (month, backend, ms, cost_usd) VALUES (?, ?, ?, ?) ON CONFLICT (month, backend) DO UPDATE SET ms = ms + excluded.ms, cost_usd = cost_usd + excluded.cost_usd',
       month, backend, Math.max(0, Math.round(ms)), costUsd,
     )
+  }
+
+  addComputerUsage(month: string, ms: number, costUsd: number): void {
+    this.sql.exec('INSERT INTO computer_usage (month, ms, cost_usd) VALUES (?, ?, ?) ON CONFLICT (month) DO UPDATE SET ms = ms + excluded.ms, cost_usd = cost_usd + excluded.cost_usd', month, Math.max(0, Math.round(ms)), costUsd)
+  }
+
+  computerUsage(month: string): { ms: number; costUsd: number } {
+    const row = this.sql.exec<{ ms: number; cost_usd: number }>('SELECT ms, cost_usd FROM computer_usage WHERE month = ?', month).toArray()[0]
+    return { ms: row?.ms ?? 0, costUsd: row?.cost_usd ?? 0 }
   }
 
   addServiceUsage(month: string, service: string, calls: number, costUsd: number): void {

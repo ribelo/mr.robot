@@ -16,6 +16,7 @@ export { Robot } from './robot/robot.ts'
 export { Member } from './member/member.ts'
 export { Home } from './home/home.ts'
 export { ChromeContainer } from './browser/chrome.ts'
+export { ComputerContainer } from './computer/container.ts'
 
 const WS_PATH = new URLPattern({ pathname: '/api/robots/:id/ws' })
 

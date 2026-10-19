@@ -4,6 +4,9 @@ import * as Plan from 'alchemy/Plan'
 import { evalStack } from 'alchemy/Stack'
 import * as Core from 'alchemy/Test/Core'
 import * as Effect from 'effect/Effect'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 import { useOfflineCloudflare } from './offline-cloudflare.ts'
 import { Edge, Files, GoogleCallback, HookChannel, HostChannel } from './stack.ts'
@@ -33,13 +36,20 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     HostChannel: 'Cloudflare.Access.Application',
     HookChannel: 'Cloudflare.Access.Application',
     GoogleCallback: 'Cloudflare.Access.Application',
+    ChromeContainer: 'Cloudflare.Container',
+    // The Robots' computer: built by the deploy from the Dockerfile in the repository (ao-h1wn).
+    ComputerContainer: 'Cloudflare.Container',
   })
+  expect(plan.resources.ComputerContainer.props).toMatchObject({ className: 'ComputerContainer', context: './infra/computer', instanceType: 'standard-1' })
+  expect(existsSync(join(dirname(fileURLToPath(import.meta.url)), 'computer', 'Dockerfile'))).toBe(true)
   const bindings = plan.resources.Edge.bindings.flatMap((b: any) => b.data.bindings ?? [])
     .filter((b: any) => typeof b.type === 'string' && typeof b.name === 'string')
     .map((b: any) => `${b.type}:${b.name}`).sort()
   expect(bindings).toEqual(expect.arrayContaining([
     'ai:AI',
     'browser:BROWSER',
+    'durable_object_namespace:CHROME',
+    'durable_object_namespace:COMPUTER',
     'durable_object_namespace:HOME',
     'durable_object_namespace:MEMBER',
     'durable_object_namespace:ROBOT',

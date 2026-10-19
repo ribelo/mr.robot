@@ -3,6 +3,8 @@ import { Robot as ProductionRobot } from '../src/robot/robot.ts'
 import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { scriptedProviders, StubLlm } from './stub-llm.ts'
 import { StubDriver } from './stub-browser.ts'
+import { StubComputer } from './stub-computer.ts'
+import type { ComputerBackend } from '../src/computer/backend.ts'
 import { FakeChannel } from './fake-channel.ts'
 import { fakeConnectors, fakeService } from './fake-connector.ts'
 import { connectorFixtures } from './connector-fixtures.ts'
@@ -145,6 +147,17 @@ export class Robot extends ProductionRobot {
 
   protected override browserDriver(backend: BrowserBackend): BrowserDriver {
     return new StubDriver(backend)
+  }
+
+  protected override computerBackend(): ComputerBackend {
+    return new StubComputer(this.store.requireConfig().id)
+  }
+
+  /** The computer's last command was `ms` ago, and the alarm is due. */
+  async backdateComputerForTest(ms: number): Promise<void> {
+    const state = this.store.get<{ state: string; since?: number; lastCommandAt?: number }>('computer')
+    if (state?.lastCommandAt !== undefined) this.store.set('computer', { ...state, since: state.since! - ms, lastCommandAt: state.lastCommandAt - ms })
+    await this.ctx.storage.setAlarm(Date.now() + 1)
   }
 
   /** Skip the setup interview: the Robot becomes active with its current Grants. */

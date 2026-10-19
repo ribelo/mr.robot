@@ -1,4 +1,4 @@
-import type { RobotPanel } from '@mr-robot/protocol'
+import type { ComputerView, RobotPanel } from '@mr-robot/protocol'
 import { TaskList } from './TaskSheets.tsx'
 import { ThreadCard } from './ChatView.tsx'
 import { CostBreakdownView } from './CostBreakdown.tsx'
@@ -14,12 +14,14 @@ export interface PanelProps {
   readonly onClose: () => void
   /** Show the card of an open request for help in the Conversation. */
   readonly onOpenHelp?: (requestId: string) => void
+  /** Stop the Robot's computer (ao-9q18). */
+  readonly onStopComputer?: () => void
   /** The time the ages are counted from; the clock when left out. */
   readonly now?: number
 }
 
 /** The robot panel (robot-z3ud): screen thumbnail, Tasks, simple settings. */
-export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, now = Date.now() }: PanelProps) {
+export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, onStopComputer, now = Date.now() }: PanelProps) {
   const name = panel.summary.identity.name
   return (
     <aside className="panel">
@@ -66,18 +68,35 @@ export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanc
               {panel.threads.length === 0 ? <div className="muted">No Threads.</div> : <ul className="thread-list">{panel.threads.map((thread) => <li key={thread.id}><ThreadCard thread={thread} /></li>)}</ul>}
             </>
           )}
+          {panel.computer === undefined ? null : <ComputerSection computer={panel.computer} {...(onStopComputer === undefined ? {} : { onStop: onStopComputer })} />}
           <div className="panel-links">
             <button type="button" className="link" onClick={onFiles}>Files</button>
             <button type="button" className="link" onClick={onTrajectory}>Trajectory</button>
             {panel.canEdit ? <button type="button" className="link" onClick={onAdvanced}>Advanced settings</button> : null}
           </div>
           <div className="usage muted">
-            {panel.usage.month}: {formatTokens(panel.usage.inputTokens + panel.usage.outputTokens)} tokens{(panel.usage.browser ?? []).map((row) => ` · ${row.minutes} browser min (${BACKEND_LABELS[row.backend] ?? (row.backend.startsWith('host:') ? 'host browser' : row.backend)})`).join('')}{(panel.usage.services ?? []).map((row) => ` · ${row.calls} ${row.service === 'exa' ? 'Exa' : row.service} calls`).join('')} · ${panel.usage.costUsd.toFixed(2)}
+            {panel.usage.month}: {formatTokens(panel.usage.inputTokens + panel.usage.outputTokens)} tokens{(panel.usage.browser ?? []).map((row) => ` · ${row.minutes} browser min (${BACKEND_LABELS[row.backend] ?? (row.backend.startsWith('host:') ? 'host browser' : row.backend)})`).join('')}{(panel.usage.services ?? []).map((row) => ` · ${row.calls} ${row.service === 'exa' ? 'Exa' : row.service} calls`).join('')}{panel.usage.computerMinutes === undefined ? '' : ` · ${panel.usage.computerMinutes} computer min`} · ${panel.usage.costUsd.toFixed(2)}
             {panel.usage.limit.limit.kind === 'usd' ? ` of $${panel.usage.limit.limit.amount.toFixed(2)}` : ''}
           </div>
           <CostBreakdownView breakdown={panel.usage.breakdown} label={`Cost in ${panel.usage.month}`} />
       </div>
     </aside>
+  )
+}
+
+const COMPUTER_STATES: Record<ComputerView['state'], string> = { off: 'Off', booting: 'Booting', running: 'Running', stopping: 'Stopping' }
+
+/** The Robot's computer (ao-9q18): its state, since when, and Stop while it is on. */
+function ComputerSection({ computer, onStop }: { computer: ComputerView; onStop?: () => void }) {
+  return (
+    <section aria-label="Computer">
+      <h3 className="panel-section">Computer</h3>
+      <div className="computer-state">
+        <span>{COMPUTER_STATES[computer.state]}{computer.since === null ? '' : ` · since ${new Date(computer.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span>
+        {computer.state === 'off' || onStop === undefined ? null : <button type="button" className="button" disabled={computer.state === 'stopping'} onClick={onStop}>Stop</button>}
+      </div>
+      <div className="muted">Stops by itself ten minutes after its last command; computer/ in the Workspace is kept.</div>
+    </section>
   )
 }
 

@@ -8,7 +8,7 @@ import * as Output from 'alchemy/Output'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Redacted from 'effect/Redacted'
-import type { ChromeContainer, Home, Member, Robot } from '../apps/worker/src/index.ts'
+import type { ChromeContainer, ComputerContainer, Home, Member, Robot } from '../apps/worker/src/index.ts'
 import { vapidPublicKey } from './vapid.ts'
 
 /** The pushed Chrome image (infra/chrome/push.sh prints it). */
@@ -54,6 +54,14 @@ export const Edge = Effect.gen(function* () {
       CHROME: Cloudflare.Container<ChromeContainer>('ChromeContainer', {
         className: 'ChromeContainer',
         image: `registry.cloudflare.com/2c42f4960f9c28a9235cac01483bd626/mrrobot-chrome:${CHROME_IMAGE_TAG}`,
+        instanceType: 'standard-1',
+        maxInstances: 10,
+      }),
+      // A Robot's computer (v1.14 ticket 10): one container per Robot on the image of infra/computer/Dockerfile,
+      // which the deploy builds and pushes (Docker).
+      COMPUTER: Cloudflare.Container<ComputerContainer>('ComputerContainer', {
+        className: 'ComputerContainer',
+        context: './infra/computer',
         instanceType: 'standard-1',
         maxInstances: 10,
       }),

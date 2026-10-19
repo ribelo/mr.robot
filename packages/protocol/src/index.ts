@@ -1140,6 +1140,8 @@ export const UsageView = Schema.Struct({
   services: Schema.optional(Schema.Array(Schema.Struct({ service: Schema.String, calls: Schema.Number, costUsd: Schema.Number }))),
   /** This month's cost by source; its total is costUsd (ao-zbld). */
   breakdown: CostBreakdown,
+  /** The computer's running minutes this month (ao-54j2). */
+  computerMinutes: Schema.optional(Schema.Number),
 })
 export type UsageView = typeof UsageView.Type
 
@@ -1160,6 +1162,14 @@ export interface UsageRow extends UsageView {
   readonly name: string
 }
 
+/** A Robot's computer as its panel shows it (ao-9q18). */
+export const ComputerView = Schema.Struct({
+  state: Schema.Literals(['off', 'booting', 'running', 'stopping']),
+  since: Schema.NullOr(Schema.Number),
+  lastCommandAt: Schema.NullOr(Schema.Number),
+})
+export type ComputerView = typeof ComputerView.Type
+
 export const RobotPanel = Schema.Struct({
   summary: RobotSummary,
   settings: RobotSettings,
@@ -1174,6 +1184,8 @@ export const RobotPanel = Schema.Struct({
   threads: Schema.optional(Schema.Array(ThreadView)),
   /** Open requests for help, oldest first (sk-fmvh). */
   help: Schema.optional(Schema.Array(HelpRequestView)),
+  /** Its computer, when it holds the computer grant (ao-9q18). */
+  computer: Schema.optional(ComputerView),
 })
 export type RobotPanel = typeof RobotPanel.Type
 

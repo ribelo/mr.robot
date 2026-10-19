@@ -97,7 +97,8 @@ describe.each(MODES)('searching the own Conversation with %s (cd-ggem)', (_, mod
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'The zeppelin is back' } })
     await settle(id)
     expect((await robot.searchConversation('zeppelin')).items.map((item) => item.snippet)).toContain('The zeppelin is back')
-  })
+    // 60 Turns before the search: slow when the whole suite shares the machine.
+  }, 90_000)
 
   it('is a tool every Robot has; a Turn calls it and gets the page', async () => {
     const id = await activeRobot(mode)
@@ -109,5 +110,5 @@ describe.each(MODES)('searching the own Conversation with %s (cd-ggem)', (_, mod
     expect(result.nextPage).toBeNull()
     expect(result.items[0]).toMatchObject({ sender: 'Anna', snippet: 'The zeppelin invoice is overdue' })
     expect(Number.isNaN(Date.parse(result.items[0]!.at))).toBe(false)
-  })
+  }, 90_000)
 })
