@@ -6,7 +6,7 @@ import { api, settle, stubModels } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
-const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'connections', 'hosts', 'browser', 'providers']
+const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'connections', 'hosts', 'browser', 'providers', 'subagents', 'computer', 'auto-review']
 const DOC_PATHS = DOC_NAMES.map((name) => `docs/${name}.md`)
 
 beforeEach(async () => {
@@ -97,6 +97,15 @@ describe('the product docs (v1.11 ticket 02)', () => {
     for (const path of DOC_PATHS) expect(index).toContain(path)
     expect(index).toContain('Before you answer a question about Mr. Robot, its features or your own capabilities, read the relevant doc')
     expect(index).toContain('say you do not know')
+  })
+
+  it('a Robot answers a question about Subagents from subagents.md (ao-cetv)', async () => {
+    const id = await activeRobot()
+    scripts.set(id, [{ calls: [{ name: 'read', args: { file_path: '/workspace/docs/subagents.md' } }] }, { text: 'At most 3 Subagents run at once.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'how many Subagents can you run?' } })
+    await settle(id)
+    expect(JSON.stringify(requests.get(id)![0]!.messages)).toContain('docs/subagents.md')
+    expect(toolResults(id).at(-1)).toContain('At most 3 Subagents run at once.')
   })
 
   it('stay under two printed pages each', async () => {

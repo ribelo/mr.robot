@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.14 — Always-on lessons: steering, Subagents, Auto review, idle compaction, oversized results, a computer, cost by source"
-status: ready-for-agent
+status: done
 story-prefix: ao
 parent: mr-robot-v1.13.md
 ---

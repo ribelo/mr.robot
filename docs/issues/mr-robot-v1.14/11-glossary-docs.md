@@ -4,8 +4,8 @@
 
 **Blocked by:** 04, 07, 08, 09, 10
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] GLOSSARY.md has the eight new entries and the two updated ones; specs and code use these words (ao-yn59)
-- [ ] Docs index lists the three new docs; the Robot answers a question about Subagents from them in a workerd test with the scripted model (ao-cetv)
-- [ ] Prompt preview test shows the new sections (ao-o1w1)
+- [x] GLOSSARY.md has the eight new entries and the two updated ones; specs and code use these words (ao-yn59)
+- [x] Docs index lists the three new docs; the Robot answers a question about Subagents from them in a workerd test with the scripted model (ao-cetv)
+- [x] Prompt preview test shows the new sections (ao-o1w1)

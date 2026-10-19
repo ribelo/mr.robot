@@ -15,6 +15,9 @@ import { MR_ROBOT } from './mr-robot.ts'
 import { PROVIDERS } from './providers.ts'
 import { ROBOTS } from './robots.ts'
 import { TASKS } from './tasks.ts'
+import { SUBAGENTS } from './subagents.ts'
+import { COMPUTER } from './computer.ts'
+import { AUTO_REVIEW } from './auto-review.ts'
 
 export const DOCS_DIRECTORY = 'docs'
 
@@ -40,6 +43,9 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('hosts', 'Hosts: the desktop app, pairing, the Hosts line with online state, host_read, host_write, host_run, the Host browser, offline Hosts.', HOSTS),
   doc('browser', 'The browser: backends, logins, Live view, Takeover, payments, screenshots.', BROWSER),
   doc('providers', 'Providers: accounts, model chains, account states, the Workers AI switch, usage, Spend limits (the Home\'s, no limit, an amount).', PROVIDERS),
+  doc('subagents', 'Subagents: the grant and its models, subagent and subagent_fork, what a Subagent cannot do, reports, limits and cost.', SUBAGENTS),
+  doc('computer', 'The computer: the tools, the kept computer/ folder and setup.sh, starting and stopping, cost.', COMPUTER),
+  doc('auto-review', 'Auto review: the reviewer model, risk levels, a denied call becomes an Ask, the reviewer setting.', AUTO_REVIEW),
 ]
 
 const BY_PATH: ReadonlyMap<string, ProductDoc> = new Map(PRODUCT_DOCS.map((entry) => [entry.path, entry]))

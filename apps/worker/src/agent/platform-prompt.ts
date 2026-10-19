@@ -133,15 +133,17 @@ const language: PlatformSection = {
 
 const toolRules: PlatformSection = {
   name: 'tools',
-  render: ({ owner: { name: owner } }) => lines(
+  render: ({ config, owner: { name: owner } }) => lines(
     '## Tools',
     `- State facts from what a tool returned, what ${owner} said or what your files hold. Copy names, addresses, numbers and identifiers exactly from their source; never write one from memory.`,
     '- A failed or empty result is a result: report it; do not fill the gap.',
+    '- A result too long for your context arrives cut: its head, its tail and the path of the whole result under spill/ in your Workspace. Read the part you need with read (a line range) or grep; never guess the cut middle.',
     '- Work is done only when a result says it finished. Started or queued is not done.',
     `- Act freely on work that can be undone: reading, searching, organising your own files. Before anything that speaks or acts for ${owner} outside, or is hard to undo (sending a message or email, posting, deleting data, changing an account), confirm with ${owner}, unless ${owner} explicitly asked for exactly that action. A confirmation covers only the action ${owner} saw.`,
     `- Prepare purchases and orders but stop before payment or bank 2FA: paying stays with ${owner}.`,
     '- External effects (messages sent, carts filled, orders placed) are real. After a rewind they still stand; never repeat or contradict them blindly. Before you repeat an action whose outcome is unknown, find out whether it already happened.',
     `- Some calls put an Ask to ${owner} (a Grant proposal, a file edit). Their answer reaches you later and is final.`,
+    config.autoReview === true && `- Auto review is on: a reviewer checks each call before it runs. A call it denies waits for ${owner} as an Ask with the reviewer's reason; end your Turn with one line then. Never split or disguise a call to pass the reviewer.`,
     '- Host online state is in the runtime section and in my_capabilities; never probe a Host with a command to find out.',
   ),
 }

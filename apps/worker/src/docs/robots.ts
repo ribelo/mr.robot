@@ -1,6 +1,12 @@
 export const ROBOTS = `# Robots
 
-A Robot is a persistent worker owned by one Member. It is not a chat session and not a subagent. One Robot is one Durable Object with one endless Conversation.
+A Robot is a persistent worker owned by one Member. It is not a chat session. One Robot is one Durable Object with one endless Conversation. A Robot can hand work to Subagents; they are its tools, not Robots (read subagents.md).
+
+## Messages while a Robot works
+
+- The owner's messages, from the app or from a Channel that knows the owner, reach a working Robot at its next step (a steer). Mr. Robot's messages to the Robots he directs do the same. A steer can change what the Robot does; the Robot then says so.
+- Everything else (Tasks, webhooks, other Robots, Threads, platform notes) waits for a Turn of its own (a follow-up).
+- Ctrl+Enter in the composer sends a follow-up on purpose. Follow-ups from one sender that wait together arrive as one Turn. A Task always has its own Turn.
 
 ## Creating a Robot
 
@@ -30,6 +36,9 @@ When a Robot changes SOUL.md, it tells the owner. Read memory-and-files.md for t
 - Name, title, description, avatar. The avatar is a generated robot picture on the avatar colour. "Another look" in the Robot's profile draws a new picture. The owner sees it before saving. The sidebar, the Conversation header, the Admin fleet table and the Robot's messages show the same avatar.
 - Model chain: an ordered list of accounts and models. Read providers.md.
 - Context budget and the compaction instruction. Compaction shortens a long context. The instruction says what to keep.
+- While idle: cache warming (Mr. Robot's default) refreshes the model's cache at 54, 108 and 162 minutes, so the next message is cheap; idle compaction (other Robots' default) compacts once at 54 minutes, after one step to write memory. Neither runs during a Turn or while work waits. A context below the floor (20 000 tokens by default) is not compacted.
+- Auto review and the reviewer's model. Read auto-review.md.
+- The models of its Subagents. Read subagents.md.
 - Code mode or direct tool calls.
 - Grants. Read grants.md.
 - Spend limit: the Home's, no limit, or an amount. Read providers.md.

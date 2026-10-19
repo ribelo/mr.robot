@@ -14,4 +14,4 @@ Spec: ../mr-robot-v1.14.md. Frontier at the start: 01. Then 02, 03, 05, 09 in pa
 | 08 | [Auto review plugin and settings](08-auto-review.md) | 05 | done |
 | 09 | [Cache warming and idle compaction](09-idle-plugins.md) | 01 | done |
 | 10 | [A computer: Sandbox backend, grant, tools, sync, idle stop, cost](10-computer.md) | 02, 05 | done (staging run open) |
-| 11 | [Glossary, product docs, prompt preview](11-glossary-docs.md) | 04, 07, 08, 09, 10 | ready-for-agent |
+| 11 | [Glossary, product docs, prompt preview](11-glossary-docs.md) | 04, 07, 08, 09, 10 | done |

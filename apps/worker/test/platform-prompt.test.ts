@@ -108,6 +108,21 @@ describe('the core of every Robot (sk-yw30, sk-nitq, sk-d9dk, sk-9sju, sk-9mvx, 
     }
   })
 
+  it('the preview shows the v1.14 sections: steering, focus changes, spilled results, Auto review, Subagents and the computer (ao-o1w1)', async () => {
+    const id = await newRobot()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { autoReview: true, grants: { tools: { subagents: 'allow', computer: 'allow' } }, subagentModels: [{ provider: 'stub', model: 'stub' }] } })
+    await testRobot(id).activateForTest()
+    const sections = await preview(id)
+    const text = sections.find((section) => section.name === 'Platform')!.text
+    expect(text).toContain('## Messages while you work')
+    expect(text).toContain('call task_focus again with the new Task, or none, and the reason in one line')
+    expect(text).toContain('the path of the whole result under spill/ in your Workspace')
+    expect(text).toContain('Auto review is on')
+    expect(sections.map((section) => section.name)).toEqual(expect.arrayContaining(['mr-robot:subagents', 'mr-robot:computer']))
+    expect(sections.find((section) => section.name === 'mr-robot:subagents')!.text).toContain('Models you may give them: stub/stub')
+    expect(sections.find((section) => section.name === 'mr-robot:computer')!.text).toContain('computer/setup.sh')
+  })
+
   it('tells a Robot that a steer may change its work and that it says so; the preview shows it (ao-03p5)', async () => {
     const [chief, staff] = [await platform(await mrRobot()), await platform(await newRobot())]
     for (const text of [chief, staff]) {
