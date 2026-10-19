@@ -1826,10 +1826,14 @@ export class Home extends DurableObject<Env> {
     const mapped = this.discord.robotOf(message.channelId)
     const robotId = mapped?.robotId ?? (message.direct ? await this.mrRobotOf(ownerId) : null)
     if (robotId === null) return null
+    // The Robot's owner is identified on Discord by their own "Discord as you" connection (ao-rsfo).
+    const robotOwner = mapped?.ownerId ?? ownerId
+    const fromOwner = (await this.env.MEMBER.getByName(robotOwner).discordUserIds().catch(() => [] as string[])).includes(message.authorId)
     const outcome = await this.env.ROBOT.getByName(robotId).channelEvent({
       channel: 'discord',
       eventId: message.id,
       from: message.authorName,
+      ...(fromOwner ? { fromOwner: true } : {}),
       text: message.text,
       route: { channel: 'discord', address: message.channelId },
     }).catch((error: unknown) => { console.warn('discord wake failed', error); return { accepted: false } })

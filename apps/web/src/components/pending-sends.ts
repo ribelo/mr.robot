@@ -6,6 +6,7 @@ export interface PendingSend {
   readonly clientId: string
   readonly text: string
   readonly attachments: readonly Attachment[]
+  readonly followup?: true
   /** Pending: waiting for the server. Failed: the server refused it, or could not be reached. */
   readonly state: 'pending' | 'failed'
   readonly error?: string

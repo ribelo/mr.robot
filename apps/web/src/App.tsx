@@ -250,8 +250,8 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
             const bytes = new Uint8Array(await file.arrayBuffer())
             return command((api) => api.upload(id, { name: file.name, type: file.type, bytes }), [keys.files(id)])
           }}
-          onSend={(text, attachments) => {
-            outgoing.send(text, attachments)
+          onSend={(text, attachments, followup) => {
+            outgoing.send(text, attachments, followup)
             setReplyingInstead(false)
             setSentCount((count) => count + 1)
           }}

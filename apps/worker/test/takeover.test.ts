@@ -72,6 +72,31 @@ describe('live view and takeover', () => {
     expect((requests.get(id) ?? []).length).toBe(before)
   })
 
+  it('a steer sent during the wait reaches the Turn that resumes after the hand-back (ao-zk5r)', async () => {
+    const id = await shopperAtLogin()
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'pay with the other card' } })
+    await settle(id)
+    const before = (requests.get(id) ?? []).length
+    const anna = await connect(ANNA, id)
+    await anna.send({ type: 'claim' })
+    await vi.waitFor(() => expect(anna.received.some((message) => message['type'] === 'claimed')).toBe(true))
+    scripts.set(id, [{ text: 'Logged in; paying with the other card.' }, { text: 'nothing else' }])
+    await anna.send({ type: 'handback' })
+    await vi.waitFor(async () => {
+      await settle(id)
+      expect((requests.get(id) ?? []).length).toBeGreaterThan(before)
+    }, { timeout: 15_000 })
+    await settle(id)
+    // One Turn: the hand-back starts it and the waiting steer is read at its next step.
+    const resumed = requests.get(id)!.slice(before)
+    expect(JSON.stringify(resumed[0]!.messages)).toContain('handed the browser back')
+    expect(JSON.stringify(resumed.at(-1)!.messages)).toContain('pay with the other card')
+    const events = await env.ROBOT.getByName(id).trajectory()
+    const waited = events.find((event) => event.type === 'assistant/message' && JSON.stringify(event.data).includes('Waiting for you to log in.'))!.seq
+    expect(events.filter((event) => event.type === 'turn/start' && event.seq > waited)).toHaveLength(1)
+    anna.socket.close(1000)
+  })
+
   it('reattaches the waiting browser after the Robot restarts', async () => {
     const id = await shopperAtLogin()
     await abortAllDurableObjects()

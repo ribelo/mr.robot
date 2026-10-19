@@ -4,7 +4,7 @@
  */
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender, TaskAction, ThreadView } from '@mr-robot/protocol'
-import { MEMBER_TIME_LABEL } from '../agent/sources.ts'
+import { JOIN_SEPARATOR, MEMBER_TIME_LABEL } from '../agent/sources.ts'
 import type { NoticeRow, StoredRoutineCard } from './store.ts'
 
 interface ContentBlock { readonly type: string; readonly text?: string }
@@ -124,18 +124,21 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action: 'ran', taskId: sender.taskId, title: sender.name })
           break
         }
-        items.push({
-          kind: 'message',
-          id: message.id,
-          seq: event.seq,
-          at: event.time,
-          sender,
-          text: visibleText(message, sender),
-          attachments: (message.source?.['attachments'] as Attachment[] | undefined) ?? [],
-          reaction: null,
-          ...(typeof message.source?.['clientId'] === 'string' ? { clientId: message.source['clientId'] } : {}),
-          ...(typeof message.source?.['threadId'] === 'string' ? { thread: { id: message.source['threadId'], topic: String(message.source['topic'] ?? '') } } : {}),
-        })
+        // Follow-ups joined into one message (ao-rdhs) are shown as the messages they were.
+        for (const [index, part] of partsOf(message).entries()) {
+          items.push({
+            kind: 'message',
+            id: index === 0 ? message.id : `${message.id}-${index}`,
+            seq: event.seq,
+            at: event.time,
+            sender,
+            text: visibleText(part.message, sender),
+            attachments: part.attachments,
+            reaction: null,
+            ...(part.clientId === undefined ? {} : { clientId: part.clientId }),
+            ...(typeof message.source?.['threadId'] === 'string' ? { thread: { id: message.source['threadId'], topic: String(message.source['topic'] ?? '') } } : {}),
+          })
+        }
         if (sender.kind === 'member') lastMemberMessage = items.length - 1
         break
       }
@@ -295,6 +298,18 @@ function senderOf(source: Record<string, unknown> | undefined): Sender {
 }
 
 /** The text a person wrote, without the label line the model sees. */
+/** One shown message per joined follow-up; a message that was not joined is one part. */
+function partsOf(message: MessageLike): Array<{ message: MessageLike; clientId?: string; attachments: Attachment[] }> {
+  const joined = message.source?.['joined'] as ReadonlyArray<{ clientId?: string; attachments: Attachment[] }> | undefined
+  const text = message.content.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('')
+  const pieces = text.split(JOIN_SEPARATOR)
+  if (joined === undefined || joined.length !== pieces.length) {
+    const clientId = message.source?.['clientId']
+    return [{ message, ...(typeof clientId === 'string' ? { clientId } : {}), attachments: (message.source?.['attachments'] as Attachment[] | undefined) ?? [] }]
+  }
+  return joined.map((part, index) => ({ message: { ...message, content: [{ type: 'text', text: pieces[index]! }] }, ...(part.clientId === undefined ? {} : { clientId: part.clientId }), attachments: part.attachments }))
+}
+
 function visibleText(message: MessageLike, sender: Sender): string {
   const text = message.content.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('')
   // A Member's message carries only the time label the model reads; every other source has its label line.

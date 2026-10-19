@@ -63,7 +63,10 @@ import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts
 import type { ChainEntry, HomeSpendLimit, ProviderView } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
-import { wakeupMessage, type HelpAnswerWake, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
+import { joinedMessage, wakeupMessage, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import { joinable } from './delivery.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
@@ -426,7 +429,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async interrupt(by: string): Promise<{ interrupted: boolean }> {
     if (this.store.activeTurn() === undefined) return { interrupted: false }
     this.store.set(INTERRUPTED_BY, by)
-    this.composition?.value.agent.cancel({ kind: 'user' })
+    // A steer handed over but not read yet stays in the inbox: the next Turn reads it.
+    this.composition?.value.agent.cancel({ kind: 'user' }, { keepInbox: true })
     return { interrupted: true }
   }
 
@@ -452,6 +456,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   protected drain(): void {
+    this.deliverSteers()
     if (this.pumping !== undefined) return
     this.pumping = this.pump()
       .catch((error: unknown) => this.failed(error))
@@ -503,21 +508,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // A Task Wake-up makes the Task the Turn's subject, with an attempt at the Home (mc-t4dd).
       const taskId = wakeup.kind === 'task' && typeof wakeup.payload['taskId'] === 'string' ? wakeup.payload['taskId'] : undefined
       if (taskId !== undefined) await this.focusTask(taskId).catch((error: unknown) => console.warn('attempt not started', taskId, error))
-      agent.followup(wakeupMessage({
-        sender: wakeup.sender,
-        text,
-        ...(toolCallAnswer === undefined ? {} : { toolCallAnswer }),
-        attachments: (wakeup.payload['attachments'] as Attachment[] | undefined) ?? [],
-        ...optionalString(wakeup.payload, 'requestId'),
-        ...optionalString(wakeup.payload, 'replyTo'),
-        ...optionalString(wakeup.payload, 'replyHandle'),
-        ...optionalString(wakeup.payload, 'summary'),
-        ...(wakeup.payload['thread'] !== undefined && wakeup.kind === 'robot' ? { thread: wakeup.payload['thread'] as ThreadWake } : {}),
-        ...(wakeup.payload['helpAnswer'] !== undefined && wakeup.kind === 'platform' ? { helpAnswer: wakeup.payload['helpAnswer'] as HelpAnswerWake } : {}),
-        ...optionalString(wakeup.payload, 'clientId'),
-        ...(wakeup.kind === 'task' ? { taskRun: taskRunOf(wakeup.payload) } : {}),
-        woke: { at: Date.now(), timeZone: this.store.requireConfig().timeZone },
-      }))
+      // Follow-ups from the same sender queued with it join its Turn; a Task never shares one (ao-rdhs).
+      const joined = wakeup.kind === 'task' ? [] : joinable(wakeup, this.store.queuedWakeups())
+      const first = this.wakeupMessageOf(wakeup, text, toolCallAnswer)
+      agent.followup(joined.length === 0 ? first : joinedMessage([first, ...joined.map((other) => this.wakeupMessageOf(other, other.text))], [wakeup, ...joined].map(joinedPart)))
+      this.store.consumeWakeups(joined.map((other) => other.id))
     } else {
       agent.followup(wakeupMessage({
         sender: { kind: 'platform' },
@@ -525,9 +520,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         summary: 'Resumed after a restart',
       }))
     }
+    // From here until the agent is idle, the owner's steers reach this Turn at its next step (ao-9570).
+    this.runningAgent = agent
+    this.deliverSteers()
     await this.rearm()
     await this.changed()
     await agent.whenIdle()
+    this.runningAgent = undefined
     await ctx.sessions.flush(agent.session)
     if (this.turnSecrets.length > 0) {
       // The in-memory session still holds plaintext; the next Turn starts from the redacted log.
@@ -541,6 +540,47 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.afterTurn(wakeup, turn)
     await this.rearm()
     await this.changed()
+  }
+
+  /** The agent of the Turn that is running now; set while a steer can still reach it. */
+  private runningAgent: Agent | undefined
+
+  /** A Wake-up as the model reads it: its source label, the local time, and the steer's Wake-up id. */
+  private wakeupMessageOf(wakeup: Wakeup, text: string, toolCallAnswer?: ToolCallAnswerWake, steer = false): UserMessage {
+    return wakeupMessage({
+      sender: wakeup.sender,
+      text,
+      ...(toolCallAnswer === undefined ? {} : { toolCallAnswer }),
+      attachments: (wakeup.payload['attachments'] as Attachment[] | undefined) ?? [],
+      ...optionalString(wakeup.payload, 'requestId'),
+      ...optionalString(wakeup.payload, 'replyTo'),
+      ...optionalString(wakeup.payload, 'replyHandle'),
+      ...optionalString(wakeup.payload, 'summary'),
+      ...(wakeup.payload['thread'] !== undefined && wakeup.kind === 'robot' ? { thread: wakeup.payload['thread'] as ThreadWake } : {}),
+      ...(wakeup.payload['helpAnswer'] !== undefined && wakeup.kind === 'platform' ? { helpAnswer: wakeup.payload['helpAnswer'] as HelpAnswerWake } : {}),
+      ...optionalString(wakeup.payload, 'clientId'),
+      ...(wakeup.kind === 'task' ? { taskRun: taskRunOf(wakeup.payload) } : {}),
+      ...(steer ? { steer: { wakeupId: wakeup.id } } : {}),
+      woke: { at: Date.now(), timeZone: this.store.requireConfig().timeZone },
+    })
+  }
+
+  /**
+   * Hand the queued steers to the running Turn (ao-9570): DSH reads them at the next step, and the log stores
+   * each where it was read (ao-lfxt). They leave the queue at once, so a restart does not replay them as Turns;
+   * the agent's inbox is durable in the session log. A reply goes back where the last steer came from.
+   */
+  private deliverSteers(): void {
+    const agent = this.runningAgent
+    const active = this.store.activeTurn()
+    if (agent === undefined || active === undefined || agent.status !== 'running') return
+    const steers = this.store.queuedWakeups().filter((queued) => queued.delivery === 'steer' && queued.id !== active.wakeupId)
+    if (steers.length === 0) return
+    for (const steer of steers) agent.steer(this.wakeupMessageOf(steer, steer.text, undefined, true))
+    this.store.consumeWakeups(steers.map((steer) => steer.id))
+    const route = steers.map((steer) => steer.payload['route'] as ReplyRoute | undefined).filter((found) => found !== undefined && found.channel !== 'webhook').at(-1)
+    if (route !== undefined) this.store.set(`steer-route:${active.wakeupId}`, route)
+    this.ctx.waitUntil(this.changed())
   }
 
   /**
@@ -724,7 +764,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       if (this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
       this.store.set(`inbound:${wakeup.dedupeKey}`, true)
     }
-    await this.wake({ kind: 'channel', sender: wakeup.sender, text: wakeup.text, payload: { route: wakeup.route } })
+    await this.wake({ kind: 'channel', sender: wakeup.sender, text: wakeup.text, payload: { route: wakeup.route, ...(event.fromOwner === true && event.channel !== 'webhook' ? { fromOwner: true } : {}) } })
     return { accepted: true }
   }
 
@@ -777,9 +817,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async deliverReplies(wakeup: Wakeup, startSeq: number): Promise<void> {
     const config = this.store.requireConfig()
     // A webhook has nobody to answer: its Turn replies like a Task's (app, and the Channels that opted in).
-    const stored = (wakeup.payload['route'] as ReplyRoute | undefined) ?? null
+    const steered = this.store.get<ReplyRoute>(`steer-route:${wakeup.id}`)
+    this.store.delete(`steer-route:${wakeup.id}`)
+    const own = (wakeup.payload['route'] as ReplyRoute | undefined) ?? null
+    const stored = own === null || own.channel === 'webhook' ? steered ?? own : own
     const route = stored?.channel === 'webhook' ? null : stored
-    const unprompted = wakeup.kind !== 'member' && (wakeup.kind !== 'channel' || stored?.channel === 'webhook')
+    const unprompted = steered === undefined && wakeup.kind !== 'member' && (wakeup.kind !== 'channel' || stored?.channel === 'webhook')
     const replies = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
     for (const item of replies) {
       if (item.kind !== 'reply') continue
@@ -2875,4 +2918,10 @@ const INTERRUPTED_BY = 'interrupted-by'
 function taskRunOf(payload: Record<string, unknown>): { by: TaskRunBy; who?: string } {
   const by = payload['by'] === 'member' || payload['by'] === 'robot' ? payload['by'] : 'schedule'
   return typeof payload['who'] === 'string' ? { by, who: payload['who'] } : { by }
+}
+
+/** What the chat needs to show one joined follow-up as its own message: the app's id and its files. */
+function joinedPart(wakeup: Wakeup): JoinedPart {
+  const clientId = wakeup.payload['clientId']
+  return { ...(typeof clientId === 'string' ? { clientId } : {}), attachments: (wakeup.payload['attachments'] as Attachment[] | undefined) ?? [] }
 }

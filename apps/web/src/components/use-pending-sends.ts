@@ -8,6 +8,8 @@ export interface OutgoingMessage {
   readonly clientId: string
   readonly text: string
   readonly attachments: Attachment[]
+  /** Waits for a Turn of its own (Ctrl+Enter, ao-q2z4). */
+  readonly followup?: true
 }
 
 const newClientId = (): string => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
@@ -32,8 +34,8 @@ export function usePendingSends(items: readonly ChatItem[], meId: string, post: 
     setSends((current) => current.map((send) => (send.clientId === message.clientId ? { ...send, state: 'failed', ...(error === undefined ? {} : { error }) } : send)))
   }, [post])
 
-  const send = useCallback((text: string, attachments: Attachment[]) => {
-    const message = { clientId: newClientId(), text, attachments }
+  const send = useCallback((text: string, attachments: Attachment[], followup = false) => {
+    const message: OutgoingMessage = { clientId: newClientId(), text, attachments, ...(followup ? { followup: true } : {}) }
     setSends((current) => [...current, { ...message, state: 'pending', knownItems: new Set(items.map((item) => item.id)) }])
     void attempt(message)
     return message.clientId
@@ -47,7 +49,7 @@ export function usePendingSends(items: readonly ChatItem[], meId: string, post: 
       const { error: _error, ...rest } = entry
       return { ...rest, state: 'pending' }
     }))
-    void attempt({ clientId, text: failed.text, attachments: [...failed.attachments] })
+    void attempt({ clientId, text: failed.text, attachments: [...failed.attachments], ...(failed.followup === true ? { followup: true } : {}) })
   }, [attempt])
 
   return { pending, send, retry }

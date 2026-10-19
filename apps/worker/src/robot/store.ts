@@ -72,10 +72,14 @@ export interface RobotConfig {
 
 export type { WakeupKind }
 
+/** How a Wake-up reaches the Robot (v1.14): at the next step of a running Turn, or in a Turn of its own. */
+export type Delivery = 'steer' | 'followup'
+
 export interface Wakeup {
   readonly id: number
   readonly kind: WakeupKind
   readonly sender: Sender
+  readonly delivery: Delivery
   readonly text: string
   /** Extra structured data the turn needs (attachments, robot request ids, channel reply route). */
   readonly payload: Record<string, unknown>
@@ -140,7 +144,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 12
+const SCHEMA_VERSION = 13
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -161,6 +165,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // How a Wake-up reaches the Robot (v1.14, ao-9570): a steer reaches a running Turn, a follow-up waits for its own.
+  13: [(sql) => addColumns(sql, 'wakeup', ["delivery TEXT NOT NULL DEFAULT 'followup'"])],
   // Routines are Tasks at the Home (v1.13 ticket 05): a Robot without any has no Routine tables; the Home takes the others' and drops them.
   12: [dropEmptyRoutines],
   // The routines tool group became tasks (v1.13, mc-r1aa): the same Grant, by its new name.
@@ -503,17 +509,31 @@ export class RobotStore {
 
   // ------------------------------------------------------------ wake-ups and the active turn
 
-  enqueue(kind: WakeupKind, sender: Sender, text: string, payload: Record<string, unknown>, now: number): number {
+  enqueue(kind: WakeupKind, sender: Sender, text: string, payload: Record<string, unknown>, now: number, delivery: Delivery = 'followup'): number {
     this.sql.exec(
-      'INSERT INTO wakeup (kind, sender, text, payload, created_at) VALUES (?, ?, ?, ?, ?)',
-      kind, JSON.stringify(sender), text, JSON.stringify(payload), now,
+      'INSERT INTO wakeup (kind, sender, text, payload, created_at, delivery) VALUES (?, ?, ?, ?, ?, ?)',
+      kind, JSON.stringify(sender), text, JSON.stringify(payload), now, delivery,
     )
     return this.sql.exec<{ id: number }>('SELECT last_insert_rowid() AS id').one().id
   }
 
+  /**
+   * The Wake-up that starts the next Turn: the oldest, except that a hand-back after a Takeover goes first, so
+   * steers queued during the wait reach the Turn that resumes the work (ao-zk5r).
+   */
   nextWakeup(): Wakeup | undefined {
-    const row = this.sql.exec<WakeupSql>('SELECT * FROM wakeup ORDER BY id LIMIT 1').toArray()[0]
+    const row = this.sql.exec<WakeupSql>("SELECT * FROM wakeup ORDER BY kind = 'takeover' DESC, id LIMIT 1").toArray()[0]
     return row === undefined ? undefined : wakeupFromSql(row)
+  }
+
+  /** Every queued Wake-up, oldest first. */
+  queuedWakeups(): Wakeup[] {
+    return this.sql.exec<WakeupSql>('SELECT * FROM wakeup ORDER BY id').toArray().map(wakeupFromSql)
+  }
+
+  /** Queued Wake-ups that became part of a running Turn (a steer handed over, follow-ups joined) leave the queue. */
+  consumeWakeups(ids: readonly number[]): void {
+    for (const id of ids) this.sql.exec('DELETE FROM wakeup WHERE id = ?', id)
   }
 
   wakeup(id: number): Wakeup | undefined {
@@ -751,6 +771,7 @@ type WakeupSql = {
   text: string
   payload: string
   created_at: number
+  delivery: Delivery
 }
 
 function wakeupFromSql(row: WakeupSql): Wakeup {
@@ -758,6 +779,7 @@ function wakeupFromSql(row: WakeupSql): Wakeup {
     id: row.id,
     kind: row.kind as WakeupKind,
     sender: JSON.parse(row.sender) as Sender,
+    delivery: row.delivery ?? 'followup',
     text: row.text,
     payload: JSON.parse(row.payload) as Record<string, unknown>,
     createdAt: row.created_at,

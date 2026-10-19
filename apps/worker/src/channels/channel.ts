@@ -35,6 +35,8 @@ export interface InboundEvent {
   readonly from: string
   readonly text: string
   readonly route: ReplyRoute
+  /** The Channel identified the sender as the Robot's owner: the message steers (ao-rsfo). */
+  readonly fromOwner?: boolean
 }
 
 export interface InboundWakeup {

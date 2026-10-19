@@ -77,6 +77,13 @@ export class ConnectionStore {
     return this.sql.exec<Row>('SELECT * FROM connection WHERE id = ?', id).toArray()[0]
   }
 
+  /** The Discord user ids of the Member's own "Discord as you" connections: who they are on Discord (ao-rsfo). */
+  discordUserIds(): string[] {
+    return this.sql.exec<{ meta: string }>("SELECT meta FROM connection WHERE kind = 'discord-user'").toArray()
+      .map((row) => (JSON.parse(row.meta) as Record<string, unknown>)['userId'])
+      .filter((id): id is string => typeof id === 'string')
+  }
+
   list(): OwnConnection[] {
     return this.sql.exec<Row>('SELECT * FROM connection ORDER BY kind, created_at').toArray().map((row) => this.view(row))
   }

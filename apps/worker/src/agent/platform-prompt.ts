@@ -1,6 +1,7 @@
 import { hostHeading, hostsOf, levelSummary, ownerLine, type CapabilityItem, type RobotOwner } from '@mr-robot/protocol'
 import type { RobotConfig } from '../robot/store.ts'
 import { docsIndex } from './docs-index.ts'
+import { JOIN_SEPARATOR } from './sources.ts'
 
 /**
  * The platform's standing instructions to every Robot (v1.11 ticket 01), modelled on Muse's prompt:
@@ -145,6 +146,17 @@ const toolRules: PlatformSection = {
   ),
 }
 
+/** Steer and follow-up (v1.14, ao-03p5): what reaches a running Turn, and what waits. */
+const steering: PlatformSection = {
+  name: 'steering',
+  render: ({ config, owner: { name: owner } }) => lines(
+    '## Messages while you work',
+    `- ${isChief(config) ? `${owner}'s messages reach` : `${owner}'s messages, and Mr. Robot's when he directs you, reach`} you while you work, at your next step. Such a message may change what you are doing. If it does, follow it and say so in your own words, in one line, so ${owner} knows what you stopped or put off.`,
+    `- Everything else (Tasks, webhooks, messages from other Robots${isChief(config) ? ', Thread messages' : ''}, platform notes) waits for a Turn of its own.`,
+    `- Messages from one sender that waited together arrive as one, separated by the line "${JOIN_SEPARATOR.trim()}". Answer them together.`,
+  ),
+}
+
 const tasks: PlatformSection = {
   name: 'tasks',
   render: ({ owner: { name: owner } }) => lines(
@@ -210,7 +222,7 @@ const runtime: PlatformSection = {
 }
 
 /** In order: bridge, role, core; the docs index and the runtime section follow at the end. */
-export const PLATFORM_SECTIONS: readonly PlatformSection[] = [bridge, role, workFor, howYouWork, memory, dateAndTime, context, style, language, toolRules, tasks, files, threads, docs, runtime]
+export const PLATFORM_SECTIONS: readonly PlatformSection[] = [bridge, role, workFor, howYouWork, memory, dateAndTime, context, style, language, toolRules, steering, tasks, files, threads, docs, runtime]
 
 /** The sections with text for this Robot now, in order. */
 export function platformSections(input: PromptInput): Array<{ name: string; text: string }> {

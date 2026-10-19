@@ -901,6 +901,7 @@ export class Member extends DurableObject<Env> {
   }
 
   connections(): OwnConnection[] { return this.connectionsOf.list() }
+  discordUserIds(): string[] { return this.connectionsOf.discordUserIds() }
   connection(id: string): OwnConnection | undefined { return this.connectionsOf.get(id) }
   addConnection(input: NewConnection): Promise<OwnConnection> { return this.connectionsOf.add(input) }
   updateConnection(id: string, change: ConnectionChange): Promise<OwnConnection | undefined> { return this.connectionsOf.update(id, change) }

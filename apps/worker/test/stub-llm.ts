@@ -5,6 +5,8 @@ export type StubReply =
   | { readonly text: string; readonly inputTokens?: number; readonly thinking?: string; /** Tool calls after the text: the text is an interim message of the Turn. */ readonly calls?: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   | { readonly hang: true }
   | { readonly calls: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
+  /** The model call waits until the gate opens, then replies: a Turn that is working while the test acts. */
+  | { readonly gate: Promise<unknown>; readonly then: StubReply }
   | ((request: GenerateOptions) => StubReply)
 
 /** Per-robot scripts, shared by the test and the Robot DO (same isolate under vitest-plugin). */
@@ -26,9 +28,13 @@ export class StubLlm extends LlmAdapter {
     const log = requests.get(this.robotId) ?? []
     log.push(options)
     requests.set(this.robotId, log)
-    const scripted = scripts.get(this.robotId)?.shift() ?? scripts.get('*')?.[0] ?? { text: 'ok' }
+    let scripted = scripts.get(this.robotId)?.shift() ?? scripts.get('*')?.[0] ?? { text: 'ok' }
+    while (typeof scripted !== 'function' && 'gate' in scripted) {
+      await scripted.gate
+      scripted = scripted.then
+    }
     const reply = typeof scripted === 'function' ? scripted(options) : scripted
-    if (typeof reply === 'function') throw new Error('StubLlm: a scripted reply function must return a reply')
+    if (typeof reply === 'function' || 'gate' in reply) throw new Error('StubLlm: a scripted reply function must return a plain reply')
     if ('hang' in reply) {
       await new Promise<void>((_resolve, reject) => {
         options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })

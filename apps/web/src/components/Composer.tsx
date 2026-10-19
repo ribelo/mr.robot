@@ -5,8 +5,11 @@ import { exitFailure, type ApiFailure } from '../client/api-failure.ts'
 
 export interface ComposerProps {
   readonly placeholder: string
-  /** Called at Enter; the Composer is already empty. Whether the send works is the Conversation's to show (ap-3si6). */
-  readonly onSend: (text: string, attachments: Attachment[]) => void
+  /**
+   * Called at Enter; the Composer is already empty. Whether the send works is the Conversation's to show (ap-3si6).
+   * `followup`: sent with Ctrl+Enter, so it waits for a Turn of its own instead of reaching a working Robot (ao-q2z4).
+   */
+  readonly onSend: (text: string, attachments: Attachment[], followup: boolean) => void
   readonly onUpload: (file: File) => Promise<Exit.Exit<Attachment, ApiFailure>>
 }
 
@@ -18,16 +21,21 @@ export function Composer({ placeholder, onSend, onUpload }: ComposerProps) {
   const [failure, setFailure] = useState<string>()
   const input = useRef<HTMLInputElement>(null)
 
-  const send = () => {
+  const send = (followup = false) => {
     if (busy || (text.trim() === '' && files.length === 0)) return
-    onSend(text.trim(), files)
+    onSend(text.trim(), files, followup)
     setText('')
     setFiles([])
     setFailure(undefined)
   }
 
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey && !matchMedia('(pointer: coarse)').matches) {
+    if (event.key !== 'Enter' || event.shiftKey) return
+    // Ctrl+Enter (Cmd+Enter on a Mac) queues the message as a follow-up, on any keyboard.
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault()
+      send(true)
+    } else if (!matchMedia('(pointer: coarse)').matches) {
       event.preventDefault()
       send()
     }
@@ -63,7 +71,7 @@ export function Composer({ placeholder, onSend, onUpload }: ComposerProps) {
           onChange={(event) => setText(event.target.value)}
           onKeyDown={keyDown}
         />
-        <button type="button" className="send-button" aria-label="Send" onClick={send} disabled={busy || (text.trim() === '' && files.length === 0)}>
+        <button type="button" className="send-button" aria-label="Send" onClick={() => send()} disabled={busy || (text.trim() === '' && files.length === 0)}>
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
       </div>

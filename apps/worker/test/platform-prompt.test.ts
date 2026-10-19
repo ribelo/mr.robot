@@ -107,6 +107,17 @@ describe('the core of every Robot (sk-yw30, sk-nitq, sk-d9dk, sk-9sju, sk-9mvx, 
       expect(text).toContain('when the result is unchanged or nothing happened, stay silent')
     }
   })
+
+  it('tells a Robot that a steer may change its work and that it says so; the preview shows it (ao-03p5)', async () => {
+    const [chief, staff] = [await platform(await mrRobot()), await platform(await newRobot())]
+    for (const text of [chief, staff]) {
+      expect(text).toContain('## Messages while you work')
+      expect(text).toContain('Such a message may change what you are doing. If it does, follow it and say so in your own words')
+      expect(text).toContain('--- next message from the same sender ---')
+    }
+    expect(staff).toContain("and Mr. Robot's when he directs you")
+    expect(chief).not.toContain("Mr. Robot's when he directs you")
+  })
 })
 
 describe('no foreign prompt text, and the memory header names only tools the Robot has (sk-9ekj, sk-xs60, sk-a2yy)', () => {

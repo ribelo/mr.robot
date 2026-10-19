@@ -7,13 +7,28 @@ import type { Attachment, Sender } from '@mr-robot/protocol'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
-    member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[]; clientId?: string } & ContextFormed
-    robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; avatarSeed: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string } & ContextFormed
+    member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[]; clientId?: string; joined?: JoinedPart[] } & Delivered & ContextFormed
+    robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; avatarSeed: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string } & Delivered & ContextFormed
     task: { kind: 'task'; taskId: string; name: string; by: TaskRunBy } & ContextFormed
-    channel: { kind: 'channel'; channel: string; from: string } & ContextFormed
-    platform: { kind: 'platform'; summary: string } & ContextFormed
+    channel: { kind: 'channel'; channel: string; from: string; joined?: JoinedPart[] } & Delivered & ContextFormed
+    platform: { kind: 'platform'; summary: string } & Delivered & ContextFormed
   }
 }
+
+/** A steer records the Wake-up it came from (v1.14, ao-lfxt); the log shows it where the Robot read it. */
+export interface Delivered {
+  wakeupId?: number
+  delivery?: 'steer'
+}
+
+/** One of several queued follow-ups from the same sender joined into one message (ao-rdhs). */
+export interface JoinedPart {
+  clientId?: string
+  attachments: Attachment[]
+}
+
+/** The line between joined follow-ups; the platform prompt tells the Robot what it means. */
+export const JOIN_SEPARATOR = '\n\n--- next message from the same sender ---\n'
 
 /** Who started a Task's Turn (mc-s1aa): its schedule, a person (Run now), or a Robot. */
 export type TaskRunBy = 'schedule' | 'member' | 'robot'
@@ -56,6 +71,8 @@ export interface WakeupMessageInput {
   readonly toolCallAnswer?: ToolCallAnswerLabel
   /** A Task's Wake-up: who started it, and the person's name for Run now. */
   readonly taskRun?: { readonly by: TaskRunBy; readonly who?: string }
+  /** The Wake-up reached a running Turn as a steer. */
+  readonly steer?: { readonly wakeupId: number }
 }
 
 /** The owner's answer to a tool-call Ask, as its label names it. */
@@ -106,13 +123,30 @@ export const MEMBER_TIME_LABEL = /^\[[A-Z][a-z]{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2}
  * the time on the same line, which keeps it one label line.
  */
 export function wakeupMessage(input: WakeupMessageInput): UserMessage {
-  const message = sourceMessage(input)
+  const sourced = sourceMessage(input)
+  const message = input.steer === undefined || sourced.source?.kind === 'task'
+    ? sourced
+    : { ...sourced, source: { ...sourced.source, wakeupId: input.steer.wakeupId, delivery: 'steer' } } as UserMessage
   if (input.woke === undefined) return message
   const time = timeLabel(input.woke.at, input.woke.timeZone)
   const [first, ...rest] = message.content
   if (first?.type !== 'text') return message
   const text = input.sender.kind === 'member' ? `${time}\n${first.text}` : `${time} ${first.text}`
   return { ...message, content: [{ ...first, text }, ...rest] }
+}
+
+/**
+ * Several queued follow-ups from one sender as one message (ao-rdhs): their texts, each with its own labels,
+ * between separators; the source of the first, with each part's id and attachments so the chat shows them apart.
+ */
+export function joinedMessage(messages: readonly UserMessage[], parts: readonly JoinedPart[]): UserMessage {
+  const [first] = messages
+  if (first === undefined) throw new Error('nothing to join')
+  if (messages.length === 1) return first
+  const text = messages.map((message) => message.content.filter((block) => block.type === 'text').map((block) => block.text).join('')).join(JOIN_SEPARATOR)
+  const { clientId: _clientId, ...source } = first.source as Record<string, unknown>
+  const attachments = parts.flatMap((part) => part.attachments)
+  return { ...first, content: [{ type: 'text', text }], source: { ...source, ...(source['kind'] === 'member' ? { attachments } : {}), joined: [...parts] } } as unknown as UserMessage
 }
 
 function sourceMessage(input: WakeupMessageInput): UserMessage {

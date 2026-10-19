@@ -1466,6 +1466,8 @@ export const SendMessage = Schema.Struct({
     size: Schema.Number,
     contentType: Schema.String,
   }))),
+  /** Wait for a Turn of its own instead of reaching a running Turn (Ctrl+Enter, ao-q2z4). */
+  followup: Schema.optional(Schema.Boolean),
 })
 export type SendMessage = typeof SendMessage.Type
 

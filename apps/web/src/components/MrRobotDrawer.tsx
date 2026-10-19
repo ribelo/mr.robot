@@ -54,7 +54,7 @@ export function MrRobotDrawer({ me, chief, onTurnEnded }: { me: Me; chief: Robot
           const bytes = new Uint8Array(await file.arrayBuffer())
           return command((api) => api.upload(id, { name: file.name, type: file.type, bytes }), [keys.files(id)])
         }}
-        onSend={(text, attachments) => { outgoing.send(text, attachments); setSent((count) => count + 1) }}
+        onSend={(text, attachments, followup) => { outgoing.send(text, attachments, followup); setSent((count) => count + 1) }}
       />
     </aside>
   )

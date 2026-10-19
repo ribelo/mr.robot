@@ -21,6 +21,7 @@ import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-s
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
+import { deliveryOf, robotMessageDelivery } from './delivery.ts'
 
 export const MAX_CHAIN_HOPS = 8
 export { THREAD_PAUSE_AT }
@@ -34,6 +35,8 @@ export interface WakeInput {
   readonly payload?: Record<string, unknown>
   /** The sender's id for this message; a repeated Wake-up with the same id is queued once. */
   readonly clientId?: string
+  /** The owner sent it as a follow-up on purpose (Ctrl+Enter, ao-q2z4): it waits for its own Turn. */
+  readonly followup?: boolean
 }
 
 /** A message between Robots, as the platform carries it (robot-mv15). */
@@ -112,7 +115,8 @@ const RECENT_CLIENT_ID_LIMIT = 200
 export const wake = (input: WakeInput) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
-  if ((yield* config).status === 'deleted') return yield* invalid('robot is deleted')
+  const current = yield* config
+  if (current.status === 'deleted') return yield* invalid('robot is deleted')
   const recent = store.get<ReadonlyArray<readonly [string, number]>>(RECENT_CLIENT_IDS) ?? []
   const seen = input.clientId === undefined ? undefined : recent.find(([clientId]) => clientId === input.clientId)
   if (seen !== undefined) return seen[1]
@@ -120,7 +124,7 @@ export const wake = (input: WakeInput) => Effect.gen(function* () {
     ...input.payload,
     attachments: input.attachments ?? [],
     ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
-  }, Date.now())
+  }, Date.now(), deliveryOf(input, current.ownerId))
   if (input.clientId !== undefined) store.set(RECENT_CLIENT_IDS, [...recent, [input.clientId, id] as const].slice(-RECENT_CLIENT_ID_LIMIT))
   yield* platform.drain()
   return id
@@ -301,6 +305,7 @@ export const receive = (message: RobotMessage) => Effect.gen(function* () {
       message.text,
       message.kind === 'request' ? { requestId: message.requestId, replyHandle: handle, chain: message.chain } : { replyTo: message.requestId, chain: message.chain },
       Date.now(),
+      robotMessageDelivery(message.from, message.kind, current.ownerId),
     )
   })
   yield* platform.drain()

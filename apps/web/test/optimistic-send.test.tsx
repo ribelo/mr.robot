@@ -101,3 +101,18 @@ describe('optimistic send (ap-3si6, ap-ceqx, ap-7b3p)', () => {
     expect(await screen.findByText(/Not sent: the server cannot be reached/)).toBeTruthy()
   })
 })
+
+describe('Ctrl+Enter sends a follow-up (ao-q2z4)', () => {
+  it('Enter sends without the flag; Ctrl+Enter and Cmd+Enter send with followup', async () => {
+    render(view(conversation()))
+    const box = screen.getByPlaceholderText('Message Sales') as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'now' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    fireEvent.change(box, { target: { value: 'later' } })
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    fireEvent.change(box, { target: { value: 'later too' } })
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true })
+    await waitFor(() => expect(posts).toHaveLength(3))
+    expect(posts.map((post) => [post.text, (post as Post & { followup?: boolean }).followup ?? false])).toEqual([['now', false], ['later', true], ['later too', true]])
+  })
+})

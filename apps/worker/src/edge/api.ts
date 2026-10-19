@@ -484,7 +484,7 @@ export const api = new Router<ApiContext>()
     const message = yield* decodeBody(c.request, SendMessage)
     if (message.text.trim() === '' && (message.attachments ?? []).length === 0) return yield* Effect.fail(badRequest('empty message'))
     const sender = { kind: 'member' as const, memberId: c.member.id, name: c.member.name }
-    const wakeup = yield* call(() => robot(c, id).wake({ kind: 'member', sender, text: message.text, attachments: message.attachments ?? [], ...(message.clientId === undefined ? {} : { clientId: message.clientId }) }))
+    const wakeup = yield* call(() => robot(c, id).wake({ kind: 'member', sender, text: message.text, attachments: message.attachments ?? [], ...(message.clientId === undefined ? {} : { clientId: message.clientId }), ...(message.followup === true ? { followup: true } : {}) }))
     return { wakeup }
   }))
   .on('PUT', '/api/robots/:id/files', (c, { id }) => Effect.gen(function* () {
