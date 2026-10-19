@@ -230,6 +230,12 @@ export class Robot extends ProductionRobot {
     await this.ctx.storage.setAlarm(Date.now() + 1)
   }
 
+  /** The spill tidy pass as the start of a Turn runs it, at a moment the test picks; the daily throttle is reset first. */
+  async tidySpillForTest(now: number): Promise<void> {
+    this.store.delete('spill-sweep-next')
+    await this.tidySpill(now)
+  }
+
   /** When the next screenshot sweep is due; null when none is planned. */
   async sweepNextForTest(): Promise<number | null> {
     return this.store.get<number>('screens-sweep-next') ?? null

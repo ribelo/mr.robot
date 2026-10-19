@@ -13,6 +13,7 @@ import SessionStore, { SessionId, SessionLogOffset, type SessionEvent } from '@d
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
+import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
 import ToolRuntime, { type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ThinkingEffort } from '@mr-robot/protocol'
 import { BudgetedAdapter } from './budget.ts'
@@ -20,6 +21,7 @@ import { compactionConfig, robotCompaction } from './compaction.ts'
 import { RobotWorkingDirectory } from './seams.ts'
 import { SqliteSessionLog } from './session-log.ts'
 import type { Mount } from '../plugins/define.ts'
+import { maxInlineTokens, WorkspaceSpillStore, type WorkspaceSpillConfig } from '../workspace/spill.ts'
 
 export interface CompositionInput {
   readonly storage: DurableObjectStorage
@@ -46,6 +48,8 @@ export interface CompositionInput {
   readonly mounts: readonly Mount[]
   /** Code mode (robot-5ewr): plugin that provides ctx.ptcRuntime, or undefined for direct tool calls. */
   readonly ptcRuntime?: (ctx: Context) => Promise<void>
+  /** Where an oversized tool result is kept whole (ao-hf02); the inline budget follows the context budget. */
+  readonly spill: WorkspaceSpillConfig
 }
 
 export interface Composition {
@@ -86,6 +90,8 @@ export async function compose(input: CompositionInput): Promise<Composition> {
       }
     }
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
+    await ctx.plugin(WorkspaceSpillStore, input.spill)
+    await ctx.plugin(SpillPolicy, { maxInlineTokens: maxInlineTokens(input.contextBudget) })
     await ctx.plugin(robotCompaction(input.compactionInstruction, input.onCompacted), compactionConfig(input.contextBudget, input.modelWindow))
     await ctx.plugin(AgentRegistry)
     if (input.onStream !== undefined) {

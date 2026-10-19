@@ -4,9 +4,11 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: a scripted tool returning more than the budget yields head, tail, the Workspace path, and the file is readable with read and grep (ao-hf02, ao-5lzl)
-- [ ] Workerd test: a Robot with a small context budget spills sooner than one with a large budget (ao-antj)
-- [ ] Workerd test: a spill file older than 30 days is removed by the tidy pass; a younger one stays (ao-ry61)
-- [ ] Component test: Files view sorts spill/ after every other folder (ao-ry61)
+- [x] Workerd test: a scripted tool returning more than the budget yields head, tail, the Workspace path, and the file is readable with read and grep (ao-hf02, ao-5lzl)
+- [x] Workerd test: a Robot with a small context budget spills sooner than one with a large budget (ao-antj)
+- [x] Workerd test: a spill file older than 30 days is removed by the tidy pass; a younger one stays (ao-ry61)
+- [x] Component test: Files view sorts spill/ after every other folder (ao-ry61)
+
+**Closing note:** WorkspaceSpillStore (apps/worker/src/workspace/spill.ts) is mounted with DSH's spill policy in every Robot composition. The file is `spill/<session>/<call id>-<tool>.txt`; the model sees it as `/workspace/spill/...`. A Robot without the files grant has no read or grep, so its retrieval hint says that the owner can open the file in Files. DSH's policy never spills a `read` result, so reading a spill file cannot spill again. The tidy pass runs at the start of a Turn and lists spill/ at most once a day.

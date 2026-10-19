@@ -16,6 +16,7 @@ const GROUPS: ReadonlyArray<readonly [WorkspaceFileView['group'], string]> = [
   ['other', 'Other files'],
   ['docs', 'Product docs (read-only)'],
   ['screens', 'Screenshots'],
+  ['spill', 'Spilled tool results'],
 ]
 
 /**
@@ -65,7 +66,7 @@ function FileList({ robotId, files, canEdit, onOpen }: { robotId: string; files:
             ))}
           </ul>
         )
-        return group === 'screens'
+        return group === 'screens' || group === 'spill'
           ? <details key={group} className="file-group"><summary>{title} <span className="muted">· {inGroup.length}</span></summary>{list}</details>
           : <section key={group} className="file-group"><h3 className="panel-section">{title}</h3>{list}</section>
       })}

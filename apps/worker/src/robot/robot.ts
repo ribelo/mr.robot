@@ -8,6 +8,7 @@
  * interrupted Turn resumes from the last persisted event.
  */
 import { clearWorkspace } from '../workspace/workspace.ts'
+import { SPILL_SWEEP_EVERY_MS, sweepSpill } from '../workspace/spill.ts'
 import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCREEN_SWEEP_EVERY_MS, sweepScreenshots } from '../workspace/screens.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -985,6 +986,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), owner: this.owner(), afterProviderIdentity, ...this.capabilityInput() }) })),
       ...(config.status === 'setup' ? [{ name: 'setup', text: () => setupPrompt(this.owner().name, brief) }] : []),
     ]
+    const mounts = this.mounts(config)
     const scope = await Effect.runPromise(Scope.make())
     const value = await Effect.runPromise(Scope.provide(scope)(composeScoped({
       storage: this.ctx.storage,
@@ -1006,7 +1008,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       onCompacted: () => this.store.delete('memory-baseline'),
       onStream: (frame) => this.streamed(frame),
       prompt,
-      mounts: this.mounts(config),
+      mounts,
+      spill: { workspace: this.workspace, fileTools: mounts.some((entry) => (entry.plugin as unknown) === Files) },
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
     }))).catch(async (error: unknown) => {
       await Effect.runPromise(Scope.close(scope, Exit.void))
@@ -1609,6 +1612,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.set('screens-sweep-next', Date.now() + SCREEN_SWEEP_EVERY_MS)
       await this.rearm()
     }
+    await this.tidySpill(Date.now())
+  }
+
+  /** Spill files older than 30 days go (ao-ry61); the Workspace is listed at most once a day for it. */
+  protected async tidySpill(now: number): Promise<void> {
+    const due = this.store.get<number>('spill-sweep-next')
+    if (due !== undefined && due > now) return
+    await sweepSpill(this.env.FILES, this.store.requireConfig().id, now)
+    this.store.set('spill-sweep-next', now + SPILL_SWEEP_EVERY_MS)
   }
 
   /** Mr. Robot's reach: every login and skill its owner can grant (rb-b0rs). */
@@ -2341,7 +2353,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         : /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path) ? 'daily'
           : path.startsWith('skills/') ? 'skills'
             : path.startsWith('screens/') ? 'screens'
-              : 'other'
+              : path.startsWith('spill/') ? 'spill'
+                : 'other'
     return entries
       .map((entry) => ({ path: entry.path, size: entry.size, updatedAt: entry.uploaded, group: group(entry.path) }))
       .sort((a, b) => order(a.path) - order(b.path) || (a.group === 'daily' && b.group === 'daily' ? b.path.localeCompare(a.path) : a.path.localeCompare(b.path)))
