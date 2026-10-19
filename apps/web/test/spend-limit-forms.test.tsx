@@ -30,7 +30,7 @@ describe('Home spend limits in Admin (ux-dbx4, ux-en86)', () => {
       { ...summary, id: 'r-3', identity: { ...identity, name: 'Free' }, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'none' }, from: 'robot' }) },
     ],
     robotsToMigrate: 0, members: [], skills: [], skillRepository: null, providers: [],
-    settings: { defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'usd', amount: 20 }, memberSpendLimit: { kind: 'none' }, models: [] },
+    settings: { defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'usd', amount: 20 }, memberSpendLimit: { kind: 'none' }, defaultReviewer: null, models: [] },
   }
   const patches: unknown[] = []
   const openAdmin = async () => {
@@ -68,7 +68,7 @@ describe('Home spend limits in Admin (ux-dbx4, ux-en86)', () => {
     expect(screen.queryByLabelText('Spend limit per Robot, USD per month')).toBeNull()
     save()
     await waitFor(() => expect(patches).toHaveLength(1))
-    expect(patches[0]).toMatchObject({ robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'usd', amount: 75 } })
+    expect(patches[0]).toMatchObject({ robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'usd', amount: 75 }, defaultReviewer: null })
   })
 
   it('does not send an amount below 1 or with cents, and says what it must be', async () => {
@@ -97,7 +97,7 @@ describe("a Robot's spend limit in Advanced settings (ux-q8ve, ux-en86)", () => 
     settings: {
       identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
       codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
-      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000,
+      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null,
     },
     tasks: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }), canEdit: true, takeover: null,
   }

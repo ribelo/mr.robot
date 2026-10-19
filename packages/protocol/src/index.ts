@@ -436,6 +436,12 @@ export const RobotSettings = Schema.Struct({
   idleCompaction: Schema.Boolean,
   /** A context below this many tokens is not compacted while idle (ao-z22f). */
   idleCompactionFloorTokens: Schema.Number,
+  /** A reviewer model checks each call of an item at allow before it runs (ao-c8k9); off by default. */
+  autoReview: Schema.Boolean,
+  /** The reviewer's route; null follows the Home default (ao-6m9i). */
+  reviewer: Schema.NullOr(ModelChoice),
+  /** What the Home default is now; null: the Robot's own model. */
+  homeReviewer: Schema.NullOr(ModelChoice),
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -466,6 +472,8 @@ export const DeputySettingsPatch = Schema.Struct({
   cacheWarming: Schema.optional(Schema.Boolean),
   idleCompaction: Schema.optional(Schema.Boolean),
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
+  autoReview: Schema.optional(Schema.Boolean),
+  reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
 })
 export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
 
@@ -488,6 +496,8 @@ export const SettingsPatch = Schema.Struct({
   cacheWarming: Schema.optional(Schema.Boolean),
   idleCompaction: Schema.optional(Schema.Boolean),
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
+  autoReview: Schema.optional(Schema.Boolean),
+  reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 
@@ -1202,6 +1212,8 @@ export const HomeSettingsPatch = Schema.Struct({
   defaultBrowserBackend: Schema.optional(BrowserBackend),
   robotSpendLimit: Schema.optional(HomeSpendLimit),
   memberSpendLimit: Schema.optional(HomeSpendLimit),
+  /** The Auto review route of every Robot that has none of its own; null: each Robot's own model (ao-6m9i). */
+  defaultReviewer: Schema.optional(Schema.NullOr(ModelChoice)),
   models: Schema.optional(Schema.Array(Schema.Struct({
     provider: Schema.String,
     model: Schema.String,
@@ -1266,6 +1278,8 @@ export const HomeSettingsView = Schema.Struct({
   robotSpendLimit: HomeSpendLimit,
   /** The limit of all Robots of one Member together. */
   memberSpendLimit: HomeSpendLimit,
+  /** The Auto review route of Robots without their own; null: each Robot's own model (ao-6m9i). */
+  defaultReviewer: Schema.NullOr(ModelChoice),
   models: Schema.Array(ModelOption),
 })
 export type HomeSettingsView = typeof HomeSettingsView.Type

@@ -10,7 +10,7 @@ import { readStoredEvents } from '../agent/session-log.ts'
 import { HOME_ID } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { invalid, notFound } from '../platform/durable.ts'
-import { homeSpendLimit, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
+import { homeDefaults, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
 import { projectChat } from './projection.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, Wakeup } from './store.ts'
@@ -280,13 +280,13 @@ interface TakeoverRow { readonly reason: string; readonly claimedBy: string | nu
 export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly TaskView[]) => Effect.gen(function* () {
   const store = yield* RobotState
   const takeover = store.get<TakeoverRow>('takeover')
-  const home = yield* homeSpendLimit
+  const home = yield* homeDefaults
   return {
     summary,
     settings: yield* settingsWith(home),
     tasks,
     screen: yield* screen,
-    usage: yield* usage(home),
+    usage: yield* usage(home.robotSpendLimit),
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
     ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),

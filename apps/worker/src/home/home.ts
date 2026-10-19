@@ -79,6 +79,8 @@ export interface HomeSettings {
   readonly robotSpendLimit: HomeSpendLimit
   /** The limit of all Robots of one Member together. */
   readonly memberSpendLimit: HomeSpendLimit
+  /** The Auto review route of Robots without their own; null: each Robot's own model (ao-6m9i). */
+  readonly defaultReviewer: ModelChoice | null
 }
 
 export interface RegistryEntry {
@@ -291,6 +293,7 @@ const settings = Effect.gen(function* () {
     defaultBrowserBackend: (yield* setting<BrowserBackend>('defaultBrowserBackend')) ?? 'browser-run',
     robotSpendLimit: yield* spendLimitSetting('robotSpendLimit'),
     memberSpendLimit: yield* spendLimitSetting('memberSpendLimit'),
+    defaultReviewer: (yield* setting<ModelChoice | null>('defaultReviewer')) ?? null,
   } as HomeSettings
 })
 

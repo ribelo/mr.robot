@@ -215,6 +215,44 @@ function RecordImage({ source, loadImage }: { source: MessageImageSource; loadIm
   return <a href={url} target="_blank" rel="noreferrer"><img className="dsh-record-image" src={url} alt={'attachment' in source ? (source.attachment.name ?? 'image') : 'image'} /></a>
 }
 
+/** One Auto review decision the session recorded for a call (v1.14, ao-jn6z). */
+export interface ReviewRow {
+  readonly seq: number
+  readonly name: string
+  readonly decision: 'allow' | 'deny' | 'failed'
+  readonly risk?: string
+  readonly reason?: string
+  readonly reviewer: string
+}
+
+/** The Auto review records among the session's events, in log order. */
+export function reviewsOf(events: SessionEventsPage['events']): ReviewRow[] {
+  return events.flatMap((event) => {
+    if (event.type !== 'plugin:mr-robot/review') return []
+    const data = (event as unknown as { data: Record<string, unknown> }).data
+    return [{
+      seq: event.seq, name: String(data['name'] ?? ''), decision: data['decision'] as ReviewRow['decision'], reviewer: String(data['reviewer'] ?? ''),
+      ...(typeof data['risk'] === 'string' ? { risk: data['risk'] } : {}), ...(typeof data['reason'] === 'string' ? { reason: data['reason'] } : {}),
+    }]
+  })
+}
+
+/** The calls Auto review checked, with the decision: allowed, denied into an Ask, or a failed review. */
+export function ReviewList({ reviews }: { reviews: readonly ReviewRow[] }) {
+  if (reviews.length === 0) return null
+  const word = (row: ReviewRow) => (row.decision === 'allow' ? 'allowed' : row.decision === 'deny' ? 'denied, asked the owner' : 'review failed, did not run')
+  return (
+    <details className="dsh-reviews">
+      <summary>Auto review · {reviews.length} {reviews.length === 1 ? 'call' : 'calls'}</summary>
+      <ul aria-label="Reviewed calls">
+        {reviews.map((row) => (
+          <li key={row.seq}><code>{row.name}</code> · {row.risk === undefined ? '' : `${row.risk} risk · `}{word(row)}{row.reason === undefined ? '' : `: ${row.reason}`} <span className="muted">({row.reviewer})</span></li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liveVersion: number }) {
   const state = useAtomValue(trajectoryStateAtom(robotId))
   const load = useAtomSet(loadEventsAtom, { mode: 'promiseExit' })
@@ -239,6 +277,7 @@ export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liv
   if (state.failure !== null && paging.openState === 'loading') return <ErrorState title="The trajectory cannot be loaded" message={state.failure} onRetry={() => void load({ robotId, kind: 'open' })} />
   return (
     <div className="dsh-trajectory">
+      <ReviewList reviews={reviewsOf(windowOf(robotId).events)} />
       <TrajectoryView
         useSession={useSession}
         useTrajectory={useTrajectory}

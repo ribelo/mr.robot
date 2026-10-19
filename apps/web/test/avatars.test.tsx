@@ -27,7 +27,7 @@ const panel: RobotPanel = {
     chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' },
-    discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000,
+    discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null,
   },
   tasks: [], screen: null, usage, canEdit: true, takeover: null,
 }
@@ -85,7 +85,7 @@ describe('Robot avatars (ux-0zm6, ux-n1mw)', () => {
       robotsToMigrate: 0,
       members: [{ id: 'm-1', email: 'a@example.com', name: 'Anna Nowak', role: 'admin', status: 'active', avatar: me.avatar, usage }, { id: 'm-2', email: 'b@example.com', name: 'Ben', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#3b82f6' }, usage }],
       skills: [], skillRepository: null, providers: [],
-      settings: { defaultModel: panel.settings.model, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'none' }, models: [] },
+      settings: { defaultModel: panel.settings.model, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'none' }, defaultReviewer: null, models: [] },
     }
     stubApi((path) => (path === '/api/admin' ? view : path === '/api/home-memory' ? { content: '' } : undefined))
     const { container } = render(<RegistryProvider><Admin /></RegistryProvider>)

@@ -327,14 +327,21 @@ export const createRobot = (brief: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ settings and Grants (robot-vqtw)
 
-/** What "the Home's" spend limit is for this Robot now: the Home's per-Robot limit. */
-export const homeSpendLimit = Effect.gen(function* () {
+/** What "the Home's" is for this Robot now: the Home's per-Robot limit and its default reviewer. */
+export interface HomeDefaults {
+  readonly robotSpendLimit: HomeSpendLimit
+  readonly defaultReviewer: ModelChoice | null
+}
+
+export const homeDefaults = Effect.gen(function* () {
   const platform = yield* RobotPlatform
-  return (yield* promise(() => platform.env.HOME.getByName(HOME_ID).settings())).robotSpendLimit
+  const settings = yield* promise(() => platform.env.HOME.getByName(HOME_ID).settings())
+  return { robotSpendLimit: settings.robotSpendLimit, defaultReviewer: settings.defaultReviewer } as HomeDefaults
 })
 
-/** The settings, with the Home's per-Robot limit already read. */
-export const settingsWith = (home: HomeSpendLimit) => Effect.gen(function* () {
+/** The settings, with the Home's defaults already read. */
+export const settingsWith = (defaults: HomeDefaults) => Effect.gen(function* () {
+  const home = defaults.robotSpendLimit
   const store = yield* RobotState
   const current = yield* config
   return {
@@ -356,10 +363,13 @@ export const settingsWith = (home: HomeSpendLimit) => Effect.gen(function* () {
     spendLimit: current.spendLimit,
     homeSpendLimit: home,
     ...idleSettings(current),
+    autoReview: current.autoReview === true,
+    reviewer: current.reviewer ?? null,
+    homeReviewer: defaults.defaultReviewer,
   } as RobotSettings
 })
 
-export const settings = Effect.flatMap(homeSpendLimit, settingsWith)
+export const settings = Effect.flatMap(homeDefaults, settingsWith)
 
 /** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
 export const setRecipients = (robotIds: readonly string[]) => Effect.gen(function* () {
@@ -431,6 +441,8 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(idleBefore.cacheWarming !== idleAfter.cacheWarming, `switched cache warming ${idleAfter.cacheWarming ? 'on' : 'off'}.`)
   note(idleBefore.idleCompaction !== idleAfter.idleCompaction, `switched idle compaction ${idleAfter.idleCompaction ? 'on' : 'off'}.`)
   note(idleBefore.idleCompactionFloorTokens !== idleAfter.idleCompactionFloorTokens, `changed the idle compaction floor to ${idleAfter.idleCompactionFloorTokens} tokens.`)
+  note((before.autoReview === true) !== (after.autoReview === true), `switched Auto review ${after.autoReview === true ? 'on' : 'off'}.`)
+  note(JSON.stringify(before.reviewer ?? null) !== JSON.stringify(after.reviewer ?? null), after.reviewer == null ? 'set the reviewer to the Home default.' : `set the reviewer to ${after.reviewer.model} (${after.reviewer.provider}), thinking ${after.reviewer.effort}.`)
   return notes
 }
 
@@ -467,6 +479,8 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
       ...(patch.cacheWarming === undefined ? {} : { cacheWarming: patch.cacheWarming }),
       ...(patch.idleCompaction === undefined ? {} : { idleCompaction: patch.idleCompaction }),
       ...(patch.idleCompactionFloorTokens === undefined ? {} : { idleCompactionFloorTokens: Math.max(0, Math.round(patch.idleCompactionFloorTokens)) }),
+      ...(patch.autoReview === undefined ? {} : { autoReview: patch.autoReview }),
+      ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))
   })

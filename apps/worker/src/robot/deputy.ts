@@ -238,6 +238,8 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
     ...(patch.cacheWarming === undefined ? {} : { cacheWarming: patch.cacheWarming }),
     ...(patch.idleCompaction === undefined ? {} : { idleCompaction: patch.idleCompaction }),
     ...(patch.idleCompactionFloorTokens === undefined ? {} : { idleCompactionFloorTokens: patch.idleCompactionFloorTokens }),
+    ...(patch.autoReview === undefined ? {} : { autoReview: patch.autoReview }),
+    ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.notifications === undefined ? {} : { notifications: {
       enabled: patch.notifications.enabled ?? shown.notifications.enabled,
       members: shown.notifications.members,

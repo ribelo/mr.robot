@@ -64,6 +64,9 @@ export interface RobotConfig {
   readonly cacheWarming?: boolean
   readonly idleCompaction?: boolean
   readonly idleCompactionFloorTokens?: number
+  /** Auto review (v1.14 ticket 08): off when absent; the reviewer route, or null for the Home default. */
+  readonly autoReview?: boolean
+  readonly reviewer?: ModelChoice | null
   readonly notifications: NotificationSettings
   /** The Robot's own monthly spend limit, or the Home's (ux-q8ve). */
   readonly spendLimit: RobotSpendLimit

@@ -4,11 +4,13 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Robot settings autoReview: boolean and reviewer: { provider, model, effort } | null; Home default; advanced settings and deputy tool edit them (ao-c8k9, ao-6m9i)
-- [ ] Workerd test with a scripted reviewer: allow runs the call; deny creates a tool-call Ask with the reason; an approved Ask runs it; malformed reviewer output fails the call; an ask-level item is not reviewed (ao-wkpt, ao-gf33)
+- [x] Robot settings autoReview: boolean and reviewer: { provider, model, effort } | null; Home default; advanced settings and deputy tool edit them (ao-c8k9, ao-6m9i)
+- [x] Workerd test with a scripted reviewer: allow runs the call; deny creates a tool-call Ask with the reason; an approved Ask runs it; malformed reviewer output fails the call; an ask-level item is not reviewed (ao-wkpt, ao-gf33)
 - [ ] Workerd test: with ticket 06 present, a child's call is reviewed with the parent's setting (ao-6boj)
-- [ ] Workerd test: reviewer usage on the Robot's rows with source review (ao-hfni)
-- [ ] Tool events carry a review field; the Trajectory renders the decision (ao-jn6z)
-- [ ] Component test: the switch and route controls in advanced settings (ao-c8k9)
+- [x] Workerd test: reviewer usage on the Robot's rows with source review (ao-hfni)
+- [x] Tool events carry a review field; the Trajectory renders the decision (ao-jn6z)
+- [x] Component test: the switch and route controls in advanced settings (ao-c8k9)
+
+**Closing note:** The review runs in Mr. Robot's ask gate (apps/worker/src/agent/ask-gate.ts), which wraps every gated tool while Auto review is on; prompt, parse and history are in apps/worker/src/agent/auto-review.ts, copied from DSH's experimental package. The history gives the owner's messages (and the owner's Channel messages) the role human-instruction, Mr. Robot's messages to his staff and a Subagent's first prompt the role direct-parent-instruction. The route is the Robot's reviewer, else the Home default, else the Robot's own model. Each decision is a session record `plugin:mr-robot/review` (call id, tool, risk, decision, reason, reviewer); the Trajectory lists the reviewed calls above the log. An approved Ask is not reviewed again. The child-review box (ao-6boj) is ticked by ticket 06.

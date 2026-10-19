@@ -160,7 +160,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
     }),
     tool<{ robot_id: string } & Record<string, unknown>>({
       name: 'robot_settings_set',
-      description: "Change another Robot's settings. Allowed: chain (its ordered model chain: entries {account, owner, provider, model, effort}; account ids and owners from robot_settings or your owner's Providers; the Robot moves to the next entry only when an account hits a limit or breaks), model {provider, model} (changes the active chain entry), thinking (off, low, medium, high, xhigh, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Home default), notifications {enabled, channels}, wakeOnScreenNotifications, cacheWarming, idleCompaction, idleCompactionFloorTokens. Grants, spendLimit and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
+      description: "Change another Robot's settings. Allowed: chain (its ordered model chain: entries {account, owner, provider, model, effort}; account ids and owners from robot_settings or your owner's Providers; the Robot moves to the next entry only when an account hits a limit or breaks), model {provider, model} (changes the active chain entry), thinking (off, low, medium, high, xhigh, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Home default), notifications {enabled, channels}, wakeOnScreenNotifications, cacheWarming, idleCompaction, idleCompactionFloorTokens, autoReview, reviewer {provider, model, effort} (null: the Home default). Grants, spendLimit and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
       parameters: {
         properties: {
           robot_id: robotId,
@@ -178,6 +178,8 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
           cacheWarming: { type: 'boolean', description: "Refresh the model's prompt cache while the Robot is idle, so the next message is cheap" },
           idleCompaction: { type: 'boolean', description: 'Compact once while idle, shortly before the prompt cache expires' },
           idleCompactionFloorTokens: { type: 'integer', description: 'A context below this many tokens is not compacted while idle' },
+          autoReview: { type: 'boolean', description: 'A reviewer model checks each allowed tool call before it runs; a denied call becomes an Ask to your owner' },
+          reviewer: { oneOf: [{ type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'xhigh', 'max'] } }, required: ['provider', 'model', 'effort'] }, { type: 'null' }], description: "The reviewer's model; null: the Home default" },
         },
         required: ['robot_id'],
       },

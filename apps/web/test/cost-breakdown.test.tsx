@@ -17,7 +17,7 @@ const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', s
 const usage = { month: '2026-10', inputTokens: 1000, outputTokens: 100, costUsd: 1.99, breakdown, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } } as const
 const panel = {
   summary,
-  settings: { identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [], contextBudget: 128000, codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants, notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000 },
+  settings: { identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [], contextBudget: 128000, codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants, notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null },
   tasks: [], screen: null, usage, canEdit: true, takeover: null,
 } as unknown as RobotPanel
 const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeHome: false, drawer: false }, acceptTasksFrom: [] } as unknown as Me
@@ -52,7 +52,7 @@ describe('cost by source in the PWA (ao-zbld, ao-ef5t, ao-ypas)', () => {
       robotsToMigrate: 0,
       members: [{ id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, usage: { ...usage, limit: { limit: { kind: 'none' }, from: 'home' } } }],
       skills: [], skillRepository: null, providers: [],
-      settings: { defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'off' }, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'none' }, models: [] },
+      settings: { defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'off' }, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'none' }, defaultReviewer: null, models: [] },
     } as unknown as AdminView
     vi.stubGlobal('fetch', vi.fn(async (input: string | Request) => {
       const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname

@@ -13,6 +13,7 @@ import { ModelSelect } from './ModelSelect.tsx'
 import { parseHomeSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import { Avatar, MemberFace } from './Avatar.tsx'
 import { costSummary } from './CostBreakdown.tsx'
+import { ReviewerSetting } from './ReviewerSetting.tsx'
 
 const usd = (value: number) => `$${value.toFixed(2)}`
 const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value)
@@ -174,6 +175,7 @@ function HomeSettings({ view }: { view: AdminView }) {
   const robotSpendLimit = parseHomeSpendLimit(robotLimit)
   const memberSpendLimit = parseHomeSpendLimit(memberLimit)
   const [backend, setBackend] = useState(view.settings.defaultBrowserBackend ?? 'browser-run')
+  const [reviewer, setReviewer] = useState<ModelChoice | null>(view.settings.defaultReviewer)
   const [moved, setMoved] = useState<string>()
   const [error, setError] = useState<string>()
   const labelOf = (choice: ModelChoice) => view.settings.models.find((option) => option.provider === choice.provider && option.model === choice.model)?.label ?? choice.model
@@ -186,6 +188,7 @@ function HomeSettings({ view }: { view: AdminView }) {
       defaultBrowserBackend: backend,
       robotSpendLimit: robotSpendLimit.value,
       memberSpendLimit: memberSpendLimit.value,
+      defaultReviewer: reviewer,
     }), [keys.admin, keys.robots, keys.hosts, keys.providers])
     setError(exitFailure(exit))
     if (Exit.isSuccess(exit)) {
@@ -217,6 +220,8 @@ function HomeSettings({ view }: { view: AdminView }) {
         </select>
         <small className="muted">{(view.browserBackends ?? []).find((option) => option.id === backend)?.note ?? ''}</small>
       </label>
+      <ReviewerSetting value={reviewer} models={view.settings.models} fallback="Each Robot's own model" onChange={setReviewer} />
+      <small className="muted">The Auto review model of every Robot that has none of its own.</small>
       <div className="form inline spend-limits">
         <SpendLimitChoice label="Spend limit per Robot" kinds={['none', 'usd']} draft={robotLimit} valid={Option.isSome(robotSpendLimit)} note="Each Robot that follows the Home's limit, per month." onChange={setRobotLimit} />
         <SpendLimitChoice label="Spend limit per Member" kinds={['none', 'usd']} draft={memberLimit} valid={Option.isSome(memberSpendLimit)} note="All Robots of one Member together, per month." onChange={setMemberLimit} />

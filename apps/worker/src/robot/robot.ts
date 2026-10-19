@@ -13,7 +13,11 @@ import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCRE
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
-import { LlmError, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, LlmError, ReasoningEffortId, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { appendPluginRecord } from '@deepseek-ai/dsh-session'
+import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
+import { readDecision, REVIEW_POLICY, reviewHistory, reviewUserText } from '../agent/auto-review.ts'
+import { WORKSPACE_ROOT } from '../workspace/r2-filesystem.ts'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
 import { IDLE_MEMORY_NOTE, IDLE_MEMORY_STEPS, idlePlan, idleSettings, type IdleStep } from './idle.ts'
@@ -52,7 +56,7 @@ import type {
 } from '@mr-robot/protocol'
 import { isToolGroup } from '../agent/catalog.ts'
 import { composeScoped, type Composition } from '../agent/compose.ts'
-import { askGate, bothItems, fixedItems, NO_ITEMS, type AskGateHost, type GrantItem, type ItemsOf, type ToolCallRequest, type ToolItems } from '../agent/ask-gate.ts'
+import { askGate, bothItems, fixedItems, NO_ITEMS, type AskGateHost, type GrantItem, type ItemsOf, type ReviewOutcome, type ToolCallRequest, type ToolItems } from '../agent/ask-gate.ts'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
@@ -68,7 +72,7 @@ import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, UserMessage } from '@deepseek-ai/dsh-llm'
-import { joinable } from './delivery.ts'
+import { joinable, mrRobotIdOf } from './delivery.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
@@ -693,6 +697,49 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       level: (item) => this.store.levelOf(item.kind, item.name),
       askToolCall: (request) => this.askToolCall(request),
       approved: (callId) => this.approvedCalls.has(callId),
+      reviewing: () => this.store.requireConfig().autoReview === true,
+      review: (call) => this.reviewCall(call),
+    }
+  }
+
+  /**
+   * Auto review of one call (v1.14 ticket 08, ao-wkpt): the reviewer route of the Robot, else the Home's, else
+   * the Robot's own model. The session gets a record of the decision for the Trajectory (ao-jn6z); the
+   * reviewer's tokens are the Robot's review cost (ao-hfni). A failed review rejects, so the call does not run.
+   */
+  private async reviewCall(call: { readonly definition: ToolDefinition; readonly arguments: Readonly<Record<string, unknown>>; readonly exec: ToolRunContext }): Promise<ReviewOutcome> {
+    const config = this.store.requireConfig()
+    const route = config.reviewer ?? (await this.home().settings()).defaultReviewer ?? config.model
+    const session = call.exec.agent?.session
+    const record = (data: Record<string, unknown>) => {
+      if (session !== undefined) appendPluginRecord(session, REVIEW_RECORD as never, { callId: String(call.exec.callId), name: call.definition.name, reviewer: `${route.provider}/${route.model}`, ...data } as never)
+    }
+    try {
+      const chosen = (await this.home().modelList()).find((option) => option.provider === route.provider && option.model === route.model)
+      const adapter = this.adapter(route.provider, chosen?.contextWindow, route.model, chosen?.wire)
+      const history = reviewHistory(session?.snapshotEvents() ?? [], { ownerId: config.ownerId, chiefId: mrRobotIdOf(config.ownerId), child: (session?.header as { origin?: string } | undefined)?.origin === 'subagent' })
+      const text = reviewUserText({
+        cwd: WORKSPACE_ROOT,
+        history,
+        action: { mode: call.exec.parent === undefined ? 'native' : 'ptc-inner', name: call.definition.name, description: call.definition.description, parameters: call.definition.parameters, arguments: call.arguments },
+      })
+      const { decision, usage } = await readDecision(adapter.stream({
+        provider: route.provider,
+        model: route.model,
+        system: REVIEW_POLICY,
+        messages: [createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'platform', summary: 'Auto review', form: 'notice' } })],
+        temperature: 0,
+        ...(route.effort === 'off' ? {} : { reasoningEffort: ReasoningEffortId(route.effort) }),
+        signal: call.exec.signal,
+      }))
+      const price = chosen?.price
+      const cost = price === undefined ? 0 : ((usage.inputTokens - usage.cacheReadTokens) * price.input + usage.cacheReadTokens * (price.cachedInput ?? price.input) + usage.outputTokens * price.output) / 1_000_000
+      await this.recordUsage('review', usage.inputTokens, usage.outputTokens, cost)
+      record({ risk: decision.risk, decision: decision.decision, ...(decision.decision === 'deny' && decision.reason !== undefined ? { reason: decision.reason } : {}) })
+      return decision.decision === 'allow' ? { decision: 'allow' } : { decision: 'deny', reason: decision.reason ?? `${decision.risk} risk` }
+    } catch (error) {
+      record({ decision: 'failed', reason: error instanceof Error ? error.message : String(error) })
+      throw error
     }
   }
 
@@ -2997,6 +3044,8 @@ const DONE_LINE = 'task-done-line'
 
 /** The kv key of who interrupted the running Turn, until the Turn has ended. */
 const INTERRUPTED_BY = 'interrupted-by'
+/** The session record of an Auto review decision (ao-jn6z): the Trajectory shows it on the reviewed call. */
+export const REVIEW_RECORD = 'plugin:mr-robot/review'
 /** The last request of the Robot's session, kept for cache warming while idle (ao-jlr0). */
 const WARM_REQUEST = 'warm-request'
 /** A warming more than this late is skipped: the cache it would refresh is gone. */

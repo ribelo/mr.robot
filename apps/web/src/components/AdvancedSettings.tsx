@@ -4,6 +4,7 @@ import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS } from './da
 import { useState, useEffect } from 'react'
 import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
+import { ReviewerSetting } from './ReviewerSetting.tsx'
 import { SaveButton, type SaveOutcome } from './SaveButton.tsx'
 import { parseRobotSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import * as Option from 'effect/Option'
@@ -60,6 +61,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       cacheWarming: draft.cacheWarming,
       idleCompaction: draft.idleCompaction,
       idleCompactionFloorTokens: draft.idleCompactionFloorTokens,
+      autoReview: draft.autoReview,
+      reviewer: draft.reviewer,
       grants: draft.grants,
       sharing: draft.sharing,
       notifications: draft.notifications,
@@ -100,6 +103,13 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       <label>Compact only above (tokens)
         <input type="number" min={0} step={1000} value={draft.idleCompactionFloorTokens} onChange={(event) => setDraft({ ...draft, idleCompactionFloorTokens: Math.max(0, Number(event.target.value)) })} />
       </label>
+
+      <h2>Auto review</h2>
+      <label className="check"><input type="checkbox" checked={draft.autoReview} onChange={(event) => setDraft({ ...draft, autoReview: event.target.checked })} />
+        <span>Auto review<small>Before each call of an item at allow, a reviewer model checks it. A call it denies becomes an Ask to you, with its reason. Items at ask keep asking you.</small></span>
+      </label>
+      <ReviewerSetting value={draft.reviewer} models={catalog.models} onChange={(reviewer) => setDraft({ ...draft, reviewer })}
+        fallback={`Home default (${settings.homeReviewer === null ? "this Robot's own model" : (catalog.models.find((option) => option.provider === settings.homeReviewer!.provider && option.model === settings.homeReviewer!.model)?.label ?? settings.homeReviewer.model)})`} />
 
       <h2>Tools</h2>
       <div className="muted">Platform tools: one item per tool group. Allow: the Robot uses it freely. Ask: each use waits for your answer. Deny: the Robot does not have it.{mrRobot ? ' Mr. Robot holds everything you can reach at allow unless you lower it here.' : ''}</div>

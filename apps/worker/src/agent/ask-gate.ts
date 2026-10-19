@@ -63,14 +63,21 @@ export interface ToolCallRequest {
   readonly items: readonly GrantItem[]
 }
 
+/** What the reviewer decided about one call (Auto review, v1.14 ticket 08). */
+export type ReviewOutcome = { readonly decision: 'allow' } | { readonly decision: 'deny'; readonly reason: string }
+
 /** What the gate asks of the Robot. */
 export interface AskGateHost {
   /** The level of an item now (read at each call: a level changed mid-Turn applies at once). */
   level(item: GrantItem): GrantLevel
   /** Store the Ask; its id is what the Robot is told and what the owner's answer names. */
-  askToolCall(request: ToolCallRequest): { readonly askId: string }
+  askToolCall(request: ToolCallRequest, exec: ToolRunContext): { readonly askId: string }
   /** The platform runs this call because the owner approved it: it passes the gate once. */
   approved(callId: string): boolean
+  /** Auto review is on: every call of an item at allow is reviewed before it runs (ao-wkpt). */
+  reviewing?(): boolean
+  /** Review one call; rejects when the review failed, and the call then does not run (ao-gf33). */
+  review?(call: { readonly definition: ToolDefinition; readonly arguments: CallArgs; readonly exec: ToolRunContext }): Promise<ReviewOutcome>
 }
 
 export const WAITING_STATUS = 'waiting for your owner'
@@ -125,8 +132,11 @@ function argsOf(value: unknown): Record<string, unknown> {
  * and stores an Ask instead of running the tool when the call uses an item at ask.
  */
 export function gateTool(definition: ToolDefinition, items: ToolItems, host: AskGateHost): ToolDefinition {
-  if (!items.possible.some((item) => host.level(item) === 'ask')) return definition
-  const own = ownsReason(definition)
+  const asks = items.possible.some((item) => host.level(item) === 'ask')
+  const reviewed = host.reviewing?.() === true && host.review !== undefined
+  if (!asks && !reviewed) return definition
+  // Only a tool that may ask its owner takes the reason the owner reads; a reviewed call is explained by the reviewer.
+  const own = ownsReason(definition) || !asks
   const inner = (args: unknown): Record<string, unknown> => {
     if (own) return argsOf(args)
     const { [REASON_PARAMETER]: _reason, ...rest } = argsOf(args)
@@ -152,11 +162,22 @@ export function gateTool(definition: ToolDefinition, items: ToolItems, host: Ask
     execute: async (args: unknown, exec: ToolRunContext) => {
       const given = inner(args)
       if (host.approved(String(exec.callId))) return definition.execute(given, exec)
-      const asking = (await items.used(given)).filter((item) => host.level(item) === 'ask')
-      if (asking.length === 0) return definition.execute(given, exec)
+      const used = await items.used(given)
+      const asking = used.filter((item) => host.level(item) === 'ask')
+      if (asking.length === 0) {
+        // Items at ask keep asking; a call at allow is reviewed first when Auto review is on (ao-wkpt).
+        if (!reviewed) return definition.execute(given, exec)
+        const outcome = await host.review!({ definition, arguments: given, exec }).catch((error: unknown) => {
+          throw new Error(`Auto review of ${definition.name} failed, so the call did not run: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        if (outcome.decision === 'allow') return definition.execute(given, exec)
+        // A denial is never final: the owner decides, with the reviewer's reason (ao-gf33).
+        const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: `Auto review denied this call: ${outcome.reason}`, items: used }, exec)
+        return waitingResult(askId, definition.name)
+      }
       const reason = argsOf(args)[REASON_PARAMETER]
       if (typeof reason !== 'string' || reason.trim() === '') throw new Error(`${definition.name}: parameter "${REASON_PARAMETER}" is required: your owner approves each call of this tool and reads why you need it.`)
-      const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: reason.trim(), items: asking })
+      const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: reason.trim(), items: asking }, exec)
       return waitingResult(askId, definition.name)
     },
   } as ToolDefinition

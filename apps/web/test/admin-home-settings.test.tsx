@@ -18,7 +18,7 @@ const settings = {
   workersAiEnabled: true,
   defaultBrowserBackend: 'browser-run',
   robotSpendLimit: { kind: 'none' },
-  memberSpendLimit: { kind: 'none' },
+  memberSpendLimit: { kind: 'none' }, defaultReviewer: null,
   models: [kimi, sonnet, glm],
 } as const
 const view: AdminView = { fleet: [], robotsToMigrate: 0, members: [], skills: [], skillRepository: null, providers: [], settings }
