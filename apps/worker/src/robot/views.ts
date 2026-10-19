@@ -271,7 +271,7 @@ const usage = (home: HomeSpendLimit) => Effect.gen(function* () {
   const month = currentMonth()
   const browser = store.browserUsage(month).map((row) => ({ backend: row.backend, minutes: Math.round(row.ms / 6_000) / 10, costUsd: row.costUsd }))
   const services = store.serviceUsage(month)
-  return { month, ...store.usage(month), limit: effectiveSpendLimit((yield* config).spendLimit, home), ...(browser.length === 0 ? {} : { browser }), ...(services.length === 0 ? {} : { services }) } as UsageView
+  return { month, ...store.usage(month), breakdown: store.costBreakdown(month), limit: effectiveSpendLimit((yield* config).spendLimit, home), ...(browser.length === 0 ? {} : { browser }), ...(services.length === 0 ? {} : { services }) } as UsageView
 })
 
 interface TakeoverRow { readonly reason: string; readonly claimedBy: string | null }

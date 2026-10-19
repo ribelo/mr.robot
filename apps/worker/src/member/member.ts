@@ -17,7 +17,7 @@ import * as Layer from 'effect/Layer'
 import * as Semaphore from 'effect/Semaphore'
 import { probeAccount, type Probe } from '../providers/usage.ts'
 import type { AccountStatus, AccountUsage, ConnectorKind, GroupPatch, ListPrefPatch, MissionPrefs, NotificationKind, ProviderView, QuietHours, RobotGroup, RobotOwner, ThemeChoice, WorkDetails } from '@mr-robot/protocol'
-import { DEFAULT_MISSION_PREFS } from '@mr-robot/protocol'
+import { costBreakdown, DEFAULT_MISSION_PREFS, type CostBreakdown, type UsageSource } from '@mr-robot/protocol'
 import { sendPush, type DeviceSubscription, type PushFailed, type PushGone, type PushNotification } from '../platform/push.ts'
 import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { localDate, zonedTime } from '../robot/schedule.ts'
@@ -540,25 +540,32 @@ const logins = Effect.gen(function* () {
 
 // ------------------------------------------------------------------ usage (robot-6jqh)
 
-const addUsage = (month: string, robotId: string, inputTokens: number, outputTokens: number, costUsd: number) => Effect.gen(function* () {
+const addUsage = (month: string, robotId: string, source: UsageSource, inputTokens: number, outputTokens: number, costUsd: number) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run(
-    `INSERT INTO usage (month, robot_id, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (month, robot_id) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens,
+    `INSERT INTO usage (month, robot_id, source, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (month, robot_id, source) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens,
        output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd`,
-    month, robotId, inputTokens, outputTokens, costUsd,
+    month, robotId, source, inputTokens, outputTokens, costUsd,
   )
 })
 
+/** The Member's month across their Robots: totals, the cost by source, and each Robot's (ao-ef5t). */
 const usage = (month: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  const rows = (yield* sql.all<{ robot_id: string; input_tokens: number; output_tokens: number; cost_usd: number }>('SELECT robot_id, input_tokens, output_tokens, cost_usd FROM usage WHERE month = ?', month))
-    .map((row) => ({ robotId: row.robot_id, inputTokens: row.input_tokens, outputTokens: row.output_tokens, costUsd: row.cost_usd }))
+  const rows = (yield* sql.all<{ robot_id: string; source: UsageSource; input_tokens: number; output_tokens: number; cost_usd: number }>('SELECT robot_id, source, input_tokens, output_tokens, cost_usd FROM usage WHERE month = ?', month))
+    .map((row) => ({ robotId: row.robot_id, source: row.source, inputTokens: row.input_tokens, outputTokens: row.output_tokens, costUsd: row.cost_usd }))
+  const robots = [...new Set(rows.map((row) => row.robotId))]
+  const breakdown = costBreakdown(rows)
   return {
     inputTokens: rows.reduce((sum, row) => sum + row.inputTokens, 0),
     outputTokens: rows.reduce((sum, row) => sum + row.outputTokens, 0),
-    costUsd: rows.reduce((sum, row) => sum + row.costUsd, 0),
-    byRobot: rows,
+    costUsd: breakdown.total,
+    breakdown,
+    byRobot: robots.map((robotId) => {
+      const own = rows.filter((row) => row.robotId === robotId)
+      return { robotId, inputTokens: own.reduce((sum, row) => sum + row.inputTokens, 0), outputTokens: own.reduce((sum, row) => sum + row.outputTokens, 0), costUsd: costBreakdown(own).total, breakdown: costBreakdown(own) }
+    }),
   }
 })
 
@@ -683,7 +690,14 @@ export class Member extends DurableObject<Env> {
     if (!sql.exec<{ name: string }>('PRAGMA table_info(list_pref)').toArray().some((column) => column.name === 'group_id')) sql.exec('ALTER TABLE list_pref ADD COLUMN group_id TEXT')
     sql.exec('CREATE TABLE IF NOT EXISTS list_group (id TEXT PRIMARY KEY, name TEXT NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS secret (name TEXT PRIMARY KEY, sealed TEXT NOT NULL, updated_at INTEGER NOT NULL)')
-    sql.exec('CREATE TABLE IF NOT EXISTS usage (month TEXT NOT NULL, robot_id TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, robot_id)) WITHOUT ROWID')
+    sql.exec('CREATE TABLE IF NOT EXISTS usage (month TEXT NOT NULL, robot_id TEXT NOT NULL, source TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, robot_id, source)) WITHOUT ROWID')
+    // Usage by source (v1.14, ao-ef5t): rows from before carry no source; their cost is counted as the model's.
+    if (!sql.exec<{ name: string }>('PRAGMA table_info(usage)').toArray().some((column) => column.name === 'source')) {
+      sql.exec('CREATE TABLE usage_v14 (month TEXT NOT NULL, robot_id TEXT NOT NULL, source TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, robot_id, source)) WITHOUT ROWID')
+      sql.exec("INSERT INTO usage_v14 SELECT month, robot_id, 'robot', input_tokens, output_tokens, cost_usd FROM usage")
+      sql.exec('DROP TABLE usage')
+      sql.exec('ALTER TABLE usage_v14 RENAME TO usage')
+    }
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
     sql.exec(`CREATE TABLE IF NOT EXISTS credential (
@@ -810,8 +824,8 @@ export class Member extends DurableObject<Env> {
   async sealedSecretForTest(name: string): Promise<string | undefined> {
     return this.ctx.storage.sql.exec<{ sealed: string }>('SELECT sealed FROM secret WHERE name = ?', name).toArray()[0]?.sealed
   }
-  addUsage(month: string, robotId: string, inputTokens: number, outputTokens: number, costUsd: number): Promise<void> { return this.run(addUsage(month, robotId, inputTokens, outputTokens, costUsd)) }
-  usage(month: string): Promise<{ inputTokens: number; outputTokens: number; costUsd: number; byRobot: Array<{ robotId: string; inputTokens: number; outputTokens: number; costUsd: number }> }> { return this.run(usage(month)) }
+  addUsage(month: string, robotId: string, source: UsageSource, inputTokens: number, outputTokens: number, costUsd: number): Promise<void> { return this.run(addUsage(month, robotId, source, inputTokens, outputTokens, costUsd)) }
+  usage(month: string): Promise<{ inputTokens: number; outputTokens: number; costUsd: number; breakdown: CostBreakdown; byRobot: Array<{ robotId: string; inputTokens: number; outputTokens: number; costUsd: number; breakdown: CostBreakdown }> }> { return this.run(usage(month)) }
   addPushDevice(device: DeviceSubscription & { device?: string }): Promise<void> { return this.run(addPushDevice(device)) }
   removePushDevice(endpoint: string): Promise<void> { return this.run(removePushDevice(endpoint)) }
   pushDevices(): Promise<Array<{ endpoint: string; device: string; createdAt: number }>> { return this.run(pushDevices) }

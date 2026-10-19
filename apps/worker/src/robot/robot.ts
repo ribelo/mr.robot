@@ -60,7 +60,7 @@ import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../age
 import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
-import type { ChainEntry, HomeSpendLimit, ProviderView } from '@mr-robot/protocol'
+import type { ChainEntry, HomeSpendLimit, ProviderView, UsageSource } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
@@ -988,9 +988,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (input === 0 && output === 0) return
     const price = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.price
     const cost = price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000
+    await this.recordUsage('robot', input, output, cost)
+  }
+
+  /** One cost on this Robot's and its owner's monthly counters, under its source (ao-zbld). */
+  protected async recordUsage(source: UsageSource, inputTokens: number, outputTokens: number, costUsd: number): Promise<void> {
+    const config = this.store.requireConfig()
     const month = currentMonth()
-    this.store.addUsage(month, input, output, cost)
-    await this.env.MEMBER.getByName(config.ownerId).addUsage(month, config.id, input, output, cost)
+    this.store.addUsage(month, source, inputTokens, outputTokens, costUsd)
+    await this.env.MEMBER.getByName(config.ownerId).addUsage(month, config.id, source, inputTokens, outputTokens, costUsd).catch((error: unknown) => console.warn('member usage not counted', error))
   }
 
   /** Over the Robot's or its owner's monthly limit: stop and tell the owner; under it again: resume. */
@@ -1376,12 +1382,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const now = Date.now()
     const ms = now - session.since
     if (ms > 0) {
-      const config = this.store.requireConfig()
-      const month = currentMonth()
       const cost = browserCost(session.backend, ms)
-      this.store.addBrowserUsage(month, session.backend, ms, cost)
-      this.store.addUsage(month, 0, 0, cost)
-      await this.env.MEMBER.getByName(config.ownerId).addUsage(month, config.id, 0, 0, cost).catch(() => undefined)
+      this.store.addBrowserUsage(currentMonth(), session.backend, ms, cost)
+      await this.recordUsage('browser', 0, 0, cost)
     }
     if (end) this.store.delete('browser-session')
     else this.store.set('browser-session', { ...session, since: now } satisfies BrowserSession)
@@ -2612,12 +2615,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       if (billed.includes(runId) || cost === 0) cost = 0
       else this.store.set('exa-billed-runs', [...billed.slice(-200), runId])
     }
-    const config = this.store.requireConfig()
-    const month = currentMonth()
-    this.store.addServiceUsage(month, 'exa', 1, cost)
+    this.store.addServiceUsage(currentMonth(), 'exa', 1, cost)
     if (cost > 0) {
-      this.store.addUsage(month, 0, 0, cost)
-      await this.env.MEMBER.getByName(config.ownerId).addUsage(month, config.id, 0, 0, cost).catch(() => undefined)
+      await this.recordUsage('services', 0, 0, cost)
       await this.checkLimits()
     }
   }

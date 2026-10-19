@@ -8,6 +8,7 @@ import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
+import { costBreakdown, type CostBreakdown, type UsageSource } from '@mr-robot/protocol'
 import { GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
 import type {
   GrantKind,
@@ -144,7 +145,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 13
+const SCHEMA_VERSION = 14
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -165,6 +166,18 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Usage by source (v1.14, ao-zbld): each month's model cost apart from browser and services, which were added into it.
+  14: [
+    'CREATE TABLE usage_v14 (month TEXT NOT NULL, source TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, source)) WITHOUT ROWID',
+    `INSERT INTO usage_v14 (month, source, input_tokens, output_tokens, cost_usd)
+      SELECT month, 'robot', input_tokens, output_tokens, MAX(0, cost_usd
+        - COALESCE((SELECT SUM(cost_usd) FROM browser_usage b WHERE b.month = usage.month), 0)
+        - COALESCE((SELECT SUM(cost_usd) FROM service_usage s WHERE s.month = usage.month), 0)) FROM usage`,
+    "INSERT INTO usage_v14 (month, source, input_tokens, output_tokens, cost_usd) SELECT month, 'browser', 0, 0, SUM(cost_usd) FROM browser_usage GROUP BY month",
+    "INSERT INTO usage_v14 (month, source, input_tokens, output_tokens, cost_usd) SELECT month, 'services', 0, 0, SUM(cost_usd) FROM service_usage GROUP BY month",
+    'DROP TABLE usage',
+    'ALTER TABLE usage_v14 RENAME TO usage',
+  ],
   // How a Wake-up reaches the Robot (v1.14, ao-9570): a steer reaches a running Turn, a follow-up waits for its own.
   13: [(sql) => addColumns(sql, 'wakeup', ["delivery TEXT NOT NULL DEFAULT 'followup'"])],
   // Routines are Tasks at the Home (v1.13 ticket 05): a Robot without any has no Routine tables; the Home takes the others' and drops them.
@@ -621,13 +634,18 @@ export class RobotStore {
 
   // ------------------------------------------------------------ usage (robot-6jqh)
 
-  addUsage(month: string, inputTokens: number, outputTokens: number, costUsd: number): void {
+  addUsage(month: string, source: UsageSource, inputTokens: number, outputTokens: number, costUsd: number): void {
     this.sql.exec(
-      `INSERT INTO usage (month, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?)
-       ON CONFLICT (month) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens,
+      `INSERT INTO usage (month, source, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (month, source) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens,
          output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd`,
-      month, inputTokens, outputTokens, costUsd,
+      month, source, inputTokens, outputTokens, costUsd,
     )
+  }
+
+  /** A month's cost by source (ao-zbld); its total is what the spend limit counts (ao-nkkb). */
+  costBreakdown(month: string): CostBreakdown {
+    return costBreakdown(this.sql.exec<{ source: UsageSource; cost_usd: number }>('SELECT source, cost_usd FROM usage WHERE month = ?', month).toArray().map((row) => ({ source: row.source, costUsd: row.cost_usd })))
   }
 
   addBrowserUsage(month: string, backend: string, ms: number, costUsd: number): void {
@@ -651,8 +669,8 @@ export class RobotStore {
   }
 
   usage(month: string): { inputTokens: number; outputTokens: number; costUsd: number } {
-    const row = this.sql.exec<{ input_tokens: number; output_tokens: number; cost_usd: number }>('SELECT * FROM usage WHERE month = ?', month).toArray()[0]
-    return { inputTokens: row?.input_tokens ?? 0, outputTokens: row?.output_tokens ?? 0, costUsd: row?.cost_usd ?? 0 }
+    const row = this.sql.exec<{ input_tokens: number | null; output_tokens: number | null; cost_usd: number | null }>('SELECT SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cost_usd) AS cost_usd FROM usage WHERE month = ?', month).one()
+    return { inputTokens: row.input_tokens ?? 0, outputTokens: row.output_tokens ?? 0, costUsd: row.cost_usd ?? 0 }
   }
 
   // ------------------------------------------------------------ small values

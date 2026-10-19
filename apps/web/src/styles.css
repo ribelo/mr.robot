@@ -187,6 +187,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .panel-links { display: flex; gap: 16px; margin: 22px 0 8px; }
 .muted { color: var(--faint); font-size: 13px; }
 .usage { margin-top: 10px; }
+.cost-breakdown { border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+.cost-breakdown th { text-align: left; font-weight: 400; padding: 1px 16px 1px 0; color: var(--muted, inherit); }
+.cost-breakdown td { text-align: right; font-variant-numeric: tabular-nums; }
+.cost-breakdown .cost-sub th { padding-left: 12px; }
+.cost-breakdown .cost-total th, .cost-breakdown .cost-total td { font-weight: 600; border-top: 1px solid var(--line, currentColor); padding-top: 3px; }
+.cost-robots { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; }
 
 .settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }
 .settings input, .settings textarea, .form input, .form textarea { background: var(--surface-raised); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; color: var(--text); outline: none; }

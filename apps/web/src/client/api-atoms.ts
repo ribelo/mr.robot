@@ -75,6 +75,7 @@ export const pluginsAtom = query((api) => api.plugins, [keys.plugins])
 export const connectionsAtom = query((api) => api.connections, [keys.connections])
 export const connectionNotesAtom = query((api) => api.connectionNotes, [keys.connections])
 export const homeMembersAtom = query((api) => api.homeMembers, [keys.me])
+export const memberCostsAtom = query((api) => api.memberCosts, [keys.me, keys.robots])
 /** What Mission Control shows: its filters, and how many pages of each table are loaded. */
 export interface MissionQuery {
   readonly scope: 'mine' | 'home'

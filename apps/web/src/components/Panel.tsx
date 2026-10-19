@@ -1,6 +1,7 @@
 import type { RobotPanel } from '@mr-robot/protocol'
 import { TaskList } from './TaskSheets.tsx'
 import { ThreadCard } from './ChatView.tsx'
+import { CostBreakdownView } from './CostBreakdown.tsx'
 
 export interface PanelProps {
   readonly panel: RobotPanel
@@ -74,6 +75,7 @@ export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanc
             {panel.usage.month}: {formatTokens(panel.usage.inputTokens + panel.usage.outputTokens)} tokens{(panel.usage.browser ?? []).map((row) => ` · ${row.minutes} browser min (${BACKEND_LABELS[row.backend] ?? (row.backend.startsWith('host:') ? 'host browser' : row.backend)})`).join('')}{(panel.usage.services ?? []).map((row) => ` · ${row.calls} ${row.service === 'exa' ? 'Exa' : row.service} calls`).join('')} · ${panel.usage.costUsd.toFixed(2)}
             {panel.usage.limit.limit.kind === 'usd' ? ` of $${panel.usage.limit.limit.amount.toFixed(2)}` : ''}
           </div>
+          <CostBreakdownView breakdown={panel.usage.breakdown} label={`Cost in ${panel.usage.month}`} />
       </div>
     </aside>
   )

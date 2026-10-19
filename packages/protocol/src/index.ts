@@ -1053,6 +1053,28 @@ export const ModelOption = Schema.Struct({
 })
 export type ModelOption = typeof ModelOption.Type
 
+/** Where a cost comes from (v1.14, ao-zbld): the model (the Robot, its reviewer, its Subagents), the browser, the computer, paid services. */
+export const UsageSource = Schema.Literals(['robot', 'review', 'subagent', 'browser', 'computer', 'services'])
+export type UsageSource = typeof UsageSource.Type
+
+/** A month's cost by source, in USD, with the total (ao-zbld, ao-nkkb). */
+export const CostBreakdown = Schema.Struct({
+  model: Schema.Struct({ robot: Schema.Number, review: Schema.Number, subagent: Schema.Number }),
+  browser: Schema.Number,
+  computer: Schema.Number,
+  services: Schema.Number,
+  total: Schema.Number,
+})
+export type CostBreakdown = typeof CostBreakdown.Type
+
+/** The breakdown of cost rows; a source without rows costs 0. */
+export function costBreakdown(rows: ReadonlyArray<{ readonly source: UsageSource; readonly costUsd: number }>): CostBreakdown {
+  const of = (source: UsageSource) => rows.filter((row) => row.source === source).reduce((sum, row) => sum + row.costUsd, 0)
+  const model = { robot: of('robot'), review: of('review'), subagent: of('subagent') }
+  const [browser, computer, services] = [of('browser'), of('computer'), of('services')]
+  return { model, browser, computer, services, total: model.robot + model.review + model.subagent + browser + computer + services }
+}
+
 export const UsageView = Schema.Struct({
   month: Schema.String,
   inputTokens: Schema.Number,
@@ -1064,8 +1086,20 @@ export const UsageView = Schema.Struct({
   browser: Schema.optional(Schema.Array(Schema.Struct({ backend: BrowserBackend, minutes: Schema.Number, costUsd: Schema.Number }))),
   /** Paid services this month (Exa); their cost is included in costUsd (rb-pb26). */
   services: Schema.optional(Schema.Array(Schema.Struct({ service: Schema.String, calls: Schema.Number, costUsd: Schema.Number }))),
+  /** This month's cost by source; its total is costUsd (ao-zbld). */
+  breakdown: CostBreakdown,
 })
 export type UsageView = typeof UsageView.Type
+
+/** A Member's own month across their Robots (ao-ef5t), against the Member's spend limit. */
+export const MemberCosts = Schema.Struct({
+  month: Schema.String,
+  breakdown: CostBreakdown,
+  /** The Member's spend limit: the Home's per-Member limit. */
+  limit: HomeSpendLimit,
+  byRobot: Schema.Array(Schema.Struct({ robotId: Schema.String, name: Schema.String, breakdown: CostBreakdown })),
+})
+export type MemberCosts = typeof MemberCosts.Type
 
 /** One row of the cost table: a Robot's or a Member's month. */
 export interface UsageRow extends UsageView {

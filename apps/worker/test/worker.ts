@@ -265,6 +265,16 @@ export class Robot extends ProductionRobot {
     return this.store.get<BrowserState>('browser-state') ?? null
   }
 
+  async browserOpenForTest(): Promise<boolean> {
+    return this.store.get('browser-session') !== undefined
+  }
+
+  /** The open browser session started `ms` earlier, as if the Turn had used it that long. */
+  async backdateBrowserForTest(ms: number): Promise<void> {
+    const session = this.store.get<{ since: number }>('browser-session')
+    if (session !== undefined) this.store.set('browser-session', { ...session, since: session.since - ms })
+  }
+
   async seedBrowserStateForTest(state: BrowserState): Promise<void> {
     this.store.set('browser-state', state)
   }

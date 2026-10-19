@@ -12,6 +12,7 @@ import { SaveButton } from './SaveButton.tsx'
 import { ModelSelect } from './ModelSelect.tsx'
 import { parseHomeSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import { Avatar, MemberFace } from './Avatar.tsx'
+import { costSummary } from './CostBreakdown.tsx'
 
 const usd = (value: number) => `$${value.toFixed(2)}`
 const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value)
@@ -55,7 +56,7 @@ function AdminPage({ view }: { view: AdminView }) {
               <td><span className={`state state-${robot.fleetState.split(' ')[0]}`}>{robot.fleetState}</span></td>
               <td>{robot.model.model}<div className="muted">{robot.model.effort}</div></td>
               <td className="muted">{[...grantNames(robot.grants.tools, ''), ...grantNames(robot.grants.skills, 'skill:'), ...grantNames(robot.grants.secrets, 'secret:')].join(', ') || 'none'}{Object.keys(robot.grants.recipients).length === 0 ? '' : ` · ${Object.keys(robot.grants.recipients).length} recipients`}</td>
-              <td>{usd(robot.usage.costUsd)}<div className="muted">{tokens(robot.usage.inputTokens + robot.usage.outputTokens)} tokens</div></td>
+              <td>{usd(robot.usage.breakdown.total)}<div className="muted">{costSummary(robot.usage.breakdown)}</div><div className="muted">{tokens(robot.usage.inputTokens + robot.usage.outputTokens)} tokens</div></td>
               <td>{spendLimitText(robot.usage.limit)}</td>
             </tr>
           ))}
@@ -90,7 +91,7 @@ function AdminPage({ view }: { view: AdminView }) {
             <tr key={member.id}>
               <td><span className="avatar-cell"><MemberFace memberId={member.id} name={member.name} avatar={member.avatar} size={22} /><span>{member.name}<div className="muted">{member.email}</div></span></span></td>
               <td>{member.role === 'admin' ? 'admin' : member.status}</td>
-              <td>{usd(member.usage.costUsd)}<div className="muted">{tokens(member.usage.inputTokens + member.usage.outputTokens)} tokens</div></td>
+              <td>{usd(member.usage.breakdown.total)}<div className="muted">{costSummary(member.usage.breakdown)}</div><div className="muted">{tokens(member.usage.inputTokens + member.usage.outputTokens)} tokens</div></td>
               <td>{member.role === 'admin' || member.status === 'removed' ? null : <ConfirmButton label="Remove" confirm="Remove and pause their Robots" onConfirm={() => void run((api) => api.removeMember(member.id), 'Removed.')} />}</td>
             </tr>
           ))}

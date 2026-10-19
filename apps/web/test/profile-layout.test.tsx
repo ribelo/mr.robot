@@ -33,11 +33,11 @@ const headings = () => screen.getAllByRole('heading', { level: 2 }).map((heading
 const before = (first: Element, second: Element) => (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
 
 describe('profile layout (ux-ag0j, ux-etwn, ux-bune, ux-i8ff)', () => {
-  it('reads You, Appearance, Providers, Connections, Logins, Hosts, the Member files and Reset everything last', async () => {
+  it('reads You, Costs, Appearance, Providers, Connections, Logins, Hosts, the Member files and Reset everything last', async () => {
     stubFetch()
     render(<RegistryProvider><Profile me={me as never} /></RegistryProvider>)
     await screen.findByRole('heading', { name: 'Providers' })
-    expect(headings()).toEqual(['You', 'Appearance', 'Providers', 'Connections', 'Logins', 'Hosts', 'What your Robots know about you', 'Reset everything'])
+    expect(headings()).toEqual(['You', 'Costs this month', 'Appearance', 'Providers', 'Connections', 'Logins', 'Hosts', 'What your Robots know about you', 'Reset everything'])
     // You holds the name, the nickname, the zone, quiet hours and the notifications of this device, in that order.
     const fields = [screen.getByLabelText('Name'), screen.getByLabelText('Nickname (optional)'), screen.getByLabelText('Time zone'), screen.getByLabelText('Quiet from'), screen.getByText(/This browser cannot receive push notifications/)]
     fields.slice(1).forEach((field, index) => expect(before(fields[index]!, field)).toBe(true))

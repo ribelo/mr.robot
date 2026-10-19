@@ -170,6 +170,8 @@ export const api = new Router<ApiContext>()
     const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))
     return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system', mission: { ...DEFAULT_MISSION_PREFS, ...profile.mission }, acceptTasksFrom: [...(profile.acceptTasksFrom ?? [])] }
   }))
+  // The Member's own month by source across their Robots (ao-ef5t).
+  .on('GET', '/api/me/costs', (c) => call(() => home(c.env).memberCosts(c.member.id)))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
     const { avatarColor, acceptTasksFrom, ...rest } = yield* decodeBody(c.request, MemberPreferences)
     // Only other active Members of the Home can be named (mc-a1aa).

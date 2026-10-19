@@ -8,7 +8,8 @@ import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
 import type { AccountUsage, Me, ProviderView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
 import { applyTheme } from '../theme/theme.ts'
-import { homeMembersAtom, keys, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
+import { homeMembersAtom, keys, memberCostsAtom, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
+import { CostBreakdownView, costSummary } from './CostBreakdown.tsx'
 import { AsyncResult } from 'effect/reactivity'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
@@ -32,6 +33,7 @@ export function Profile({ me }: { me: Me }) {
   return (
     <div className="form">
       <You me={me} />
+      <Costs />
       <Appearance me={me} />
       <Providers />
       <Connections />
@@ -40,6 +42,28 @@ export function Profile({ me }: { me: Me }) {
       <MemberFiles />
       <ResetEverything me={me} />
     </div>
+  )
+}
+
+/** The Member's own month by source across their Robots (ao-ef5t), with the limit and each Robot's line. */
+function Costs() {
+  return (
+    <>
+      <h2>Costs this month</h2>
+      <AtomView atom={memberCostsAtom} what="your costs" errorTitle="Your costs cannot be shown">
+        {(costs) => (
+          <>
+            <CostBreakdownView breakdown={costs.breakdown} label={`Your cost in ${costs.month}`} />
+            <div className="muted">Limit: {costs.limit.kind === 'usd' ? `$${costs.limit.amount.toFixed(2)} a month` : 'none'}</div>
+            {costs.byRobot.length === 0 ? null : (
+              <ul className="cost-robots">
+                {costs.byRobot.map((robot) => <li key={robot.robotId}>{robot.name}: ${robot.breakdown.total.toFixed(2)} <span className="muted">({costSummary(robot.breakdown)})</span></li>)}
+              </ul>
+            )}
+          </>
+        )}
+      </AtomView>
+    </>
   )
 }
 

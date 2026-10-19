@@ -4,9 +4,11 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Protocol: CostBreakdown = { model: { robot, review, subagent }, browser, computer, services, total }
-- [ ] Workerd test: model and browser usage from scripted Turns land in their sources; the Robot, Member and Admin cost endpoints return the breakdown with the right total (ao-zbld, ao-ef5t, ao-ypas)
-- [ ] Workerd test: the spend limit blocks the Robot when the sum of sources crosses it, not only model cost (ao-nkkb)
-- [ ] Component test: the Robot panel, the profile and Admin render the breakdown with a total line (ao-zbld)
+- [x] Protocol: CostBreakdown = { model: { robot, review, subagent }, browser, computer, services, total }
+- [x] Workerd test: model and browser usage from scripted Turns land in their sources; the Robot, Member and Admin cost endpoints return the breakdown with the right total (ao-zbld, ao-ef5t, ao-ypas)
+- [x] Workerd test: the spend limit blocks the Robot when the sum of sources crosses it, not only model cost (ao-nkkb)
+- [x] Component test: the Robot panel, the profile and Admin render the breakdown with a total line (ao-zbld)
+
+**Closing note:** The Robot's `usage` rows and the Member's `usage` rows have a `source` (robot, review, subagent, browser, computer, services); `Robot.recordUsage` writes both. The Robot's migration splits each old month: model = old total minus browser and services. The Member's old rows have no split, so their cost counts as the model's. The Member's own view is `GET /api/me/costs` (the Profile's "Costs this month"); the Robot panel, the Profile and Admin render the breakdown with a total line.

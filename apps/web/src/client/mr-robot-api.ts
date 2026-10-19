@@ -11,7 +11,7 @@ import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
-  LoginView, Me, MemberAvatar, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
+  LoginView, Me, MemberAvatar, MemberCosts, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
   SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
@@ -78,6 +78,7 @@ const make = Effect.gen(function* () {
     webhook: (id: string) => get(WebhookView, `/api/robots/${enc(id)}/webhook`),
     regenerateWebhook: (id: string) => request(WebhookView, 'POST', `/api/robots/${enc(id)}/webhook/regenerate`, {}),
     prompt: (id: string) => get(PromptPreview, `/api/robots/${enc(id)}/prompt`),
+    memberCosts: get(MemberCosts, '/api/me/costs'),
     send: (id: string, message: SendMessage) => send('POST', `/api/robots/${enc(id)}/messages`, message),
     retry: (id: string) => request(RetryResult, 'POST', `/api/robots/${enc(id)}/retry`, {}),
     updateSettings: (id: string, patch: SettingsPatch) => request(RobotSettings, 'PATCH', `/api/robots/${enc(id)}/settings`, patch),

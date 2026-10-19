@@ -4,7 +4,7 @@
  * One per deployment, addressed by HOME_ID.
  */
 import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, RobotOwner, SkillLibraryRow } from '@mr-robot/protocol'
-import { CHIEF_TITLE, HomeSpendLimit, MemberAvatar, robotIdentity, usableNames, type StoredIdentity } from '@mr-robot/protocol'
+import { CHIEF_TITLE, costBreakdown, HomeSpendLimit, MemberAvatar, robotIdentity, usableNames, type MemberCosts, type StoredIdentity } from '@mr-robot/protocol'
 import * as Schema from 'effect/Schema'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
@@ -331,6 +331,21 @@ export interface SpendLimits {
   readonly memberSpentUsd: number
 }
 
+/** A Member's own month by source across their Robots, against the Home's per-Member limit (ao-ef5t). */
+const memberCosts = (memberId: string) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const current = yield* settings
+  const month = currentMonth()
+  const usage = yield* remote((env) => env.MEMBER.getByName(memberId).usage(month))
+  const names = new Map((yield* sql.all<{ id: string; identity: string }>('SELECT id, identity FROM robot WHERE owner_id = ?', memberId)).map((row) => [row.id, (JSON.parse(row.identity) as { name?: string }).name ?? row.id]))
+  return {
+    month,
+    breakdown: usage.breakdown,
+    limit: current.memberSpendLimit,
+    byRobot: usage.byRobot.map((row) => ({ robotId: row.robotId, name: names.get(row.robotId) ?? 'A deleted Robot', breakdown: row.breakdown })),
+  } as MemberCosts
+})
+
 const limitsFor = (memberId: string) => Effect.gen(function* () {
   const current = yield* settings
   const usage = yield* remote((env) => env.MEMBER.getByName(memberId).usage(currentMonth()))
@@ -600,8 +615,8 @@ const adminView = (adminId: string) => Effect.gen(function* () {
   const live = rows.filter((value): value is NonNullable<typeof value> => value !== null)
   const everyone = yield* members
   const memberRows = yield* Effect.forEach(everyone, (person) => Effect.gen(function* () {
-    const usage = person.status === 'invited' ? { inputTokens: 0, outputTokens: 0, costUsd: 0 } : yield* remote((env) => env.MEMBER.getByName(person.id).usage(month))
-    return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, limit: { limit: current.memberSpendLimit, from: 'home' as const } } }
+    const usage = person.status === 'invited' ? { inputTokens: 0, outputTokens: 0, costUsd: 0, breakdown: costBreakdown([]) } : yield* remote((env) => env.MEMBER.getByName(person.id).usage(month))
+    return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, breakdown: usage.breakdown, limit: { limit: current.memberSpendLimit, from: 'home' as const } } }
   }), { concurrency: 'unbounded' })
   const providers = (yield* Effect.forEach(everyone.filter((person) => person.status === 'active'), (person) =>
     Effect.map(remote((env) => env.MEMBER.getByName(person.id).accounts()), (views) => views.map((view) => ({ id: view.id, provider: view.provider, label: view.label, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
@@ -1415,6 +1430,7 @@ export class Home extends DurableObject<Env> {
   settings(): Promise<HomeSettings> { return this.run(settings) }
   updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }, by?: string): Promise<HomeSettings & { defaultModelMoved?: DefaultModelMoved }> { return this.run(updateSettings(patch, by)) }
   limitsFor(memberId: string): Promise<SpendLimits> { return this.run(limitsFor(memberId)) }
+  memberCosts(memberId: string): Promise<MemberCosts> { return this.run(memberCosts(memberId)) }
   reachable(memberId: string): Promise<RobotSummary[]> { return this.run(reachable(memberId)) }
   fleet(): Promise<RobotSummary[]> { return this.run(fleet) }
   entry(robotId: string): Promise<RegistryEntry | undefined> { return this.run(entry(robotId)) }
