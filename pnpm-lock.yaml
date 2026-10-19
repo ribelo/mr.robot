@@ -271,15 +271,6 @@ importers:
       '@deepseek-ai/dsh-spill-policy':
         specifier: 0.2.1-rc.2
         version: 0.2.1-rc.2(ef396cd3e993c2f6d078912276cdaacb)
-      '@deepseek-ai/dsh-subagent':
-        specifier: 0.2.1-rc.2
-        version: 0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992)
-      '@deepseek-ai/dsh-subagent-fork-in-process':
-        specifier: 0.2.1-rc.2
-        version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-agent@0.2.1-rc.2(84e4a17c1b98c9d3d54ad36424f72a5a))(@deepseek-ai/dsh-session@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-subagent@0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992))
-      '@deepseek-ai/dsh-subagent-spawn-in-process':
-        specifier: 0.2.1-rc.2
-        version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-subagent@0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992))
       '@deepseek-ai/dsh-system-prompt':
         specifier: 0.2.1-rc.2
         version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5))
@@ -292,12 +283,6 @@ importers:
       '@deepseek-ai/dsh-tool-skill':
         specifier: 0.2.1-rc.2
         version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-agent@0.2.1-rc.2(84e4a17c1b98c9d3d54ad36424f72a5a))(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-skill@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-tools@0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667))(@deepseek-ai/dsh-working-directory@0.2.1-rc.2(213b891db7fb1a51086dc1bbb0003b74))
-      '@deepseek-ai/dsh-tool-subagent':
-        specifier: 0.2.1-rc.2
-        version: 0.2.1-rc.2(7a94d1f71a88522dca1abfc962fe6417)
-      '@deepseek-ai/dsh-tool-subagent-control':
-        specifier: 0.2.1-rc.2
-        version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-session@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-subagent@0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992))(@deepseek-ai/dsh-tools@0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667))
       '@deepseek-ai/dsh-tool-web':
         specifier: 0.2.1-rc.2
         version: 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-system-prompt@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-tools@0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667))(@deepseek-ai/dsh-web@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5)))
@@ -1076,20 +1061,6 @@ packages:
     peerDependencies:
       '@deepseek-ai/cordis': ~4.0.5
 
-  '@deepseek-ai/dsh-subagent-fork-in-process@0.2.1-rc.2':
-    resolution: {integrity: sha512-zBMdnqmzQYpLiMg1K8rvlRCUsFFPmSgTTqBoO8o7UquqPdtxNpgUMyxJfAwJStrUmkWUp5GhwAdXXQE6DeeG3w==}
-    peerDependencies:
-      '@deepseek-ai/cordis': ~4.0.5
-      '@deepseek-ai/dsh-agent': 0.2.1-rc.2
-      '@deepseek-ai/dsh-session': 0.2.1-rc.2
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2
-
-  '@deepseek-ai/dsh-subagent-spawn-in-process@0.2.1-rc.2':
-    resolution: {integrity: sha512-odjH+gYSGIpW/UWZjzVy67aH+8IAMt4AU7AsVt11bhB07jIDK9NNQopHRyGJja1KzaqKaGYmlCjWDj1Kr4bzHA==}
-    peerDependencies:
-      '@deepseek-ai/cordis': ~4.0.5
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2
-
   '@deepseek-ai/dsh-subagent@0.2.1-rc.2':
     resolution: {integrity: sha512-c2Zw5qiHm5X2C778tAoAGVirZtsuOZ0ikgdnrQKe2lvKdo0z0Q19StHX8ghu4J5RXrsfg5cRrNgVN9ZO4jlLxw==}
     peerDependencies:
@@ -1180,32 +1151,6 @@ packages:
       '@deepseek-ai/dsh-skill': 0.2.1-rc.2
       '@deepseek-ai/dsh-tools': 0.2.1-rc.2
       '@deepseek-ai/dsh-working-directory': 0.2.1-rc.2
-
-  '@deepseek-ai/dsh-tool-subagent-control@0.2.1-rc.2':
-    resolution: {integrity: sha512-u/TvDbBtKPh5khrmNcSPc8B7kEg28m8z/KkHfysnLcIe7iHY18rGseFV55cGdGnd+vj7KMUuxi0Lhlb27AH0Ug==}
-    peerDependencies:
-      '@deepseek-ai/cordis': ~4.0.5
-      '@deepseek-ai/dsh-llm': 0.2.1-rc.2
-      '@deepseek-ai/dsh-session': 0.2.1-rc.2
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2
-      '@deepseek-ai/dsh-tools': 0.2.1-rc.2
-
-  '@deepseek-ai/dsh-tool-subagent@0.2.1-rc.2':
-    resolution: {integrity: sha512-VxIhRFSVyUg6i4imonbPhfjgfxqmSM0jkGt8jE9bswqC1+53qjVACcyEMGirWalqvNaTaiLO+c7d3u3Y9KGQIA==}
-    peerDependencies:
-      '@deepseek-ai/cordis': ~4.0.5
-      '@deepseek-ai/dsh-agent': 0.2.1-rc.2
-      '@deepseek-ai/dsh-agent-preset-registry': 0.2.1-rc.2
-      '@deepseek-ai/dsh-llm': 0.2.1-rc.2
-      '@deepseek-ai/dsh-scope': 0.2.1-rc.2
-      '@deepseek-ai/dsh-session': 0.2.1-rc.2
-      '@deepseek-ai/dsh-session-projection': 0.2.1-rc.2
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2
-      '@deepseek-ai/dsh-system-prompt': 0.2.1-rc.2
-      '@deepseek-ai/dsh-tools': 0.2.1-rc.2
-    peerDependenciesMeta:
-      '@deepseek-ai/dsh-agent-preset-registry':
-        optional: true
 
   '@deepseek-ai/dsh-tool-todo@0.2.1-rc.2':
     resolution: {integrity: sha512-9hN/b++pvkmtskDFXM3xCRrHUc5jMzuYe9pvMGrtebDoWPJG5Huc2lM6ntdTjhLVkAgiWY+oqoZVAtZ+oXpyGw==}
@@ -4796,20 +4741,6 @@ snapshots:
     dependencies:
       '@deepseek-ai/cordis': 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
 
-  '@deepseek-ai/dsh-subagent-fork-in-process@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-agent@0.2.1-rc.2(84e4a17c1b98c9d3d54ad36424f72a5a))(@deepseek-ai/dsh-session@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-subagent@0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992))':
-    dependencies:
-      '@deepseek-ai/cordis': 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
-      '@deepseek-ai/dsh-agent': 0.2.1-rc.2(84e4a17c1b98c9d3d54ad36424f72a5a)
-      '@deepseek-ai/dsh-session': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5))
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992)
-      '@deepseek-ai/schemastery': 3.18.5
-
-  '@deepseek-ai/dsh-subagent-spawn-in-process@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-subagent@0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992))':
-    dependencies:
-      '@deepseek-ai/cordis': 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992)
-      '@deepseek-ai/schemastery': 3.18.5
-
   '@deepseek-ai/dsh-subagent@0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992)':
     dependencies:
       '@deepseek-ai/cordis': 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
@@ -4888,32 +4819,6 @@ snapshots:
       '@deepseek-ai/dsh-tools': 0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667)
       '@deepseek-ai/dsh-working-directory': 0.2.1-rc.2(213b891db7fb1a51086dc1bbb0003b74)
       '@deepseek-ai/schemastery': 3.18.5
-
-  '@deepseek-ai/dsh-tool-subagent-control@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-session@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-subagent@0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992))(@deepseek-ai/dsh-tools@0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667))':
-    dependencies:
-      '@deepseek-ai/cordis': 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
-      '@deepseek-ai/dsh-brand': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)
-      '@deepseek-ai/dsh-llm': 0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5)
-      '@deepseek-ai/dsh-session': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5))
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992)
-      '@deepseek-ai/dsh-tools': 0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667)
-      '@deepseek-ai/dsh-util-values': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)
-
-  '@deepseek-ai/dsh-tool-subagent@0.2.1-rc.2(7a94d1f71a88522dca1abfc962fe6417)':
-    dependencies:
-      '@deepseek-ai/cordis': 4.0.5(@deepseek-ai/cordis-plugin-include@1.0.10)(@deepseek-ai/cordis-plugin-loader@1.0.6)
-      '@deepseek-ai/dsh-agent': 0.2.1-rc.2(84e4a17c1b98c9d3d54ad36424f72a5a)
-      '@deepseek-ai/dsh-llm': 0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5)
-      '@deepseek-ai/dsh-scope': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)
-      '@deepseek-ai/dsh-session': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5))
-      '@deepseek-ai/dsh-session-projection': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-session@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))
-      '@deepseek-ai/dsh-subagent': 0.2.1-rc.2(4248cb5af59dfb463c9a8b244c929992)
-      '@deepseek-ai/dsh-system-prompt': 0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.2(patch_hash=b6bacdb93e29713bf8349b18d7a3929f0e55fcd8d13497f693d6e61e510b08f6)(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5))
-      '@deepseek-ai/dsh-tools': 0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667)
-      '@deepseek-ai/schemastery': 3.18.5
-      zod: 4.4.3
-    optionalDependencies:
-      '@deepseek-ai/dsh-agent-preset-registry': 0.2.1-rc.2(7c4dc0bffd4bce7aad8edf66f2b4d2cf)
 
   '@deepseek-ai/dsh-tool-todo@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-agent@0.2.1-rc.2(84e4a17c1b98c9d3d54ad36424f72a5a))(@deepseek-ai/dsh-session-projection@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-session@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5))))(@deepseek-ai/dsh-session@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.2(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-tools@0.2.1-rc.2(27b3e00ae822f273ac5ab14c9ba81667))':
     dependencies:

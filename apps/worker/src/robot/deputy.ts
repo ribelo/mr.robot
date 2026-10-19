@@ -240,6 +240,7 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
     ...(patch.idleCompactionFloorTokens === undefined ? {} : { idleCompactionFloorTokens: patch.idleCompactionFloorTokens }),
     ...(patch.autoReview === undefined ? {} : { autoReview: patch.autoReview }),
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
+    ...(patch.subagentModels === undefined ? {} : { subagentModels: patch.subagentModels }),
     ...(patch.notifications === undefined ? {} : { notifications: {
       enabled: patch.notifications.enabled ?? shown.notifications.enabled,
       members: shown.notifications.members,

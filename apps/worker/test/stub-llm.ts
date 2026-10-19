@@ -25,20 +25,26 @@ export class StubLlm extends LlmAdapter {
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    const log = requests.get(this.robotId) ?? []
+    // A Subagent's requests have their own script and log: "<robot id>:sub" (v1.14 ticket 06).
+    const key = String(options.sessionId ?? '').startsWith('sa-') ? `${this.robotId}:sub` : this.robotId
+    const log = requests.get(key) ?? []
     log.push(options)
-    requests.set(this.robotId, log)
-    let scripted = scripts.get(this.robotId)?.shift() ?? scripts.get('*')?.[0] ?? { text: 'ok' }
+    requests.set(key, log)
+    let scripted = scripts.get(key)?.shift() ?? scripts.get('*')?.[0] ?? { text: 'ok' }
+    // A cancelled call stops waiting at its gate, as a real model call would.
+    const aborted = new Promise<never>((_resolve, reject) => {
+      if (options.signal?.aborted === true) reject(new Error('aborted'))
+      options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+    })
+    aborted.catch(() => undefined)
     while (typeof scripted !== 'function' && 'gate' in scripted) {
-      await scripted.gate
+      await Promise.race([scripted.gate, aborted])
       scripted = scripted.then
     }
     const reply = typeof scripted === 'function' ? scripted(options) : scripted
     if (typeof reply === 'function' || 'gate' in reply) throw new Error('StubLlm: a scripted reply function must return a plain reply')
     if ('hang' in reply) {
-      await new Promise<void>((_resolve, reject) => {
-        options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
-      })
+      await aborted
       return
     }
     if ('text' in reply) {

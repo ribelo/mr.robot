@@ -4,17 +4,19 @@
 
 **Blocked by:** 03, 05
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Grant item tool:subagents with allowedModels payload; grant table gains a nullable JSON payload column; advanced settings and Mr. Robot's deputy settings edit the list (ao-zzga, ao-2z4n)
-- [ ] Workerd test: an empty list refuses delegation; a listed model is accepted; an unlisted model is refused with a message (ao-2z4n, ao-r3oq)
-- [ ] Workerd test: the child's tool list has no delegation tool and none of the excluded tools; an Ask-level item fails with the message and the report reaches the Robot (ao-8s1d, ao-sbc9, ao-3umf)
-- [ ] Workerd test: the Robot's Turn ends while a child runs; the child's report arrives as a follow-up Wake-up and starts a Turn (ao-w9lq)
-- [ ] Workerd test: send_message steers a child; interrupt_agent stops it (ao-nc31)
-- [ ] Workerd test: the fourth concurrent child is refused (ao-6jz6)
-- [ ] Workerd test: a restart with a running child resumes it with the note (ao-ij3i)
-- [ ] Workerd test: Robot interrupt, rewind before the delegation, and delete cascade to children (ao-qy77)
-- [ ] Workerd test: child usage on the Robot's rows with source subagent; the spend limit stops children before the Robot (ao-3pl8)
-- [ ] Workerd test: a secret value never appears in the child's log (ao-xl6g)
-- [ ] Workerd test: Task tools refuse a Subagent as assignee; the directory lists no Subagent (ao-2fgp)
-- [ ] API: GET /api/robots/:id/subagents and the child session's events and trajectory pages
+- [x] Grant item tool:subagents with allowedModels payload; grant table gains a nullable JSON payload column; advanced settings and Mr. Robot's deputy settings edit the list (ao-zzga, ao-2z4n)
+- [x] Workerd test: an empty list refuses delegation; a listed model is accepted; an unlisted model is refused with a message (ao-2z4n, ao-r3oq)
+- [x] Workerd test: the child's tool list has no delegation tool and none of the excluded tools; an Ask-level item fails with the message and the report reaches the Robot (ao-8s1d, ao-sbc9, ao-3umf)
+- [x] Workerd test: the Robot's Turn ends while a child runs; the child's report arrives as a follow-up Wake-up and starts a Turn (ao-w9lq)
+- [x] Workerd test: send_message steers a child; interrupt_agent stops it (ao-nc31)
+- [x] Workerd test: the fourth concurrent child is refused (ao-6jz6)
+- [x] Workerd test: a restart with a running child resumes it with the note (ao-ij3i)
+- [x] Workerd test: Robot interrupt, rewind before the delegation, and delete cascade to children (ao-qy77)
+- [x] Workerd test: child usage on the Robot's rows with source subagent; the spend limit stops children before the Robot (ao-3pl8)
+- [x] Workerd test: a secret value never appears in the child's log (ao-xl6g)
+- [x] Workerd test: Task tools refuse a Subagent as assignee; the directory lists no Subagent (ao-2fgp)
+- [x] API: GET /api/robots/:id/subagents and the child session's events and trajectory pages
+
+**Closing note:** Decision, to reverse if wanted: the Subagents are second DSH agents created through DSH's agent registry in the Robot's composition (`compose().child`), with Mr. Robot's own tools of the DSH names (subagent, subagent_fork, send_message, interrupt_agent, list_agents). DSH's dsh-subagent, tool-subagent and subagent-control packages are not mounted and were removed from the dependencies: they hand a Subagent's report straight to the parent agent (a DSH turn outside the Wake-up queue), record the allowed models once per session, need a preset scope for model selection, and keep their state only in memory, so a restart could not resume a child. A fork starts from the Robot's log (`buildForkSeed`). The child rows are in the Robot's `subagent` table (parent session and seq, label, route, status, report); the grant item has a `payload` column for the model list. A child's report reaches a running Turn at its next step (steer), else a platform Wake-up. The composition is kept while children run, so a settings change applies after them. Mr. Robot holds subagents only when granted. Deviation: a Subagent uses the Robot's browser page, not a tab of its own (the browser seam has one page per Robot; a tab per caller needs the caller in every browser call).

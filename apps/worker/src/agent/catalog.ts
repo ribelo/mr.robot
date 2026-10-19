@@ -1,7 +1,6 @@
 /**
  * Grantable tool groups. A Grant names a group at a level; only the tools of groups at
- * allow or ask are registered in the Robot's composition (robot-f9ln, sk-746n). There is no shell, terminal
- * or container group (robot-0ms7).
+ * allow or ask are registered in the Robot's composition (robot-f9ln, sk-746n).
  */
 import { emptyGrants, overlayGrants, type GrantSet } from '@mr-robot/protocol'
 
@@ -18,10 +17,14 @@ export const TOOL_GROUPS = {
   deputy: "Read the Conversations, files, Grants and settings of the Robots its owner can reach, and change their files and settings (Mr. Robot only).",
   exa: 'Exa research: web search, page crawling and code context, paid per call from the Home\'s Exa key.',
   'exa-agent': 'Exa agent runs: long research jobs that can cost dollars each. Grant separately.',
+  subagents: 'Hand work to Subagents: fresh or forked contexts on the models you allow, at most three at once.',
 } as const
 
 export type ToolGroup = keyof typeof TOOL_GROUPS
 export const TOOL_GROUP_NAMES = Object.keys(TOOL_GROUPS) as ToolGroup[]
+
+/** Groups nobody holds until granted, Mr. Robot included (v1.14: Subagents, the computer). */
+export const EXPLICIT_TOOL_GROUPS: readonly string[] = ['subagents']
 
 /** Groups only Mr. Robot holds: never offered to an ordinary Robot's settings. */
 export const MR_ROBOT_ONLY_GROUPS: readonly string[] = ['robots', 'deputy']

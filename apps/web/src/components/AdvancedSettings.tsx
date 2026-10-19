@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
 import { ReviewerSetting } from './ReviewerSetting.tsx'
+import { SubagentModels } from './SubagentModels.tsx'
 import { SaveButton, type SaveOutcome } from './SaveButton.tsx'
 import { parseRobotSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import * as Option from 'effect/Option'
@@ -63,6 +64,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       idleCompactionFloorTokens: draft.idleCompactionFloorTokens,
       autoReview: draft.autoReview,
       reviewer: draft.reviewer,
+      subagentModels: draft.subagentModels,
       grants: draft.grants,
       sharing: draft.sharing,
       notifications: draft.notifications,
@@ -116,6 +118,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       <div className="check-grid scroll-box">
         {of('tools').map(item)}
       </div>
+      <SubagentModels value={draft.subagentModels} models={catalog.models} onChange={(subagentModels) => setDraft({ ...draft, subagentModels })} />
       <h2>Skills</h2>
       {catalog.skills.length === 0 ? <div className="muted">No skills in the library yet.</div> : (
         <div className="check-grid scroll-box">

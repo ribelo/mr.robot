@@ -617,6 +617,25 @@ export const api = new Router<ApiContext>()
     const { interrupted } = yield* call(() => robot(c, id).interrupt(c.member.name))
     return interrupted ? { ok: true } : yield* Effect.fail(conflict('this Robot is not working now'))
   }))
+  // A Robot's Subagents (v1.14 ticket 06): listed, each with its own Chat and Trajectory, and stopped from there (ao-ce55).
+  .on('GET', '/api/robots/:id/subagents', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).subagentList()))))
+  .on('GET', '/api/robots/:id/subagents/:child/conversation', (c, { id, child }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).subagentConversation(child)))))
+  .on('GET', '/api/robots/:id/subagents/:child/events', (c, { id, child }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const query = new URL(c.request.url).searchParams
+    const number = (name: string) => (query.get(name) === null ? undefined : Number(query.get(name)))
+    const page = yield* call(() => robot(c, id).subagentEvents(child, {
+      ...(number('before') === undefined ? {} : { before: number('before')! }),
+      ...(number('after') === undefined ? {} : { after: number('after')! }),
+      ...(number('limit') === undefined ? {} : { limit: number('limit')! }),
+    }))
+    return new Response(`{"sessionId":${JSON.stringify(page.sessionId)},"hasMore":${page.hasMore},"events":${page.events}}`, { headers: { 'content-type': 'application/json' } })
+  }))
+  .on('POST', '/api/robots/:id/subagents/:child/interrupt', (c, { id, child }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const { interrupted } = yield* call(() => robot(c, id).interruptSubagent(child))
+    return interrupted ? { ok: true } : yield* Effect.fail(conflict('this Subagent is not running'))
+  }))
   .on('POST', '/api/robots/:id/pause', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).pause()))))
   .on('POST', '/api/robots/:id/resume', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).resume()))))
   .on('DELETE', '/api/robots/:id', (c, { id }) => Effect.gen(function* () {

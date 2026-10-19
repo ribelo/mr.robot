@@ -3,7 +3,7 @@
  * single-writer, so the store is a plain object with synchronous methods; the
  * session log lives beside it (agent/session-log.ts).
  */
-import { TOOL_GROUP_NAMES } from '../agent/catalog.ts'
+import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
@@ -152,7 +152,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 14
+const SCHEMA_VERSION = 15
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -173,6 +173,15 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Subagents (v1.14 ticket 06): a grant item carries a payload (the subagents grant's model list); the child sessions.
+  15: [
+    (sql) => addColumns(sql, 'grant_item', ['payload TEXT']),
+    `CREATE TABLE IF NOT EXISTS subagent (
+      id TEXT PRIMARY KEY, parent_session TEXT NOT NULL, parent_seq INTEGER NOT NULL, label TEXT NOT NULL, mode TEXT NOT NULL,
+      task TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, effort TEXT NOT NULL, status TEXT NOT NULL,
+      report TEXT, started_at INTEGER NOT NULL, finished_at INTEGER, accounted_seq INTEGER NOT NULL DEFAULT 0
+    )`,
+  ],
   // Usage by source (v1.14, ao-zbld): each month's model cost apart from browser and services, which were added into it.
   14: [
     'CREATE TABLE usage_v14 (month TEXT NOT NULL, source TEXT NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost_usd REAL NOT NULL, PRIMARY KEY (month, source)) WITHOUT ROWID',
@@ -336,17 +345,34 @@ export class RobotStore {
    */
   setGrants(grants: GrantSet): void {
     const mrRobot = this.config()?.kind === 'mr-robot'
-    const kept = (kind: GrantKind, level: GrantLevel) => mrRobot && kind !== 'recipient' ? level !== 'allow' : usableLevel(level)
+    // Mr. Robot holds a group he reaches without a row, except the groups everyone holds only when granted (ao-zzga).
+    const kept = (kind: GrantKind, name: string, level: GrantLevel) => mrRobot && kind !== 'recipient' && !(kind === 'tool' && EXPLICIT_TOOL_GROUPS.includes(name)) ? level !== 'allow' : usableLevel(level)
+    // A payload (the subagents grant's model list) stays with its item through any change of level.
+    const payloads = this.sql.exec<{ kind: GrantKind; name: string; payload: string }>('SELECT kind, name, payload FROM grant_item WHERE payload IS NOT NULL').toArray()
     this.transaction(() => {
       this.sql.exec('DELETE FROM grant_item')
       for (const [kind, field] of Object.entries(GRANT_FIELDS) as Array<[GrantKind, keyof GrantSet]>) {
         for (const [given, level] of Object.entries(grants[field])) {
           // A proposal made before v1.13 names the group by its old name (mc-r1aa).
           const name = kind === 'tool' && given === 'routines' ? 'tasks' : given
-          if (kept(kind, level)) this.sql.exec('INSERT INTO grant_item (kind, name, level) VALUES (?, ?, ?)', kind, name, level)
+          if (kept(kind, name, level)) this.sql.exec('INSERT INTO grant_item (kind, name, level) VALUES (?, ?, ?)', kind, name, level)
         }
       }
+      for (const row of payloads) {
+        this.sql.exec("INSERT INTO grant_item (kind, name, level, payload) VALUES (?, ?, 'deny', ?) ON CONFLICT (kind, name) DO UPDATE SET payload = excluded.payload", row.kind, row.name, row.payload)
+      }
     })
+  }
+
+  /** The payload of one grant item, parsed; undefined when it has none. */
+  grantPayload<T>(kind: GrantKind, name: string): T | undefined {
+    const row = this.sql.exec<{ payload: string | null }>('SELECT payload FROM grant_item WHERE kind = ? AND name = ?', kind, name).toArray()[0]
+    return row?.payload == null ? undefined : (JSON.parse(row.payload) as T)
+  }
+
+  /** Set the payload of one grant item; an item without a row gets one at deny, so the payload waits for the grant. */
+  setGrantPayload(kind: GrantKind, name: string, payload: unknown): void {
+    this.sql.exec("INSERT INTO grant_item (kind, name, level, payload) VALUES (?, ?, 'deny', ?) ON CONFLICT (kind, name) DO UPDATE SET payload = excluded.payload", kind, name, JSON.stringify(payload))
   }
 
   /** What Mr. Robot can reach without grants: every login and skill its owner can (rb-b0rs). Kept in memory, refreshed each Turn. */
@@ -366,7 +392,7 @@ export class RobotStore {
     if (this.config()?.kind !== 'mr-robot') return stored
     const allow = (names: readonly string[]): GrantLevels => Object.fromEntries(names.map((name) => [name, 'allow' as const]))
     const reached: GrantSet = {
-      tools: allow(TOOL_GROUP_NAMES),
+      tools: allow(TOOL_GROUP_NAMES.filter((name) => !EXPLICIT_TOOL_GROUPS.includes(name))),
       skills: allow(this.reach.skills),
       recipients: {},
       secrets: allow(this.reach.secrets),

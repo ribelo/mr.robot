@@ -52,11 +52,32 @@ export interface CompositionInput {
   readonly onRequest?: (options: GenerateOptions) => void
   /** Where an oversized tool result is kept whole (ao-hf02); the inline budget follows the context budget. */
   readonly spill: WorkspaceSpillConfig
+  /** Adapters of other Providers the Robot's Subagents may run on (v1.14 ticket 06). */
+  readonly extraAdapters?: ReadonlyArray<{ readonly provider: string; readonly adapter: LlmAdapter }>
+}
+
+/** One Subagent to create or resume in this composition: a second DSH agent beside the Robot's (ao-ab01). */
+export interface ChildAgentInput {
+  readonly sessionId: string
+  readonly parentAgent: Agent
+  readonly provider: string
+  readonly model: string
+  readonly effort: ThinkingEffort
+  /** Prompt sections of the child, in order. */
+  readonly prompt: ReadonlyArray<{ readonly name: string; readonly text: () => string }>
+  /** Tools the child does not get (delegation, messaging, Asks, ao-8s1d, ao-sbc9). */
+  readonly deny: readonly string[]
+  /** A fork: the Robot's log up to now (ao-r3oq). */
+  readonly seed?: readonly SessionEvent[]
+  readonly inheritedEventCount?: number
+  readonly parentSession: string
 }
 
 export interface Composition {
   readonly ctx: Context
   readonly agent: Agent
+  /** Create (or, after a restart, resume) a Subagent's agent; dispose it with the handle. */
+  child(input: ChildAgentInput, resume: boolean): Promise<{ readonly agent: Agent; dispose(): Promise<void> }>
   dispose(): Promise<void>
 }
 
@@ -65,6 +86,9 @@ export async function compose(input: CompositionInput): Promise<Composition> {
   try {
     await ctx.plugin(LlmRuntime)
     ctx.llm.registerAdapter([input.provider], new BudgetedAdapter(input.adapter, input.contextBudget, input.onRequest))
+    for (const extra of input.extraAdapters ?? []) {
+      if (extra.provider !== input.provider) ctx.llm.registerAdapter([extra.provider], new BudgetedAdapter(extra.adapter, input.contextBudget))
+    }
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SqliteSessionLog, {
@@ -126,9 +150,35 @@ export async function compose(input: CompositionInput): Promise<Composition> {
           agentOptions,
           setup,
         })
+    const child = async (spec: ChildAgentInput, resume: boolean) => {
+      const childInfo = await ctx.llm.resolveModelInfo(spec.provider, spec.model)
+      const childOptions = { provider: spec.provider, model: spec.model, ...reasoning(spec.effort, (childInfo.reasoning?.efforts ?? []).map((entry) => String(entry.id))) }
+      const known = new Set(ctx.tools.schemas().map((schema) => schema.name))
+      const childSetup = (agentCtx: Context) => {
+        for (const [index, section] of spec.prompt.entries()) {
+          agentCtx.systemPrompt.section({ name: `robot:${section.name}`, order: index, interpolate: false, text: () => section.text() })
+        }
+        const deny = spec.deny.filter((name) => known.has(name))
+        if (deny.length > 0) agentCtx.tools.restrict({ deny })
+        if (input.ptcRuntime !== undefined) agentCtx.tools.presentAs('ptc')
+      }
+      const childId = SessionId(spec.sessionId)
+      const made = resume
+        ? await ctx.agents.resume({ resumeSessionId: childId, parentAgent: spec.parentAgent, agentOptions: childOptions, setup: childSetup })
+        : await ctx.agents.create({
+          sessionId: childId,
+          parentAgent: spec.parentAgent,
+          meta: { cwd: '/workspace', origin: 'subagent', delegationDepth: 1, parentSession: SessionId(spec.parentSession), ...(spec.seed === undefined ? {} : { isSeeded: true }) },
+          ...(spec.seed === undefined ? {} : { seed: spec.seed, inheritedEventCount: SessionLogOffset(spec.inheritedEventCount ?? spec.seed.length) }),
+          agentOptions: childOptions,
+          setup: childSetup,
+        })
+      return { agent: made.agent, dispose: () => made.dispose() }
+    }
     return {
       ctx,
       agent: handle.agent,
+      child,
       dispose: async () => {
         await handle.dispose()
         await ctx.fiber.dispose()

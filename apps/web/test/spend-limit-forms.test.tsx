@@ -97,7 +97,7 @@ describe("a Robot's spend limit in Advanced settings (ux-q8ve, ux-en86)", () => 
     settings: {
       identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
       codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
-      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null,
+      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null, subagentModels: [],
     },
     tasks: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }), canEdit: true, takeover: null,
   }

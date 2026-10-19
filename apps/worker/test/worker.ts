@@ -224,6 +224,15 @@ export class Robot extends ProductionRobot {
     this.store.delete('bank-retired')
   }
 
+  async fileForTest(path: string): Promise<string | null> {
+    return (await this.run(this.workspace.readText(path))) ?? null
+  }
+
+  /** Every stored Subagent's status (v1.14 ticket 06). */
+  async subagentStatusesForTest(): Promise<string[]> {
+    return this.store.sql.exec<{ status: string }>("SELECT status FROM subagent").toArray().map((row) => row.status)
+  }
+
   /** The idle moments planned after the last Turn (v1.14 ticket 09). */
   async idlePlanForTest(): Promise<Array<{ at: number; action: string }>> {
     return this.store.get<Array<{ at: number; action: string }>>('idle-plan') ?? []

@@ -66,13 +66,16 @@ import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../age
 import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
-import type { ChainEntry, HomeSpendLimit, ProviderView, UsageSource } from '@mr-robot/protocol'
+import type { ChainEntry, HomeSpendLimit, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, UserMessage } from '@deepseek-ai/dsh-llm'
 import { joinable, mrRobotIdOf } from './delivery.ts'
+import { SubagentStore } from './subagent-store.ts'
+import { SUBAGENT_TOOL_NAMES, type SubagentHost, type SubagentStart } from '../agent/tools/subagents.ts'
+import { MAX_SUBAGENTS, Subagents } from '../plugins/subagents.ts'
 import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
@@ -256,6 +259,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * gone (deleted before v1.3) still loses its files (sk-44d5).
    */
   async destroy(robotId: string): Promise<void> {
+    // Its Subagents go with it (ao-qy77): disposing the composition ends them, deleting the storage their rows.
+    this.interruptChildren()
+    this.children.clear()
     await this.releaseComposition().catch(() => undefined)
     await this.closeBrowser().catch(() => undefined)
     for (const socket of this.ctx.getWebSockets()) {
@@ -283,7 +289,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    */
   async clearHistory(): Promise<void> {
     if (this.store.activeTurn() !== undefined) throw new Error('the Robot is working; wait for it to finish, then clear')
+    this.interruptChildren()
+    this.children.clear()
     await this.releaseComposition()
+    this.subagentRows.clear()
     const sql = this.ctx.storage.sql
     for (const table of ['session_event', 'session_log', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
     // Answered Asks go with the history; open ones are still decisions the owner owes.
@@ -396,6 +405,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config !== undefined) await this.deliverOutbox()
     if (config !== undefined && config.status !== 'deleted') this.resumeChain(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.escalateHelp(Date.now()).catch((error: unknown) => console.warn('help not escalated', error))
+    if (config !== undefined && config.status === 'active') await this.resumeChildren().catch((error: unknown) => console.warn('subagents not resumed', error))
     if (config !== undefined && config.status === 'active') await this.runIdle(Date.now()).catch((error: unknown) => console.warn('idle work failed', error))
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
@@ -437,6 +447,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.set(INTERRUPTED_BY, by)
     // A steer handed over but not read yet stays in the inbox: the next Turn reads it.
     this.composition?.value.agent.cancel({ kind: 'user' }, { keepInbox: true })
+    // Its Subagents stop with it (ao-qy77).
+    this.interruptChildren()
     return { interrupted: true }
   }
 
@@ -522,7 +534,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     } else {
       agent.followup(wakeupMessage({
         sender: { kind: 'platform' },
-        text: 'Your previous Turn was interrupted by a platform restart. Its tool results above are real. Continue that work from where it stopped; do not redo finished steps.',
+        text: RESTART_NOTE,
         summary: 'Resumed after a restart',
       }))
     }
@@ -534,7 +546,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await agent.whenIdle()
     this.runningAgent = undefined
     await ctx.sessions.flush(agent.session)
-    if (this.turnSecrets.length > 0) {
+    if (this.turnSecrets.length > 0 && this.children.size === 0) {
       // The in-memory session still holds plaintext; the next Turn starts from the redacted log.
       await this.releaseComposition()
       this.turnSecrets = []
@@ -547,6 +559,233 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.planIdle()
     await this.rearm()
     await this.changed()
+  }
+
+  // ---------------------------------------------------------------- Subagents (v1.14 ticket 06)
+
+  /** The Subagents running in this composition, by id; a row in the subagent table outlives a restart. */
+  private readonly children = new Map<string, { readonly agent: Agent; readonly dispose: () => Promise<void> }>()
+  /** Children stopped on purpose: their report says interrupted. */
+  private readonly stopping = new Set<string>()
+
+  private get subagentRows(): SubagentStore {
+    return new SubagentStore(this.store.sql)
+  }
+
+  /** The routes the owner allowed for this Robot's Subagents (ao-2z4n): the subagents grant's payload. */
+  subagentModels(): Array<{ provider: string; model: string }> {
+    return this.store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? []
+  }
+
+  /** An adapter for each other Provider the allowed list names, so a Subagent can run there. */
+  private async subagentAdapters(config: RobotConfig): Promise<Array<{ provider: string; adapter: LlmAdapter }>> {
+    if (!this.store.mayUse('tool', 'subagents')) return []
+    const list = await this.home().modelList()
+    const providers = [...new Map(this.subagentModels().filter((entry) => entry.provider !== config.model.provider).map((entry) => [entry.provider, entry])).values()]
+    return providers.flatMap((entry) => {
+      const chosen = list.find((option) => option.provider === entry.provider && option.model === entry.model)
+      try {
+        return [{ provider: entry.provider, adapter: this.adapter(entry.provider, chosen?.contextWindow, entry.model, chosen?.wire) }]
+      } catch {
+        return []
+      }
+    })
+  }
+
+  private subagentHost(): SubagentHost {
+    return {
+      allowedModels: () => this.subagentModels().map((entry) => `${entry.provider}/${entry.model}`),
+      start: (input) => this.startSubagent(input),
+      message: async (id, text) => {
+        const child = this.children.get(id)
+        if (child === undefined || this.subagentRows.get(id)?.status !== 'running') throw new Error(`${id} is not a running Subagent of yours`)
+        const message = createUserMessage({ content: [{ type: 'text', text: `[Message from ${this.store.requireConfig().identity.name}, your Robot]\n${text}` }], source: this.robotSource() })
+        child.agent.steer(message)
+        return { messageId: String(message.id) }
+      },
+      interrupt: async (id) => ({ accepted: this.interruptChild(id) }),
+      list: async () => {
+        const rows = this.subagentRows.of(this.store.requireConfig().liveSessionId)
+        return rows.length === 0 ? 'No Subagents.' : rows.map((row) => `${row.id} [${row.status === 'running' ? 'running' : 'inactive'}] — ${row.label}`).join('\n')
+      },
+    }
+  }
+
+  /** How a Subagent's prompt names its Robot: a message from it. */
+  private robotSource(): never {
+    const config = this.store.requireConfig()
+    return { kind: 'robot', robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed, form: 'relay' } as never
+  }
+
+  /**
+   * Start one Subagent (ao-r3oq): a listed route (the first when none is named), at most three at once (ao-6jz6),
+   * never past the spend limit. A fork starts from the Robot's log as it stands now.
+   */
+  private async startSubagent(input: SubagentStart): Promise<{ kind: 'activation'; subagentId: string }> {
+    const config = this.store.requireConfig()
+    const allowed = this.subagentModels()
+    if (allowed.length === 0) throw new Error(`${this.owner().name} allowed no models for Subagents, so you cannot delegate. Do the work yourself, or ask ${this.owner().name} to add models to the subagents grant.`)
+    if ((input.provider === undefined) !== (input.model === undefined)) throw new Error('give provider and model together, or neither')
+    const route = input.provider === undefined ? allowed[0]! : allowed.find((entry) => entry.provider === input.provider && entry.model === input.model)
+    if (route === undefined) throw new Error(`${input.provider}/${input.model} is not a model your owner allowed for Subagents. Allowed: ${allowed.map((entry) => `${entry.provider}/${entry.model}`).join(', ')}`)
+    const effort = (['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const).find((value) => value === input.effort) ?? config.model.effort
+    // Calls in one step run at once: a slot is taken before the first await (ao-6jz6).
+    if (this.subagentRows.running().length + this.startingChildren >= MAX_SUBAGENTS) throw new Error(`At most ${MAX_SUBAGENTS} Subagents run at once. Wait for a report, or stop one with interrupt_agent.`)
+    if (config.status === 'blocked') throw new Error('The spend limit is reached: no Subagent starts.')
+    this.startingChildren += 1
+    try {
+      return await this.launchSubagent(input, route, effort)
+    } finally {
+      this.startingChildren -= 1
+    }
+  }
+
+  /** Subagents being created now, before their row exists. */
+  private startingChildren = 0
+
+  private async launchSubagent(input: SubagentStart, route: { provider: string; model: string }, effort: ThinkingEffort): Promise<{ kind: 'activation'; subagentId: string }> {
+    const config = this.store.requireConfig()
+    const composition = this.composition?.value ?? await this.agent()
+    const id = `sa-${crypto.randomUUID()}`
+    const parentSeq = storedLength(this.ctx.storage.sql, config.liveSessionId)
+    const seed = input.mode === 'fork' && parentSeq > 0 ? buildForkSeed(readStoredEvents(this.ctx.storage.sql, config.liveSessionId), SessionSeq(parentSeq - 1)) : undefined
+    const child = await composition.child({
+      sessionId: id, parentAgent: composition.agent, provider: route.provider, model: route.model, effort, parentSession: config.liveSessionId,
+      prompt: this.childPrompt(input.label), deny: SUBAGENT_DENIED_TOOLS,
+      ...(seed === undefined ? {} : { seed, inheritedEventCount: parentSeq }),
+    }, false)
+    this.subagentRows.add({ id, parentSession: config.liveSessionId, parentSeq, label: input.label.trim().slice(0, 80) || 'Subagent', mode: input.mode, task: input.task, provider: route.provider, model: route.model, effort, startedAt: Date.now() })
+    this.subagentRows.accounted(id, storedLength(this.ctx.storage.sql, id))
+    this.children.set(id, child)
+    child.agent.followup(createUserMessage({ content: [{ type: 'text', text: `[Task from ${config.identity.name}, your Robot]\n${input.task}` }], source: this.robotSource() }))
+    this.watchChild(id, child.agent, composition)
+    await this.rearm()
+    await this.report()
+    return { kind: 'activation', subagentId: id }
+  }
+
+  /** A Subagent's prompt: the Robot's platform prompt, and what a Subagent is and cannot do (ao-sbc9). */
+  private childPrompt(label: string): Array<{ name: string; text: () => string }> {
+    const config = this.store.requireConfig()
+    return [
+      ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), owner: this.owner(), afterProviderIdentity: false, ...this.capabilityInput() }) })),
+      { name: 'subagent', text: () => [
+        `## You are a Subagent`,
+        `${config.identity.name} started you for one task: "${label}". Work in its Workspace and with its tools. Your final message is your report to ${config.identity.name}: say what you did, what you found and what is left.`,
+        `You cannot ask ${this.owner().name}, message other Robots, use Threads, edit shared files or start Subagents. When a call needs ${this.owner().name}'s answer it fails: say so in your report.`,
+      ].join('\n') },
+    ]
+  }
+
+  /**
+   * Follow a Subagent until it is idle (ao-w9lq): its tokens are billed as the Robot's Subagent cost as they come
+   * (ao-3pl8), the Durable Object stays awake meanwhile, and its report reaches the Robot: at the next step of a
+   * running Turn, else as a platform Wake-up that starts one.
+   */
+  private watchChild(id: string, agent: Agent, composition: Composition): void {
+    const stop = composition.ctx.on('session/event', (session, event) => {
+      const usage = (event.data as { usage?: ChildUsage }).usage
+      if (session === agent.session && usage !== undefined) this.ctx.waitUntil(this.accountChild(id, usage).catch(() => undefined))
+    })
+    const done = (async () => {
+      try {
+        await agent.whenIdle()
+      } finally {
+        stop()
+      }
+      await Promise.resolve(composition.ctx.sessions?.flush(agent.session)).catch(() => undefined)
+      const events = readStoredEvents(this.ctx.storage.sql, id)
+      const failed = events.some((event) => event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')
+      const report = events.filter((event) => event.type === 'assistant/message').map((event) => ((event.data as unknown as { message?: { content?: Array<{ type: string; text?: string }> } }).message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim()).filter((text) => text !== '').at(-1) ?? ''
+      const status = this.stopping.has(id) ? 'interrupted' : failed ? 'failed' : 'done'
+      this.stopping.delete(id)
+      const row = this.subagentRows.get(id)
+      this.subagentRows.finish(id, status, report, Date.now())
+      const child = this.children.get(id)
+      this.children.delete(id)
+      await child?.dispose().catch(() => undefined)
+      if (row === undefined || row.status !== 'running') return
+      const verb = status === 'done' ? 'finished' : status === 'interrupted' ? 'was interrupted' : 'failed'
+      const text = `Subagent "${row.label}" (${id}) ${verb}.${report === '' ? ' It wrote no report.' : ` Its report:\n${report}`}`
+      const config = this.store.requireConfig()
+      if (row.parentSession !== config.liveSessionId) return
+      const running = this.runningAgent
+      if (running !== undefined && running.status === 'running') running.steer(wakeupMessage({ sender: { kind: 'platform' }, text, summary: `Subagent "${row.label}" ${verb}` }))
+      else await this.wake({ kind: 'platform', sender: { kind: 'platform' }, text, payload: { summary: `Subagent "${row.label}" ${verb}`, subagent: id } })
+    })().catch((error: unknown) => console.warn('subagent watch failed', id, error)).finally(() => {
+      void this.rearm()
+      void this.report().catch(() => undefined)
+      void this.changed()
+    })
+    this.ctx.waitUntil(done)
+  }
+
+  /** Bill one model response of a Subagent as it comes (ao-3pl8); past the spend limit its Subagents stop first, then the Robot. */
+  private async accountChild(id: string, usage: ChildUsage): Promise<void> {
+    const row = this.subagentRows.get(id)
+    if (row === undefined) return
+    const [input, output, cached] = [usage.inputTokens ?? 0, usage.outputTokens ?? 0, usage.cacheReadTokens ?? 0]
+    if (input === 0 && output === 0) return
+    const price = (await this.home().modelList()).find((option) => option.provider === row.provider && option.model === row.model)?.price
+    await this.recordUsage('subagent', input, output, price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000)
+    if (await this.checkLimits()) this.interruptChildren()
+  }
+
+  private interruptChild(id: string): boolean {
+    const child = this.children.get(id)
+    if (child === undefined || this.subagentRows.get(id)?.status !== 'running') return false
+    this.stopping.add(id)
+    child.agent.cancel({ kind: 'user' })
+    return true
+  }
+
+  /** Stop every running Subagent: the Robot was interrupted, rewound or stopped by its spend limit (ao-qy77, ao-3pl8). */
+  private interruptChildren(): void {
+    for (const id of this.children.keys()) this.interruptChild(id)
+  }
+
+  /**
+   * After a platform restart, running Subagents resume as a Turn does (ao-ij3i): their session is loaded and they
+   * are told that the work was interrupted, so finished steps are not redone.
+   */
+  private async resumeChildren(): Promise<void> {
+    const rows = this.subagentRows.running().filter((row) => !this.children.has(row.id))
+    if (rows.length === 0) return
+    const config = this.store.requireConfig()
+    const composition = await this.agent()
+    for (const row of rows) {
+      if (row.parentSession !== config.liveSessionId) {
+        this.subagentRows.finish(row.id, 'archived', null, Date.now())
+        continue
+      }
+      try {
+        const child = await composition.child({ sessionId: row.id, parentAgent: composition.agent, provider: row.provider, model: row.model, effort: row.effort, parentSession: row.parentSession, prompt: this.childPrompt(row.label), deny: SUBAGENT_DENIED_TOOLS }, true)
+        this.children.set(row.id, child)
+        child.agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: RESTART_NOTE, summary: 'Resumed after a restart' }))
+        this.watchChild(row.id, child.agent, composition)
+      } catch (error) {
+        console.warn('subagent not resumed', row.id, error)
+        this.subagentRows.finish(row.id, 'failed', 'It could not be resumed after a platform restart.', Date.now())
+      }
+    }
+  }
+
+  /** The Robot's Subagents of its live Conversation (GET /api/robots/:id/subagents). */
+  async subagentList(): Promise<SubagentView[]> {
+    return this.program(Views.subagents)
+  }
+
+  async subagentConversation(childId: string): Promise<Conversation> {
+    return this.program(Views.subagentConversation(childId))
+  }
+
+  async subagentEvents(childId: string, input: { before?: number; after?: number; limit?: number }): Promise<{ events: string; hasMore: boolean; sessionId: string }> {
+    return this.program(Views.subagentEvents(childId, input))
+  }
+
+  /** The owner stops one Subagent from its view or from Mission Control (ao-ce55, ao-j8t9). */
+  async interruptSubagent(childId: string): Promise<{ interrupted: boolean }> {
+    return { interrupted: this.interruptChild(childId) }
   }
 
   // ---------------------------------------------------------------- idle: cache warming and idle compaction (v1.14 ticket 09)
@@ -695,7 +934,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private askGateHost(): AskGateHost {
     return {
       level: (item) => this.store.levelOf(item.kind, item.name),
-      askToolCall: (request) => this.askToolCall(request),
+      askToolCall: (request, exec) => {
+        // A Subagent cannot put a question to the owner (ao-3umf): the call fails and the Subagent reports it.
+        const session = exec.agent?.session.id
+        if (session !== undefined && String(session) !== this.store.requireConfig().liveSessionId) {
+          throw new Error(`A Subagent cannot ask ${this.owner().name}: ${request.tool} needs their answer. Say so in your report; ${this.store.requireConfig().identity.name} will ask them.`)
+        }
+        return this.askToolCall(request)
+      },
       approved: (callId) => this.approvedCalls.has(callId),
       reviewing: () => this.store.requireConfig().autoReview === true,
       review: (call) => this.reviewCall(call),
@@ -1150,6 +1396,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async agent(): Promise<Composition> {
     const config = this.store.requireConfig()
     if (this.composition?.revision === config.revision) return this.composition.value
+    // Running Subagents live in this composition: a settings change applies once they are done (ao-ij3i).
+    if (this.composition !== undefined && this.children.size > 0) return this.composition.value
     await this.releaseComposition()
     const brief = this.store.get<string>('brief') ?? null
     const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
@@ -1190,6 +1438,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       prompt,
       mounts,
       spill: { workspace: this.workspace, fileTools: mounts.some((entry) => (entry.plugin as unknown) === Files) },
+      extraAdapters: await this.subagentAdapters(config),
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
     }))).catch(async (error: unknown) => {
       await Effect.runPromise(Scope.close(scope, Exit.void))
@@ -1277,6 +1526,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('deputy') && config.kind === 'mr-robot') mounts.push(mount(Deputy, { host: DeputyPrograms.deputyHost((program) => this.program(program)) }, gate(group('deputy'))))
     if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }, gate((tool) => fixedItems({ kind: 'tool', name: tool.startsWith('exa_agent_') ? 'exa-agent' : 'exa' }))))
     if (granted.has('web')) mounts.push(mount(Web, {}, gate(group('web'))))
+    if (granted.has('subagents')) mounts.push(mount(Subagents, { host: this.subagentHost() }, gate(group('subagents'))))
     if (granted.has('tasks')) mounts.push(mount(Tasks, { host: tasksHost((program) => this.program(program), this.taskTurn()) }, gate(group('tasks'))))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
@@ -2695,10 +2945,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   needsBaseline(sessionId: string): boolean {
+    // A Subagent's session has its own baseline, so its steps never make the Robot's next step reload it.
+    if (sessionId.startsWith('sa-')) return this.store.get<boolean>(`memory-baseline:${sessionId}`) !== true
     return this.store.get<string>('memory-baseline') !== sessionId
   }
 
   memoryDelivered(sessionId: string, baseline: boolean): void {
+    if (sessionId.startsWith('sa-')) {
+      if (baseline) this.store.set(`memory-baseline:${sessionId}`, true)
+      return
+    }
     this.store.delete('memory-changes')
     if (baseline) this.store.set('memory-baseline', sessionId)
   }
@@ -2817,13 +3073,30 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Rewind to before Turn n: before the inbox events that delivered its message too, so the
    * message is gone with the Turn (it is not delivered again).
    */
-  rewindBeforeTurn(turn: number): Promise<RewindView> {
-    return this.program(Programs.rewindBeforeTurn(turn))
+  async rewindBeforeTurn(turn: number): Promise<RewindView> {
+    const before = this.store.requireConfig().liveSessionId
+    const view = await this.program(Programs.rewindBeforeTurn(turn))
+    this.archiveChildren(before, view.atSeq)
+    return view
   }
 
 
-  rewind(atSeq: number): Promise<RewindView> {
-    return this.program(Programs.rewind(atSeq))
+  async rewind(atSeq: number): Promise<RewindView> {
+    const before = this.store.requireConfig().liveSessionId
+    const view = await this.program(Programs.rewind(atSeq))
+    this.archiveChildren(before, view.atSeq)
+    return view
+  }
+
+  /** A Rewind to before a delegation archives its Subagents with the old log (ao-qy77); running ones stop. */
+  private archiveChildren(session: string, atSeq: number): void {
+    const archived = this.subagentRows.archiveAfter(session, atSeq, Date.now())
+    for (const id of archived) {
+      const child = this.children.get(id)
+      if (child === undefined) continue
+      this.stopping.add(id)
+      child.agent.cancel({ kind: 'user' })
+    }
   }
 
 
@@ -3044,6 +3317,19 @@ const DONE_LINE = 'task-done-line'
 
 /** The kv key of who interrupted the running Turn, until the Turn has ended. */
 const INTERRUPTED_BY = 'interrupted-by'
+/** The usage of one model response, as the session event carries it. */
+type ChildUsage = { readonly inputTokens?: number; readonly outputTokens?: number; readonly cacheReadTokens?: number }
+/** What a Turn or a Subagent resumed after a platform restart is told (ao-ij3i). */
+const RESTART_NOTE = 'Your previous Turn was interrupted by a platform restart. Its tool results above are real. Continue that work from where it stopped; do not redo finished steps.'
+/**
+ * What a Subagent does not get (ao-8s1d, ao-sbc9): delegation and its controls, Robot messaging and Threads,
+ * shared-file edits, everything that asks the owner, reactions, and the Turn's own Task bookkeeping.
+ */
+const SUBAGENT_DENIED_TOOLS = [
+  ...SUBAGENT_TOOL_NAMES, 'robot_send', 'robot_directory', 'robot_reply', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list',
+  'memory_write_shared', 'propose_member_file_edit', 'propose_grants', 'propose_review', 'need_help', 'react', 'browser_request_takeover',
+  'task_focus', 'task_done', 'set_identity', 'setup_complete', 'robot_propose_grants',
+]
 /** The session record of an Auto review decision (ao-jn6z): the Trajectory shows it on the reviewed call. */
 export const REVIEW_RECORD = 'plugin:mr-robot/review'
 /** The last request of the Robot's session, kept for cache warming while idle (ao-jlr0). */

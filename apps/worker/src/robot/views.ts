@@ -14,7 +14,8 @@ import { homeDefaults, proposalView, RobotPlatform, RobotState, settingsWith } f
 import { projectChat } from './projection.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, Wakeup } from './store.ts'
-import type { LastWakeup, RobotTurn, WakeupCause } from '@mr-robot/protocol'
+import type { LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause } from '@mr-robot/protocol'
+import { SubagentStore } from './subagent-store.ts'
 
 /** What woke the Robot, as its fleet row names it (mc-w1aa). */
 export function causeOf(wakeup: Wakeup): WakeupCause {
@@ -31,6 +32,23 @@ export function causeOf(wakeup: Wakeup): WakeupCause {
       }
   }
 }
+
+/** The running Subagents as lines of the Robot's row (ao-2fgp, ao-j8t9). */
+export const subagentLines = Effect.gen(function* () {
+  const store = yield* RobotState
+  return new SubagentStore(store.sql).running().map((row): SubagentLine => ({ id: row.id, label: row.label, since: row.startedAt, activity: runningTool(readStoredEvents(store.sql, row.id)) ?? null }))
+})
+
+/** A Robot's Subagents of its live Conversation, newest first (the API and the PWA). */
+export const subagents = Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  return new SubagentStore(store.sql).of(current.liveSessionId).map((row): SubagentView => ({
+    id: row.id, label: row.label, mode: row.mode, model: { provider: row.provider, model: row.model, effort: row.effort }, status: row.status,
+    startedAt: row.startedAt, finishedAt: row.finishedAt, result: row.report === null ? null : (row.report.split('\n')[0] ?? '').slice(0, 200),
+    activity: row.status === 'running' ? runningTool(readStoredEvents(store.sql, row.id)) ?? null : null,
+  }))
+})
 
 /** The kv key of the last Turn's cause and subject. */
 export const LAST_WAKEUP = 'last-wakeup'
@@ -58,7 +76,8 @@ export const fleetState = Effect.gen(function* () {
   const current = yield* config
   if (current.status === 'paused') return 'paused' as FleetState
   if (current.status === 'blocked') return 'blocked' as FleetState
-  if (store.activeTurn() !== undefined) return 'working' as FleetState
+  // Subagents that run while the Robot's Turn has ended are its work too (ao-j8t9).
+  if (store.activeTurn() !== undefined || new SubagentStore(store.sql).running().length > 0) return 'working' as FleetState
   // A failed Turn waiting for "Try again" is a state, not a raw error in the list.
   if (store.get('failed-wakeup') !== undefined) return 'blocked' as FleetState
   if (store.proposals('open').length > 0 || store.get('takeover') !== undefined) return 'waiting for you' as FleetState
@@ -244,16 +263,47 @@ export const archivedTrajectory = (sessionId: string) => Effect.gen(function* ()
  * masked, for the DSH trajectory view. Pages backwards with before, forwards with after.
  */
 export const sessionEvents = (input: { before?: number; after?: number; limit?: number }) => Effect.gen(function* () {
-  const store = yield* RobotState
   const current = yield* config
+  return yield* eventsPage(current.liveSessionId, input)
+})
+
+const eventsPage = (sessionId: string, input: { before?: number; after?: number; limit?: number }) => Effect.gen(function* () {
+  const store = yield* RobotState
   const mask = yield* (yield* RobotPlatform).masker()
   const limit = Math.min(Math.max(input.limit ?? 400, 1), 2000)
   const rows = input.after !== undefined
-    ? store.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?', current.liveSessionId, input.after, limit).toArray()
-    : store.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?', current.liveSessionId, input.before ?? Number.MAX_SAFE_INTEGER, limit).toArray().reverse()
+    ? store.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?', sessionId, input.after, limit).toArray()
+    : store.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?', sessionId, input.before ?? Number.MAX_SAFE_INTEGER, limit).toArray().reverse()
   const first = rows[0]?.seq
   // Events cross the RPC boundary as one JSON text (deep JSON types do not survive RPC typing).
-  return { events: `[${rows.map((row) => mask(row.event)).join(',')}]`, hasMore: first !== undefined && first > 0 && input.after === undefined, sessionId: current.liveSessionId }
+  return { events: `[${rows.map((row) => mask(row.event)).join(',')}]`, hasMore: first !== undefined && first > 0 && input.after === undefined, sessionId }
+})
+
+const childOf = (childId: string) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const row = new SubagentStore(store.sql).get(childId)
+  if (row === undefined || row.parentSession !== current.liveSessionId) return yield* notFound('no such Subagent')
+  return row
+})
+
+/** A Subagent's own log, paged like the Robot's (its Trajectory, ao-ce55). */
+export const subagentEvents = (childId: string, input: { before?: number; after?: number; limit?: number }) => Effect.gen(function* () {
+  const row = yield* childOf(childId)
+  return yield* eventsPage(row.id, input)
+})
+
+/** A Subagent's own Chat (ao-ce55): its log projected, secrets masked; no proposals, it has no Asks. */
+export const subagentConversation = (childId: string) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const row = yield* childOf(childId)
+  const mask = yield* (yield* RobotPlatform).masker()
+  const events = readStoredEvents(store.sql, row.id)
+  const items = projectChat({ events, notices: [], avatarSeed: current.identity.avatarSeed, proposal: () => undefined }).map((item) => maskItem(item, mask))
+  const working = row.status === 'running'
+  const activity = working ? runningTool(events) : undefined
+  return { robotId: current.id, working, items, ...(activity === undefined ? {} : { activity }) } as Conversation
 })
 
 
@@ -335,6 +385,7 @@ export const report = Effect.gen(function* () {
     accounts: chainAccounts(chainOf(current)),
     turn: yield* runningTurn,
     lastWakeup: store.get<LastWakeup>(LAST_WAKEUP) ?? null,
+    subagents: yield* subagentLines,
   }
   yield* Effect.promise(() => platform.env.HOME.getByName(HOME_ID).robotChanged(entry))
 })

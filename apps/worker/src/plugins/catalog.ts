@@ -57,6 +57,7 @@ export const PLUGINS: readonly PluginEntry[] = [
   capability('secrets', 'Logins', 'key'),
   capability('skills', 'Skills', 'sparkle'),
   capability('notify', 'Notifications', 'bell'),
+  capability('subagents', 'Subagents', 'sparkle'),
   capability('exa', 'Exa research', 'search', {
     toolGroups: ['exa', 'exa-agent'],
     description: 'Web search, page crawling, code context and long agent runs through Exa, paid per call from the Home\'s key.',

@@ -407,6 +407,10 @@ export function spendLimitText(effective: EffectiveSpendLimit): string {
 }
 
 /** Everything the advanced settings page edits. */
+/** A route a Robot's Subagents may run on (ao-2z4n). */
+export const SubagentModel = Schema.Struct({ provider: Schema.String, model: Schema.String })
+export type SubagentModel = typeof SubagentModel.Type
+
 export const RobotSettings = Schema.Struct({
   identity: Identity,
   sharing: Sharing,
@@ -442,6 +446,8 @@ export const RobotSettings = Schema.Struct({
   reviewer: Schema.NullOr(ModelChoice),
   /** What the Home default is now; null: the Robot's own model. */
   homeReviewer: Schema.NullOr(ModelChoice),
+  /** The routes its Subagents may run on: the subagents grant's list, empty by default (ao-2z4n). */
+  subagentModels: Schema.Array(SubagentModel),
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -474,6 +480,7 @@ export const DeputySettingsPatch = Schema.Struct({
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
   autoReview: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
+  subagentModels: Schema.optional(Schema.Array(SubagentModel)),
 })
 export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
 
@@ -498,6 +505,7 @@ export const SettingsPatch = Schema.Struct({
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
   autoReview: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
+  subagentModels: Schema.optional(Schema.Array(SubagentModel)),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 
@@ -521,6 +529,26 @@ export type RobotTurn = typeof RobotTurn.Type
 export const LastWakeup = Schema.Struct({ wakeup: WakeupCause, task: Schema.NullOr(TaskRef) })
 export type LastWakeup = typeof LastWakeup.Type
 
+/** A running Subagent as its Robot's row shows it (ao-j8t9): label, since when, the tool it runs. */
+export const SubagentLine = Schema.Struct({ id: Schema.String, label: Schema.String, since: Schema.Number, activity: Schema.NullOr(Schema.String) })
+export type SubagentLine = typeof SubagentLine.Type
+
+/** One of a Robot's Subagents (v1.14 ticket 06): never a Robot, a Task's doer or a Fleet row of its own. */
+export const SubagentView = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  mode: Schema.Literals(['spawn', 'fork']),
+  model: ModelChoice,
+  status: Schema.Literals(['running', 'done', 'interrupted', 'failed', 'archived']),
+  startedAt: Schema.Number,
+  finishedAt: Schema.NullOr(Schema.Number),
+  /** The first line of its report; null while it runs. */
+  result: Schema.NullOr(Schema.String),
+  /** The tool it runs now. */
+  activity: Schema.NullOr(Schema.String),
+})
+export type SubagentView = typeof SubagentView.Type
+
 /** One row of the robot list. */
 export const RobotSummary = Schema.Struct({
   id: Schema.String,
@@ -536,6 +564,8 @@ export const RobotSummary = Schema.Struct({
   /** The running Turn; null while the Robot does not work. */
   turn: Schema.NullOr(RobotTurn),
   lastWakeup: Schema.NullOr(LastWakeup),
+  /** Its running Subagents (ao-j8t9); absent or empty when none runs. */
+  subagents: Schema.optional(Schema.Array(SubagentLine)),
   unread: Schema.Boolean,
   /** This person's list settings (robot-mktj). */
   pinned: Schema.optional(Schema.Boolean),

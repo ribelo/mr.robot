@@ -22,6 +22,7 @@ import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 import { deliveryOf, robotMessageDelivery } from './delivery.ts'
+import { SubagentStore } from './subagent-store.ts'
 import { DEFAULT_IDLE_FLOOR_TOKENS, idleSettings, type IdleStep } from './idle.ts'
 
 export const MAX_CHAIN_HOPS = 8
@@ -366,6 +367,7 @@ export const settingsWith = (defaults: HomeDefaults) => Effect.gen(function* () 
     autoReview: current.autoReview === true,
     reviewer: current.reviewer ?? null,
     homeReviewer: defaults.defaultReviewer,
+    subagentModels: store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? [],
   } as RobotSettings
 })
 
@@ -462,6 +464,8 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
   store.transaction(() => {
     if (chain !== undefined) store.set('chain-active', nextActive)
     if (patch.grants !== undefined) store.setGrants(grantSetFrom(patch.grants))
+    // The subagents grant carries the routes its Subagents may run on (ao-2z4n).
+    if (patch.subagentModels !== undefined) store.setGrantPayload('tool', 'subagents', { allowedModels: [...new Map(patch.subagentModels.map((entry) => [`${entry.provider}/${entry.model}`, { provider: entry.provider, model: entry.model }])).values()] })
     store.updateConfig((current) => ({
       // An identity without a seed keeps the stored one (ux-h0s4).
       ...(patch.identity === undefined ? {} : { identity: { ...patch.identity, avatarSeed: patch.identity.avatarSeed ?? current.identity.avatarSeed } }),
@@ -486,7 +490,8 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
   })
   if (by !== undefined) {
     const after = yield* config
-    for (const text of changeNotes(by, before, after)) store.addNotice(after.liveSessionId, storedLength(store.sql, after.liveSessionId), text, Date.now())
+    const notes = [...changeNotes(by, before, after), ...(patch.subagentModels === undefined ? [] : [`${by} set the Subagent models to ${patch.subagentModels.length === 0 ? 'none' : patch.subagentModels.map((entry) => `${entry.model} (${entry.provider})`).join(', ')}.`])]
+    for (const text of notes) store.addNotice(after.liveSessionId, storedLength(store.sql, after.liveSessionId), text, Date.now())
   }
   yield* platform.changed()
   // The Home routes Discord messages by channel, so it hears about the mapping (cn-y1ac).
@@ -954,7 +959,8 @@ export const rearm = Effect.gen(function* () {
     ...(taskDue === undefined ? [] : [taskDue]),
     ...(signInEnds === undefined ? [] : [signInEnds]),
     ...(resume === undefined ? [] : [resume]),
-    ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) ? [Date.now() + HEARTBEAT_MS] : []),
+    // Running Subagents keep the heartbeat too: after a restart the alarm resumes them (ao-ij3i).
+    ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) || new SubagentStore(store.sql).running().length > 0 ? [Date.now() + HEARTBEAT_MS] : []),
     ...(outbox === null ? [] : [outbox]),
     ...(watch === undefined ? [] : [watch]),
     ...(sweep === undefined ? [] : [sweep]),

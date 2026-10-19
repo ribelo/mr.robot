@@ -9,7 +9,7 @@ Spec: ../mr-robot-v1.14.md. Frontier at the start: 01. Then 02, 03, 05, 09 in pa
 | 03 | [Steer and follow-up delivery](03-steer-and-followup.md) | 01 | done |
 | 04 | [Changing focus with a reason](04-focus-change.md) | 03 | done |
 | 05 | [Cost by source](05-cost-by-source.md) | 01 | done |
-| 06 | [Subagents: grant, tools, child sessions, lifecycle](06-subagents-lifecycle.md) | 03, 05 | ready-for-agent |
+| 06 | [Subagents: grant, tools, child sessions, lifecycle](06-subagents-lifecycle.md) | 03, 05 | done |
 | 07 | [Subagents in the PWA and Mission Control](07-subagents-ui.md) | 06 | ready-for-agent |
 | 08 | [Auto review plugin and settings](08-auto-review.md) | 05 | done |
 | 09 | [Cache warming and idle compaction](09-idle-plugins.md) | 01 | done |

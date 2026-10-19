@@ -6,7 +6,7 @@ import { env, reset, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { jsonSchemaToTs } from '@deepseek-ai/dsh-tools'
 import { emptyGrants, type Conversation, type GrantSet, type RobotPanel, type RobotSummary, type Trajectory } from '@mr-robot/protocol'
-import { TOOL_GROUP_NAMES } from '../src/agent/catalog.ts'
+import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../src/agent/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../src/connectors/registry.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { account, testHost } from './connector-host.ts'
@@ -121,7 +121,8 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await settle(mr)
     const shown = await grantsOf(mr)
-    expect(shown.tools).toEqual(Object.fromEntries(TOOL_GROUP_NAMES.map((group) => [group, 'allow'])))
+    // Subagents and the computer are held only when granted, by Mr. Robot too (v1.14, ao-zzga).
+    expect(shown.tools).toEqual(Object.fromEntries(TOOL_GROUP_NAMES.filter((group) => !EXPLICIT_TOOL_GROUPS.includes(group)).map((group) => [group, 'allow'])))
     expect(shown.secrets).toEqual({ shop: 'allow' })
     expect(await registered(mr)).toEqual(expect.arrayContaining(['web_search_exa', 'browser_open', 'robot_list']))
 
