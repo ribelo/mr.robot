@@ -127,6 +127,15 @@ export const conversation = (details = false) => Effect.gen(function* () {
     const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
     items.splice(position, 0, { kind: 'question', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
   }
+  // One card per delegation (ao-15ui), where the Robot started it; it follows the Subagent's state.
+  for (const row of new SubagentStore(store.sql).of(current.liveSessionId).reverse()) {
+    const position = items.findIndex((item) => item.seq >= row.parentSeq)
+    const card: ChatItem = {
+      kind: 'delegation', id: `delegation-${row.id}`, seq: row.parentSeq, at: row.startedAt, subagentId: row.id, label: row.label, mode: row.mode,
+      model: { provider: row.provider, model: row.model, effort: row.effort }, status: row.status, result: row.report === null ? null : (row.report.split('\n')[0] ?? '').slice(0, 200),
+    }
+    items.splice(position < 0 ? items.length : position, 0, card)
+  }
   const working = store.activeTurn() !== undefined
   const activity = working ? runningTool(events) : undefined
   return {
@@ -144,6 +153,7 @@ function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
     case 'reply': return { ...item, text: mask(item.text) }
     case 'notice': return { ...item, text: mask(item.text) }
     case 'thinking': return { ...item, text: mask(item.text) }
+    case 'delegation': return { ...item, label: mask(item.label), result: item.result === null ? null : mask(item.result) }
     case 'activity': return item.calls === undefined ? item : { ...item, calls: item.calls.map((call) => ({ ...call, args: mask(call.args), result: mask(call.result), inner: call.inner.map((inner) => ({ ...inner, args: mask(inner.args) })) })) }
     // A tool-call Ask shows the stored arguments; a secret value among them is masked like the chat (sk-hx8j).
     case 'question': {

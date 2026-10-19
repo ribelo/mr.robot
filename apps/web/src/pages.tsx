@@ -20,6 +20,7 @@ import { Admin } from './components/Admin.tsx'
 import { Takeover } from './components/Takeover.tsx'
 import { ConfirmButton } from './components/RobotSheets.tsx'
 import { MissionControl } from './components/MissionControl.tsx'
+import { SubagentPage } from './components/SubagentPage.tsx'
 
 // The DSH trajectory (with its code highlighter) loads only when its page opens.
 const RobotTrajectory = lazy(() => import('./dsh/RobotTrajectory.tsx').then((module) => ({ default: module.RobotTrajectory })))
@@ -28,6 +29,7 @@ const RobotTrajectory = lazy(() => import('./dsh/RobotTrajectory.tsx').then((mod
 export function Pages({ route, me, robots }: { route: Route; me: Me; robots: readonly RobotSummary[] }) {
   switch (route.page) {
     case 'trajectory': return <TrajectoryPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} me={me} />
+    case 'subagent': return <SubagentPage robotId={route.id} child={route.child} tab={route.tab} robot={robots.find((robot) => robot.id === route.id)} me={me} />
     case 'advanced': return <AdvancedPage id={route.id} />
     case 'mission': return <MissionControl me={me} />
     case 'admin': return (

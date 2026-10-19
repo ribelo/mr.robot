@@ -188,10 +188,17 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .muted { color: var(--faint); font-size: 13px; }
 .usage { margin-top: 10px; }
 .cost-breakdown { border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
-.cost-breakdown th { text-align: left; font-weight: 400; padding: 1px 16px 1px 0; color: var(--muted, inherit); }
+.cost-breakdown th { text-align: left; font-weight: 400; padding: 1px 16px 1px 0; color: var(--muted); }
 .cost-breakdown td { text-align: right; font-variant-numeric: tabular-nums; }
 .cost-breakdown .cost-sub th { padding-left: 12px; }
-.cost-breakdown .cost-total th, .cost-breakdown .cost-total td { font-weight: 600; border-top: 1px solid var(--line, currentColor); padding-top: 3px; }
+.cost-breakdown .cost-total th, .cost-breakdown .cost-total td { font-weight: 600; border-top: 1px solid var(--line); padding-top: 3px; }
+.subagents-control { position: relative; }
+.subagents-menu { position: absolute; right: 12px; top: 48px; z-index: 30; min-width: 260px; display: grid; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+.subagent-lines { position: relative; }
+.subagent-popover { position: absolute; left: 0; top: 100%; z-index: 20; display: grid; gap: 2px; min-width: 320px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.subagent-line { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; font-size: 12.5px; }
+.delegation-line a { color: inherit; text-decoration: none; }
+.delegation-result { display: block; font-size: 12.5px; }
 .computer-state { display: flex; align-items: center; gap: 10px; }
 .cost-robots { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; }
 

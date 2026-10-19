@@ -6,6 +6,8 @@ export type Route =
   | { readonly page: 'robot'; readonly id: string; readonly panel: boolean; readonly from?: 'mission' }
   | { readonly page: 'mission' }
   | { readonly page: 'trajectory'; readonly id: string }
+  /** A Subagent's own Chat or Trajectory (ao-ce55), under its Robot: #/r/:id/subagents/:child. */
+  | { readonly page: 'subagent'; readonly id: string; readonly child: string; readonly tab: 'chat' | 'trajectory' }
   | { readonly page: 'advanced'; readonly id: string }
   | { readonly page: 'takeover'; readonly id: string }
   | { readonly page: 'files'; readonly id: string; readonly path: string | null }
@@ -24,6 +26,7 @@ export function parse(hash: string): Route {
   if (parts[0] === 'r' && parts[1] !== undefined) {
     const id = decodeURIComponent(parts[1])
     if (parts[2] === 'trajectory') return { page: 'trajectory', id }
+    if (parts[2] === 'subagents' && parts[3] !== undefined) return { page: 'subagent', id, child: decodeURIComponent(parts[3]), tab: parts[4] === 'trajectory' ? 'trajectory' : 'chat' }
     if (parts[2] === 'settings') return { page: 'advanced', id }
     if (parts[2] === 'takeover') return { page: 'takeover', id }
     if (parts[2] === 'files') return { page: 'files', id, path: parts.length > 3 ? parts.slice(3).map(decodeURIComponent).join('/') : null }
@@ -43,6 +46,7 @@ export function href(route: Route): string {
     case 'home': return '#/'
     case 'robot': return `#/r/${encodeURIComponent(route.id)}${route.panel ? '/panel' : ''}${route.from === 'mission' ? '?from=mission' : ''}`
     case 'trajectory': return `#/r/${encodeURIComponent(route.id)}/trajectory`
+    case 'subagent': return `#/r/${encodeURIComponent(route.id)}/subagents/${encodeURIComponent(route.child)}${route.tab === 'trajectory' ? '/trajectory' : ''}`
     case 'advanced': return `#/r/${encodeURIComponent(route.id)}/settings`
     case 'takeover': return `#/r/${encodeURIComponent(route.id)}/takeover`
     case 'files': return `#/r/${encodeURIComponent(route.id)}/files${route.path === null ? '' : `/${route.path.split('/').map(encodeURIComponent).join('/')}`}`

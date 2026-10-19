@@ -9,8 +9,10 @@ import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import { Atom } from 'effect/reactivity'
-import type { SessionEventsPage } from '@mr-robot/protocol'
-import { apiRuntime } from '../client/api-atoms.ts'
+import type { SessionEventsPage, SubagentView } from '@mr-robot/protocol'
+import { AsyncResult } from 'effect/reactivity'
+import { apiRuntime, subagentsAtom } from '../client/api-atoms.ts'
+import { href } from '../route.ts'
 import { describeFailure } from '../client/api-failure.ts'
 import { MrRobotApi } from '../client/mr-robot-api.ts'
 import { ErrorState } from '../components/States.tsx'
@@ -115,18 +117,22 @@ const windowOf = (robotId: string): EventWindow => {
 }
 const trajectoryStateAtom = Atom.family((_robotId: string) => Atom.make(INITIAL).pipe(Atom.keepAlive))
 
-type Load = { readonly robotId: string; readonly kind: 'open' | 'refresh' | 'older' }
+type Load = { readonly robotId: string; readonly kind: 'open' | 'refresh' | 'older'; /** A Subagent's own log (ao-ce55). */ readonly child?: string }
+
+/** Whose log a window holds: the Robot's, or one of its Subagents'. */
+const sourceKey = (robotId: string, child?: string) => (child === undefined ? robotId : `${robotId}|${child}`)
 
 /** Open the latest page, append newer events (live), or prepend an older page; resolves whether older rows were added. */
 const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* () {
   const api = yield* MrRobotApi
-  const state = trajectoryStateAtom(load.robotId)
-  const window = windowOf(load.robotId)
+  const key = sourceKey(load.robotId, load.child)
+  const state = trajectoryStateAtom(key)
+  const window = windowOf(key)
   // Read through the registry: a subscribed read would restart this command each time it updates the state.
   const read = () => get.registry.get(state)
   const write = (next: TrajectoryState) => get.registry.set(state, next)
   const open = Effect.gen(function* () {
-    const page = yield* api.events(load.robotId, { limit: PAGE })
+    const page = yield* api.events(load.robotId, { limit: PAGE }, load.child)
     window.sessionId = page.sessionId
     window.firstSeq = page.events[0]?.seq
     window.lastSeq = page.events.at(-1)?.seq
@@ -140,7 +146,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   // Nothing loaded yet: the open in flight brings the latest events.
   if (window.lastSeq === undefined) return false
   if (load.kind === 'refresh') {
-    const page = yield* api.events(load.robotId, { after: window.lastSeq, limit: 2000 })
+    const page = yield* api.events(load.robotId, { after: window.lastSeq, limit: 2000 }, load.child)
     // A different session (after a rewind) replaces the whole window.
     if (page.sessionId !== window.sessionId) return yield* open
     window.events = [...window.events, ...page.events]
@@ -152,7 +158,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   const current = read()
   if (window.firstSeq === undefined || !current.paging.hasMore) return false
   write({ ...current, paging: { ...current.paging, loadingOlder: true } })
-  const page = yield* api.events(load.robotId, { before: window.firstSeq, limit: PAGE }).pipe(
+  const page = yield* api.events(load.robotId, { before: window.firstSeq, limit: PAGE }, load.child).pipe(
     Effect.ensuring(Effect.sync(() => { const now = read(); write({ ...now, paging: { ...now.paging, loadingOlder: false } }) })),
   )
   const before = read().snapshot
@@ -166,7 +172,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   write({ ...now, snapshot, paging: { ...now.paging, hasMore: page.hasMore } })
   return snapshot !== before
 }).pipe(Effect.tapError((failure) => Effect.sync(() => {
-  const target = trajectoryStateAtom(load.robotId)
+  const target = trajectoryStateAtom(sourceKey(load.robotId, load.child))
   get.registry.set(target, { ...get.registry.get(target), failure: describeFailure(failure) })
 }))), { concurrent: true })
 
@@ -215,6 +221,24 @@ function RecordImage({ source, loadImage }: { source: MessageImageSource; loadIm
   return <a href={url} target="_blank" rel="noreferrer"><img className="dsh-record-image" src={url} alt={'attachment' in source ? (source.attachment.name ?? 'image') : 'image'} /></a>
 }
 
+/** The Robot's delegations, one entry each, opening the Subagent's own Trajectory (ao-i3q9). */
+export function DelegationList({ robotId }: { robotId: string }) {
+  const children = AsyncResult.getOrElse(useAtomValue(subagentsAtom(robotId)), () => [] as readonly SubagentView[])
+  if (children.length === 0) return null
+  return (
+    <details className="dsh-reviews" open>
+      <summary>Subagents · {children.length}</summary>
+      <ul aria-label="Delegations">
+        {children.map((child) => (
+          <li key={child.id}>
+            <a href={href({ page: 'subagent', id: robotId, child: child.id, tab: 'trajectory' })}>{child.label}</a> · {child.model.model} · {child.status}{child.result === null ? '' : `: ${child.result}`}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 /** One Auto review decision the session recorded for a call (v1.14, ao-jn6z). */
 export interface ReviewRow {
   readonly seq: number
@@ -253,31 +277,34 @@ export function ReviewList({ reviews }: { reviews: readonly ReviewRow[] }) {
   )
 }
 
-export function RobotTrajectory({ robotId, liveVersion }: { robotId: string; liveVersion: number }) {
-  const state = useAtomValue(trajectoryStateAtom(robotId))
+export function RobotTrajectory({ robotId, liveVersion, child }: { robotId: string; liveVersion: number; child?: string }) {
+  const key = sourceKey(robotId, child)
+  const state = useAtomValue(trajectoryStateAtom(key))
   const load = useAtomSet(loadEventsAtom, { mode: 'promiseExit' })
   const loadImage = useMemo(() => imageLoader(robotId) as unknown as MessageImageLoader, [robotId])
   const wantsActual = useSyncExternalStore(duration.subscribe, duration.getSnapshot)
   // The setter's identity is not stable across renders; effects read the latest one through a ref.
   const loadRef = useRef(load)
   loadRef.current = load
-  useEffect(() => { void loadRef.current({ robotId, kind: 'open' }) }, [robotId])
+  const source = child === undefined ? {} : { child }
+  useEffect(() => { void loadRef.current({ robotId, kind: 'open', ...source }) }, [robotId, child])
   // Every change the Robot announces after the page opened brings the events written since (fe-xp06).
   const openedAt = useRef(liveVersion)
-  useEffect(() => { if (liveVersion !== openedAt.current) void loadRef.current({ robotId, kind: 'refresh' }) }, [robotId, liveVersion])
+  useEffect(() => { if (liveVersion !== openedAt.current) void loadRef.current({ robotId, kind: 'refresh', ...source }) }, [robotId, child, liveVersion])
   const loadOlder = useCallback(async () => {
-    const exit = await loadRef.current({ robotId, kind: 'older' })
+    const exit = await loadRef.current({ robotId, kind: 'older', ...source })
     return Exit.isSuccess(exit) && exit.value
-  }, [robotId])
+  }, [robotId, child])
   const snapshot = state.snapshot
   const paging = state.paging
   const useTrajectory = useCallback(<S,>(select: (value: TrajectorySnapshot) => S) => select(snapshot), [snapshot])
   const useSession = useCallback(<S,>(select: (value: Paging) => S) => select(paging), [paging])
   const useDuration = useCallback(<S,>(select: (value: boolean) => S) => select(wantsActual), [wantsActual])
-  if (state.failure !== null && paging.openState === 'loading') return <ErrorState title="The trajectory cannot be loaded" message={state.failure} onRetry={() => void load({ robotId, kind: 'open' })} />
+  if (state.failure !== null && paging.openState === 'loading') return <ErrorState title="The trajectory cannot be loaded" message={state.failure} onRetry={() => void load({ robotId, kind: 'open', ...source })} />
   return (
     <div className="dsh-trajectory">
-      <ReviewList reviews={reviewsOf(windowOf(robotId).events)} />
+      {child === undefined ? <DelegationList robotId={robotId} /> : null}
+      <ReviewList reviews={reviewsOf(windowOf(key).events)} />
       <TrajectoryView
         useSession={useSession}
         useTrajectory={useTrajectory}

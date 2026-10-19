@@ -24,6 +24,7 @@ import { applyTheme } from './theme/theme.ts'
 import { NewRobot } from './components/NewRobot.tsx'
 import { EditProfileSheet } from './components/RobotSheets.tsx'
 import { TaskSheet } from './components/TaskSheets.tsx'
+import { SubagentsControl } from './components/SubagentsControl.tsx'
 
 export function App() {
   const meResult = useAtomValue(meAtom)
@@ -213,6 +214,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
             <button type="button" className="icon-button small" aria-label="Close search" onClick={() => setSearch(undefined)}>×</button>
           </span>
         )}
+      <SubagentsControl robotId={id} />
       {panel.canEdit ? <button type="button" className="head-button" onClick={() => go({ page: 'advanced', id })}>Settings</button> : null}
       <button
         type="button"

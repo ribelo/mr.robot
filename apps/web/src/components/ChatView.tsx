@@ -8,6 +8,7 @@ import { Avatar } from './Avatar.tsx'
 import { FOLLOW_THRESHOLD_PX } from './ChatScroll.tsx'
 import type { PendingSend } from './pending-sends.ts'
 import { robotTint } from './tint.ts'
+import { href } from '../route.ts'
 
 export interface ChatViewProps {
   readonly items: readonly ChatItem[]
@@ -203,7 +204,27 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
       return <div className="chat-separator ask-line" data-status={item.proposal.status}>{`${askTitle(item.proposal)} · ${item.proposal.status === 'open' ? (canAnswer ? 'answer below' : 'waiting for the owner') : statusText(item.proposal)}`}</div>
     case 'working':
       return null
+    case 'delegation':
+      return <DelegationCard item={item} {...(robotId === undefined ? {} : { robotId })} />
   }
+}
+
+const DELEGATION_STATES: Record<Extract<ChatItem, { kind: 'delegation' }>['status'], string> = { running: 'working', done: 'done', interrupted: 'interrupted', failed: 'failed', archived: 'archived' }
+
+/** One delegation to a Subagent (ao-15ui), in the family of the Task cards: label, model, state, first line of its report. */
+export function DelegationCard({ item, robotId }: { item: Extract<ChatItem, { kind: 'delegation' }>; robotId?: string }) {
+  const body = (
+    <>
+      <span className="task-name">{item.mode === 'fork' ? 'Forked' : 'Delegated'}: {item.label}</span>
+      <span className="muted"> · {item.model === null ? '' : `${item.model.model} · `}{DELEGATION_STATES[item.status]}</span>
+      {item.result === null ? null : <span className="delegation-result">{item.result}</span>}
+    </>
+  )
+  return (
+    <div className="chat-separator delegation-line" data-status={item.status} aria-label={`Subagent ${item.label}`}>
+      {robotId === undefined ? body : <a href={href({ page: 'subagent', id: robotId, child: item.subagentId, tab: 'chat' })}>{body}</a>}
+    </div>
+  )
 }
 
 

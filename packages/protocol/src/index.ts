@@ -994,6 +994,11 @@ export const ChatItem = Schema.Union([
   /** The model's thinking, shown at Detailed and Verbose (pl-etps). */
   Schema.Struct({ kind: Schema.Literal('thinking'), ...itemFields, text: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('working'), ...itemFields }),
+  /** One delegation to a Subagent (ao-15ui): its label, model, state and the first line of its report. */
+  Schema.Struct({
+    kind: Schema.Literal('delegation'), ...itemFields, subagentId: Schema.String, label: Schema.String, mode: Schema.Literals(['spawn', 'fork']),
+    model: Schema.NullOr(ModelChoice), status: Schema.Literals(['running', 'done', 'interrupted', 'failed', 'archived']), result: Schema.NullOr(Schema.String),
+  }),
 ])
 export type ChatItem = typeof ChatItem.Type
 

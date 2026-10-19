@@ -11,7 +11,7 @@ import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
-  LoginView, Me, MemberAvatar, MemberCosts, MemberView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
+  LoginView, Me, MemberAvatar, MemberCosts, MemberView, SubagentView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
   SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
@@ -71,8 +71,12 @@ const make = Effect.gen(function* () {
     conversation: (id: string, details: boolean) => get(Conversation, `/api/robots/${enc(id)}/conversation${details ? '?details=1' : ''}`),
     trajectory: (id: string) => get(Trajectory, `/api/robots/${enc(id)}/trajectory`),
     /** A page of raw session events: the latest (no cursor), newer than after, or older than before. */
-    events: (id: string, page: { readonly before?: number; readonly after?: number; readonly limit: number }) =>
-      get(SessionEventsPage, `/api/robots/${enc(id)}/events?limit=${page.limit}${page.before === undefined ? '' : `&before=${page.before}`}${page.after === undefined ? '' : `&after=${page.after}`}`),
+    events: (id: string, page: { readonly before?: number; readonly after?: number; readonly limit: number }, child?: string) =>
+      get(SessionEventsPage, `/api/robots/${enc(id)}${child === undefined ? '' : `/subagents/${enc(child)}`}/events?limit=${page.limit}${page.before === undefined ? '' : `&before=${page.before}`}${page.after === undefined ? '' : `&after=${page.after}`}`),
+    /** A Robot's Subagents, each with its own Chat and Trajectory (ao-ce55). */
+    subagents: (id: string) => get(Schema.Array(SubagentView), `/api/robots/${enc(id)}/subagents`),
+    subagentConversation: (id: string, child: string) => get(Conversation, `/api/robots/${enc(id)}/subagents/${enc(child)}/conversation`),
+    interruptSubagent: (id: string, child: string) => send('POST', `/api/robots/${enc(id)}/subagents/${enc(child)}/interrupt`),
     panel: (id: string) => get(RobotPanel, `/api/robots/${enc(id)}/panel`),
     catalog: (id: string) => get(SettingsCatalog, `/api/robots/${enc(id)}/catalog`),
     webhook: (id: string) => get(WebhookView, `/api/robots/${enc(id)}/webhook`),

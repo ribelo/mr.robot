@@ -4,9 +4,11 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Component test: header control lists children and opens #/robots/:id/subagents/:child (ao-ce55)
-- [ ] Component test: the child view has Stop and no composer; Stop calls the interrupt API (ao-ce55)
-- [ ] Component test: the delegation card in Chat and the delegation entry in the Trajectory (ao-15ui, ao-i3q9)
-- [ ] Component test: the Fleet row shows the count and expands; Interrupt on a line calls the child interrupt API (ao-j8t9)
+- [x] Component test: header control lists children and opens #/robots/:id/subagents/:child (ao-ce55)
+- [x] Component test: the child view has Stop and no composer; Stop calls the interrupt API (ao-ce55)
+- [x] Component test: the delegation card in Chat and the delegation entry in the Trajectory (ao-15ui, ao-i3q9)
+- [x] Component test: the Fleet row shows the count and expands; Interrupt on a line calls the child interrupt API (ao-j8t9)
+
+**Closing note:** The route is `#/r/:id/subagents/:child` (and `/trajectory`), after the app's other Robot pages (`#/r/...`), not `#/robots/...`. The delegation cards come from the Robot's Subagent rows, so a delegation made inside a code-mode program has its card too. The Fleet row's lines open over the table, so the windowed rows keep one height. The Trajectory lists the delegations (and the Auto review decisions) above DSH's log view; each entry opens the Subagent's own Trajectory.

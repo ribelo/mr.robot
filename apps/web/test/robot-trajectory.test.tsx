@@ -16,6 +16,8 @@ function serveEvents(page: (query: URLSearchParams) => { hasMore: boolean; event
   const calls: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (input: string) => {
     const url = new URL(input, 'http://localhost')
+    // The Robot's delegations are listed above its log (v1.14): not an events page.
+    if (url.pathname.endsWith('/subagents')) return Response.json([])
     calls.push(url.search)
     return Response.json({ sessionId: 's-1', ...page(url.searchParams) })
   }))

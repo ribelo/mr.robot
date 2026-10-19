@@ -52,6 +52,12 @@ export const conversationAtom = Atom.family((key: string) => {
   return query((api) => api.conversation(id, details === 'details'), [keys.robot(id)])
 })
 export const panelAtom = Atom.family((id: string) => query((api) => api.panel(id), [keys.robot(id)]))
+export const subagentsAtom = Atom.family((id: string) => query((api) => api.subagents(id), [keys.robot(id)]))
+/** A Subagent's own Chat: "<robot id>|<subagent id>". */
+export const subagentConversationAtom = Atom.family((key: string) => {
+  const [id = '', child = ''] = key.split('|')
+  return query((api) => api.subagentConversation(id, child), [keys.robot(id)])
+})
 export const catalogAtom = Atom.family((id: string) => query((api) => api.catalog(id), [keys.robot(id)]))
 export const promptAtom = Atom.family((id: string) => query((api) => api.prompt(id), [keys.robot(id)]))
 export const webhookAtom = Atom.family((id: string) => query((api) => api.webhook(id), [keys.robot(id)]))

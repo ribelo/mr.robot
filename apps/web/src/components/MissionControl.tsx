@@ -185,7 +185,8 @@ function MissionTables({ view, prefs, wholeHome, onOpenTask, onForm, onMoreFleet
           columns={fleetColumns}
           header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Last line</span>{wholeHome ? <span>Owner</span> : null}<span /></>}
           renderRow={(robot) => <FleetCells robot={robot} now={now} wholeHome={wholeHome}
-            onInterrupt={() => void command((api) => api.interrupt(robot.id), [keys.robots, keys.tasks, keys.robot(robot.id)])} />}
+            onInterrupt={() => void command((api) => api.interrupt(robot.id), [keys.robots, keys.tasks, keys.robot(robot.id)])}
+            onInterruptSubagent={(childId) => void command((api) => api.interruptSubagent(robot.id, childId), [keys.robots, keys.robot(robot.id)])} />}
           onRowClick={(robot) => go({ page: 'robot', id: robot.id, panel: false, from: 'mission' })}
           onEnd={moreFleet}
         />
@@ -221,13 +222,39 @@ function MissionTables({ view, prefs, wholeHome, onOpenTask, onForm, onMoreFleet
   )
 }
 
-function FleetCells({ robot, now, wholeHome, onInterrupt }: { robot: RobotSummary; now: number; wholeHome: boolean; onInterrupt: () => void }) {
+/**
+ * "working · N Subagents" on a Fleet row (ao-j8t9): it opens one line per Subagent with its label, since when,
+ * the tool it runs and Interrupt. The lines open over the table, so the windowed rows keep their height.
+ */
+function SubagentLines({ robot, now, onInterrupt }: { robot: RobotSummary; now: number; onInterrupt: (childId: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const lines = robot.subagents ?? []
+  return (
+    <span className="subagent-lines">
+      <button type="button" className="link" aria-expanded={open} onClick={(event) => { event.stopPropagation(); setOpen(!open) }}> · {lines.length} {lines.length === 1 ? 'Subagent' : 'Subagents'}</button>
+      {open ? (
+        <span className="subagent-popover" role="list" aria-label={`Subagents of ${robot.identity.name}`} onClick={(event) => event.stopPropagation()}>
+          {lines.map((line) => (
+            <span key={line.id} role="listitem" className="subagent-line">
+              <span>{line.label}</span>
+              <span className="muted">{sinceText(line.since, now)}</span>
+              <span>{line.activity ?? ''}</span>
+              <button type="button" className="link danger" onClick={() => onInterrupt(line.id)}>Interrupt</button>
+            </span>
+          ))}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+function FleetCells({ robot, now, wholeHome, onInterrupt, onInterruptSubagent }: { robot: RobotSummary; now: number; wholeHome: boolean; onInterrupt: () => void; onInterruptSubagent: (childId: string) => void }) {
   const cause: LastWakeup | null = robot.turn ?? robot.lastWakeup
   return (
     <>
       <Avatar seed={robot.identity.avatarSeed} color={robot.identity.avatarColor} size={18} state={robot.fleetState} />
       <span className="wt-cell-name">{robot.identity.name}</span>
-      <span><span className={`state state-${robot.fleetState.split(' ')[0]}`}>{robot.fleetState}</span></span>
+      <span><span className={`state state-${robot.fleetState.split(' ')[0]}`}>{robot.fleetState}</span>{(robot.subagents ?? []).length === 0 ? null : <SubagentLines robot={robot} now={now} onInterrupt={onInterruptSubagent} />}</span>
       <span className={robot.turn === null ? 'muted' : ''}>{cause === null ? '' : wokeText(cause.wakeup)}</span>
       <span className={robot.turn === null ? 'muted' : ''}>{cause?.task?.title ?? (robot.turn === null ? '' : 'no task')}</span>
       <span>{robot.turn?.activity ?? ''}</span>

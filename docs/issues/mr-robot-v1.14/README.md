@@ -10,7 +10,7 @@ Spec: ../mr-robot-v1.14.md. Frontier at the start: 01. Then 02, 03, 05, 09 in pa
 | 04 | [Changing focus with a reason](04-focus-change.md) | 03 | done |
 | 05 | [Cost by source](05-cost-by-source.md) | 01 | done |
 | 06 | [Subagents: grant, tools, child sessions, lifecycle](06-subagents-lifecycle.md) | 03, 05 | done |
-| 07 | [Subagents in the PWA and Mission Control](07-subagents-ui.md) | 06 | ready-for-agent |
+| 07 | [Subagents in the PWA and Mission Control](07-subagents-ui.md) | 06 | done |
 | 08 | [Auto review plugin and settings](08-auto-review.md) | 05 | done |
 | 09 | [Cache warming and idle compaction](09-idle-plugins.md) | 01 | done |
 | 10 | [A computer: Sandbox backend, grant, tools, sync, idle stop, cost](10-computer.md) | 02, 05 | done (staging run open) |
