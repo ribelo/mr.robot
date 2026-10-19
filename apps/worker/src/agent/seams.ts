@@ -3,7 +3,7 @@
  * Member/Home DOs (read-only inside a Robot: people manage keys in the PWA), the fs seam over R2
  * with DSH's file tools, and the browser-use provider registration for Browser Rendering.
  */
-import type { Context } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import BrowserUseRegistry from '@deepseek-ai/dsh-browser-use'
 import {
   CredentialProvider,
@@ -17,7 +17,7 @@ import {
 } from '@deepseek-ai/dsh-credentials'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import type { MemberFileName } from '../member/member.ts'
-import { R2FileSystem } from '../workspace/r2-filesystem.ts'
+import { R2FileSystem, WORKSPACE_ROOT } from '../workspace/r2-filesystem.ts'
 import type { WorkspaceShape } from '../workspace/workspace.ts'
 import type { CredentialSource, ProviderId } from './providers.ts'
 
@@ -79,6 +79,30 @@ export function filesPlugin(workspace: WorkspaceShape, memberFile: (name: Member
   return async (ctx) => {
     await ctx.plugin(R2FileSystem, { workspace, memberFile })
     await ctx.plugin(ToolFs, {})
+  }
+}
+
+/**
+ * DSH's `workingDirectory` seam (DSH 0.2.1: tool-fs, tool-skill and run_code ask it for the current
+ * directory). A Robot always works in its Workspace root and has no cd, so this owner answers
+ * /workspace without filesystem reads, session events or prompt context. DSH's own service would
+ * append a working-directory event to every session log and add a context line to every prompt.
+ */
+export class RobotWorkingDirectory extends Service {
+  constructor(ctx: Context) {
+    super(ctx, 'workingDirectory')
+  }
+
+  get(): string {
+    return WORKSPACE_ROOT
+  }
+
+  async ensure(): Promise<string> {
+    return WORKSPACE_ROOT
+  }
+
+  async set(): Promise<string> {
+    throw new Error(`a Robot works in its Workspace root (${WORKSPACE_ROOT}) and cannot change directory`)
   }
 }
 

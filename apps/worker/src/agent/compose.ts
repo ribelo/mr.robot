@@ -17,6 +17,7 @@ import ToolRuntime, { type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ThinkingEffort } from '@mr-robot/protocol'
 import { BudgetedAdapter } from './budget.ts'
 import { compactionConfig, robotCompaction } from './compaction.ts'
+import { RobotWorkingDirectory } from './seams.ts'
 import { SqliteSessionLog } from './session-log.ts'
 import type { Mount } from '../plugins/define.ts'
 
@@ -66,6 +67,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
       ...(input.redact === undefined ? {} : { redact: input.redact }),
     })
     await ctx.plugin(TokenMeter)
+    await ctx.plugin(RobotWorkingDirectory)
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false })
     ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
       const assembly = await next()

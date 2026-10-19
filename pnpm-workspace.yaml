@@ -20,4 +20,4 @@ minimumReleaseAge: 0
 dedupePeerDependents: false
 
 patchedDependencies:
-  '@deepseek-ai/dsh-llm@0.2.0-rc.2': patches/@deepseek-ai__dsh-llm@0.2.0-rc.2.patch
+  '@deepseek-ai/dsh-llm@0.2.1-rc.2': patches/@deepseek-ai__dsh-llm@0.2.1-rc.2.patch

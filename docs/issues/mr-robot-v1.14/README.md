@@ -4,7 +4,7 @@ Spec: ../mr-robot-v1.14.md. Frontier at the start: 01. Then 02, 03, 05, 09 in pa
 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
-| 01 | [DSH 0.2.1-rc.2 upgrade](01-dsh-upgrade.md) | — | ready-for-agent |
+| 01 | [DSH 0.2.1-rc.2 upgrade](01-dsh-upgrade.md) | — | done |
 | 02 | [Oversized tool results spill to the Workspace](02-spill-to-workspace.md) | 01 | ready-for-agent |
 | 03 | [Steer and follow-up delivery](03-steer-and-followup.md) | 01 | ready-for-agent |
 | 04 | [Changing focus with a reason](04-focus-change.md) | 03 | ready-for-agent |
