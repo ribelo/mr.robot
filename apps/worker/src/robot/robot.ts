@@ -549,6 +549,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.rearm()
     await this.changed()
     await agent.whenIdle()
+    // A steer handed over while the loop was ending is still in the inbox, with no driver to read it:
+    // it runs now, as part of this Turn, so the owner's message is never left waiting for another Wake-up.
+    // After an Interrupt it waits for the next Turn instead.
+    while (agent.inbox.nextStep.length > 0 && this.store.requireConfig().status === 'active' && this.store.get(INTERRUPTED_BY) === undefined) {
+      const late = [...agent.inbox.nextStep]
+      for (const message of late) agent.inbox.remove(message.id)
+      for (const message of late) agent.steer(message)
+      await agent.whenIdle()
+    }
     this.runningAgent = undefined
     await ctx.sessions.flush(agent.session)
     if (this.turnSecrets.length > 0 && this.children.size === 0) {
