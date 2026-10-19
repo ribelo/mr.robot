@@ -18,7 +18,7 @@ type R = RobotState | RobotPlatform
 
 /** What the Task tools need of the running Turn: its subject, and the result line of the Task it finished. */
 export interface TaskTurn {
-  focus(taskId: string): Promise<{ ok: true; title: string } | { ok: false; reason: string }>
+  focus(taskId: string | null, reason: string): Promise<{ ok: true; title: string | null } | { ok: false; reason: string }>
   /** task_done on the Turn's own Task gives its attempt this line. */
   doneLine(taskId: string, line: string): void
 }
@@ -184,10 +184,10 @@ export function tasksHost(run: Deputy.Run, turn: TaskTurn): TasksHost {
     create: (robotId, input) => act(create(robotId, input)),
     update: (robotId, taskId, patch) => act(update(robotId, taskId, patch)),
     assign: (robotId, taskId, text) => change(robotId, (who) => Effect.flatMap(parseAssignee(text, who.caller), (assignee) => home((stub) => stub.assignTask(who.caller, taskId, assignee)))),
-    focus: async (taskId) => {
-      const focused = await turn.focus(taskId)
+    focus: async (taskId, reason) => {
+      const focused = await turn.focus(taskId, reason)
       if (!focused.ok) throw new Error(focused.reason)
-      return { focused: taskId, title: focused.title }
+      return taskId === null ? { focused: null } : { focused: taskId, title: focused.title }
     },
     done: (robotId, taskId, firstLine) => change(robotId, (who) => Effect.gen(function* () {
       if (!who.deputy && firstLine !== undefined && firstLine.trim() !== '') turn.doneLine(taskId, firstLine.trim())

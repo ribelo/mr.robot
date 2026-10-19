@@ -531,7 +531,7 @@ export const rezoneTasks = (memberId: string, from: string, to: string, now = Da
 })
 
 /** An attempt ends (mc-t4dd); the Turn that ran it says how. */
-export const finishAttempt = (attemptId: number, outcome: Exclude<AttemptOutcome, 'running' | 'skipped'>, firstLine: string, now = Date.now()) => Effect.gen(function* () {
+export const finishAttempt = (attemptId: number, outcome: Exclude<AttemptOutcome, 'running'>, firstLine: string, now = Date.now()) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run("UPDATE task_attempt SET outcome = ?, first_line = ?, finished_at = ? WHERE id = ? AND outcome = 'running'", outcome, firstLine.slice(0, 160), now, attemptId)
 })

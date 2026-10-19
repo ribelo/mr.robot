@@ -1509,7 +1509,8 @@ export class Home extends DurableObject<Env> {
   }
 
   /** The Turn ended: its attempt ends ok, failed or interrupted, with the first line of the reply. */
-  attemptFinished(attemptId: number, outcome: 'ok' | 'failed' | 'interrupted', firstLine: string): Promise<void> {
+  /** A running attempt ends; `skipped`: the Robot dropped the Task mid-Turn, with its reason (ao-cvpx). */
+  attemptFinished(attemptId: number, outcome: 'ok' | 'failed' | 'interrupted' | 'skipped', firstLine: string): Promise<void> {
     return this.run(Tasks.finishAttempt(attemptId, outcome, firstLine))
   }
 

@@ -572,9 +572,9 @@ export class RobotStore {
     return { wakeupId: row.wakeup_id, startedAt: row.started_at, sessionId: row.session_id, startSeq: row.start_seq, task }
   }
 
-  /** The running Turn works on this Task from now on (mc-w3cc); set once per Turn. @returns false when it already has one. */
-  setTurnTask(task: { readonly id: string; readonly title: string; readonly attemptId: number }): boolean {
-    return this.sql.exec("UPDATE turn SET task_id = ?, task_title = ?, attempt_id = ? WHERE k = 'active' AND task_id IS NULL", task.id, task.title, task.attemptId).rowsWritten === 1
+  /** The running Turn works on this Task from now on (mc-w3cc), or on none (ao-lj6z). @returns false when no Turn runs. */
+  setTurnTask(task: { readonly id: string; readonly title: string; readonly attemptId: number } | null): boolean {
+    return this.sql.exec("UPDATE turn SET task_id = ?, task_title = ?, attempt_id = ? WHERE k = 'active'", task?.id ?? null, task?.title ?? null, task?.attemptId ?? null).rowsWritten === 1
   }
 
   beginTurn(wakeupId: number, sessionId: string, startSeq: number, now: number): void {

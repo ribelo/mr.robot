@@ -16,7 +16,7 @@ const shopper = robot('r-1', 'Shopper', {
   fleetState: 'working', lastLine: 'Looking for milk.',
   turn: { wakeup: { kind: 'task', from: 'schedule' }, task: { id: 't-1', title: 'Shopping' }, activity: 'browser_open', since: now - 12 * 60_000 },
 })
-const view: MissionView = {
+let view: MissionView = {
   fleet: [shopper, robot('r-2', 'Accountant', { lastWakeup: { wakeup: { kind: 'member', from: 'Anna' }, task: null }, lastLine: 'Invoices sent.' })],
   fleetNext: null,
   tasks: [
@@ -141,5 +141,23 @@ describe('Mission Control (v1.13 ticket 06)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mr. Robot', pressed: true }))
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Mr. Robot' })).toBeNull())
     expect(calls.find((call) => call.method === 'PATCH' && call.path === '/api/me')!.body).toEqual({ mission: { drawer: false } })
+  })
+})
+
+describe('focus changes reach the Fleet (ao-cvpx)', () => {
+  it('a working row shows the new Task once the registry has it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const before = view
+    try {
+      const fleet = await mission()
+      await within(fleet).findByText('Shopping')
+      view = { ...view, fleet: [{ ...shopper, turn: { ...shopper.turn!, task: { id: 't-9', title: 'Invoice' } } }, ...view.fleet.slice(1)] }
+      await vi.advanceTimersByTimeAsync(10_000)
+      await within(fleet).findByText('Invoice')
+      expect(within(fleet).queryByText('Shopping')).toBeNull()
+    } finally {
+      view = before
+      vi.useRealTimers()
+    }
   })
 })

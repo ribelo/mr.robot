@@ -4,7 +4,7 @@
  * before still show their cards as Task cards (mc-c2bb).
  */
 import { reset } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Conversation, Me, TaskPage, TaskView } from '@mr-robot/protocol'
 import { projectChat } from '../src/robot/projection.ts'
@@ -96,22 +96,77 @@ describe('a Robot works with Tasks through the tools (v1.13 ticket 04)', () => {
     expect(await ask()).toContain('does not accept Tasks from the Robots of Anna')
   })
 
-  it('task_focus makes a message Turn work on a Task once; task_done finishes it with its line (mc-w3cc, mc-w4dd)', async () => {
+  it('task_focus makes a message Turn work on a Task; task_done finishes it with its line (mc-w3cc, mc-w4dd)', async () => {
     const id = await robot(ANNA, ['tasks'])
     const shopping = await create(ANNA, { title: 'Shopping', assignee: { kind: 'robot', robotId: id } })
     const elsewhere = await create(ANNA, { title: 'Someone else', assignee: { kind: 'nobody' } })
     const [notMine, focused, again, done] = await calls(id, [
-      { name: 'task_focus', args: { task_id: elsewhere.id } },
-      { name: 'task_focus', args: { task_id: shopping.id } },
-      { name: 'task_focus', args: { task_id: shopping.id } },
+      { name: 'task_focus', args: { task_id: elsewhere.id, reason: 'Anna asked' } },
+      { name: 'task_focus', args: { task_id: shopping.id, reason: 'Anna asked for the shopping now' } },
+      { name: 'task_focus', args: { task_id: shopping.id, reason: 'still the shopping' } },
       { name: 'task_done', args: { task_id: shopping.id, first_line: 'Bought everything.' } },
     ])
     expect(notMine).toContain('not an open Task assigned to you')
     expect(JSON.parse(focused!)).toEqual({ focused: shopping.id, title: 'Shopping' })
-    expect(again).toContain('This Turn already works on that Task.')
+    // Focusing the Task the Turn already works on changes nothing.
+    expect(JSON.parse(again!)).toEqual({ focused: shopping.id, title: 'Shopping' })
     expect(JSON.parse(done!)).toMatchObject({ id: shopping.id, state: 'done' })
     const after = (await api<TaskView>(ANNA, `/api/tasks/${shopping.id}`)).body
     expect(after).toMatchObject({ state: 'done', attempts: [{ robotId: id, outcome: 'ok', firstLine: 'Bought everything.' }] })
+  })
+
+  it('focus changes in a Turn: the Task left ends skipped with the reason, the new one runs, the fleet row follows (ao-lj6z, ao-cvpx)', async () => {
+    const id = await robot(ANNA, ['tasks'])
+    const report = await create(ANNA, { title: 'Report', assignee: { kind: 'robot', robotId: id } })
+    const invoice = await create(ANNA, { title: 'Invoice', assignee: { kind: 'robot', robotId: id } })
+    const taskCell = async () => (await api<Array<{ id: string; turn: { task: { id: string } | null } | null }>>(ANNA, '/api/robots')).body.find((row) => row.id === id)!.turn?.task?.id ?? null
+    const gate = () => { let open!: () => void; const promise = new Promise<void>((resolve) => { open = resolve }); return { promise, open } }
+    const [second, third] = [gate(), gate()]
+    requests.delete(id)
+    scripts.set(id, [
+      { calls: [{ name: 'task_focus', args: { task_id: report.id, reason: 'Anna asked for the report' } }] },
+      { gate: second.promise, then: { calls: [{ name: 'task_focus', args: { task_id: invoice.id, reason: 'Anna said the invoice comes first' } }] } },
+      { gate: third.promise, then: { text: 'Working on the invoice.' } },
+    ])
+    const step = (n: number) => vi.waitFor(() => expect(requests.get(id)?.length ?? 0).toBeGreaterThanOrEqual(n), { timeout: 10_000 })
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'report, then actually the invoice' } })
+    const seen: Array<string | null> = []
+    await step(2)
+    seen.push(await taskCell())
+    second.open()
+    await step(3)
+    seen.push(await taskCell())
+    third.open()
+    await settle(id)
+    expect((await api<TaskView>(ANNA, `/api/tasks/${report.id}`)).body.attempts).toEqual([expect.objectContaining({ outcome: 'skipped', firstLine: 'Anna said the invoice comes first' })])
+    expect((await api<TaskView>(ANNA, `/api/tasks/${invoice.id}`)).body.attempts).toEqual([expect.objectContaining({ outcome: 'ok', firstLine: 'Working on the invoice.' })])
+    expect(seen).toEqual([report.id, invoice.id])
+  })
+
+  it('focus on none: the Task left ends skipped and the row shows no Task (ao-lj6z)', async () => {
+    const id = await robot(ANNA, ['tasks'])
+    const report = await create(ANNA, { title: 'Report', assignee: { kind: 'robot', robotId: id } })
+    const [, cleared] = await calls(id, [
+      { name: 'task_focus', args: { task_id: report.id, reason: 'Anna asked' } },
+      { name: 'task_focus', args: { task_id: 'none', reason: 'Anna wants a chat, no Task' } },
+    ])
+    expect(JSON.parse(cleared!)).toEqual({ focused: null })
+    expect((await api<TaskView>(ANNA, `/api/tasks/${report.id}`)).body.attempts).toEqual([expect.objectContaining({ outcome: 'skipped', firstLine: 'Anna wants a chat, no Task' })])
+    const row = (await api<Array<{ id: string; lastWakeup: { task: unknown } | null }>>(ANNA, '/api/robots')).body.find((entry) => entry.id === id)!
+    expect(row.lastWakeup?.task).toBeNull()
+  })
+
+  it('the dropped Task starts a fresh attempt at its next Wake-up (ao-n2fo)', async () => {
+    const id = await robot(ANNA, ['tasks'])
+    const report = await create(ANNA, { title: 'Report', assignee: { kind: 'robot', robotId: id } })
+    await calls(id, [
+      { name: 'task_focus', args: { task_id: report.id, reason: 'Anna asked' } },
+      { name: 'task_focus', args: { task_id: 'none', reason: 'Dropped for the invoice' } },
+    ])
+    scripts.set(id, [{ text: 'Report written.' }])
+    expect((await api(ANNA, `/api/tasks/${report.id}/run`, { body: {} })).status).toBe(200)
+    await settle(id)
+    expect((await api<TaskView>(ANNA, `/api/tasks/${report.id}`)).body.attempts.map((attempt) => [attempt.outcome, attempt.firstLine])).toEqual([['ok', 'Report written.'], ['skipped', 'Dropped for the invoice']])
   })
 
   it('gives robot_id to Mr. Robot alone (mc-r4dd)', async () => {

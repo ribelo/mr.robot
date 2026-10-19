@@ -41,7 +41,7 @@ export interface TasksHost {
   update(robotId: string | undefined, taskId: string, patch: TaskUpdateArgs): Promise<unknown>
   assign(robotId: string | undefined, taskId: string, assignee: string): Promise<unknown>
   /** The running Turn works on this Task (once per Turn). */
-  focus(taskId: string): Promise<unknown>
+  focus(taskId: string | null, reason: string): Promise<unknown>
   done(robotId: string | undefined, taskId: string, firstLine: string | undefined): Promise<unknown>
   cancel(robotId: string | undefined, taskId: string): Promise<unknown>
   pause(robotId: string | undefined, taskId: string, paused: boolean): Promise<unknown>
@@ -110,11 +110,17 @@ export function taskTools(host: TasksHost): ToolDefinition[] {
       parameters: { properties: { robot_id: robotId, task_id: taskId, assignee }, required: ['task_id', 'assignee'] },
       execute: async ({ robot_id, task_id, assignee: who }) => host.assign(robot_id, task_id, who),
     }),
-    tool<{ task_id: string }>({
+    tool<{ task_id: string; reason: string }>({
       name: 'task_focus',
-      description: 'Say that this Turn works on one of your Tasks, when a message and not its schedule started the work ("do the shopping now"). Once per Turn; the Turn is recorded as an attempt on the Task.',
-      parameters: { properties: { task_id: taskId }, required: ['task_id'] },
-      execute: async ({ task_id }) => host.focus(task_id),
+      description: 'Say which of your Tasks this Turn works on now, or none (task_id "none"): when a message and not its schedule started the work ("do the shopping now"), or when your owner redirected you. Call it again whenever the focus changes; the Task you leave ends its attempt as skipped with your reason.',
+      parameters: {
+        properties: {
+          task_id: { type: 'string', description: 'The Task to work on now, or "none"' },
+          reason: { type: 'string', description: 'Why the focus changes, in one line (for a Task you leave, its attempt line)' },
+        },
+        required: ['task_id', 'reason'],
+      },
+      execute: async ({ task_id, reason }) => host.focus(task_id === 'none' ? null : task_id, reason),
     }),
     tool<{ robot_id?: string; task_id: string; first_line?: string }>({
       name: 'task_done',

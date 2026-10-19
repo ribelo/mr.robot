@@ -7,7 +7,7 @@ Spec: ../mr-robot-v1.14.md. Frontier at the start: 01. Then 02, 03, 05, 09 in pa
 | 01 | [DSH 0.2.1-rc.2 upgrade](01-dsh-upgrade.md) | — | done |
 | 02 | [Oversized tool results spill to the Workspace](02-spill-to-workspace.md) | 01 | done |
 | 03 | [Steer and follow-up delivery](03-steer-and-followup.md) | 01 | done |
-| 04 | [Changing focus with a reason](04-focus-change.md) | 03 | ready-for-agent |
+| 04 | [Changing focus with a reason](04-focus-change.md) | 03 | done |
 | 05 | [Cost by source](05-cost-by-source.md) | 01 | done |
 | 06 | [Subagents: grant, tools, child sessions, lifecycle](06-subagents-lifecycle.md) | 03, 05 | ready-for-agent |
 | 07 | [Subagents in the PWA and Mission Control](07-subagents-ui.md) | 06 | ready-for-agent |

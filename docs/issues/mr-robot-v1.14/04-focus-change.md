@@ -4,10 +4,12 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] task_focus({ task_id: string | null, reason: string }); the once-per-Turn refusal is gone
-- [ ] Workerd test: focus A, then focus B with a reason: A's Attempt is skipped with the reason, B's is running, the registry row shows B (ao-lj6z, ao-cvpx)
-- [ ] Workerd test: focus A, then none: A's Attempt skipped, the row shows no Task (ao-lj6z)
-- [ ] Workerd test: the dropped Task's next scheduled Wake-up starts a fresh Attempt (ao-n2fo)
-- [ ] Component test: a Mission Control row updates its Task cell on the registry change (ao-cvpx)
+- [x] task_focus({ task_id: string | null, reason: string }); the once-per-Turn refusal is gone
+- [x] Workerd test: focus A, then focus B with a reason: A's Attempt is skipped with the reason, B's is running, the registry row shows B (ao-lj6z, ao-cvpx)
+- [x] Workerd test: focus A, then none: A's Attempt skipped, the row shows no Task (ao-lj6z)
+- [x] Workerd test: the dropped Task's next scheduled Wake-up starts a fresh Attempt (ao-n2fo)
+- [x] Component test: a Mission Control row updates its Task cell on the registry change (ao-cvpx)
+
+**Closing note:** The tool takes `task_id: "none"` for no Task instead of null: DSH's code-mode SDK cannot type a string-or-null parameter. Focusing the Task the Turn already works on changes nothing. The Fleet row follows the registry at its next refresh (Mission Control polls every 10 seconds), and the Robot reports the change at once.

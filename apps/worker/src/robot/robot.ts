@@ -395,27 +395,26 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /**
-   * The running Turn works on this Task (mc-w3cc): once per Turn, only a Task assigned to this Robot. The Home
-   * records an attempt running; the Turn's end finishes it.
+   * The running Turn works on this Task, or on none (mc-w3cc, ao-lj6z): only a Task assigned to this Robot. The Home
+   * records an attempt running; the Turn's end finishes it. Focus may change any number of times in a Turn: the
+   * Task it leaves ends its attempt as skipped with the reason, and Mission Control shows the new focus at once (ao-cvpx).
    */
-  async focusTask(taskId: string): Promise<{ ok: true; title: string } | { ok: false; reason: string }> {
+  async focusTask(taskId: string | null, reason: string): Promise<{ ok: true; title: string | null } | { ok: false; reason: string }> {
     const active = this.store.activeTurn()
     if (active === undefined) return { ok: false, reason: 'No Turn is running.' }
-    if (active.task !== null) return { ok: false, reason: active.task.id === taskId ? 'This Turn already works on that Task.' : `This Turn already works on the Task "${active.task.title}" (${active.task.id}). A Turn has one Task.` }
-    const started = await this.home().attemptStarted(taskId, this.store.requireConfig().id)
-    if (started === null) return { ok: false, reason: 'That Task is not an open Task assigned to you.' }
-    if (!this.store.setTurnTask({ id: taskId, title: started.title, attemptId: started.attemptId })) {
-      await this.home().attemptFinished(started.attemptId, 'failed', 'This Turn already had a Task.')
-      return { ok: false, reason: 'This Turn already works on a Task.' }
-    }
+    if (active.task?.id === taskId || (active.task === null && taskId === null)) return { ok: true, title: active.task?.title ?? null }
+    const started = taskId === null ? null : await this.home().attemptStarted(taskId, this.store.requireConfig().id)
+    if (taskId !== null && started === null) return { ok: false, reason: 'That Task is not an open Task assigned to you.' }
+    if (active.task !== null) await this.home().attemptFinished(active.task.attemptId, 'skipped', reason.trim() === '' ? 'Dropped for other work.' : reason.trim())
+    this.store.setTurnTask(started === null || taskId === null ? null : { id: taskId, title: started.title, attemptId: started.attemptId })
     await this.report()
-    return { ok: true, title: started.title }
+    return { ok: true, title: started?.title ?? null }
   }
 
   /** What the Task tools need of the running Turn. */
   private taskTurn(): TaskTurn {
     return {
-      focus: (taskId) => this.focusTask(taskId),
+      focus: (taskId, reason) => this.focusTask(taskId, reason),
       doneLine: (taskId, line) => {
         if (this.store.activeTurn()?.task?.id === taskId) this.store.set(DONE_LINE, line)
       },
@@ -507,7 +506,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.set(`turn-start:${wakeup.id}`, startSeq)
       // A Task Wake-up makes the Task the Turn's subject, with an attempt at the Home (mc-t4dd).
       const taskId = wakeup.kind === 'task' && typeof wakeup.payload['taskId'] === 'string' ? wakeup.payload['taskId'] : undefined
-      if (taskId !== undefined) await this.focusTask(taskId).catch((error: unknown) => console.warn('attempt not started', taskId, error))
+      if (taskId !== undefined) await this.focusTask(taskId, '').catch((error: unknown) => console.warn('attempt not started', taskId, error))
       // Follow-ups from the same sender queued with it join its Turn; a Task never shares one (ao-rdhs).
       const joined = wakeup.kind === 'task' ? [] : joinable(wakeup, this.store.queuedWakeups())
       const first = this.wakeupMessageOf(wakeup, text, toolCallAnswer)

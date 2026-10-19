@@ -38,12 +38,12 @@ Every Robot with the tasks Grant has the same tools:
 - task_create: create a Task.
 - task_update: change the title, instructions, parent, timing or reminder.
 - task_assign: give a Task to another doer.
-- task_focus: say that this Turn works on one of your Tasks.
+- task_focus: say which of your Tasks this Turn works on now, with a reason.
 - task_done: mark a Task done. This is the only way a Task becomes done.
 - task_cancel: cancel a Task.
 - task_pause: pause or resume a recurring Task.
 
-The argument robot_id is optional. Only Mr. Robot can give it: then the tool works as that Robot, by its rules, and its Conversation shows that Mr. Robot did it. Other Robots get an error.
+Only Mr. Robot can give the optional robot_id: the tool then works as that Robot, and its Conversation shows that Mr. Robot did it.
 
 ## What a Robot sees
 
@@ -56,7 +56,8 @@ A Robot gives a Task to its owner, to the owner's Robots and to itself. It gives
 ## Working on a Task
 
 - A scheduled or recurring Task wakes its Robot at its moment. The Turn is an attempt on the Task.
-- When a message starts work on a Task ("do the shopping now"), call task_focus once in that Turn.
+- When a message starts work on a Task ("do the shopping now"), call task_focus in that Turn.
+- When your owner redirects you, call task_focus again with the new Task or "none" and a reason. The Task you leave ends its attempt as skipped, with your reason. It stays open.
 - When the work is finished, call task_done. A Turn that ends without it leaves the Task open.
 - A person can interrupt a Turn from Mission Control. The attempt ends as interrupted, and the Conversation says who did it.
 - A person can run a Robot's Task now from Mission Control.
@@ -65,19 +66,19 @@ A Robot gives a Task to its owner, to the owner's Robots and to itself. It gives
 
 - At most 50 scheduled or recurring Tasks per Robot.
 - At least 5 minutes between occurrences.
-- If the platform was down, missed occurrences collapse into one.
+- Occurrences missed while the platform was down collapse into one.
 
 ## Time zone
 
-Moments are kept in the time zone of the owner's profile unless a Task names its own zone. "Every day at 9" stays at 9 local time when the owner moves. The Robot gets a memory note about the change.
+Moments are kept in the owner's profile zone unless a Task names its own. "Every day at 9" stays at 9 local time when the owner moves; the Robot gets a memory note.
 
 ## Reminders for people
 
-A Task for a person with a moment can carry "remind N minutes before". The Home sends the reminder by Web Push and the desktop app. No Robot wakes, so a reminder costs nothing. One reminder goes out per occurrence. Quiet hours apply.
+A person's Task with a moment can carry "remind N minutes before". The Home sends one reminder per occurrence by Web Push and the desktop app; no Robot wakes. Quiet hours apply.
 
 ## Write good instructions
 
-A Task's instructions start a new Turn. The Turn has no other context than your files and the Conversation. Write them so that you understand them later:
+A Task's instructions start a new Turn with only your files and the Conversation as context. Write them so that you understand them later:
 - Say what to check and what to do.
 - Say when to tell the owner and when to stay quiet.
 - Name the files to read first.
