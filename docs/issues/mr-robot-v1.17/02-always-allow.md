@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: the level is raised and the call runs; the button's data is absent on a review denial; grant history records the Ask (dp-u9z9, dp-kcds, dp-2xp4)
-- [ ] Component test: the button and its absence on a denial (dp-u9z9, dp-kcds)
+- [x] Workerd test: the level is raised and the call runs; the button's data is absent on a review denial; grant history records the Ask (dp-u9z9, dp-kcds, dp-2xp4)
+- [x] Component test: the button and its absence on a denial (dp-u9z9, dp-kcds)

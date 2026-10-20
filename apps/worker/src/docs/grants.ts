@@ -51,6 +51,8 @@ A Robot that needs a different level calls propose_grants. It names each item wi
 
 The owner can also change levels in the Advanced settings of the Robot. Each item has three states there.
 
+A tool-call Ask has "Always allow this". After a confirmation, it sets the items the call waited on to allow for this Robot and runs the call. The Conversation records the change with the Ask id. The owner lowers the level again in the Grants. An Ask from an Auto review denial, or a call without the sandbox, does not have this button.
+
 ## Defaults
 
 - A new Robot ends setup with allow on what the owner approved. It gets ask on files, web and exa. It gets deny on Connections with write, Hosts, logins and exa-agent.

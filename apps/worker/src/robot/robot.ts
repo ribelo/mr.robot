@@ -2685,6 +2685,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.program(Programs.answer(proposalId, revision, approve, approved, scope, { ...(note === undefined ? {} : { note }), ...choice }))
   }
 
+  /** "Always allow this" on a tool-call Ask (v1.17, dp-u9z9): its items go to allow for this Robot, then the stored call is approved. */
+  async alwaysAllow(proposalId: string, revision: number, by: string): Promise<AnswerResult> {
+    const result = await this.program(Programs.alwaysAllow(proposalId, revision, by))
+    await this.changed()
+    return result
+  }
+
   /**
    * Save a credential Ask (v1.15 ticket 05, gb-923q): the entry is created under the owner at the Home, granted to this Robot at allow, and
    * the Robot is woken with its name. The password goes from here to the Home and nowhere else: it is not stored in the Ask, the log or a

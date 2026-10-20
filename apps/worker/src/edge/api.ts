@@ -7,6 +7,7 @@ import { probe } from '../browser/probe.ts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import {
+  AlwaysAllowAnswer,
   LoginInput,
   ConnectionPaste,
   CredentialSave,
@@ -596,6 +597,14 @@ export const api = new Router<ApiContext>()
     const answer = yield* decodeBody(c.request, ProposalAnswer)
     const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved, answer.scope, answer.note, { ...(answer.value === undefined ? {} : { value: answer.value }), ...(answer.values === undefined ? {} : { values: answer.values }), ...(answer.text === undefined ? {} : { text: answer.text }) }))
     if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : result.reason === 'not-yours' ? forbidden('only the owner answers this Ask') : notFound('no such proposal'))
+    return result.proposal
+  }))
+  // "Always allow this" (v1.17, dp-u9z9): the Ask's items at ask go to allow for the Robot, then the stored call runs.
+  .on('POST', '/api/robots/:id/proposals/:proposal/always-allow', (c, { id, proposal }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const { revision } = yield* decodeBody(c.request, AlwaysAllowAnswer)
+    const result = yield* call((): Promise<AnswerResult> => robot(c, id).alwaysAllow(proposal, revision, c.member.name))
+    if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : notFound('no such Ask'))
     return result.proposal
   }))
   // Saving a credential Ask (v1.15 ticket 05): the form's password goes to the Home through this call and nowhere else.

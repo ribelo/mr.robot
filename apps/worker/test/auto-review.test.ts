@@ -82,6 +82,9 @@ describe('Auto review (ao-wkpt, ao-gf33, ao-c8k9, ao-6m9i, ao-hfni, ao-jn6z)', (
     const [ask] = await asks(id)
     expect(ask).toMatchObject({ status: 'open', toolCall: { tool: 'write', reason: 'Auto review denied this call: it overwrites a file the owner did not name' } })
     expect(await reviews(id)).toEqual([expect.objectContaining({ decision: 'deny', risk: 'medium', reason: 'it overwrites a file the owner did not name' })])
+    // A reviewer's no is never turned into a standing yes by one tap (dp-kcds).
+    expect(ask!.toolCall!.alwaysAllow).toBeNull()
+    expect((await api(ANNA, `/api/robots/${id}/proposals/${ask!.id}/always-allow`, { body: { revision: ask!.revision } })).status).toBe(400)
     scripts.set(id, [{ text: 'Written.' }])
     expect((await api(ANNA, `/api/robots/${id}/proposals/${ask!.id}`, { body: { revision: ask!.revision, approve: true } })).status).toBe(200)
     await settle(id)

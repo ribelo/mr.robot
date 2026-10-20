@@ -9,3 +9,5 @@ export type AskReply =
   | { readonly kind: 'dismiss' }
   | { readonly kind: 'save'; readonly entry: Omit<CredentialSave, 'revision'> }
   | { readonly kind: 'decline' }
+  /** "Always allow this" on a tool-call Ask (v1.17, dp-u9z9): its items go to allow for the Robot, and the call runs. */
+  | { readonly kind: 'always-allow' }

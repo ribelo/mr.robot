@@ -16,7 +16,7 @@ import { chainOf, modelOf, withModel } from './chain.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { chiefGrants, type ProposalRow, type RobotConfig, type RobotStore, type WakeupKind } from './store.ts'
 import { setupGrants } from '../agent/catalog.ts'
-import { effectiveSpendLimit, emptyGrants, grantSetFrom, overlayGrants, usableNames, type HomeSpendLimit } from '@mr-robot/protocol'
+import { effectiveSpendLimit, emptyGrants, GRANT_FIELDS, grantSetFrom, overlayGrants, usableNames, type GrantItemRef, type GrantSet, type HomeSpendLimit } from '@mr-robot/protocol'
 import { THREAD_PAUSE_AT, type AskAnswerLabel } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -691,6 +691,42 @@ export const answer = (proposalId: string, revision: number, approve: boolean, a
     },
   })
   return { ok: true, proposal: proposalView(answered) } as AnswerResult
+})
+
+/** A grant item as the owner reads it in a notice. */
+function itemLabel(item: GrantItemRef): string {
+  switch (item.kind) {
+    case 'tool': return `the tool group ${item.name}`
+    case 'skill': return `the skill ${item.name}`
+    case 'recipient': return `messages to ${item.name}`
+    case 'secret': return `the login ${item.name}`
+    case 'host': return `the Host grant ${item.name}`
+    case 'connection': return item.name.endsWith(':write') ? `writing with the Connection ${item.name.slice(0, -':write'.length)}` : `the Connection ${item.name}`
+  }
+}
+
+/**
+ * "Always allow this" (v1.17, dp-u9z9, dp-2xp4; "This Robot sends on its own" on a draft, dp-ef0p): the items at ask the call waited on are set to
+ * allow for this Robot, the Conversation records the change with the Ask it came from, and the stored call is approved. A review denial and a call
+ * without the sandbox offer no such answer (dp-kcds). The grant settings lower the items again like any other grant (dp-fjh7).
+ */
+export const alwaysAllow = (proposalId: string, revision: number, by: string) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const pending = store.proposal(proposalId)
+  if (pending === undefined || pending.kind !== 'tool-call' || pending.toolCall === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
+  if (pending.status !== 'open' || pending.revision !== revision) return { ok: false, reason: 'stale' } as AnswerResult
+  const items = pending.toolCall.alwaysAllow
+  if (items === null) return yield* invalid('this call is decided one at a time: approve or reject it')
+  const raised: GrantSet = { ...emptyGrants }
+  const levels = items.reduce<GrantSet>((set, item) => ({ ...set, [GRANT_FIELDS[item.kind]]: { ...set[GRANT_FIELDS[item.kind]], [item.name]: 'allow' } }), raised)
+  const current = yield* config
+  store.transaction(() => {
+    store.setGrants(overlayGrants(store.grants(), levels))
+    store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), `${by} set ${items.map(itemLabel).join(' and ')} to allow for ${current.identity.name}, raised from Ask ${pending.id}.`, Date.now())
+  })
+  // The composition is rebuilt with the new levels at the next Turn, the one the approval starts.
+  store.updateConfig(() => ({}))
+  return yield* answerToolCall(pending, revision, true, undefined)
 })
 
 /**

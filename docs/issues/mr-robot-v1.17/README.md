@@ -5,7 +5,7 @@ Spec: ../mr-robot-v1.17.md. Frontier at the start: 01, 02, 03, 05 in parallel; t
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
 | 01 | [Multi-select questions](01-multi-select.md) | — | done |
-| 02 | [Always allow on a tool-call Ask](02-always-allow.md) | — | ready-for-agent |
+| 02 | [Always allow on a tool-call Ask](02-always-allow.md) | — | done |
 | 03 | [Draft cards: send tools at ask rendered as messages, edit, Send, Discard](03-draft-cards.md) | — | ready-for-agent |
 | 04 | [Draft revisions and 'this Robot sends on its own'](04-draft-revisions.md) | 03 | ready-for-agent |
 | 05 | [Pages: files, reading view, PDF, rename, cards, panel list](05-pages.md) | — | ready-for-agent |

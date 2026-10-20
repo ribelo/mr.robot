@@ -220,7 +220,7 @@ describe('tool-call Ask (sk-hx8j)', () => {
   const ask: ProposalView = {
     id: 'p-call', kind: 'tool-call', revision: 1, status: 'open', purpose: 'gmail_send: Tell Ben the meeting moved', grants: null, file: null, skill: null,
     toolCall: {
-      robot: 'Inbox', tool: 'gmail_send', reason: 'Tell Ben the meeting moved', note: null,
+      robot: 'Inbox', tool: 'gmail_send', reason: 'Tell Ben the meeting moved', note: null, alwaysAllow: null,
       arguments: [{ name: 'to', value: 'ben@example.com' }, { name: 'token', value: '[secret:gmail]' }, { name: 'body', value: long }],
     },
   }
@@ -256,5 +256,32 @@ describe('tool-call Ask (sk-hx8j)', () => {
     expect(screen.queryByText('Approve')).toBeNull()
     expect(screen.getByText('Your note: Not today')).toBeTruthy()
     expect(screen.getByText('Rejected')).toBeTruthy()
+  })
+})
+
+describe('Always allow this (dp-u9z9, dp-kcds)', () => {
+  const write: ProposalView = {
+    id: 'p-write', kind: 'tool-call', revision: 1, status: 'open', purpose: 'write: Keep the list', grants: null, file: null, skill: null,
+    toolCall: { robot: 'Inbox', tool: 'write', reason: 'Keep the list', note: null, alwaysAllow: [{ kind: 'tool', name: 'files' }], arguments: [{ name: 'file_path', value: 'notes/a.md' }] },
+  }
+
+  it('asks for a confirmation that says what changes, then answers with always-allow', () => {
+    const onReply = vi.fn()
+    render(<AskBar asks={[write]} onAnswer={vi.fn()} onReply={onReply} onReplyInstead={vi.fn()} />)
+    fireEvent.click(screen.getByText('Always allow this'))
+    expect(onReply).not.toHaveBeenCalled()
+    expect(screen.getByText(/Inbox will use write without asking you from now on/)).toBeTruthy()
+    fireEvent.click(screen.getByText('Cancel'))
+    expect(screen.queryByText(/without asking you from now on/)).toBeNull()
+    fireEvent.click(screen.getByText('Always allow this'))
+    fireEvent.click(screen.getByText('Yes, always allow this'))
+    expect(onReply).toHaveBeenCalledWith(write, { kind: 'always-allow' })
+  })
+
+  it('is absent on an Ask that came from an Auto review denial', () => {
+    const denial: ProposalView = { ...write, toolCall: { ...write.toolCall!, reason: 'Auto review denied this call: deletes the repository', alwaysAllow: null } }
+    render(<AskBar asks={[denial]} onAnswer={vi.fn()} onReply={vi.fn()} onReplyInstead={vi.fn()} />)
+    expect(screen.getByText('Approve')).toBeTruthy()
+    expect(screen.queryByText('Always allow this')).toBeNull()
   })
 })

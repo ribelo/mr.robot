@@ -160,6 +160,10 @@ export const robotIdentity = (stored: StoredIdentity, robotId: string, kind?: 'm
 export const GrantKind = Schema.Literals(['tool', 'skill', 'recipient', 'secret', 'host', 'connection'])
 export type GrantKind = typeof GrantKind.Type
 
+/** One grant item by kind and name: a tool group, a skill, a recipient, a login, a Host facet or a Connection (with :write). */
+export const GrantItemRef = Schema.Struct({ kind: GrantKind, name: Schema.String })
+export type GrantItemRef = typeof GrantItemRef.Type
+
 /**
  * The level of one grant item (v1.11, sk-746n): allow, ask (each call waits for the owner's answer)
  * or deny (its tools are not registered). An item that is not named is at deny.
@@ -842,6 +846,11 @@ export const ToolCallAsk = Schema.Struct({
   reason: Schema.String,
   /** The owner's optional text with the answer (the reason of a rejection); null while open or when none was given. */
   note: Schema.NullOr(Schema.String),
+  /**
+   * The grant items "Always allow this" raises to allow (v1.17, dp-u9z9): the items at ask that made the call wait. Null when the button is not
+   * offered: an Auto review denial (dp-kcds), a call that lifts the sandbox, or an Ask stored without its items.
+   */
+  alwaysAllow: Schema.NullOr(Schema.Array(GrantItemRef)),
 })
 export type ToolCallAsk = typeof ToolCallAsk.Type
 
@@ -939,6 +948,9 @@ export const ProposalAnswer = Schema.Struct({
   values: Schema.optional(Schema.Array(Schema.String)),
   text: Schema.optional(Schema.String),
 })
+
+/** "Always allow this" on a tool-call Ask (v1.17, dp-u9z9): the revision the owner saw. */
+export const AlwaysAllowAnswer = Schema.Struct({ revision: Schema.Number })
 
 /** Saving a credential Ask: the entry the owner filled in (v1.15, gb-923q). The password is sent once, to the Home. */
 export const CredentialSave = Schema.Struct({

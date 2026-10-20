@@ -1,6 +1,6 @@
 import { reset, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Conversation, ProposalView, Trajectory } from '@mr-robot/protocol'
+import type { Conversation, ProposalView, RobotPanel, Trajectory } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
@@ -122,5 +122,34 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
     expect(await file(id, 'notes/a.md')).toBe('report')
     expect(lastRequestText(id)).toContain(`[Your owner approved write (${ask!.id})]`)
     expect((await robots(ANNA)).find((robot) => robot.id === id)?.fleetState).not.toBe('waiting for you')
+  })
+})
+
+describe('Always allow this (dp-u9z9, dp-2xp4)', () => {
+  it('raises the item to allow for the Robot, runs the call, records the Ask in the Conversation, and stops asking; the grants lower it again', async () => {
+    const id = await askingRobot(false)
+    await say(id, 'save the list', [{ calls: [write('milk')] }, { text: 'Waiting.' }])
+    const [ask] = await asks(id)
+    expect(ask!.toolCall!.alwaysAllow).toEqual([{ kind: 'tool', name: 'files' }])
+    scripts.set(id, [{ text: 'Saved.' }])
+    const raised = await api<ProposalView>(ANNA, `/api/robots/${id}/proposals/${ask!.id}/always-allow`, { body: { revision: ask!.revision } })
+    expect(raised.status).toBe(200)
+    expect(raised.body.status).toBe('approved')
+    await settle(id)
+    expect(await file(id, 'notes/a.md')).toBe('milk')
+    const settings = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings
+    expect(settings.grants.tools['files']).toBe('allow')
+    const notices = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.flatMap((item) => (item.kind === 'notice' ? [item.text] : []))
+    expect(notices).toContainEqual(expect.stringContaining(`set the tool group files to allow for `))
+    expect(notices).toContainEqual(expect.stringContaining(`raised from Ask ${ask!.id}`))
+    // A second answer to the same Ask is stale.
+    expect((await api(ANNA, `/api/robots/${id}/proposals/${ask!.id}/always-allow`, { body: { revision: ask!.revision } })).status).toBe(409)
+    await say(id, 'add eggs', [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'milk, eggs' } }] }, { text: 'Done.' }])
+    expect(await file(id, 'notes/a.md')).toBe('milk, eggs')
+    expect((await asks(id)).filter((item) => item.status === 'open')).toEqual([])
+    // The tap is a grant change like any other: the settings lower it back to ask.
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { ...settings.grants, tools: { ...settings.grants.tools, files: 'ask' } } } })
+    await say(id, 'and bread', [{ calls: [write('milk, eggs, bread')] }, { text: 'Waiting.' }])
+    expect((await asks(id)).filter((item) => item.status === 'open')).toHaveLength(1)
   })
 })

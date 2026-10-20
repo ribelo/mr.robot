@@ -309,7 +309,7 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, onReply, c
       {proposal.help === undefined && proposal.toolCall === undefined && proposal.question === undefined && proposal.credential === undefined ? <div className="question-purpose">{proposal.purpose}</div> : null}
       {proposal.question === undefined ? null : <QuestionAnswerPanel key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onReply === undefined ? {} : { onReply })} />}
       {proposal.credential === undefined ? null : <CredentialForm key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onReply === undefined ? {} : { onReply })} />}
-      {proposal.toolCall === undefined ? null : <ToolCallAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />}
+      {proposal.toolCall === undefined ? null : <ToolCallAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onReply === undefined ? {} : { onReply })} />}
       {proposal.help === undefined ? null : <HelpAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onHelp === undefined ? {} : { onHelp })} />}
       {lines.length > 0 ? (
         <ul className="grant-list">{lines.map(([kind, name]) => <li key={`${kind}-${name}`}><span className="grant-kind">{kind}</span> {name}</li>)}</ul>
@@ -447,11 +447,12 @@ const ARGUMENT_SHOWN = 240
  * A tool-call Ask (sk-hx8j): the tool, its arguments one per line (long values cut, secrets already masked by
  * the server), the Robot's reason, and Approve or Reject with an optional text the Robot gets with the answer.
  */
-function ToolCallAnswer({ proposal, canAnswer, onAnswer }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer'] }) {
+function ToolCallAnswer({ proposal, canAnswer, onAnswer, onReply }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; onReply?: (proposal: ProposalView, reply: AskReply) => void }) {
   const call = proposal.toolCall!
   const open = proposal.status === 'open' && canAnswer
   const [note, setNote] = useState('')
   const text = note.trim()
+  const [confirming, setConfirming] = useState(false)
   return (
     <>
       {call.arguments.length === 0 ? <div className="question-purpose">No arguments.</div> : (
@@ -473,9 +474,27 @@ function ToolCallAnswer({ proposal, canAnswer, onAnswer }: { proposal: ProposalV
             <button type="button" className="button" onClick={() => onAnswer?.(proposal, false, undefined, undefined, text === '' ? undefined : text)}>Reject</button>
             <button type="button" className="button button-primary" onClick={() => onAnswer?.(proposal, true, undefined, undefined, text === '' ? undefined : text)}>Approve</button>
           </div>
+          {call.alwaysAllow === null || onReply === undefined ? null : (
+            <AlwaysAllow confirming={confirming} onStart={() => setConfirming(true)} onCancel={() => setConfirming(false)} onConfirm={() => onReply(proposal, { kind: 'always-allow' })}
+              question={`${call.robot} will use ${toolLabel(call.tool)} without asking you from now on, and this call runs now. You can change it back in its Grants.`} label="Always allow this" />
+          )}
         </>
       ) : <div className="question-status">{statusText(proposal)}</div>}
     </>
+  )
+}
+
+/** A standing yes in two steps (dp-u9z9, dp-ef0p): the button, then a confirmation that says what changes. */
+export function AlwaysAllow({ confirming, onStart, onCancel, onConfirm, question, label }: { confirming: boolean; onStart: () => void; onCancel: () => void; onConfirm: () => void; question: string; label: string }) {
+  if (!confirming) return <div className="question-actions always-allow"><button type="button" className="link" onClick={onStart}>{label}</button></div>
+  return (
+    <div className="always-allow-confirm" role="group" aria-label="Confirm">
+      <div className="question-purpose">{question}</div>
+      <div className="question-actions">
+        <button type="button" className="button" onClick={onCancel}>Cancel</button>
+        <button type="button" className="button button-primary" onClick={onConfirm}>Yes, {label.charAt(0).toLowerCase()}{label.slice(1)}</button>
+      </div>
+    </div>
   )
 }
 

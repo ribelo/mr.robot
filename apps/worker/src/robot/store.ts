@@ -14,7 +14,7 @@ import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
 import { isRemovedBrowserBackend } from '../browser/removed-backends.ts'
 import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
-import { costBreakdown, type CostBreakdown, type UsageSource } from '@mr-robot/protocol'
+import { costBreakdown, GrantKind as GrantKindSchema, type CostBreakdown, type GrantItemRef, type UsageSource } from '@mr-robot/protocol'
 import { emptyGrants, GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
 import type {
   GrantKind,
@@ -1045,7 +1045,11 @@ export interface StoredToolCall {
   readonly reason: string
   /** The Hosts the call's places resolved to when it was asked, by id in the order it names them (deep review P14); none when it names none. */
   readonly hosts: readonly string[]
+  /** The items at ask that made the call wait, as stored (unknown before they were parsed). */
+  readonly items?: unknown
 }
+
+const isGrantKind = Schema.is(GrantKindSchema)
 
 export function storedToolCall(payload: Record<string, unknown>): StoredToolCall | undefined {
   const call = payload['toolCall'] as Omit<StoredToolCall, 'hosts'> & { readonly hosts?: unknown } | undefined
@@ -1066,8 +1070,19 @@ function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk }
       arguments: Object.entries(call.arguments).map(([name, value]) => ({ name, value: typeof value === 'string' ? value : JSON.stringify(value) ?? 'null' })),
       reason: call.reason,
       note: typeof note === 'string' && note.trim() !== '' ? note : null,
+      alwaysAllow: alwaysAllowItems(call),
     },
   }
+}
+
+/** The stored reason of an Ask that Auto review made: a reviewer's no is never turned into a standing yes (dp-kcds). */
+export const REVIEW_DENIAL_PREFIX = 'Auto review denied'
+
+/** The items "Always allow this" raises (dp-u9z9): the items at ask the call waited on; none for a review denial or a call without the sandbox. */
+function alwaysAllowItems(call: StoredToolCall): GrantItemRef[] | null {
+  if (call.reason.startsWith(REVIEW_DENIAL_PREFIX) || call.arguments['escalate'] === true || !Array.isArray(call.items)) return null
+  const items = call.items.filter((item): item is GrantItemRef => item !== null && typeof item === 'object' && isGrantKind((item as GrantItemRef).kind) && typeof (item as GrantItemRef).name === 'string')
+  return items.length === 0 ? null : items
 }
 
 function questionOf(payload: Record<string, unknown>): { question: QuestionAsk } | Record<string, never> {
