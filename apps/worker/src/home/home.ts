@@ -718,7 +718,11 @@ type HostSql = { id: string; owner_id: string; name: string; platform: string; s
 /** The Member DO reports each host; the Home keeps the index for sharing and the admin view. */
 const hostChanged = (entry: HostEntry | { id: string; removed: true }) => Effect.gen(function* () {
   const sql = yield* Sql
-  if ('removed' in entry) return yield* sql.run('DELETE FROM host WHERE id = ?', entry.id)
+  if ('removed' in entry) {
+    yield* sql.run('DELETE FROM host WHERE id = ?', entry.id)
+    return []
+  }
+  const wasOnline = (yield* sql.first<{ online: number }>('SELECT online FROM host WHERE id = ?', entry.id))?.online === 1
   yield* sql.run(
     `INSERT INTO host (id, owner_id, name, platform, sharing, online, last_seen, version, capabilities, users) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET name = excluded.name, platform = excluded.platform, sharing = excluded.sharing, online = excluded.online,
@@ -726,6 +730,12 @@ const hostChanged = (entry: HostEntry | { id: string; removed: true }) => Effect
     entry.id, entry.ownerId, entry.name, entry.platform, entry.sharing, entry.online ? 1 : 0, entry.lastSeen, entry.version,
     entry.capabilities === null ? null : JSON.stringify(entry.capabilities), JSON.stringify(entry.users),
   )
+  if (wasOnline || !entry.online) return []
+  // The Host came online (v1.16 ticket 05, ob-e271): the Robots that reach it hear, so a scheduled Task that waited for it runs.
+  const reaching = yield* sql.all<{ id: string }>(
+    "SELECT id FROM robot WHERE status = 'active' AND (owner_id = ? OR ? = 'home')", entry.ownerId, entry.sharing,
+  )
+  return reaching.map((robot) => robot.id)
 })
 
 const hostViews = (rows: readonly HostSql[], memberId: string | null) => Effect.gen(function* () {
@@ -1502,7 +1512,7 @@ export class Home extends DurableObject<Env> {
   }
 
   /** A Robot's alarm asks for its due Tasks; the Home hands them out and moves them on (mc-s1aa, mc-s2bb). */
-  dueTasks(robotId: string): Promise<{ tasks: Tasks.DueTask[]; nextDue: number | null }> { return this.run(Tasks.takeDue(robotId)) }
+  dueTasks(robotId: string): Promise<{ tasks: Tasks.DueOccurrence[]; nextDue: number | null }> { return this.run(Tasks.takeDue(robotId)) }
 
   /**
    * A Turn of this Robot starts serving the Task (mc-t4dd, mc-w3cc): an attempt running. Refused (null) for a Task
@@ -1688,7 +1698,10 @@ export class Home extends DurableObject<Env> {
   }
   proxyConfig(): Promise<string | null> { return this.run(proxyConfig) }
   setProxyConfig(url: string | null): Promise<void> { return this.run(setProxyConfig(url)) }
-  hostChanged(entry: HostEntry | { id: string; removed: true }): Promise<void> { return this.run(hostChanged(entry)) }
+  async hostChanged(entry: HostEntry | { id: string; removed: true }): Promise<void> {
+    const reaching = await this.run(hostChanged(entry))
+    for (const id of reaching) this.ctx.waitUntil(this.env.ROBOT.getByName(id).hostOnline().catch((error: unknown) => console.warn('Robot not told of a Host', id, error)))
+  }
   hostsFor(memberId: string): Promise<HostView[]> { return this.run(hostsFor(memberId)) }
   hostOwner(id: string): Promise<string | null> { return this.run(hostOwner(id)) }
   startPairing(name: string, platform: string): Promise<{ code: string }> { return this.run(startPairing(name, platform)) }

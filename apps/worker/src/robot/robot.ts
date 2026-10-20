@@ -429,6 +429,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config !== undefined && config.status !== 'deleted') this.quietSteer(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.expireCapture(Date.now()).catch((error: unknown) => console.warn('sign-in not ended', error))
     if (config !== undefined && config.status !== 'deleted') await this.program(Programs.fireTasks(Date.now())).catch((error: unknown) => console.warn('due Tasks not fetched', error))
+    if (config !== undefined && config.status !== 'deleted') await this.program(Programs.releaseParked(Date.now())).catch((error: unknown) => console.warn('parked Tasks not released', error))
     // Due Tasks start at once; housekeeping below must not delay their Turns.
     if (this.store.pendingWakeups() > 0) this.drain()
     if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
@@ -497,6 +498,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const verb = card.action === 'done' ? 'marked done' : card.action
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Task ${verb} by ${card.by}: ${card.title}`, Date.now(), card)
     await this.changed()
+  }
+
+  /** A Host this Robot's owner reaches came online (v1.16 ticket 05, ob-e271): the scheduled Tasks that waited for it run now. */
+  async hostOnline(): Promise<void> {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted') return
+    await this.program(Programs.releaseParked(Date.now()))
+    if (this.store.pendingWakeups() > 0) this.drain()
+    await this.rearm()
   }
 
   /** The Home planned this Robot's earliest due Task (mc-s1aa): the alarm comes then. */

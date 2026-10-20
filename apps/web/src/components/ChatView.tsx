@@ -301,6 +301,7 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, onReply, c
     ...items('Login', grants.secrets),
     ...items('Host', grants.hosts),
     ...items('Connection', grants.connections),
+    ...(proposal.requiresHosts === true ? [['Setting', 'do not run while any of my Hosts is offline'] as const] : []),
   ]
   return (
     <div className="question" data-status={proposal.status}>

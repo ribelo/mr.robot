@@ -70,6 +70,8 @@ export interface RobotConfig {
   /** Auto review (v1.14 ticket 08): off when absent; the reviewer route, or null for the Home default. */
   readonly autoReview?: boolean
   readonly reviewer?: ModelChoice | null
+  /** v1.16 (ob-5nvd): Tasks wait for, or fail on, an offline Host the Robot holds a facet on; off when absent. */
+  readonly requiresHosts?: boolean
   readonly notifications: NotificationSettings
   /** The Robot's own monthly spend limit, or the Home's (ux-q8ve). */
   readonly spendLimit: RobotSpendLimit
@@ -961,6 +963,7 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
     ...toolCallOf(payload),
     ...questionOf(payload),
     ...credentialOf(payload),
+    ...(payload['requiresHosts'] === true ? { requiresHosts: true } : {}),
     createdAt: row.created_at,
     answeredAt: row.answered_at,
   }

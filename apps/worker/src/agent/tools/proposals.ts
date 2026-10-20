@@ -150,14 +150,21 @@ export function identityTools(host: RobotHost): ToolDefinition[] {
 /** Setup (robot-btct, robot-cobv): the Robot proposes one Grant summary. */
 export function setupTools(host: RobotHost): ToolDefinition[] {
   return [
-    tool<{ purpose: string } & Partial<Record<GrantField, unknown>>>({
+    tool<{ purpose: string; requires_hosts?: boolean } & Partial<Record<GrantField, unknown>>>({
       name: 'setup_complete',
       description: `Finish setup: propose the one summary of Grants you need, each at allow or ask (allow when you name no level). Approval activates you with what you proposed; files, web and exa are at ask unless you propose them, everything else stays denied. Only Grants are approved; your persona files are your own business. Tool groups:\n${catalogText}`,
-      parameters: { properties: { purpose: { type: 'string', description: 'What you will do, in one or two sentences' }, ...grantParameters(PROPOSABLE_LEVELS) }, required: ['purpose'] },
-      execute: async ({ purpose, ...grants }) => {
+      parameters: {
+        properties: {
+          purpose: { type: 'string', description: 'What you will do, in one or two sentences' },
+          requires_hosts: { type: 'boolean', description: 'true when your owner wants you to run no Task while any Host you ask a facet on is offline (v1.16); leave out otherwise' },
+          ...grantParameters(PROPOSABLE_LEVELS),
+        },
+        required: ['purpose'],
+      },
+      execute: async ({ purpose, requires_hosts, ...grants }) => {
         // The stored proposal is what approval applies, defaults included, so the owner sees it all (sk-3sij).
-        const proposal = host.propose('setup', purpose, { grants: setupGrants(proposedGrants(grants, PROPOSABLE_LEVELS)) })
-        return { proposalId: proposal.id, status: 'waiting for your owner to approve the Grants', grants: proposal.grants }
+        const proposal = host.propose('setup', purpose, { grants: setupGrants(proposedGrants(grants, PROPOSABLE_LEVELS)), ...(requires_hosts === true ? { requiresHosts: true } : {}) })
+        return { proposalId: proposal.id, status: 'waiting for your owner to approve the Grants', grants: proposal.grants, ...(proposal.requiresHosts === true ? { requiresHosts: true } : {}) }
       },
     }),
   ]

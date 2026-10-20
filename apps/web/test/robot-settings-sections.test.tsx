@@ -104,6 +104,27 @@ describe('Robot settings: Auto review (ao-c8k9, ao-6m9i)', () => {
 })
 
 
+describe('Robot settings: waiting for Hosts (v1.16 ticket 05, ob-5nvd)', () => {
+  it('is off by default; switching it on saves requiresHosts', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
+    const saved: SettingsPatch[] = []
+    render(<RegistryProvider><AdvancedSettings panel={panel} catalog={catalog} onSave={async (patch) => { saved.push(patch); return true }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
+    const toggle = screen.getByRole('checkbox', { name: /^Do not run while any of my Hosts is offline/ }) as HTMLInputElement
+    expect(toggle.checked).toBe(false)
+    fireEvent.click(toggle)
+    expect(toggle.checked).toBe(true)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).at(-1)!)
+    await waitFor(() => expect(saved).toHaveLength(1))
+    expect(saved[0]).toMatchObject({ requiresHosts: true })
+  })
+
+  it('shows the stored setting', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
+    render(<RegistryProvider><AdvancedSettings panel={{ ...panel, settings: { ...panel.settings, requiresHosts: true } }} catalog={catalog} onSave={async () => true} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
+    expect((screen.getByRole('checkbox', { name: /^Do not run while any of my Hosts is offline/ }) as HTMLInputElement).checked).toBe(true)
+  })
+})
+
 describe('Robot settings: the prompt preview (v1.15 ticket 13, gb-dzf6)', () => {
   it('shows the new sections of the Platform part and the platform skills before the granted ones', async () => {
     const preview = {

@@ -444,6 +444,8 @@ export const RobotSettings = Schema.Struct({
   autoReview: Schema.Boolean,
   /** The reviewer's route; null follows the Home default (ao-6m9i). */
   reviewer: Schema.NullOr(ModelChoice),
+  /** v1.16 (ob-5nvd): no Task runs while a Host the Robot holds a facet on is offline. Absent: off. */
+  requiresHosts: Schema.optional(Schema.Boolean),
   /** What the Home default is now; null: the Robot's own model. */
   homeReviewer: Schema.NullOr(ModelChoice),
   /** The routes its Subagents may run on: the subagents grant's list, empty by default (ao-2z4n). */
@@ -479,6 +481,7 @@ export const DeputySettingsPatch = Schema.Struct({
   idleCompaction: Schema.optional(Schema.Boolean),
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
   autoReview: Schema.optional(Schema.Boolean),
+  requiresHosts: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
 })
@@ -504,6 +507,7 @@ export const SettingsPatch = Schema.Struct({
   idleCompaction: Schema.optional(Schema.Boolean),
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
   autoReview: Schema.optional(Schema.Boolean),
+  requiresHosts: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
 })
@@ -874,6 +878,8 @@ export const ProposalView = Schema.Struct({
   question: Schema.optional(QuestionAsk),
   /** Credential Ask: what the Robot asked for and, once answered, the entry saved or the refusal. */
   credential: Schema.optional(CredentialAsk),
+  /** Setup only (v1.16, ob-kvw3): the Robot also proposes the setting "do not run while any of my Hosts is offline". */
+  requiresHosts: Schema.optional(Schema.Boolean),
 })
 export type ProposalView = typeof ProposalView.Type
 
