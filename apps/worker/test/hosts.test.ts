@@ -5,6 +5,7 @@ import type { HostView, Me, RobotSummary } from '@mr-robot/protocol'
 import { frame, HostError, HostRpcs, parseFrame, serveHost } from '@mr-robot/host-protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
+import { boxDisks, boxLog } from './stub-box.ts'
 
 const ANNA = 'anna@example.com'
 const BEN = 'ben@example.com'
@@ -22,6 +23,9 @@ beforeEach(async () => {
 
 const ran: string[] = []
 const open: WebSocket[] = []
+/** The fake host's disk (v1.15, host_copy): path → bytes; a path in `declaredSize` reports that size and holds nothing. */
+const hostDisk = new Map<string, Uint8Array>()
+const declaredSize = new Map<string, number>()
 
 afterEach(async () => {
   for (const socket of open.splice(0)) {
@@ -51,6 +55,23 @@ async function fakeHost(name = 'Desk') {
   const handlers = HostRpcs.toLayer({
     Read: ({ path }) => path === '/root/secret' ? Effect.fail(new HostError({ message: 'permission denied', code: 'EACCES' })) : Effect.succeed({ path, size: 5, text: 'hello', base64: null }),
     Write: ({ path, text }) => Effect.succeed({ path, bytes: (text ?? '').length }),
+    ReadChunk: ({ path, offset, length }) => {
+      const size = declaredSize.get(path) ?? hostDisk.get(path)?.length
+      if (size === undefined) return Effect.fail(new HostError({ message: `no such file: ${path}`, code: 'ENOENT' }))
+      const bytes = (hostDisk.get(path) ?? new Uint8Array()).subarray(offset, offset + length)
+      let binary = ''
+      for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+      return Effect.succeed({ path, size, base64: btoa(binary) })
+    },
+    WriteChunk: ({ path, offset, base64 }) => Effect.sync(() => {
+      const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
+      const before = offset === 0 ? new Uint8Array() : (hostDisk.get(path) ?? new Uint8Array())
+      const next = new Uint8Array(Math.max(before.length, offset + bytes.length))
+      next.set(before)
+      next.set(bytes, offset)
+      hostDisk.set(path, next)
+      return { path, bytes: bytes.length }
+    }),
     Run: ({ command }) => Effect.sync(() => { ran.push(command); return { stdout: `ran: ${command}`, stderr: '', exitCode: 0, timedOut: false } }),
     BrowserOpen: () => Effect.fail(new HostError({ message: 'no Chrome in the fake host' })),
     BrowserClose: () => Effect.void,
@@ -191,5 +212,94 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     const actions = (await api<Array<{ robotName: string; action: string; detail: string; outcome: string; exitCode: number | null }>>(ANNA, `/api/hosts/${desk.hostId}/actions`)).body
     expect(actions[0]).toMatchObject({ robotName: 'New robot', action: 'run', detail: 'uname -a', outcome: 'done', exitCode: 0 })
     expect((await api(BEN, `/api/hosts/${desk.hostId}/actions`)).status).toBe(404)
+  })
+})
+
+describe('host_copy (v1.15 ticket 09, gb-iw01, gb-rvj5, gb-mcnc)', () => {
+  /** A pattern that shows a wrong byte, wrong order or a lost piece: 2.5 MiB, so three pieces. */
+  const binary = (length: number) => Uint8Array.from({ length }, (_, index) => (index * 31 + (index >> 8)) & 255)
+  const workspaceBytes = async (id: string, path: string) => {
+    const object = await env.FILES.get(`robots/${id}/${path}`)
+    return object === null ? null : new Uint8Array(await object.arrayBuffer())
+  }
+
+  beforeEach(() => {
+    hostDisk.clear()
+    declaredSize.clear()
+  })
+
+  it('copies a binary file each way, byte for byte, in pieces; the result names both paths and the size; the log has one line', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(ANNA, [`${desk.hostId}:files`])
+    const bytes = binary(2_500_000)
+    hostDisk.set('/home/anna/report.bin', bytes)
+    await say(ANNA, id, [{ calls: [{ name: 'host_copy', args: { host: 'Desk', direction: 'to_workspace', host_path: '/home/anna/report.bin', workspace_path: 'inbox/report.bin' } }] }, { text: 'Copied.' }])
+    expect(toolResults(id).at(-1)).toBeDefined()
+    expect(JSON.parse(toolResults(id).at(-1)!)).toEqual({ host: 'Desk', direction: 'to_workspace', hostPath: '/home/anna/report.bin', workspacePath: 'inbox/report.bin', bytes: 2_500_000 })
+    expect(await workspaceBytes(id, 'inbox/report.bin')).toEqual(bytes)
+
+    const back = binary(1_048_576)
+    await env.FILES.put(`robots/${id}/out/data.bin`, back)
+    await say(ANNA, id, [{ calls: [{ name: 'host_copy', args: { host: 'Desk', direction: 'to_host', host_path: '/home/anna/copy/data.bin', workspace_path: 'out/data.bin' } }] }, { text: 'Copied.' }])
+    expect(JSON.parse(toolResults(id).at(-1)!)).toMatchObject({ direction: 'to_host', hostPath: '/home/anna/copy/data.bin', workspacePath: 'out/data.bin', bytes: 1_048_576 })
+    expect(hostDisk.get('/home/anna/copy/data.bin')).toEqual(back)
+
+    // An empty file copies too.
+    await env.FILES.put(`robots/${id}/out/empty.txt`, new Uint8Array())
+    await say(ANNA, id, [{ calls: [{ name: 'host_copy', args: { host: 'Desk', direction: 'to_host', host_path: '/home/anna/empty.txt', workspace_path: 'out/empty.txt' } }] }, { text: 'Copied.' }])
+    expect(hostDisk.get('/home/anna/empty.txt')).toEqual(new Uint8Array())
+
+    const actions = (await api<Array<{ action: string; detail: string; outcome: string }>>(ANNA, `/api/hosts/${desk.hostId}/actions`)).body
+    expect(actions.filter((action) => action.action === 'copy').map((action) => [action.detail, action.outcome])).toEqual([
+      ['out/empty.txt → /home/anna/empty.txt', 'done'],
+      ['out/data.bin → /home/anna/copy/data.bin', 'done'],
+      ['/home/anna/report.bin → inbox/report.bin', 'done'],
+    ])
+  })
+
+  it('refuses a file over 100 MB with the reason, a missing file, a path outside the Workspace and the platform docs', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(ANNA, [`${desk.hostId}:files`])
+    declaredSize.set('/home/anna/huge.iso', 100 * 1024 * 1024 + 1)
+    await say(ANNA, id, [{ calls: [
+      { name: 'host_copy', args: { host: 'Desk', direction: 'to_workspace', host_path: '/home/anna/huge.iso', workspace_path: 'huge.iso' } },
+      { name: 'host_copy', args: { host: 'Desk', direction: 'to_workspace', host_path: '/home/anna/nope', workspace_path: 'nope' } },
+      { name: 'host_copy', args: { host: 'Desk', direction: 'to_host', host_path: '/home/anna/x', workspace_path: 'out/missing.bin' } },
+      { name: 'host_copy', args: { host: 'Desk', direction: 'to_workspace', host_path: '/home/anna/x', workspace_path: '../escape' } },
+      { name: 'host_copy', args: { host: 'Desk', direction: 'to_workspace', host_path: '/home/anna/x', workspace_path: 'docs/robots.md' } },
+      { name: 'host_copy', args: { host: 'Desk', direction: 'sideways', host_path: '/home/anna/x', workspace_path: 'x' } },
+    ] }, { text: 'Refused.' }])
+    const results = toolResults(id).slice(-6)
+    expect(results[0]).toContain('files over 100 MB are not copied')
+    expect(results[1]).toContain('no such file')
+    expect(results[2]).toContain('no file "out/missing.bin" in your Workspace')
+    expect(results[3]).toContain('is not a path in your Workspace')
+    expect(results[4]).toContain('is not a path in your Workspace')
+    expect(results[5]).toContain('direction is to_workspace or to_host')
+    expect(await workspaceBytes(id, 'huge.iso')).toBeNull()
+  })
+
+  it('needs the Host\'s file Grant: without it the tool is absent and the Host refuses a piece', async () => {
+    const desk = await fakeHost()
+    const shellOnly = await robotWith(ANNA, [`${desk.hostId}:shell`])
+    await say(ANNA, shellOnly, [{ text: 'hi' }])
+    expect(requests.get(shellOnly)!.at(-1)!.tools!.map((definition) => definition.name)).not.toContain('host_copy')
+    const member = env.MEMBER.getByName(annaId)
+    expect(await refusal(() => member.hostReadChunk(desk.hostId, shellOnly, { path: '/home/anna/report.bin', offset: 0, length: 10 }))).toContain('has no files grant on the host "Desk"')
+    expect(await refusal(() => member.hostWriteChunk(desk.hostId, shellOnly, { path: '/tmp/x', offset: 0, base64: 'AA==' }))).toContain('has no files grant on the host "Desk"')
+    const granted = await robotWith(ANNA, [`${desk.hostId}:files`])
+    await say(ANNA, granted, [{ text: 'hi' }])
+    expect(requests.get(granted)!.at(-1)!.tools!.map((definition) => definition.name)).toContain('host_copy')
+  })
+
+  it('a file copied into the Workspace under box/ is in the Box at its next boot (gb-mcnc)', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(ANNA, [`${desk.hostId}:files`])
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { box: 'allow' }, skills: [], recipients: [], secrets: [], hosts: { [`${desk.hostId}:files`]: 'allow' } } } })
+    const bytes = binary(70_000)
+    hostDisk.set('/home/anna/model.bin', bytes)
+    await say(ANNA, id, [{ calls: [{ name: 'host_copy', args: { host: 'Desk', direction: 'to_workspace', host_path: '/home/anna/model.bin', workspace_path: 'box/model.bin' } }, { name: 'box_run', args: { command: 'ls' } }] }, { text: 'Ready.' }])
+    expect(boxLog.get(id)![0]).toBe('boot')
+    expect(boxDisks.get(id)!.get('/workspace/box/model.bin')?.bytes).toEqual(bytes)
   })
 })

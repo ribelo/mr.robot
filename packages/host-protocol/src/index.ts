@@ -36,6 +36,23 @@ export const Write = Rpc.make('Write', {
   error: HostError,
 })
 
+/**
+ * One piece of a file (v1.15, gb-iw01): host_copy moves a file in pieces so that no frame holds it whole and no piece passes through the
+ * model. A read at the end of the file returns an empty piece; `size` is the size of the whole file.
+ */
+export const ReadChunk = Rpc.make('ReadChunk', {
+  payload: { path: Schema.String, offset: Schema.Number, length: Schema.Number },
+  success: Schema.Struct({ path: Schema.String, size: Schema.Number, base64: Schema.String }),
+  error: HostError,
+})
+
+/** Write one piece at an offset; the piece at offset 0 starts the file afresh (and creates its directories). */
+export const WriteChunk = Rpc.make('WriteChunk', {
+  payload: { path: Schema.String, offset: Schema.Number, base64: Schema.String },
+  success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
+  error: HostError,
+})
+
 /** Run a shell command as the signed-in user, in their login shell and environment (hs-i785). */
 export const Run = Rpc.make('Run', {
   payload: { command: Schema.String, cwd: Schema.optional(Schema.String), timeoutMs: Schema.optional(Schema.Number) },
@@ -55,7 +72,11 @@ export const BrowserClose = Rpc.make('BrowserClose', {
   error: HostError,
 })
 
-export class HostRpcs extends RpcGroup.make(Read, Write, Run, BrowserOpen, BrowserClose) {}
+export class HostRpcs extends RpcGroup.make(Read, Write, ReadChunk, WriteChunk, Run, BrowserOpen, BrowserClose) {}
+
+/** The size of one piece of a copy, and the largest file host_copy moves (v1.15, gb-rvj5). */
+export const COPY_CHUNK_BYTES = 1024 * 1024
+export const COPY_MAX_BYTES = 100 * 1024 * 1024
 
 /** What a Host reports every few seconds while connected (hs-7dlt). */
 export const Heartbeat = Schema.Struct({

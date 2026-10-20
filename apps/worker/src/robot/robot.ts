@@ -11,6 +11,7 @@ import { clearWorkspace } from '../workspace/workspace.ts'
 import { SPILL_SWEEP_EVERY_MS, sweepSpill } from '../workspace/spill.ts'
 import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCREEN_SWEEP_EVERY_MS, sweepScreenshots } from '../workspace/screens.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
+import { COPY_CHUNK_BYTES, COPY_MAX_BYTES } from '@mr-robot/host-protocol'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
 import { createUserMessage, LlmError, ReasoningEffortId, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -18,6 +19,7 @@ import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { readDecision, REVIEW_POLICY, reviewHistory, reviewUserText } from '../agent/auto-review.ts'
 import { WORKSPACE_ROOT } from '../workspace/r2-filesystem.ts'
+import { workspacePrefix } from '../workspace/workspace.ts'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
 import { IDLE_MEMORY_NOTE, IDLE_MEMORY_STEPS, idlePlan, idleSettings, type IdleStep } from './idle.ts'
@@ -1910,7 +1912,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         possible: usableNames(grants.skills).map((skill): GrantItem => ({ kind: 'skill', name: skill })),
         used: async (args) => (typeof args['name'] === 'string' && Object.hasOwn(grants.skills, args['name']) ? [{ kind: 'skill', name: args['name'] }] : []),
       } : NO_ITEMS),
-      hosts: (name) => (name === 'host_run' ? hostFacet('shell') : name === 'host_read' || name === 'host_write' ? hostFacet('files') : NO_ITEMS),
+      hosts: (name) => (name === 'host_run' ? hostFacet('shell') : name === 'host_read' || name === 'host_write' || name === 'host_copy' ? hostFacet('files') : NO_ITEMS),
     }
   }
 
@@ -2048,6 +2050,73 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const host = await this.resolveHost(name)
     const result = await this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostWrite(host.id, this.store.requireConfig().id, encoding === 'base64' ? { path, base64: content } : { path, text: content }))
     return { host: host.name, ...result }
+  }
+
+  /**
+   * Copy a file between a Host and the Workspace in pieces (v1.15 ticket 09, gb-iw01, gb-rvj5, gb-mcnc). The bytes go from one to the other
+   * through this object and never through the model; at most one piece is held, and the Workspace file is streamed to R2.
+   */
+  async hostCopy(name: string, direction: 'to_workspace' | 'to_host', hostPath: string, workspacePath: string): Promise<unknown> {
+    const host = await this.resolveHost(name)
+    const robotId = this.store.requireConfig().id
+    const path = normalizePath(workspacePath)
+    if (path === undefined || isDocsPath(path)) throw new Error(`host_copy: "${workspacePath}" is not a path in your Workspace`)
+    const member = await this.hostOwnerStub(host.id)
+    const detail = direction === 'to_workspace' ? `${hostPath} → ${path}` : `${path} → ${hostPath}`
+    try {
+      const result = direction === 'to_workspace' ? await this.copyToWorkspace(member, host.id, robotId, hostPath, path) : await this.copyToHost(member, host.id, robotId, hostPath, path)
+      await member.recordHostCopy(host.id, robotId, detail, 'done')
+      return { host: host.name, direction, ...result }
+    } catch (error) {
+      await member.recordHostCopy(host.id, robotId, detail, error instanceof Error ? error.message : String(error)).catch(() => undefined)
+      throw error instanceof Error && error.name === 'HostOffline' ? new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running.`) : error
+    }
+  }
+
+  private async copyToWorkspace(member: Awaited<ReturnType<Robot['hostOwnerStub']>>, hostId: string, robotId: string, hostPath: string, path: string): Promise<{ hostPath: string; workspacePath: string; bytes: number }> {
+    const first = await this.hostCall(() => member.hostReadChunk(hostId, robotId, { path: hostPath, offset: 0, length: COPY_CHUNK_BYTES }))
+    if (first.size > COPY_MAX_BYTES) throw new Error(`host_copy: ${first.path} is ${first.size} bytes; files over ${COPY_MAX_BYTES / 1024 / 1024} MB are not copied. Cut it on the computer first.`)
+    const fixed = new FixedLengthStream(first.size)
+    const writing = this.run(this.workspace.write(path, fixed.readable))
+    const writer = fixed.writable.getWriter()
+    try {
+      let offset = 0
+      let chunk = first
+      for (;;) {
+        const bytes = Uint8Array.from(atob(chunk.base64), (char) => char.charCodeAt(0))
+        if (bytes.length === 0 && offset < first.size) throw new Error(`host_copy: ${first.path} changed while it was copied`)
+        if (bytes.length > 0) await writer.write(bytes)
+        offset += bytes.length
+        if (offset >= first.size) break
+        chunk = await this.hostCall(() => member.hostReadChunk(hostId, robotId, { path: hostPath, offset, length: COPY_CHUNK_BYTES }))
+      }
+      await writer.close()
+    } catch (error) {
+      await writer.abort(error).catch(() => undefined)
+      await writing.catch(() => undefined)
+      throw error
+    }
+    await writing
+    return { hostPath: first.path, workspacePath: path, bytes: first.size }
+  }
+
+  private async copyToHost(member: Awaited<ReturnType<Robot['hostOwnerStub']>>, hostId: string, robotId: string, hostPath: string, path: string): Promise<{ hostPath: string; workspacePath: string; bytes: number }> {
+    const key = `${workspacePrefix(robotId)}${path}`
+    const head = await this.env.FILES.head(key)
+    if (head === null) throw new Error(`host_copy: no file "${path}" in your Workspace`)
+    if (head.size > COPY_MAX_BYTES) throw new Error(`host_copy: ${path} is ${head.size} bytes; files over ${COPY_MAX_BYTES / 1024 / 1024} MB are not copied.`)
+    let offset = 0
+    let written = hostPath
+    do {
+      const length = Math.min(COPY_CHUNK_BYTES, head.size - offset)
+      const body = length === 0 ? new Uint8Array() : new Uint8Array(await (await this.env.FILES.get(key, { range: { offset, length } }))!.arrayBuffer())
+      let binary = ''
+      for (let at = 0; at < body.length; at += 0x8000) binary += String.fromCharCode(...body.subarray(at, at + 0x8000))
+      const result = await this.hostCall(() => member.hostWriteChunk(hostId, robotId, { path: hostPath, offset, base64: btoa(binary) }))
+      written = result.path
+      offset += body.length
+    } while (offset < head.size)
+    return { hostPath: written, workspacePath: path, bytes: head.size }
   }
 
   async hostRun(name: string, command: string, cwd: string | undefined, timeoutSeconds: number | undefined): Promise<unknown> {

@@ -3,7 +3,7 @@
  * browser sessions relayed between Mr. Robot and the host's Chrome (hs-mqwd).
  */
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
 import * as Effect from 'effect/Effect'
@@ -52,6 +52,42 @@ export function hostHandlers(chrome: HostChrome, relay: () => Relay, onSessions:
         const body = base64 !== undefined ? Buffer.from(base64, 'base64') : Buffer.from(text ?? '', 'utf8')
         await mkdir(dirname(full), { recursive: true })
         await writeFile(full, body)
+        return { path: full, bytes: body.length }
+      },
+      catch: fail,
+    }),
+    // A file in pieces (v1.15, host_copy): the piece at offset 0 truncates, later ones write at their offset.
+    ReadChunk: ({ path, offset, length }) => Effect.tryPromise({
+      try: async () => {
+        const full = resolve(path)
+        const info = await stat(full)
+        const handle = await open(full, 'r')
+        try {
+          const wanted = Math.max(0, Math.min(length, info.size - offset))
+          const buffer = Buffer.alloc(wanted)
+          const { bytesRead } = await handle.read(buffer, 0, wanted, offset)
+          return { path: full, size: info.size, base64: buffer.subarray(0, bytesRead).toString('base64') }
+        } finally {
+          await handle.close()
+        }
+      },
+      catch: fail,
+    }),
+    WriteChunk: ({ path, offset, base64 }) => Effect.tryPromise({
+      try: async () => {
+        const full = resolve(path)
+        const body = Buffer.from(base64, 'base64')
+        if (offset === 0) {
+          await mkdir(dirname(full), { recursive: true })
+          await writeFile(full, body)
+        } else {
+          const handle = await open(full, 'r+')
+          try {
+            await handle.write(body, 0, body.length, offset)
+          } finally {
+            await handle.close()
+          }
+        }
         return { path: full, bytes: body.length }
       },
       catch: fail,

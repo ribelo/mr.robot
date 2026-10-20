@@ -281,6 +281,11 @@ export class HostHub {
 
   private readonly robotNames = new Map<string, string>()
 
+  /** A copy is one line in the host's log, not one per piece (v1.15, host_copy). */
+  recordCopy(entry: { hostId: string; robotId: string; detail: string; outcome: string }): void {
+    this.record({ ...entry, action: 'copy', exitCode: null })
+  }
+
   /** The latest actions on one host, newest first. */
   actions(id: string, limit = 100): HostAction[] {
     this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS host_action (id INTEGER PRIMARY KEY AUTOINCREMENT, host_id TEXT NOT NULL, robot_id TEXT NOT NULL, robot_name TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL, outcome TEXT NOT NULL, exit_code INTEGER, at INTEGER NOT NULL)')

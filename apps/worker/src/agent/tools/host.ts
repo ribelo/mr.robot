@@ -5,6 +5,7 @@ export interface HostToolHost {
   hostRead(host: string, path: string): Promise<unknown>
   hostWrite(host: string, path: string, content: string, encoding: 'text' | 'base64'): Promise<unknown>
   hostRun(host: string, command: string, cwd: string | undefined, timeoutSeconds: number | undefined): Promise<unknown>
+  hostCopy(host: string, direction: 'to_workspace' | 'to_host', hostPath: string, workspacePath: string): Promise<unknown>
 }
 
 /** Host tools (v1.2 ticket 02, hs-n34u): files and a shell on the owner's computers this Robot is granted. */
@@ -18,6 +19,23 @@ export function hostTools(host: HostToolHost, granted: { files: readonly string[
         description: `Read a file on one of your owner's computers (${list(granted.files)}), as your owner's user. Text comes back as text, other files as base64.`,
         parameters: { properties: { host: { type: 'string', description: 'host name' }, path: { type: 'string', description: 'absolute path, or relative to the home directory' } }, required: ['host', 'path'] },
         execute: async ({ host: name, path }) => host.hostRead(name, path),
+      }),
+      tool<{ host: string; direction: 'to_workspace' | 'to_host'; host_path: string; workspace_path: string }>({
+        name: 'host_copy',
+        description: `Copy one file between one of your owner's computers (${list(granted.files)}) and your Workspace, in either direction, as it is: binary files too, up to 100 MB. The content does not pass through you, so use this, not host_read and host_write, for reports, datasets, images and anything large. A file copied into your Workspace under box/ is in your Box at its next boot. Returns both paths and the size.`,
+        parameters: {
+          properties: {
+            host: { type: 'string', description: 'host name' },
+            direction: { type: 'string', enum: ['to_workspace', 'to_host'], description: 'to_workspace: from the computer into your Workspace; to_host: from your Workspace onto the computer' },
+            host_path: { type: 'string', description: 'absolute path on the computer, or relative to the home directory' },
+            workspace_path: { type: 'string', description: 'path in your Workspace' },
+          },
+          required: ['host', 'direction', 'host_path', 'workspace_path'],
+        },
+        execute: async ({ host: name, direction, host_path, workspace_path }) => {
+          if (direction !== 'to_workspace' && direction !== 'to_host') throw new Error('host_copy: direction is to_workspace or to_host.')
+          return host.hostCopy(name, direction, host_path, workspace_path)
+        },
       }),
       tool<{ host: string; path: string; content: string; encoding?: 'text' | 'base64' }>({
         name: 'host_write',
