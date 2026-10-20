@@ -2,6 +2,7 @@ import { Empty } from './components/States.tsx'
 import { ThisComputer } from './components/ThisComputer.tsx'
 import { PairHost } from './components/Hosts.tsx'
 import { FilesView } from './components/FilesView.tsx'
+import { PageReader } from './components/PageReader.tsx'
 import { PluginDetail, PluginsPage } from './components/Plugins.tsx'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useAtomValue } from '@effect/atom-react'
@@ -62,6 +63,15 @@ export function Pages({ route, me, robots }: { route: Route; me: Me; robots: rea
       </div>
     )
     case 'files': return <FilesPage id={route.id} path={route.path} robot={robots.find((robot) => robot.id === route.id)} me={me} />
+    case 'page': {
+      const robot = robots.find((entry) => entry.id === route.id)
+      return (
+        <div className="page page-wide">
+          <PageHead title={`${robot?.identity.name ?? 'Robot'} · Page`} back={{ page: 'robot', id: route.id, panel: true }} />
+          <PageReader robotId={route.id} path={route.path} canEdit={robot?.ownerId === me.id} />
+        </div>
+      )
+    }
     case 'takeover': return <TakeoverPage id={route.id} robot={robots.find((robot) => robot.id === route.id)} />
     case 'profile': return (
       <div className="page">

@@ -292,8 +292,8 @@ export const WorkspaceFileView = Schema.Struct({
   path: Schema.String,
   size: Schema.Number,
   updatedAt: Schema.Number,
-  /** persona and memory files pinned first, then daily notes, local skills, screenshots, the rest. */
-  group: Schema.Literals(['persona', 'daily', 'skills', 'screens', 'docs', 'spill', 'other']),
+  /** persona and memory files pinned first, then daily notes, local skills, Pages (v1.17), screenshots, the rest. */
+  group: Schema.Literals(['persona', 'daily', 'skills', 'pages', 'screens', 'docs', 'spill', 'other']),
 })
 export type WorkspaceFileView = typeof WorkspaceFileView.Type
 
@@ -1056,8 +1056,34 @@ export const Attachment = Schema.Struct({
   path: Schema.String,
   size: Schema.Number,
   contentType: Schema.String,
+  /** A say attachment under pages/ is a Page (v1.17, dp-35i9): its title and first lines, shown as a Page card. */
+  page: Schema.optional(Schema.Struct({ title: Schema.String, excerpt: Schema.String })),
 })
 export type Attachment = typeof Attachment.Type
+
+// ---------------------------------------------------------------- Pages (v1.17)
+
+export const PageFormat = Schema.Literals(['markdown', 'html'])
+export type PageFormat = typeof PageFormat.Type
+
+/** One Page of a Robot (v1.17, dp-53pf): a file under pages/, its title and first lines; `shared` is the open share link, if any (dp-hf7v). */
+export const PageView = Schema.Struct({
+  path: Schema.String,
+  title: Schema.String,
+  format: PageFormat,
+  excerpt: Schema.String,
+  size: Schema.Number,
+  updatedAt: Schema.Number,
+})
+export type PageView = typeof PageView.Type
+
+/** A Page opened in the reading view: its view and its text. */
+export const PageContent = Schema.Struct({ page: PageView, text: Schema.String })
+export type PageContent = typeof PageContent.Type
+
+/** Rename a Page (dp-e0rp): the new title, written into the file. */
+export const PageRename = Schema.Struct({ path: Schema.String, title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)) })
+export type PageRename = typeof PageRename.Type
 
 const MemberSender = Schema.Struct({ kind: Schema.Literal('member'), memberId: Schema.String, name: Schema.String })
 const RobotSender = Schema.Struct({ kind: Schema.Literal('robot'), robotId: Schema.String, name: Schema.String, avatarColor: Schema.String, avatarSeed: Schema.String })

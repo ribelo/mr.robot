@@ -18,6 +18,7 @@ import { usePendingSends, type OutgoingMessage } from './components/use-pending-
 import { AskBar } from './components/AskBar.tsx'
 import type { AskReply } from './components/ask-reply.ts'
 import { Panel } from './components/Panel.tsx'
+import { RobotPages } from './components/PageList.tsx'
 import { RobotList, type GroupChange } from './components/RobotList.tsx'
 import type { SaveOutcome } from './components/SaveButton.tsx'
 import { Pages } from './pages.tsx'
@@ -282,6 +283,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
           onOpenHelp={() => go({ page: 'robot', id, panel: false })}
           onStopBox={() => void command((api) => api.stopBox(id), [keys.robot(id)])}
           onStopJob={(jobId) => void command((api) => api.stopBoxJob(id, jobId), [keys.robot(id)])}
+          pages={<RobotPages robotId={id} />}
         />
       ) : null}
     </div>

@@ -11,6 +11,8 @@ export type Route =
   | { readonly page: 'advanced'; readonly id: string }
   | { readonly page: 'takeover'; readonly id: string }
   | { readonly page: 'files'; readonly id: string; readonly path: string | null }
+  /** A Page's reading view (v1.17, dp-nnzg): #/r/:id/pages/<path under the Workspace, pages/ included>. */
+  | { readonly page: 'page'; readonly id: string; readonly path: string }
   | { readonly page: 'admin' }
   | { readonly page: 'profile' }
   | { readonly page: 'pair'; readonly code: string }
@@ -29,6 +31,7 @@ export function parse(hash: string): Route {
     if (parts[2] === 'subagents' && parts[3] !== undefined) return { page: 'subagent', id, child: decodeURIComponent(parts[3]), tab: parts[4] === 'trajectory' ? 'trajectory' : 'chat' }
     if (parts[2] === 'settings') return { page: 'advanced', id }
     if (parts[2] === 'takeover') return { page: 'takeover', id }
+    if (parts[2] === 'pages' && parts.length > 3) return { page: 'page', id, path: parts.slice(3).map(decodeURIComponent).join('/') }
     if (parts[2] === 'files') return { page: 'files', id, path: parts.length > 3 ? parts.slice(3).map(decodeURIComponent).join('/') : null }
     return { page: 'robot', id, panel: parts[2] === 'panel', ...(fromMission ? { from: 'mission' as const } : {}) }
   }
@@ -50,6 +53,7 @@ export function href(route: Route): string {
     case 'advanced': return `#/r/${encodeURIComponent(route.id)}/settings`
     case 'takeover': return `#/r/${encodeURIComponent(route.id)}/takeover`
     case 'files': return `#/r/${encodeURIComponent(route.id)}/files${route.path === null ? '' : `/${route.path.split('/').map(encodeURIComponent).join('/')}`}`
+    case 'page': return `#/r/${encodeURIComponent(route.id)}/pages/${route.path.split('/').map(encodeURIComponent).join('/')}`
     case 'admin': return '#/admin'
     case 'mission': return '#/mission'
     case 'profile': return '#/me'

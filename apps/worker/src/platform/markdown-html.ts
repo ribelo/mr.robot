@@ -5,10 +5,13 @@
  */
 import { micromark } from 'micromark'
 import { gfm, gfmHtml } from 'micromark-extension-gfm'
+import { math, mathHtml } from 'micromark-extension-math'
 
-/** The body of an HTML document for this Markdown. */
-export function markdownToHtml(markdown: string): string {
-  return micromark(markdown, { extensions: [gfm()], htmlExtensions: [gfmHtml()] })
+/** The body of an HTML document for this Markdown; `math` also renders TeX ($…$, $$…$$) with KaTeX, as the app does. */
+export function markdownToHtml(markdown: string, options: { readonly math?: boolean } = {}): string {
+  return options.math === true
+    ? micromark(markdown, { extensions: [gfm(), math()], htmlExtensions: [gfmHtml(), mathHtml({ throwOnError: false })] })
+    : micromark(markdown, { extensions: [gfm()], htmlExtensions: [gfmHtml()] })
 }
 
 const EMAIL_STYLE = 'font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.5; color: #1f2328;'

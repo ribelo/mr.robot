@@ -99,7 +99,8 @@ describe('box and hosts follow the box grant and the Host facets (ob-vw9d, ob-iv
   it('a Robot with the box grant and a Host facet sees both; one with neither sees neither', async () => {
     const desk = await fakeHost()
     expect(await catalog(await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'box', 'hosts'))
-    expect(await catalog(await robotWith({ tools: { files: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking'))
+    // The files group writes Pages: it brings the skill pages (v1.17, dp-3wnd).
+    expect(await catalog(await robotWith({ tools: { files: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'pages'))
   })
 
   it('Mr. Robot sees hosts through the Hosts his owner reaches, and box only when his owner grants it', async () => {
@@ -192,8 +193,8 @@ describe('read-only, and not in the Home library (gb-n6by, gb-8wx5)', () => {
 describe('the texts (gb-vmmx, gb-58ad, gb-ej8r)', () => {
   const text = (name: string) => PLATFORM_SKILLS.find((skill) => skill.name === name)!.text
 
-  it('are eight, each with a one-line description in its frontmatter and under two printed pages', () => {
-    expect(PLATFORM_SKILLS.map((skill) => skill.name)).toEqual(['tasks-cadence', 'asking', 'subagents', 'browser', 'channels', 'writing-as-owner', 'box', 'hosts'])
+  it('are nine, each with a one-line description in its frontmatter and under two printed pages', () => {
+    expect(PLATFORM_SKILLS.map((skill) => skill.name)).toEqual(['tasks-cadence', 'asking', 'pages', 'subagents', 'browser', 'channels', 'writing-as-owner', 'box', 'hosts'])
     for (const skill of PLATFORM_SKILLS) {
       expect(skill.description, skill.name).not.toContain('\n')
       expect(skill.description.length, skill.name).toBeLessThan(140)

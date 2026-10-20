@@ -13,7 +13,7 @@ import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberAvatar, MemberCosts, MemberView, SubagentView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
-  SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
+  PageContent, PageView, SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type CredentialSave, type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
@@ -135,6 +135,10 @@ const make = Effect.gen(function* () {
     file: (id: string, path: string) => get(WorkspaceFileContent, `/api/robots/${enc(id)}/file?path=${enc(path)}`),
     saveFile: (id: string, path: string, content: string) => request(WorkspaceFileContent, 'PUT', `/api/robots/${enc(id)}/file?path=${enc(path)}`, { content }),
     deleteFile: (id: string, path: string) => send('DELETE', `/api/robots/${enc(id)}/file?path=${enc(path)}`),
+    /** Pages (v1.17): the Robot's list, one Page with its text, and a new title. */
+    pages: (id: string) => get(Schema.Array(PageView), `/api/robots/${enc(id)}/pages`),
+    page: (id: string, path: string) => get(PageContent, `/api/robots/${enc(id)}/page?path=${enc(path)}`),
+    renamePage: (id: string, path: string, title: string) => request(PageView, 'POST', `/api/robots/${enc(id)}/page/rename`, { path, title }),
 
     subscribePush: (subscription: PushSubscriptionJSON, device: string) => send('POST', '/api/push/subscriptions', { ...subscription, device }),
     unsubscribePush: (endpoint: string) => send('DELETE', '/api/push/subscriptions', { endpoint }),
@@ -201,6 +205,11 @@ export class MrRobotApi extends Context.Service<MrRobotApi, Effect.Success<typeo
     // SAFETY: the arrow has fetch's call signature; the cast only adds fetch's static members (preconnect), which HttpClient never uses.
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, ((input, init) => globalThis.fetch(input, init)) as typeof globalThis.fetch)),
   )
+}
+
+/** A Page's PDF, printed by Browser Rendering (v1.17, dp-239c). */
+export function pagePdfUrl(robotId: string, path: string): string {
+  return `/api/robots/${enc(robotId)}/page/pdf?path=${enc(path)}`
 }
 
 /** Where a Workspace file is served for preview or download (pl-ojbr); a plain URL for img, iframe and links. */

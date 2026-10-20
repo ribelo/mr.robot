@@ -3,11 +3,11 @@
  * library is per Home and granted per Robot. They ship with the Worker like the product docs, at docs/skills/<name>/SKILL.md, read-only,
  * with no Grant, and a deploy is the only thing that changes them. The skill tool loads one by name; the catalog lists them one line each.
  * A skill about a tool group shows only to a Robot that holds the group (gb-ekkf). The skill box shows with the box grant, and the skill
- * hosts with any facet of a Host (v1.16 ticket 10, ob-vw9d, ob-ivby).
+ * hosts with any facet of a Host (v1.16 ticket 10, ob-vw9d, ob-ivby); the skill pages with the files group, which writes them (v1.17, dp-3wnd).
  */
 
 /** When a platform skill is listed: always, or only for a Robot that holds what it is about. */
-export type PlatformSkillAudience = 'everyone' | 'subagents' | 'browser' | 'channels' | 'surfaces' | 'box' | 'hosts'
+export type PlatformSkillAudience = 'everyone' | 'subagents' | 'browser' | 'channels' | 'surfaces' | 'box' | 'hosts' | 'files'
 
 export interface PlatformSkill {
   readonly name: string
@@ -110,6 +110,43 @@ Gather first. Read your memory, your files and your tools. Do not ask what you c
 ## A login you do not have
 
 Call request_credential. Do not ask your owner for a password in the Conversation, and never write one in a file.
+`),
+  skill('pages', 'When to write a Page, and how to keep one current.', 'files', `
+# Pages
+
+A Page is a file under pages/ in your Workspace: Markdown (.md) or HTML (.html). Your owner reads it in a reading view, prints it to PDF and can share it with a link. You cannot share a Page; only your owner can.
+
+## When a Page beats a message
+
+Write a Page when the result is:
+- longer than one screen,
+- a table, a comparison or a report with sections,
+- something your owner will keep, come back to, print or send on.
+
+Everything else is a message with say.
+
+## Hand it over
+
+1. Write the file with the file tools, for example pages/2026-10-flat-search.md.
+2. Call say with one or two lines and the path in attachments. Your owner sees a Page card with the title and the first lines, and opens the reading view from it.
+
+## Write a Markdown Page
+
+- Give it a title: a front matter line title: ..., or the first heading "# ...". Rename in the app rewrites that title in the file.
+- Start with the answer or the summary. Then sections with "##" headings: the reading view makes a table of contents from them.
+- Use tables, lists, TeX math ($...$) and Mermaid diagrams (a fence with the language mermaid).
+- Show an image of your Workspace with a path relative to the Page (![Plan](img/plan.png)) or from the Workspace root (/attachments/...).
+- Put the date of the facts in the Page. Say where they came from.
+
+## Markdown first, HTML when layout needs it
+
+Write HTML only when Markdown cannot hold the layout: a styled table, a timeline, a page with inline script. An HTML Page runs in a sandbox: it loads nothing from the internet (no remote scripts, styles, fonts or images), so put styles and script inline and images as data: URLs. Give it a <title>.
+
+## Keep a Page current
+
+- When the same subject comes back (a weekly report, a search that goes on), update the existing Page instead of writing a new one. Read it first, change what changed, and say what changed in your message.
+- Write a new Page for a new subject or when your owner asks for a separate copy.
+- Do not delete a Page your owner may have shared. If it is out of date, say so at its top.
 `),
   skill('subagents', 'When to delegate, how to scope a task, how to check the report.', 'subagents', `
 # Subagents
@@ -306,7 +343,7 @@ Read this before you use a Host: a computer that belongs to your owner.
 ]
 
 /** The platform skills this Robot is shown now. `has` says which of the things they are about the Robot holds. */
-export function platformSkillsFor(has: { readonly subagents: boolean; readonly browser: boolean; readonly channels: boolean; readonly surfaces: boolean; readonly box: boolean; readonly hosts: boolean }): PlatformSkill[] {
+export function platformSkillsFor(has: { readonly subagents: boolean; readonly browser: boolean; readonly channels: boolean; readonly surfaces: boolean; readonly box: boolean; readonly hosts: boolean; readonly files: boolean }): PlatformSkill[] {
   return PLATFORM_SKILLS.filter((entry) => entry.audience === 'everyone' || has[entry.audience])
 }
 

@@ -8,11 +8,18 @@ import { rawFileUrl } from '../client/mr-robot-api.ts'
 import { AtomView } from './AtomView.tsx'
 import { InlineEdit } from './InlineEdit.tsx'
 import { SaveButton } from './SaveButton.tsx'
+import { href } from '../route.ts'
+
+/** A Page is a .md or .html file under pages/ (v1.17, dp-t2w1). */
+export function isPagePath(path: string): boolean {
+  return /^pages\/.+\.(md|html?)$/i.test(path)
+}
 
 const GROUPS: ReadonlyArray<readonly [WorkspaceFileView['group'], string]> = [
   ['persona', 'Persona and memory'],
   ['daily', 'Daily notes'],
   ['skills', 'Skills'],
+  ['pages', 'Pages'],
   ['other', 'Other files'],
   ['docs', 'Product docs (read-only)'],
   ['screens', 'Screenshots'],
@@ -62,6 +69,7 @@ function FileList({ robotId, files, canEdit, onOpen }: { robotId: string; files:
                   <span className="file-name">{file.path}</span>
                   <span className="muted">{file.group === 'docs' ? size(file.size) : `${size(file.size)} · ${new Date(file.updatedAt).toLocaleString()}`}</span>
                 </button>
+                {file.group === 'pages' ? <a className="link file-page-link" href={href({ page: 'page', id: robotId, path: file.path })}>Open as Page</a> : null}
               </li>
             ))}
           </ul>
@@ -99,7 +107,7 @@ function FileText({ robotId, path, canEdit, file, onBack }: { robotId: string; p
         <strong>{path}</strong>
         <span className="muted">{size(file.size)}</span>
       </div>
-      <div className="file-actions"><a className="button" href={rawFileUrl(robotId, path, true)} download>Download</a>{previewable(path) ? <a className="button" href={rawFileUrl(robotId, path)} target="_blank" rel="noreferrer">Open</a> : null}</div>
+      <div className="file-actions">{isPagePath(path) ? <a className="button" href={href({ page: 'page', id: robotId, path })}>Open as Page</a> : null}<a className="button" href={rawFileUrl(robotId, path, true)} download>Download</a>{previewable(path) ? <a className="button" href={rawFileUrl(robotId, path)} target="_blank" rel="noreferrer">Open</a> : null}</div>
       {previewable(path) ? <FilePreview robotId={robotId} path={path} /> : file.text === null ? <div className="muted">{file.note}</div> : (
         <>
           <textarea aria-label={`Edit ${path}`} className="file-text" value={text} readOnly={!editable} spellCheck={false} onChange={(event) => setText(event.target.value)} />

@@ -26,6 +26,8 @@ import type {
   HostView,
   WorkspaceFileContent,
   WorkspaceFileView,
+  PageContent,
+  PageView,
   Attachment,
   BrowserBackend,
   ChatItem,
@@ -84,6 +86,9 @@ import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelFile, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
 import { answerByNumbers, questionText } from '../agent/tools/ask.ts'
 import { draftText } from '../agent/draft.ts'
+import { PAGE_TITLES, PAGES_DIRECTORY, pageExcerpt, pageFormat, pageTitle, renamedPage, type PageFormat } from '../pages/page.ts'
+import { pageDocument } from '../pages/page-html.ts'
+import { printPdf } from '../pages/page-pdf.ts'
 import { dismissedTrailer, QUIET_STEER_MS, quietSteerNote, SAFETY_NET_STEPS, safetyNetNote, SAY_MAX_ATTACHMENTS, SAY_RECORD, sayOf, SCREEN_PREFIX, type SayRecord } from '../agent/say.ts'
 import type { SayHost } from '../agent/tools/say.ts'
 import { Say } from '../plugins/say.ts'
@@ -1698,11 +1703,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (entry === undefined) throw new Error(`say: no file "${path}" in your Workspace. Write it first, then attach it.`)
     const name = path.split('/').pop() ?? path
     const contentType = mediaTypeOf(path)
+    // A file under pages/ is a Page: the Conversation shows it as a Page card, and a Channel links to its reading view (dp-35i9).
+    const page = await this.pageView(path)
+    if (page !== undefined) this.rememberPageTitles([page.view], false)
+    const route = page === undefined ? 'files' : 'pages'
     return {
-      attachment: { name, path, size: entry.size, contentType },
+      attachment: { name, path, size: entry.size, contentType, ...(page === undefined ? {} : { page: { title: page.view.title, excerpt: page.view.excerpt } }) },
       channelFile: {
         name, contentType, size: entry.size,
-        link: origin === null ? null : `${origin}/#/r/${encodeURIComponent(id)}/files/${path.split('/').map(encodeURIComponent).join('/')}`,
+        link: origin === null ? null : `${origin}/#/r/${encodeURIComponent(id)}/${route}/${path.split('/').map(encodeURIComponent).join('/')}`,
         read: async () => new Uint8Array((await this.run(this.workspace.read(path)))?.body ?? new ArrayBuffer(0)),
       },
     }
@@ -2184,11 +2193,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Discord channel of its own or a chat Connection it may use; writing-as-owner, any surface it can write on in its owner's name (a chat Channel or a Connection);
    * box, the box grant; hosts, any facet of a Host (v1.16 ticket 10).
    */
-  private platformSkillAudience(granted: ReadonlySet<string>): { subagents: boolean; browser: boolean; channels: boolean; surfaces: boolean; box: boolean; hosts: boolean } {
+  private platformSkillAudience(granted: ReadonlySet<string>): { subagents: boolean; browser: boolean; channels: boolean; surfaces: boolean; box: boolean; hosts: boolean; files: boolean } {
     const config = this.store.requireConfig()
     const held = this.knownConnections.filter((connection) => this.store.mayUse('connection', connection.id))
     const channels = (config.discordChannel ?? '') !== '' || held.some((connection) => connection.kind === 'slack' || connection.kind === 'discord' || connection.kind === 'discord-user')
-    return { subagents: granted.has('subagents'), browser: granted.has('browser'), channels, surfaces: channels || held.length > 0, box: granted.has('box'), hosts: usableNames(this.store.effectiveGrants().hosts).length > 0 }
+    return { subagents: granted.has('subagents'), browser: granted.has('browser'), channels, surfaces: channels || held.length > 0, box: granted.has('box'), hosts: usableNames(this.store.effectiveGrants().hosts).length > 0, files: granted.has('files') }
   }
 
   private grantedConnections(kind: ConnectorKind): GrantedConnection[] {
@@ -3394,12 +3403,74 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         : isDocsPath(path) ? 'docs'
         : /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path) ? 'daily'
           : path.startsWith('skills/') ? 'skills'
+            : pageFormat(path) !== undefined ? 'pages'
             : path.startsWith('screens/') ? 'screens'
               : path.startsWith('spill/') ? 'spill'
                 : 'other'
     return entries
       .map((entry) => ({ path: entry.path, size: entry.size, updatedAt: entry.uploaded, group: group(entry.path) }))
       .sort((a, b) => order(a.path) - order(b.path) || (a.group === 'daily' && b.group === 'daily' ? b.path.localeCompare(a.path) : a.path.localeCompare(b.path)))
+  }
+
+  // ---------------------------------------------------------------- Pages (v1.17 ticket 05)
+
+  /** A Page's view from its file, or undefined when the path is not a Page or the file is gone. */
+  private async pageView(path: string): Promise<{ readonly view: PageView; readonly text: string } | undefined> {
+    const format = pageFormat(path)
+    if (format === undefined) return undefined
+    const file = await this.run(this.workspace.read(path))
+    if (file === undefined) return undefined
+    const text = new TextDecoder().decode(file.body)
+    return { view: { path, title: pageTitle(path, text), format, excerpt: pageExcerpt(path, text), size: file.size, updatedAt: file.uploaded }, text }
+  }
+
+  /** The titles the Conversation shows on Page cards, kept as the Pages were last read (a rename shows at once, dp-e0rp). */
+  private rememberPageTitles(pages: readonly PageView[], replace: boolean): void {
+    const known = replace ? {} : this.store.get<Record<string, string>>(PAGE_TITLES) ?? {}
+    this.store.set(PAGE_TITLES, { ...known, ...Object.fromEntries(pages.map((page) => [page.path, page.title])) })
+  }
+
+  /** The Robot's Pages, newest first (dp-lxw4). */
+  async pages(): Promise<PageView[]> {
+    const entries = (await this.run(this.workspace.list(PAGES_DIRECTORY))).filter((entry) => pageFormat(entry.path) !== undefined)
+    const pages = (await Promise.all(entries.map((entry) => this.pageView(entry.path)))).flatMap((found) => (found === undefined ? [] : [found.view]))
+    this.rememberPageTitles(pages, true)
+    return pages.sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path))
+  }
+
+  /** One Page for the reading view (dp-nnzg, dp-hv7b). */
+  async pageContent(path: string): Promise<PageContent> {
+    const found = await this.pageView(path)
+    if (found === undefined) throw Object.assign(new Error(pageFormat(path) === undefined ? `"${path}" is not a Page: a Page is a .md or .html file under pages/` : `no Page "${path}"`), { name: 'NotFound', status: 404 })
+    return { page: found.view, text: found.text }
+  }
+
+  /** Rename a Page (dp-e0rp): the title is rewritten in the file, so the file stays the one place it lives. */
+  async renamePage(path: string, title: string, by: string): Promise<PageView> {
+    const { text } = await this.pageContent(path)
+    await this.run(this.workspace.write(path, renamedPage(path, text, title), pageFormat(path) === 'html' ? 'text/html; charset=utf-8' : 'text/markdown; charset=utf-8'))
+    const { page } = await this.pageContent(path)
+    this.rememberPageTitles([page], false)
+    const config = this.store.requireConfig()
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${by} renamed the Page ${path} to "${page.title}".`, Date.now())
+    await this.changed()
+    return page
+  }
+
+  /** The Page as one HTML document: what the PDF prints and a share link serves (dp-239c, dp-jl3d). */
+  async pageHtml(path: string): Promise<{ readonly title: string; readonly html: string; readonly format: PageFormat }> {
+    const { page, text } = await this.pageContent(path)
+    const html = await pageDocument(path, page.title, text, async (image) => {
+      const file = await this.run(this.workspace.read(image))
+      return file === undefined ? undefined : { bytes: new Uint8Array(file.body), contentType: mediaTypeOf(image) }
+    })
+    return { title: page.title, html, format: page.format }
+  }
+
+  /** The Page as a PDF, printed by Browser Rendering (dp-239c). */
+  async pagePdf(path: string): Promise<{ readonly title: string; readonly pdf: Uint8Array }> {
+    const { title, html } = await this.pageHtml(path)
+    return { title, pdf: await printPdf(this.env.BROWSER, html) }
   }
 
   /** One file for the editor; binary and large files are read-only (rb-q5eb). */

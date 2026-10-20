@@ -9,6 +9,7 @@ import * as Schema from 'effect/Schema'
 import {
   AlwaysAllowAnswer,
   DraftEdit,
+  PageRename,
   LoginInput,
   ConnectionPaste,
   CredentialSave,
@@ -551,6 +552,28 @@ export const api = new Router<ApiContext>()
     yield* call(() => robot(c, id).deleteFile(path))
     return { ok: true }
   }))
+  // ------------------------------------------------------------ Pages (v1.17 ticket 05)
+  .on('GET', '/api/robots/:id/pages', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).pages()))))
+  .on('GET', '/api/robots/:id/page', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    return yield* call(() => robot(c, id).pageContent(path))
+  }))
+  .on('POST', '/api/robots/:id/page/rename', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const input = yield* decodeBody(c.request, PageRename)
+    const path = normalizePath(input.path)
+    if (path === undefined || input.title.trim() === '') return yield* Effect.fail(badRequest('a Page path and a title'))
+    return yield* call(() => robot(c, id).renamePage(path, input.title, c.member.name))
+  }))
+  .on('GET', '/api/robots/:id/page/pdf', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    const { title, pdf } = yield* call(() => robot(c, id).pagePdf(path))
+    return pdfResponse(title, pdf)
+  }))
   .on('GET', '/api/robots/:id/webhook', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).webhook()))))
   .on('POST', '/api/robots/:id/webhook/regenerate', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).regenerateWebhook()))))
   .on('GET', '/api/robots/:id/prompt', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).promptPreview()))))
@@ -741,6 +764,12 @@ export const api = new Router<ApiContext>()
     yield* call(() => home(c.env).remove(member))
     return { ok: true }
   }))
+
+/** A Page's PDF as a download named by its title (dp-239c). */
+export function pdfResponse(title: string, pdf: Uint8Array): Response {
+  const name = `${title.replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').trim().slice(0, 120) || 'page'}.pdf`
+  return new Response(pdf, { headers: { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`, 'cache-control': 'private, no-store' } })
+}
 
 const MAX_AVATAR_BYTES = 1024 * 1024
 const AVATAR_KEY = /^avatar-[0-9a-f]{24}$/

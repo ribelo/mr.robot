@@ -1,5 +1,5 @@
 import { memo, type MouseEvent } from 'react'
-import { MarkdownText, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText, type MarkdownLabels, type MarkdownPathImages } from '@deepseek-ai/dsh-client-ui-primitives'
 
 const LABELS: MarkdownLabels = { code: { copyLabel: 'Copy', copiedLabel: 'Copied' }, footnotes: 'Footnotes' }
 
@@ -12,10 +12,10 @@ function openOutside(event: MouseEvent<HTMLDivElement>): void {
 }
 
 /** A Robot's message as Markdown (pl-6bop), rendered by the DSH conversation's Markdown component. */
-export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export const Markdown = memo(function Markdown({ text, streaming = false, pathImages }: { text: string; streaming?: boolean; pathImages?: MarkdownPathImages }) {
   return (
     <div className="markdown" onClick={openOutside}>
-      <MarkdownText text={text} labels={LABELS} streaming={streaming} />
+      <MarkdownText text={text} labels={LABELS} streaming={streaming} {...(pathImages === undefined ? {} : { pathImages })} />
     </div>
   )
 })

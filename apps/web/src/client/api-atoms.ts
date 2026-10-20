@@ -68,6 +68,13 @@ export const fileAtom = Atom.family((key: string) => {
   const [id = '', path = ''] = key.split('\n')
   return query((api) => api.file(id, path), [keys.files(id)])
 })
+/** A Robot's Pages (v1.17): they change with its files and with its Conversation (a say hands one over). */
+export const pagesAtom = Atom.family((id: string) => query((api) => api.pages(id), [keys.files(id), keys.robot(id)]))
+/** One Page, keyed "<robot id>\n<path>". */
+export const pageAtom = Atom.family((key: string) => {
+  const [id = '', path = ''] = key.split('\n')
+  return query((api) => api.page(id, path), [keys.files(id)])
+})
 export const memberFileAtom = Atom.family((name: string) => query((api) => api.memberFile(name), [keys.memberFiles]))
 export const homeMemoryAtom = query((api) => api.homeMemory, [keys.homeMemory])
 export const adminAtom = query((api) => api.admin, [keys.admin])

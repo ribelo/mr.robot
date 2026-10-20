@@ -18,6 +18,7 @@ import { TASKS } from './tasks.ts'
 import { SUBAGENTS } from './subagents.ts'
 import { BOX } from './box.ts'
 import { AUTO_REVIEW } from './auto-review.ts'
+import { PAGES } from './pages.ts'
 import { PLATFORM_SKILLS, platformSkillPath } from '../skills/platform.ts'
 
 export const DOCS_DIRECTORY = 'docs'
@@ -42,6 +43,7 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('tasks', 'Tasks: doers, timings, state and attempts, the Task tools, limits, reminders.', TASKS),
   doc('asks-and-help', 'Asks and their kinds; ask, request_credential, asking your chief.', ASKS_AND_HELP),
   doc('memory-and-files', 'Memory files and whose they are, the Workspace layout, the file tools.', MEMORY_AND_FILES),
+  doc('pages', 'Pages: documents under pages/, the reading view, PDF, sharing.', PAGES),
   doc('connections', 'Connectors and Connections: Google, Slack, Discord; connecting, sharing, grants, instructions.', CONNECTIONS),
   doc('hosts', 'Hosts: the desktop app, pairing, the tools with on set to a Host, modes and write roots, jobs, offline Hosts, the Host browser.', HOSTS),
   doc('browser', 'The browser: backends, logins, Live view, Takeover, payments, screenshots.', BROWSER),

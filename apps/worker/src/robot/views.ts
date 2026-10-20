@@ -16,6 +16,7 @@ import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, Wakeup } from './store.ts'
 import type { BoxView, LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause } from '@mr-robot/protocol'
 import { SubagentStore } from './subagent-store.ts'
+import { PAGE_TITLES } from '../pages/page.ts'
 
 /** What woke the Robot, as its fleet row names it (mc-w1aa). */
 export function causeOf(wakeup: Wakeup): WakeupCause {
@@ -139,11 +140,14 @@ export const conversation = (details = false) => Effect.gen(function* () {
   }
   const working = store.activeTurn() !== undefined
   const activity = working ? runningTool(events) : undefined
+  // A Page card shows the Page's title now, not the one it had when it was handed over (dp-e0rp).
+  const titles = store.get<Record<string, string>>(PAGE_TITLES) ?? {}
   return {
     canRetry: store.get('failed-wakeup') !== undefined,
     robotId: current.id,
     working,
-    items,
+    items: items.map((item) => item.kind !== 'reply' || item.attachments === undefined || !item.attachments.some((file) => file.page !== undefined) ? item
+      : { ...item, attachments: item.attachments.map((file) => file.page === undefined || titles[file.path] === undefined ? file : { ...file, page: { ...file.page, title: titles[file.path]! } }) }),
     ...(activity === undefined ? {} : { activity }),
   } as Conversation
 })

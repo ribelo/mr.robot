@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { BoxView, RobotPanel } from '@mr-robot/protocol'
 import { TaskList } from './TaskSheets.tsx'
 import { ThreadCard } from './ChatView.tsx'
@@ -20,10 +21,12 @@ export interface PanelProps {
   readonly onStopJob?: (jobId: string) => void
   /** The time the ages are counted from; the clock when left out. */
   readonly now?: number
+  /** The Robot's Pages (v1.17, dp-lxw4), read on their own. */
+  readonly pages?: ReactNode
 }
 
 /** The robot panel (robot-z3ud): screen thumbnail, Tasks, simple settings. */
-export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, onStopBox, onStopJob, now = Date.now() }: PanelProps) {
+export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, onStopBox, onStopJob, now = Date.now(), pages }: PanelProps) {
   const name = panel.summary.identity.name
   return (
     <aside className="panel">
@@ -64,6 +67,7 @@ export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanc
           <div className="screen-caption">{name}’s screen</div>
           <h3 className="panel-section">Tasks</h3>
           <TaskList tasks={panel.tasks} onOpen={(task) => onOpenTask(task.id)} />
+          {pages}
           {panel.threads === undefined ? null : (
             <>
               <h3 className="panel-section">Threads</h3>

@@ -163,7 +163,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .draft-head dt { color: var(--muted); }
 .draft-head dd { margin: 0; overflow-wrap: anywhere; }
 .draft-subject { width: 100%; box-sizing: border-box; }
-.draft-body { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; max-height: 50vh; overflow: auto; }
+.draft-body { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; max-height: 50vh; overflow: auto; }
 .draft-body-edit { width: 100%; box-sizing: border-box; font: inherit; }
 .draft-attachments { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13.5px; }
 .draft-changes { margin-top: 8px; font-size: 13.5px; }
@@ -721,3 +721,23 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 /* Box jobs (v1.15 ticket 07) */
 .box-jobs { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .box-jobs li { display: flex; gap: 6px; align-items: baseline; }
+
+/* Pages (v1.17 ticket 05) */
+.page-reader-head { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.page-title { margin: 0; font-size: 1.8rem; }
+.page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.page-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+@media (min-width: 1000px) { .page-layout:has(.page-toc) { grid-template-columns: 200px minmax(0, 1fr); } .page-toc { position: sticky; top: 12px; align-self: start; } }
+.page-toc ol { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+.page-toc li[data-level="3"] { padding-left: 12px; }
+.page-toc .link { text-align: left; }
+.page-body { max-width: 46rem; }
+.page-diagram { overflow-x: auto; margin: 12px 0; }
+.page-diagram-source, .page-source { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; background: var(--code-bg); padding: 10px; border-radius: 6px; }
+.page-frame { width: 100%; min-height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-top: 8px; }
+.page-list { list-style: none; padding: 0; margin: 4px 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.page-card { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; text-decoration: none; color: inherit; max-width: 28rem; }
+.page-card-kind { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+.page-card-title { font-weight: 600; }
+.page-card-excerpt { font-size: 13px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.file-page-link { margin-left: 8px; font-size: 13px; }

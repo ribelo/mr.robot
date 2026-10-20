@@ -11,6 +11,7 @@ import { robotTint } from './tint.ts'
 import { href } from '../route.ts'
 import type { AskReply } from './ask-reply.ts'
 import { DraftCard } from './DraftCard.tsx'
+import { PageCard } from './PageList.tsx'
 
 export interface ChatViewProps {
   readonly items: readonly ChatItem[]
@@ -230,6 +231,8 @@ export function ReplyAttachments({ attachments, robotId }: { attachments: readon
     <div className="attachments reply-attachments">
       {attachments.map((file) => robotId === undefined
         ? <span key={file.path} className="attachment">📎 {file.name}</span>
+        : file.page !== undefined
+          ? <PageCard key={file.path} robotId={robotId} path={file.path} title={file.page.title} excerpt={file.page.excerpt} />
         : file.contentType.startsWith('image/')
           ? <a key={file.path} className="reply-image-link" href={url(file)} target="_blank" rel="noreferrer"><img className="reply-image" src={url(file)} alt={file.name} loading="lazy" /></a>
           : (
