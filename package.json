@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "pnpm --filter @mr-robot/web build",
-    "deploy": "pnpm build && ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy deploy --yes",
+    "box:tools": "node infra/box-tools.ts",
+    "deploy": "pnpm box:tools && pnpm build && ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy deploy --yes",
     "destroy": "ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy destroy",
     "plan": "ALCHEMY_HOME=$HOME/.alchemy-mr-robot ALCHEMY_PROFILE=mr-robot alchemy plan",
     "test": "vitest run",
