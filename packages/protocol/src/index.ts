@@ -1465,6 +1465,8 @@ export const ConnectionView = Schema.Struct({
   /** A link the person may still need at the service (Discord: invite the bot to a server). */
   setupLink: Schema.NullOr(Schema.String),
   setupLabel: Schema.NullOr(Schema.String),
+  /** What its owner wrote about how Robots should use it (v1.15, gb-wzl9); absent in a view stored before. */
+  instructions: Schema.optional(Schema.String),
   createdAt: Schema.Number,
 })
 export type ConnectionView = typeof ConnectionView.Type
@@ -1473,7 +1475,7 @@ export const PluginSwitch = Schema.Struct({ enabled: Schema.Boolean })
 export const PluginSettingsInput = Schema.Struct({ values: Schema.Record(Schema.String, Schema.Unknown) })
 /** A connection by pasted values (Slack session, Discord bot token); the values are secrets. */
 export const ConnectionPaste = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.Boolean, values: Schema.Record(Schema.String, Schema.String) })
-export const ConnectionPatch = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.optional(Schema.Boolean), isDefault: Schema.optional(Schema.Boolean) })
+export const ConnectionPatch = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.optional(Schema.Boolean), isDefault: Schema.optional(Schema.Boolean), instructions: Schema.optional(Schema.String) })
 
 /**
  * Connecting as you through Mr. Robot's browser (v1.12 ticket 11, ux-8pek, ux-wgok): where the

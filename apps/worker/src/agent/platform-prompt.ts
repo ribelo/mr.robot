@@ -18,6 +18,8 @@ export interface PromptInput {
   readonly afterProviderIdentity: boolean
   /** The Robot's grantable items with their levels, for the runtime section; absent while they are not known yet. */
   readonly capabilities?: readonly CapabilityItem[]
+  /** What the owner wrote for each Connection this Robot holds at allow or ask (v1.15, gb-j887); empty ones are left out. */
+  readonly connectionInstructions?: ReadonlyArray<{ readonly label: string; readonly instructions: string }>
 }
 
 export interface PlatformSection {
@@ -211,7 +213,7 @@ const docs: PlatformSection = { name: 'docs', render: () => `## ${docsIndex()}` 
  */
 const runtime: PlatformSection = {
   name: 'runtime',
-  render: ({ config, owner, capabilities }) => lines(
+  render: ({ config, owner, capabilities, connectionInstructions }) => lines(
     '## Runtime',
     `- You are ${config.identity.name}, a Robot of ${owner.name}. Your model is ${config.model.model} on ${config.model.provider}, thinking ${config.model.effort}.`,
     // The same line as the owner of my_capabilities (ux-nwi1, ux-xzdh).
@@ -219,6 +221,7 @@ const runtime: PlatformSection = {
     `- Time zone: ${config.timeZone}.`,
     `- Language: answer in the language ${owner.name} writes in; write files, notes and skills in English; USER.md may override this.`,
     capabilities !== undefined && config.status !== 'setup' && hostsOf(capabilities).length > 0 && `- Hosts: ${hostsOf(capabilities).map(hostHeading).join('; ')}.`,
+    ...(config.status === 'setup' ? [] : (connectionInstructions ?? []).map((entry) => `- Instructions for ${entry.label}: ${entry.instructions}`)),
     capabilities !== undefined && config.status !== 'setup' && '- Your levels (call my_capabilities for what each item does):',
     capabilities !== undefined && config.status !== 'setup' && levelSummary(capabilities),
   ),

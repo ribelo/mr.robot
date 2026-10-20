@@ -28,6 +28,8 @@ export interface ConnectionChange {
   readonly account?: string
   readonly shared?: boolean
   readonly isDefault?: boolean
+  /** What the owner wrote about how Robots use it (v1.15, gb-wzl9); empty clears it. */
+  readonly instructions?: string
   readonly services?: readonly string[]
   readonly status?: ConnectionStatus
   readonly statusNote?: string | null
@@ -37,7 +39,7 @@ export interface ConnectionChange {
 
 type Row = {
   id: string; kind: ConnectorKind; label: string; account: string; shared: number; is_default: number
-  services: string; status: ConnectionStatus; status_note: string | null; meta: string; created_at: number
+  services: string; status: ConnectionStatus; status_note: string | null; meta: string; created_at: number; instructions: string | null
 }
 
 /** A Discord bot's label shows its id next to the name (sk-7dg7); the id is the bot's application id, kept in meta. */
@@ -61,6 +63,8 @@ export class ConnectionStore {
       is_default INTEGER NOT NULL, services TEXT NOT NULL, status TEXT NOT NULL, status_note TEXT, meta TEXT NOT NULL,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )`)
+    // Custom instructions the owner writes (v1.15 ticket 08, gb-wzl9).
+    if (!sql.exec<{ name: string }>('PRAGMA table_info(connection)').toArray().some((column) => column.name === 'instructions')) sql.exec("ALTER TABLE connection ADD COLUMN instructions TEXT NOT NULL DEFAULT ''")
     sql.exec('CREATE TABLE IF NOT EXISTS connection_secret (connection_id TEXT NOT NULL, field TEXT NOT NULL, sealed TEXT NOT NULL, PRIMARY KEY (connection_id, field)) WITHOUT ROWID')
   }
 
@@ -68,6 +72,7 @@ export class ConnectionStore {
     return {
       id: row.id, kind: row.kind, label: shownLabel(row), account: row.account, shared: row.shared === 1, isDefault: row.is_default === 1,
       services: JSON.parse(row.services) as string[], status: row.status, statusNote: row.status_note, createdAt: row.created_at,
+      instructions: row.instructions ?? '',
       setupLink: typeof (JSON.parse(row.meta) as Record<string, unknown>)['setupLink'] === 'string' ? (JSON.parse(row.meta) as Record<string, string>)['setupLink']! : null,
       setupLabel: typeof (JSON.parse(row.meta) as Record<string, unknown>)['setupLabel'] === 'string' ? (JSON.parse(row.meta) as Record<string, string>)['setupLabel']! : null,
     }
@@ -111,10 +116,10 @@ export class ConnectionStore {
     const row = this.row(id)
     if (row === undefined) return undefined
     const meta = change.meta === undefined ? row.meta : JSON.stringify({ ...(JSON.parse(row.meta) as object), ...change.meta })
-    this.sql.exec('UPDATE connection SET label = ?, account = ?, shared = ?, services = ?, status = ?, status_note = ?, meta = ?, updated_at = ? WHERE id = ?',
+    this.sql.exec('UPDATE connection SET label = ?, account = ?, shared = ?, services = ?, status = ?, status_note = ?, meta = ?, instructions = ?, updated_at = ? WHERE id = ?',
       change.label ?? row.label, change.account ?? row.account, change.shared === undefined ? row.shared : change.shared ? 1 : 0,
       change.services === undefined ? row.services : JSON.stringify(change.services), change.status ?? row.status,
-      change.statusNote === undefined ? row.status_note : change.statusNote, meta, Date.now(), id)
+      change.statusNote === undefined ? row.status_note : change.statusNote, meta, change.instructions === undefined ? row.instructions ?? '' : change.instructions.trim(), Date.now(), id)
     if (change.isDefault === true) {
       this.sql.exec('UPDATE connection SET is_default = 0 WHERE kind = ?', row.kind)
       this.sql.exec('UPDATE connection SET is_default = 1 WHERE id = ?', id)

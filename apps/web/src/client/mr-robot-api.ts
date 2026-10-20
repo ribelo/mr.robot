@@ -175,7 +175,7 @@ const make = Effect.gen(function* () {
     savePluginSettings: (name: string, values: Record<string, unknown>) => request(PluginView, 'PUT', `/api/admin/plugins/${enc(name)}/settings`, { values }),
     connections: get(Schema.Array(ConnectionView), '/api/connections'),
     pasteConnection: (kind: string, input: { readonly label?: string; readonly shared: boolean; readonly values: Record<string, string> }) => request(ConnectionView, 'POST', `/api/connections/${enc(kind)}`, input),
-    updateConnection: (id: string, change: { readonly label?: string; readonly shared?: boolean; readonly isDefault?: boolean }) => request(ConnectionView, 'PATCH', `/api/connections/${enc(id)}`, change),
+    updateConnection: (id: string, change: { readonly label?: string; readonly shared?: boolean; readonly isDefault?: boolean; readonly instructions?: string }) => request(ConnectionView, 'PATCH', `/api/connections/${enc(id)}`, change),
     removeConnection: (id: string) => send('DELETE', `/api/connections/${enc(id)}`),
     connectionNotes: get(Schema.Array(ConnectionNote), '/api/connections/notes'),
     dismissConnectionNote: (id: string) => send('DELETE', `/api/connections/notes/${enc(id)}`),

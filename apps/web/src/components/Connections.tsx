@@ -136,6 +136,7 @@ export function ConnectorPanel({ plugin, way, connections }: { plugin: PluginVie
                   <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${connection.label}? Robots granted it lose it.`)) void change((api) => api.removeConnection(connection.id)) }}>Remove</button>
                 </div>
               ) : null}
+              <ConnectionInstructions connection={connection} />
             </li>
           ))}
         </ul>
@@ -146,6 +147,25 @@ export function ConnectorPanel({ plugin, way, connections }: { plugin: PluginVie
         : signIn !== undefined ? <SignInConnect way={way} signIn={signIn} attempt={attempt}>{paste}</SignInConnect>
           : connector.connect.method === 'paste' ? paste
           : <OAuthConnect plugin={plugin} way={way} services={connector.connect.services} />}
+    </div>
+  )
+}
+
+/**
+ * What the owner wants Robots to do with a Connection (v1.15, gb-wzl9): "answer in threads on Slack", said once.
+ * Every Robot granted the Connection reads it in its prompt. A Connection shared by someone else shows theirs, read-only.
+ */
+export function ConnectionInstructions({ connection }: { connection: ConnectionView }) {
+  const command = useCommand()
+  const stored = connection.instructions ?? ''
+  const [text, setText] = useState(stored)
+  const [message, setMessage] = useState<string>()
+  if (!connection.mine) return stored === '' ? null : <div className="muted">Instructions: {stored}</div>
+  const save = async () => setMessage(exitFailure(await command((api) => api.updateConnection(connection.id, { instructions: text }), [keys.connections])) ?? 'Saved.')
+  return (
+    <div className="connection-instructions">
+      <label><span>Instructions for Robots <span className="muted">(optional)</span></span><textarea rows={2} value={text} placeholder="For example: answer in threads. Never mark messages read." aria-label={`Instructions for ${connection.label}`} onChange={(event) => { setText(event.target.value); setMessage(undefined) }} /></label>
+      <div className="question-actions">{message === undefined ? null : <span className="muted">{message}</span>}<button type="button" className="button" disabled={text.trim() === stored.trim()} onClick={() => void save()}>Save instructions</button></div>
     </div>
   )
 }

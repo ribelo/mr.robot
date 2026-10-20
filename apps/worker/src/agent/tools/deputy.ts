@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {
-  ConversationPage, ConversationSearchResult, GrantSet, ModelChoice, ProposalView, RobotSettings,
+  ConnectionView, ConversationPage, ConversationSearchResult, GrantSet, ModelChoice, ProposalView, RobotSettings,
   TrajectoryExcerpt, WorkspaceFileContent, WorkspaceFileView,
 } from '@mr-robot/protocol'
 import { tool } from './define.ts'
@@ -50,6 +50,8 @@ export interface DeputyHost {
   fileWrite(robotId: string, path: string, content: string): Promise<{ path: string; size: number }>
   fileDelete(robotId: string, path: string): Promise<{ deleted: string }>
   settingsSet(robotId: string, patch: unknown): Promise<RobotSettings>
+  connections(): Promise<ConnectionView[]>
+  connectionInstructionsSet(connectionId: string, instructions: string): Promise<{ id: string; label: string; instructions: string }>
   helpRequests(): Promise<HelpListing[]>
   helpAnswer(robotId: string, requestId: string, text: string): Promise<{ requestId: string; status: string }>
 }
@@ -132,6 +134,20 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
       parameters: { properties: { robot_id: robotId }, required: ['robot_id'] },
       concurrencySafe: true,
       execute: async ({ robot_id }) => host.settings(robot_id),
+    }),
+    tool<Record<string, never>>({
+      name: 'connection_list',
+      description: "List the Connections your owner can use (Google, Slack, Discord accounts): id, kind, label, account, whether it is your owner's own or shared by someone else, and the instructions Robots granted the Connection read in their prompt.",
+      parameters: { properties: {} },
+      concurrencySafe: true,
+      execute: async () => ({ connections: (await host.connections()).map(({ id, kind, label, account, mine, ownerName, shared, status, instructions }) => ({ id, kind, label, account, mine, ...(mine ? {} : { owner: ownerName }), shared, status, instructions: instructions ?? '' })) }),
+    }),
+    tool<{ connection_id: string; instructions: string }>({
+      name: 'connection_instructions_set',
+      description: "Set the instructions for one of your owner's own Connections, when your owner tells you how it should be used (for example 'answer in threads on Slack'). Every Robot granted the Connection reads them in its prompt from its next Turn. The text replaces the old one; empty text clears it. Write it in short imperative sentences, in English.",
+      parameters: { properties: { connection_id: { type: 'string', description: 'Connection id from connection_list' }, instructions: { type: 'string', description: 'The whole new instructions; empty clears them' } }, required: ['connection_id', 'instructions'] },
+      emptyAllowed: ['instructions'],
+      execute: async ({ connection_id, instructions }) => host.connectionInstructionsSet(connection_id, instructions),
     }),
     tool<Record<string, never>>({
       name: 'help_requests',

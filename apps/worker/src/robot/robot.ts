@@ -355,6 +355,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async promptPreview(): Promise<{ sections: Array<{ name: string; text: string }>; tools: string[]; skills: string[] }> {
     const config = this.store.requireConfig()
     const owner = this.owner()
+    // What the Robot reads now: its owner's Connections and their instructions may have changed since its last Turn.
+    await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
     await this.refreshPersona()
     await this.loadSecretMasks()
     // Exactly what the model reads (sk-xsat): the provider's identity line and the bridge when its adapter puts one first.
@@ -3281,9 +3283,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.knownCatalog === undefined ? undefined : capabilityItems(this.knownCatalog, this.store.effectiveGrants())
   }
 
-  private capabilityInput(): { capabilities?: CapabilityItem[] } {
+  private capabilityInput(): { capabilities?: CapabilityItem[]; connectionInstructions?: Array<{ label: string; instructions: string }> } {
     const items = this.capabilityItems()
-    return items === undefined ? {} : { capabilities: items }
+    // The owner's words about each Connection this Robot holds at allow or ask (v1.15, gb-j887).
+    const instructions = this.knownConnections
+      .filter((connection) => connectorOn(this.pluginsOn, connection.kind) && this.store.mayUse('connection', connection.id) && (connection.instructions ?? '').trim() !== '')
+      .map((connection) => ({ label: connection.label, instructions: (connection.instructions ?? '').trim() }))
+    return { ...(items === undefined ? {} : { capabilities: items }), ...(instructions.length === 0 ? {} : { connectionInstructions: instructions }) }
   }
 
   /** The my_capabilities tool: the list as it is now, read fresh. */

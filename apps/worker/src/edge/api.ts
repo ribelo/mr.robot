@@ -316,6 +316,7 @@ export const api = new Router<ApiContext>()
       ...(body.label === undefined || body.label.trim() === '' ? {} : { label: body.label.trim() }),
       ...(body.shared === undefined ? {} : { shared: body.shared }),
       ...(body.isDefault === true ? { isDefault: true } : {}),
+      ...(body.instructions === undefined ? {} : { instructions: body.instructions }),
     }))
     return updated === undefined ? yield* Effect.fail(notFound('no such connection of yours')) : yield* connectionView(c, updated.id)
   }))

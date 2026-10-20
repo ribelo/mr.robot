@@ -7,7 +7,7 @@
  */
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
-import { DeputySettingsPatch, type RobotSettings, type SettingsPatch } from '@mr-robot/protocol'
+import { DeputySettingsPatch, type ConnectionView, type RobotSettings, type SettingsPatch } from '@mr-robot/protocol'
 import type { DeputyHost, HelpListing, RobotListing } from '../agent/tools/deputy.ts'
 import { HOME_ID } from '../env.ts'
 import { conflict, invalid, notFound, type DurableError } from '../platform/durable.ts'
@@ -151,6 +151,28 @@ export const settings = (robotId: string) => Effect.gen(function* () {
   }
 })
 
+// ------------------------------------------------------------------ Connections (v1.15 ticket 08, gb-q55x)
+
+/** The Connections the owner can use: their own and the ones shared with the Home. */
+export const connections = Effect.gen(function* () {
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot is a deputy')
+  return yield* promise((): Promise<ConnectionView[]> => platform.env.HOME.getByName(HOME_ID).connectionsFor(current.ownerId))
+})
+
+/** Set the instructions of one of the owner's own Connections; one shared by someone else is theirs to change. */
+export const connectionInstructionsSet = (connectionId: string, instructions: string) => Effect.gen(function* () {
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  const known = (yield* connections).find((connection) => connection.id === connectionId)
+  if (known === undefined) return yield* notFound(`no Connection ${connectionId} your owner can use; list them with connection_list`)
+  if (!known.mine) return yield* invalid(`${known.label} belongs to ${known.ownerName}: only they change how it is used`)
+  const updated = yield* promise(() => platform.env.MEMBER.getByName(current.ownerId).updateConnection(connectionId, { instructions }))
+  if (updated === undefined) return yield* notFound(`no Connection ${connectionId} your owner can use`)
+  return { id: updated.id, label: updated.label, instructions: updated.instructions ?? '' }
+})
+
 // ------------------------------------------------------------------ requests for help (sk-cj9v, sk-gag7)
 
 /** Open requests for help of the Robots the owner owns: the ones Mr. Robot's owner answers (a shared Robot's own owner answers, and his Mr. Robot is woken). */
@@ -279,6 +301,8 @@ export function deputyHost(run: Run): DeputyHost {
     fileWrite: (id, path, content) => plain(run(fileWrite(id, path, content))),
     fileDelete: (id, path) => plain(run(fileDelete(id, path))),
     settingsSet: (id, patch) => plain(run(settingsSet(id, patch))),
+    connections: () => plain(run(connections)),
+    connectionInstructionsSet: (id, instructions) => plain(run(connectionInstructionsSet(id, instructions))),
     helpRequests: () => plain(run(helpRequests)),
     helpAnswer: (id, request, text) => plain(run(helpAnswer(id, request, text))),
   }
