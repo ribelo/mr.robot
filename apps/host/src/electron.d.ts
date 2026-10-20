@@ -60,16 +60,20 @@ declare module 'electron' {
     setUserAgent(userAgent: string): void
   }
   export const session: { fromPartition(partition: string): Session }
+  export interface NativeImage {
+    addRepresentation(options: { scaleFactor: number; dataURL: string }): void
+    setTemplateImage(option: boolean): void
+  }
   export class Tray {
-    constructor(image: unknown)
+    constructor(image: NativeImage)
     setToolTip(text: string): void
     setContextMenu(menu: unknown): void
-    setImage(image: unknown): void
+    setImage(image: NativeImage): void
     setTitle(title: string): void
     on(event: string, listener: () => void): void
   }
   export const Menu: { buildFromTemplate(template: Array<Record<string, unknown>>): unknown }
-  export const nativeImage: { createFromDataURL(url: string): unknown }
+  export const nativeImage: { createFromDataURL(url: string): NativeImage }
   export const shell: { openExternal(url: string): Promise<void> }
   export const ipcMain: { handle(channel: string, listener: (event: { senderFrame?: { url: string } | null }, ...args: never[]) => unknown): void }
   export const ipcRenderer: { invoke(channel: string, ...args: unknown[]): Promise<unknown>; on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void }

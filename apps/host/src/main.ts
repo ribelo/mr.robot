@@ -5,7 +5,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, Notification, shell, Tray } from 'electron'
 import { HostChrome } from './chrome.ts'
 import { ConfigFile, normalizeServer, type HostConfig } from './config.ts'
 import { HostLink, startPairing, waitForApproval, type LinkState } from './connection.ts'
@@ -13,10 +13,9 @@ import { isSignInKind } from './sign-in.ts'
 import { HostShell } from './shell.ts'
 import { connectThroughSignIn } from './sign-in-window.ts'
 import { PWSH_INSTALL_URL } from './windows.ts'
+import { trayIcon } from './tray-icon.ts'
 
 const VERSION = '0.1.0'
-// A small green robot dot for the tray (16x16 PNG).
-const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMElEQVR4nGNgoBZgZGRk+M/AwMDAxMTEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMBQAQC5xQMRrW1ZcgAAAABJRU5ErkJggg=='
 
 // Settings live in ~/.config/mr-robot-host (Linux), ~/Library/Application Support/mr-robot-host (macOS) or %APPDATA%\\mr-robot-host (Windows).
 app.setName('Mr. Robot host')
@@ -265,7 +264,7 @@ app.on('window-all-closed', () => { /* stay in the tray */ })
 
 void app.whenReady().then(() => {
   app.dock?.hide()
-  tray = new Tray(nativeImage.createFromDataURL(ICON))
+  tray = new Tray(trayIcon(process.platform))
   tray.on('click', () => openWindow())
   if (config.autostart) applyAutostart(true)
   changed()

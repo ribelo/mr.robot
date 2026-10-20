@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Mr. Robot in the tray: the app's teal blob with its two eyes (apps/web/public/icons), drawn to read at 16 and 32 px. -->
+  <defs>
+    <mask id="eyes">
+      <rect width="32" height="32" fill="#fff"/>
+      <ellipse cx="11.4" cy="15" rx="1.9" ry="3.4" transform="rotate(-14 11.4 15)" fill="#000"/>
+      <ellipse cx="20.6" cy="15" rx="1.9" ry="3.4" transform="rotate(14 20.6 15)" fill="#000"/>
+    </mask>
+  </defs>
+  <path fill="#5ec4b6" mask="url(#eyes)" d="M16 3.4c7.1 0 12.9 6.3 12.9 14.8 0 7-5.5 10.6-12.9 10.6S3.1 25.2 3.1 18.2C3.1 9.7 8.9 3.4 16 3.4Z"/>
+</svg>
