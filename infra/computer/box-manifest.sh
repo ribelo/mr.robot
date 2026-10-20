@@ -22,6 +22,16 @@ program() {
   jq -nc --arg name "$name" --arg command "$command" --arg version "$version" '{kind: "program", name: $name, command: $command, version: $version}' >> "$records"
 }
 
+# release NAME COMMAND REPORTED VERSION: a tool whose binary reports an older version than its release (the sd 1.1.0 release prints
+# "sd 1.0.0"). It runs COMMAND --version, requires REPORTED as its first line and records VERSION, the release the Dockerfile installs.
+# Another release reports another line and fails the build here, so the version recorded cannot drift from the one installed.
+release() {
+  local name="$1" command="$2" reported="$3" version="$4" line
+  line="$("$command" --version 2>&1 | head -n 1)"
+  if [ "$line" != "$reported" ]; then echo "box-manifest: $name reports '$line', not '$reported': write the release it is here" >&2; exit 1; fi
+  jq -nc --arg name "$name" --arg command "$command" --arg version "$version" '{kind: "program", name: $name, command: $command, version: $version}' >> "$records"
+}
+
 # package NAME: records the installed version of a Python distribution.
 package() {
   local name="$1" version
@@ -36,7 +46,7 @@ ws --help > /dev/null 2>&1 || { echo "box-manifest: ws --help failed" >&2; exit 
 program ripgrep rg --version
 program fd fd --version
 program jq jq --version
-program sd sd --version
+release sd sd 'sd 1.0.0' 1.1.0
 program less less --version
 program tree tree --version
 program file file --version

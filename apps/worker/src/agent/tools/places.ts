@@ -185,7 +185,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       }),
       tool<{ on: string; pattern: string; glob?: string; ignore_case?: boolean; path?: string }>({
         name: 'grep',
-        description: `Search text files with a regular expression. Returns { matches, truncated }: at most ${GREP_MAX_MATCHES} matches as { path, line, text } (empty when nothing matches), and truncated true when there were more or not every file was searched (the Workspace searches up to ${WORKSPACE_GREP_MAX_FILES} files); then narrow path or glob. The expression is a JavaScript one, on the Box ripgrep's; on a computer it searches under path (your directory there when left out). .git, node_modules and .cache are skipped on a Box or a computer. ${filePlaces(reach)}`,
+        description: `Search text files with a regular expression. Returns { matches, truncated }: at most ${GREP_MAX_MATCHES} matches as { path, line, text } (empty when nothing matches), and truncated true when there were more or not every file was searched (the Workspace searches up to ${WORKSPACE_GREP_MAX_FILES} files); then narrow path or glob. The expression is a JavaScript one; on the Box it is ripgrep's (Rust syntax, no look-around or backreferences); on a computer it searches under path (your directory there when left out). .git, node_modules and .cache are skipped on a Box or a computer. ${filePlaces(reach)}`,
         parameters: {
           properties: {
             on: filePlace(reach),

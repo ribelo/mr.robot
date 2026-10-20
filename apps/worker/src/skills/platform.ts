@@ -235,6 +235,7 @@ Read this before you use the Box for more than one short command: a script, a bi
 - Fetch the file where you need it. To move it, call copy with from set to the Workspace and to set to the Box. In a command, run \`ws get inbox/video.mp4\` and the file comes from R2 straight to the disk.
 - Send a result back the same way: copy, or \`ws put out.mp4 results/out.mp4\` at the end of the script. Use ws when a script needs a file in the middle of a run. Use copy when you only move a file.
 - Neither has a size limit, and the file does not pass through you. Never read a big file and write it again.
+- ws needs the files group at allow. When your files are at ask, ws is refused, because a script cannot wait for your owner. Use copy then: it asks.
 
 ## Set up once
 
@@ -260,6 +261,7 @@ Read this before you use a Host: a computer that belongs to your owner.
 - Use the Box for work that needs only a computer: scripts, data, conversion. The Box is yours. A Host is your owner's.
 - Use a Host only when the work needs something that exists there: your owner's files, its environment (its programs, its display, its network) or its connection (a home address, a VPN).
 - The Hosts line in your runtime section gives each Host's state, its shell and its sandbox. Read it. Do not run a command to find out whether a Host is online.
+- Call a Host by the name the line gives. When two Hosts share a name, each has its owner's name too, for example "Desk (Anna)".
 - Write commands for the shell the line names: bash, or pwsh on Windows.
 
 ## Your directory
@@ -271,9 +273,9 @@ Read this before you use a Host: a computer that belongs to your owner.
 ## Modes and denials
 
 - The grant has a mode. read-only: you change nothing. workspace-write: you change your directory and the roots your owner listed (a command may also change /tmp). full: you change anything that the OS user can, with no sandbox.
-- When the sandbox denies a write, the result names the path. First change the command: write inside your directory.
-- When the work truly needs that path, call run again with the same command, escalate set to true and a reason in one sentence. Your owner gets one Ask and reads your reason. You wake with the result or the refusal. An approval covers that one call. Never split a command to get past the sandbox.
-- A Host with no usable sandbox refuses a command in read-only or workspace-write mode and says why. Tell your owner. Do not look for a way around it.
+- When the sandbox denies a write, the result names the path. First change the call: write inside your directory.
+- When the work truly needs that path, call the same tool again (run, write, edit, delete_file, or copy to the Host) with the same arguments, escalate set to true and a reason in one sentence. Your owner gets one Ask and reads your reason. You wake with the result or the refusal. An approval covers that one call. Never split a command to get past the sandbox.
+- A Host with no usable sandbox refuses a command or a write in read-only or workspace-write mode and says why. Tell your owner. Do not look for a way around it.
 
 ## Jobs
 
