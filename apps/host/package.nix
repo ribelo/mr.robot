@@ -34,8 +34,7 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src pnpmWorkspaces;
     inherit pnpm;
     fetcherVersion = 4;
-    # The dependencies changed in v1.16 ticket 02 (DSH's shell and sandbox): build once to get the new hash from the error.
-    hash = lib.fakeHash;
+    hash = "sha256-Ouu037rmQNAjQImKTl7QxhtPgigmfDbatPStvbFab+M=";
   };
 
   buildPhase = ''
