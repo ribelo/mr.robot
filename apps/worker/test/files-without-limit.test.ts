@@ -220,12 +220,11 @@ describe('copy over presigned links (ob-d3rt, ob-qshq, ob-fgyk, ob-qr7v, ob-7hp3
     expect(sameBytes(await workspaceBytes(id, 'inbox/video.bin'), bytes)).toBe(true)
     expect(json(down)).toMatchObject({ to: { on: 'Desk', path: '/home/anna/back/video.bin' }, bytes: bytes.length })
     expect(sameBytes(hostDisk.get('/home/anna/back/video.bin'), bytes)).toBe(true)
-    // The Host app moved the bytes, a window of two parts at a time, each window on links minted just before it: three parts up, three ranges down.
+    // The Host app moved the bytes one part per call, each with its own deadline and on a link minted just before it (deep review P12):
+    // three parts up, three ranges down.
     expect(hostCopies).toEqual([
-      { rpc: 'Upload', path: '/home/anna/video.bin', size: bytes.length, parts: 2 },
-      { rpc: 'Upload', path: '/home/anna/video.bin', size: bytes.length, parts: 1 },
-      { rpc: 'Download', path: '/home/anna/back/video.bin', size: bytes.length, parts: 2 },
-      { rpc: 'Download', path: '/home/anna/back/video.bin', size: bytes.length, parts: 1 },
+      ...[1, 2, 3].map(() => ({ rpc: 'Upload', path: '/home/anna/video.bin', size: bytes.length, parts: 1 })),
+      ...[1, 2, 3].map(() => ({ rpc: 'Download', path: '/home/anna/back/video.bin', size: bytes.length, parts: 1 })),
     ])
     expect(r2Log.every((entry) => entry.key === `robots/${id}/inbox/video.bin`)).toBe(true)
     expect(r2Log).toHaveLength(6)

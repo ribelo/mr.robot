@@ -11,7 +11,13 @@ import * as Redacted from 'effect/Redacted'
 import type { ComputerContainer, Home, Member, Robot } from '../apps/worker/src/index.ts'
 import { vapidPublicKey } from './vapid.ts'
 
-export const Files = Cloudflare.R2.Bucket('Files')
+/**
+ * The Robots' Workspaces. A multipart upload that a Host app or ws started and nobody completed or aborted (the Robot restarted in the
+ * middle of a copy) is aborted by R2 after a day, so its parts are not kept (deep review P12).
+ */
+export const Files = Cloudflare.R2.Bucket('Files', {
+  lifecycleRules: [{ id: 'abort-unfinished-uploads', abortMultipartUploadsTransition: { condition: { type: 'Age', maxAge: 24 * 60 * 60 } } }],
+})
 
 export const OneTimePin = Cloudflare.Access.IdentityProvider('OneTimePin', {
   name: 'One-time PIN',

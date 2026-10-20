@@ -1,17 +1,21 @@
 /**
  * Oversized tool results spill to the Workspace (v1.14, ao-hf02): DSH's spill policy keeps the head and
  * the tail inline and stores the complete result through this store under spill/ in the Robot's
- * Workspace, where the file tools read it. Spill files are tidied after 30 days (ao-ry61).
+ * Workspace, where the file tools read it. Spill files are tidied after 30 days (ao-ry61). The same
+ * tidy pass removes what a copy left under tmp/ more than a day ago (deep review P12).
  */
 import { type Context } from '@deepseek-ai/cordis'
 import SpillStore, { SpillLocator, type SaveTextSpill, type SpillRef } from '@deepseek-ai/dsh-spill'
 import * as Effect from 'effect/Effect'
-import { WORKSPACE_ROOT } from '../places/files.ts'
+import { STAGING_DIRECTORY, WORKSPACE_ROOT } from '../places/files.ts'
 import { workspacePrefix, type WorkspaceShape } from './workspace.ts'
 
 export const SPILL_DIRECTORY = 'spill'
 export const SPILL_KEEP_MS = 30 * 24 * 60 * 60 * 1000
 export const SPILL_SWEEP_EVERY_MS = 24 * 60 * 60 * 1000
+
+/** A staged file is deleted when its copy ends; one that a copy cut off (the Robot restarted in the middle) goes after a day. */
+export const STAGED_KEEP_MS = 24 * 60 * 60 * 1000
 
 /** The inline budget follows the context budget (ao-antj): a sixteenth of it, between 2 000 and 12 500 tokens. */
 export function maxInlineTokens(contextBudget: number): number {
@@ -53,13 +57,22 @@ export class WorkspaceSpillStore extends SpillStore {
 }
 
 /** Delete the spill files older than 30 days; returns how many are left. */
-export async function sweepSpill(bucket: R2Bucket, robotId: string, now: number): Promise<number> {
-  const prefix = `${workspacePrefix(robotId)}${SPILL_DIRECTORY}/`
+export function sweepSpill(bucket: R2Bucket, robotId: string, now: number): Promise<number> {
+  return deleteOlder(bucket, `${workspacePrefix(robotId)}${SPILL_DIRECTORY}/`, SPILL_KEEP_MS, now)
+}
+
+/** Delete the staged files of copies older than a day; returns how many are left. */
+export function sweepStaged(bucket: R2Bucket, robotId: string, now: number): Promise<number> {
+  return deleteOlder(bucket, `${workspacePrefix(robotId)}${STAGING_DIRECTORY}/`, STAGED_KEEP_MS, now)
+}
+
+/** Delete the objects under `prefix` uploaded more than `keepMs` before `now`; returns how many are left. */
+async function deleteOlder(bucket: R2Bucket, prefix: string, keepMs: number, now: number): Promise<number> {
   let left = 0
   let cursor: string | undefined
   do {
     const page = await bucket.list({ prefix, ...(cursor === undefined ? {} : { cursor }) })
-    const old = page.objects.filter((object) => now - object.uploaded.getTime() > SPILL_KEEP_MS).map((object) => object.key)
+    const old = page.objects.filter((object) => now - object.uploaded.getTime() > keepMs).map((object) => object.key)
     if (old.length > 0) await bucket.delete(old)
     left += page.objects.length - old.length
     cursor = page.truncated ? page.cursor : undefined

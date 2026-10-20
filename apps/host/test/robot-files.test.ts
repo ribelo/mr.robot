@@ -21,7 +21,8 @@ const r2: CopyIo = {
     return range === null ? new Response('no', { status: 400 }) : new Response(OBJECT.slice(Number(range[1]), Number(range[2]) + 1), { status: 206 })
   },
 }
-const download = (path: string) => ({ path, url: 'https://r2.test/x', size: OBJECT.length, partBytes: OBJECT.length, from: 0, until: OBJECT.length, access: access() })
+const download = (path: string, window: { readonly copy?: string; readonly from?: number; readonly until?: number } = {}) =>
+  ({ copy: window.copy ?? crypto.randomUUID(), path, url: 'https://r2.test/x', size: OBJECT.length, partBytes: 8, from: window.from ?? 0, until: window.until ?? OBJECT.length, access: access() })
 
 let home = ''
 let host: Awaited<ReturnType<typeof connected>>
@@ -64,7 +65,7 @@ describe('writes obey the mode and the roots of the grant', () => {
 
   it('refuses every write in read-only, also in the Robot directory, and allows every write in full', async () => {
     expect((await failure('Write', { path: 'ro.txt', text: 'no', access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
-    expect((await failure('Download', { path: 'ro.bin', url: 'https://r2.test/x', size: 1, partBytes: 1, from: 0, until: 1, access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
+    expect((await failure('Download', { copy: crypto.randomUUID(), path: 'ro.bin', url: 'https://r2.test/x', size: 1, partBytes: 1, from: 0, until: 1, access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
     const anywhere = join(home, 'anywhere.txt')
     await call('Write', { path: anywhere, text: 'full', access: access({ mode: 'full' }) })
     expect(await readFile(anywhere, 'utf8')).toBe('full')
@@ -113,8 +114,14 @@ describe('a change cannot leave the roots through a link on its path', () => {
   it('does not download through a link planted at the part file', async () => {
     const victim = await outsideFile('planted-part-victim')
     await mkdir(robotDir(), { recursive: true })
-    await symlink(victim, join(robotDir(), 'planted.bin.mr-robot-part'))
-    expect((await failure('Download', download('planted.bin'))).code).toBe('SANDBOX_DENIED')
+    // The first window of a copy makes its part file; the Robot swaps it for a link before the next window comes (deep review P1, P12).
+    const copy = crypto.randomUUID()
+    await call('Download', download('planted.bin', { copy, until: 8 }))
+    const part = (await readdir(robotDir())).find((name) => /^planted\.bin\.[0-9a-f]+\.mr-robot-part$/.test(name))
+    expect(part).toBeDefined()
+    await rm(join(robotDir(), part!))
+    await symlink(victim, join(robotDir(), part!))
+    expect((await failure('Download', download('planted.bin', { copy, from: 8 }))).code).toBe('SANDBOX_DENIED')
     expect(await readFile(victim, 'utf8')).toBe('keep')
     await expect(stat(join(robotDir(), 'planted.bin'))).rejects.toThrow()
     // A download with no link in its way lands, and leaves no part file.

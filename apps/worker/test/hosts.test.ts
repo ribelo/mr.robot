@@ -224,7 +224,7 @@ describe('copy between a Host and the Workspace (v1.15 ticket 09, gb-iw01, gb-mc
     const member = env.MEMBER.getByName(annaId)
     expect(await refusal(() => member.hostCopySize(desk.hostId, shellOnly, '/home/anna/report.bin'))).toContain('has no files grant on the host "Desk"')
     expect(await refusal(() => member.hostUpload(desk.hostId, shellOnly, { path: '/home/anna/report.bin', size: 0, parts: [] }))).toContain('has no files grant on the host "Desk"')
-    expect(await refusal(() => member.hostDownload(desk.hostId, shellOnly, { path: '/tmp/x', url: 'https://r2.example/x', size: 0, partBytes: 1, from: 0, until: 0 }))).toContain('has no files grant on the host "Desk"')
+    expect(await refusal(() => member.hostDownload(desk.hostId, shellOnly, { copy: 'c-1', path: '/tmp/x', url: 'https://r2.example/x', size: 0, partBytes: 1, from: 0, until: 0 }))).toContain('has no files grant on the host "Desk"')
     const granted = await robotWith(ANNA, [`${desk.hostId}:files`], ['files'])
     await say(ANNA, granted, [{ text: 'hi' }])
     expect(requests.get(granted)!.at(-1)!.tools!.map((definition) => definition.name)).toContain('copy')

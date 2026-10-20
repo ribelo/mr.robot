@@ -20,7 +20,7 @@ const open: WebSocket[] = []
 let runs = 0
 /** The fake host's disk (v1.15, copy): path → bytes. */
 export const hostDisk = new Map<string, Uint8Array>()
-/** Downloads that came in windows and are not whole yet. */
+/** Downloads that came in windows and are not whole yet, by the Worker's id of the copy. */
 const downloading = new Map<string, Uint8Array>()
 /** What the fake app did to copy: each Upload and Download it was handed, with the URLs' keys. */
 export const hostCopies: Array<{ rpc: 'Upload' | 'Download'; path: string; size: number; parts: number }> = []
@@ -95,26 +95,28 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     },
     // The real copy engine of the app (host-protocol), over the fake disk and the fake R2.
     Upload: ({ path, size, parts }) => Effect.tryPromise({
-      try: async () => {
+      try: async (signal) => {
         hostCopies.push({ rpc: 'Upload', path, size, parts: parts.length })
         const bytes = hostDisk.get(path)
         if (bytes === undefined) throw new CopyFailed({ message: `no such file: ${path}` })
-        return { path, size, etags: await uploadFile({ size: async () => bytes.length, read: async (offset, length) => bytes.subarray(offset, offset + length) }, size, parts, copyIo()) }
+        return { path, size, etags: await uploadFile({ size: async () => bytes.length, read: async (offset, length) => bytes.subarray(offset, offset + length) }, size, parts, copyIo(), signal) }
       },
       catch: hostError,
     }),
-    Download: ({ path, url, size, partBytes, from, until, access }) => readOnly(access, path) ?? Effect.tryPromise({
-      try: async () => {
+    Download: ({ copy, path, url, size, partBytes, from, until, access }) => readOnly(access, path) ?? Effect.tryPromise({
+      try: async (signal) => {
         hostFileCalls.push({ rpc: 'Download', path, access })
         hostCopies.push({ rpc: 'Download', path, size, parts: Math.ceil((Math.min(until, size) - from) / partBytes) })
-        // A download in windows keeps what arrived until the last window puts the file in place.
-        const received = from > 0 ? downloading.get(path) ?? new Uint8Array(size) : new Uint8Array(size)
+        // A download in windows keeps what arrived, for its copy, until the last window puts the file in place.
+        const kept = downloading.get(copy)
+        if (from > 0 && kept === undefined) throw new CopyFailed({ message: `${path} was not written: this copy stopped on this computer` })
+        const received = kept ?? new Uint8Array(size)
         const written = await downloadFile({
           write: async (offset, bytes) => { received.set(bytes, offset) },
-          finish: async () => { downloading.delete(path); hostDisk.set(path, received) },
-          release: async () => { downloading.set(path, received) },
-          abandon: async () => { downloading.delete(path) },
-        }, { url, size, partBytes, from, until }, copyIo())
+          finish: async () => { downloading.delete(copy); hostDisk.set(path, received) },
+          release: async () => { downloading.set(copy, received) },
+          abandon: async () => { downloading.delete(copy) },
+        }, { url, size, partBytes, from, until }, copyIo(), signal)
         return { path, bytes: written }
       },
       catch: hostError,

@@ -6,7 +6,7 @@ import * as Effect from 'effect/Effect'
 import { downloadFile, HostError, HostRpcs, uploadFile, type CopyIo } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import type { HostChrome } from './chrome.ts'
-import { fileSize, nodeCopyIo, sourceFile } from './copy.ts'
+import { fileSize, nodeCopyIo, sourceFile, type HostDownloads } from './copy.ts'
 import { HostDisk } from './files.ts'
 import type { HostShell } from './shell.ts'
 
@@ -17,8 +17,9 @@ export interface Relay {
   readonly token: string
 }
 
-export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void, copyIo: CopyIo = nodeCopyIo) {
-  const disk = new HostDisk(shell)
+/** The handlers of one connection; `downloads` outlives it, so that a copy goes on over the next connection of the same run of the app. */
+export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void, copyIo: CopyIo = nodeCopyIo) {
+  const disk = new HostDisk(shell, downloads)
   const sessions = new Map<string, { remote: WebSocket; local: WebSocket }>()
   const closeSession = (session: string) => {
     const found = sessions.get(session)
@@ -31,6 +32,7 @@ export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => 
     Read: ({ path, access }) => Effect.tryPromise({ try: () => disk.read(access, path), catch: fail }),
     Write: ({ path, text, base64, access }) => Effect.tryPromise({ try: () => disk.write(access, path, { text, base64 }), catch: fail }),
     // Copy (v1.16): the file goes to and from R2 over presigned URLs, in parts, retried (copy.ts, the protocol's copy engine). A download writes, so it runs in the sandbox of the mode and roots.
+    // The signal ends when the Worker gives up on the call or the connection is lost: the requests in flight and the writes stop (deep review P12).
     CopyStat: ({ path, access }) => Effect.tryPromise({
       try: async () => {
         const full = await disk.readable(access, path)
@@ -39,16 +41,16 @@ export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => 
       catch: fail,
     }),
     Upload: ({ path, size, parts, access }) => Effect.tryPromise({
-      try: async () => {
+      try: async (signal) => {
         const full = await disk.readable(access, path)
-        return { path: full, size, etags: await uploadFile(sourceFile(full), size, parts, copyIo) }
+        return { path: full, size, etags: await uploadFile(sourceFile(full), size, parts, copyIo, signal) }
       },
       catch: fail,
     }),
-    Download: ({ path, url, size, partBytes, from, until, access }) => Effect.tryPromise({
-      try: async () => {
-        const target = await disk.target(access, path, { resume: from > 0 })
-        return { path: target.path, bytes: await downloadFile(target.file, { url, size, partBytes, from, until }, copyIo) }
+    Download: ({ copy, path, url, size, partBytes, from, until, access }) => Effect.tryPromise({
+      try: async (signal) => {
+        const target = await disk.target(access, path, { copy, first: from === 0 }, signal)
+        return { path: target.path, bytes: await downloadFile(target.file, { url, size, partBytes, from, until }, copyIo, signal) }
       },
       catch: fail,
     }),

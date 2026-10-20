@@ -15,6 +15,8 @@ import { refuseOwned } from './place.ts'
 
 export const WORKSPACE_ROOT = '/workspace'
 export const BOX_ROOT = '/workspace'
+/** Where a copy between two places other than the Workspace parks its file (places.ts): tmp/<id>/ in the Workspace. */
+export const STAGING_DIRECTORY = 'tmp'
 
 /** A file read: its text, or base64 when it is not UTF-8. */
 export type FileContent =

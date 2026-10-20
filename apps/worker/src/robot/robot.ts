@@ -8,7 +8,7 @@
  * interrupted Turn resumes from the last persisted event.
  */
 import { clearWorkspace } from '../workspace/workspace.ts'
-import { SPILL_SWEEP_EVERY_MS, sweepSpill } from '../workspace/spill.ts'
+import { SPILL_SWEEP_EVERY_MS, sweepSpill, sweepStaged } from '../workspace/spill.ts'
 import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCREEN_SWEEP_EVERY_MS, sweepScreenshots } from '../workspace/screens.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -99,7 +99,7 @@ import { Credentials } from '../plugins/credentials.ts'
 import { Exa } from '../plugins/exa.ts'
 import { Places as PlacesCapability } from '../plugins/places.ts'
 import { Places } from '../places/places.ts'
-import { HOST_WINDOW_PARTS, PART_BYTES, Transfers } from '../places/transfers.ts'
+import { PART_BYTES, Transfers } from '../places/transfers.ts'
 import { boxTransfer as boxDoor } from '../places/box-door.ts'
 import { CopyPermits, type PermitSecret } from '../places/copy-permit.ts'
 import { hostJobPlace, hostLink, type HostCaller } from '../places/host-links.ts'
@@ -831,7 +831,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       jobs: this.jobs(),
       transfers: this.transfers(),
       permits: this.wsPermits,
-      windowParts: this.hostWindowParts(),
     })
     return this.placeService
   }
@@ -860,11 +859,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The size of a part of a multipart upload; tests make it small. */
   protected partBytes(): number {
     return PART_BYTES
-  }
-
-  /** How many parts of a file a Host is handed links for at once; tests make it small. */
-  protected hostWindowParts(): number {
-    return HOST_WINDOW_PARTS
   }
 
   /** The permits of the runs of ws this Robot starts on its Box (a copy, the caches' archive); the door finds them by secret. */
@@ -2573,11 +2567,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.tidySpill(Date.now())
   }
 
-  /** Spill files older than 30 days go (ao-ry61); the Workspace is listed at most once a day for it. */
+  /**
+   * Spill files older than 30 days go (ao-ry61), and so do files a copy parked under tmp/ more than a day ago (a restart cut the copy off,
+   * deep review P12); the Workspace is listed at most once a day for it.
+   */
   protected async tidySpill(now: number): Promise<void> {
     const due = this.store.get<number>('spill-sweep-next')
     if (due !== undefined && due > now) return
-    await sweepSpill(this.env.FILES, this.store.requireConfig().id, now)
+    const robotId = this.store.requireConfig().id
+    await sweepSpill(this.env.FILES, robotId, now)
+    await sweepStaged(this.env.FILES, robotId, now)
     this.store.set('spill-sweep-next', now + SPILL_SWEEP_EVERY_MS)
   }
 

@@ -3,13 +3,17 @@ import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Scope from 'effect/Scope'
 import { makeHostClient, parseFrame, serveHost, type CopyIo, type HostAccess, type JobEnded } from '@mr-robot/host-protocol'
+import { HostDownloads } from '../src/copy.ts'
 import { hostHandlers } from '../src/handlers.ts'
 import { HostShell } from '../src/shell.ts'
 
 type Rpc = Record<string, (payload: unknown) => Effect.Effect<any, any>>
 
-export async function connected(home: string, copyIo?: CopyIo, options: { readonly sandboxChain?: Parameters<typeof HostShell.start>[0]['sandboxChain'] } = {}) {
-  const shell = await HostShell.start({ home, ...options })
+export async function connected(home: string, copyIo?: CopyIo, options: { readonly sandboxChain?: Parameters<typeof HostShell.start>[0]['sandboxChain']; readonly downloadIdleMs?: number } = {}) {
+  const { downloadIdleMs, ...shellOptions } = options
+  const shell = await HostShell.start({ home, ...shellOptions })
+  // The downloads in flight outlive a connection, as in the app's link.
+  const downloads = new HostDownloads(shell, downloadIdleMs)
   // The job frames the app would send to the Worker.
   const ended: JobEnded[] = []
   shell.onJobEnded((job) => ended.push(job))
@@ -17,7 +21,7 @@ export async function connected(home: string, copyIo?: CopyIo, options: { readon
   /** One connection, as the app makes one to the Worker: new handlers and server, and the Worker's client. */
   const link = async () => {
     let toClient: (text: string) => void = () => undefined
-    const server = serveHost(hostHandlers(shell, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, copyIo), (text) => toClient(text))
+    const server = serveHost(hostHandlers(shell, downloads, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, copyIo), (text) => toClient(text))
     const client = makeHostClient((text) => {
       const parsed = parseFrame(text)
       if (parsed?.t === 'rpc') Effect.runFork(server.deliver(parsed.d))

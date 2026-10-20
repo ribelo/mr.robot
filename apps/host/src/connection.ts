@@ -9,6 +9,7 @@ import * as Fiber from 'effect/Fiber'
 import { frame, HEARTBEAT_MS, parseFrame, serveHost, type HostNotification, type JobEnded } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import { findChrome, hasGraphicalSession, type HostChrome } from './chrome.ts'
+import { HostDownloads } from './copy.ts'
 import { hostHandlers } from './handlers.ts'
 import type { HostShell } from './shell.ts'
 
@@ -49,6 +50,8 @@ export class HostLink {
   private server: Fiber.Fiber<never, never> | undefined
   /** Jobs that ended while there was no connection: the app is still the same run, so it tells the Worker when it is back. */
   private readonly unsent: JobEnded[] = []
+  /** The downloads in flight, kept across reconnects: the next window of a copy may come over the next connection. */
+  private readonly downloads: HostDownloads
 
   constructor(
     private readonly target: { server: string; hostId: string; token: string; version: string },
@@ -56,6 +59,7 @@ export class HostLink {
     private readonly chrome: HostChrome,
     private readonly events: LinkEvents,
   ) {
+    this.downloads = new HostDownloads(shell)
     shell.onJobEnded((ended) => {
       if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(frame({ t: 'job', d: ended }))
       else this.unsent.push(ended)
@@ -92,7 +96,7 @@ export class HostLink {
     const url = `${this.target.server.replace(/^http/, 'ws')}/api/host/connect`
     const socket = new WebSocket(url, { headers: { authorization: `Bearer ${this.target.token}`, 'x-host-id': this.target.hostId } })
     this.socket = socket
-    const handlers = hostHandlers(this.shell, this.chrome, () => ({ hostId: this.target.hostId, token: this.target.token }), (count) => this.events.sessions(count))
+    const handlers = hostHandlers(this.shell, this.downloads, this.chrome, () => ({ hostId: this.target.hostId, token: this.target.token }), (count) => this.events.sessions(count))
     const host = serveHost(handlers, (text) => { if (socket.readyState === WebSocket.OPEN) socket.send(text) })
     socket.on('open', () => {
       this.retry = 1000

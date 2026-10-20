@@ -24,11 +24,11 @@ export interface FileChanges {
   /** The OS user's home directory, where the Robots' directories are. */
   readonly home: string
   /**
-   * Make one change under the mode and roots of `access`.
+   * Make one change under the mode and roots of `access`; an aborted `signal` stops the program that makes it.
    * @throws WriteDenied when the sandbox refused it, an error with code SANDBOX_UNAVAILABLE when nothing here can confine it, and an
    *   error with the OS code (ENOENT, EISDIR, ...) when it failed otherwise.
    */
-  change(access: HostAccess, change: FileChange, body?: Uint8Array): Promise<void>
+  change(access: HostAccess, change: FileChange, body?: Uint8Array, signal?: AbortSignal): Promise<void>
 }
 
 /**
@@ -101,9 +101,10 @@ export interface ChangePlace {
 
 /**
  * Run one change in the sandbox the policy names (none in full mode). The caller has made the directory and the roots the policy binds.
+ * An aborted `signal` stops the program (a copy the Worker gave up on writes no more).
  * @throws as FileChanges.change says.
  */
-export async function runFileChange(ctx: Context, place: ChangePlace, change: FileChange, body: Uint8Array = new Uint8Array()): Promise<void> {
+export async function runFileChange(ctx: Context, place: ChangePlace, change: FileChange, body: Uint8Array = new Uint8Array(), signal?: AbortSignal): Promise<void> {
   const argv = [process.execPath, '-e', PROGRAM, '--', Buffer.from(JSON.stringify(change), 'utf8').toString('base64')]
   const { policy } = place
   const target = subject(change)
@@ -122,6 +123,7 @@ export async function runFileChange(ctx: Context, place: ChangePlace, change: Fi
     cwd: place.directory,
     stdio: { stdin: 'pipe', stdout: OUTPUT, stderr: OUTPUT },
     graceMs: 3000,
+    signal,
     // The program is Node in Electron too; the app's own Node options (a loader, a debugger) do not reach it.
     env: { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: undefined },
   })

@@ -4,7 +4,7 @@
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
 import * as Schema from 'effect/Schema'
-import { copyTimeoutMs, RUN_MAX_WAIT_SECONDS, type UploadPart } from '@mr-robot/host-protocol'
+import { hostPartDeadlineMs, RUN_MAX_WAIT_SECONDS, type UploadPart } from '@mr-robot/host-protocol'
 import type { Reach } from '../places/host-facet.ts'
 import { HostHub, jobRef, type HostEntry, type HostAction, type HostRunAnswer } from './hosts.ts'
 import { GoogleConsents } from './google-consent.ts'
@@ -958,10 +958,11 @@ export class Member extends DurableObject<Env> {
   hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }, reach: Reach = 'granted') { return this.hosts.run(id, robotId, 'files', (client, access) => client.Write({ ...input, access }), undefined, { action: reach === 'escalated' ? 'write (escalated)' : 'write', detail: input.path }, reach) }
   /** One piece of a copy, under the Host's file Grant; the copy as a whole is logged once (recordHostCopy). */
   hostCopySize(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.CopyStat({ path, access }), 60_000) }
-  // The Member DO only coordinates a copy: the bytes go between the Host app and R2 (v1.16 ticket 06).
-  hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Upload({ ...input, access }), copyTimeoutMs(input.parts.reduce((sum, part) => sum + part.length, 0))) }
-  /** One window of a download, bytes `from` to `until`; the Host app puts the file in place when the window reaches the end. */
-  hostDownload(id: string, robotId: string, input: { path: string; url: string; size: number; partBytes: number; from: number; until: number }, reach: Reach = 'granted') { return this.hosts.run(id, robotId, 'files', (client, access) => client.Download({ ...input, access }), copyTimeoutMs(input.until - input.from), undefined, reach) }
+  // The Member DO only coordinates a copy: the bytes go between the Host app and R2 (v1.16 ticket 06). A call carries one part, and has
+  // that part's deadline (deep review P12); when it runs out, the app is told to stop and stops its requests and writes.
+  hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Upload({ ...input, access }), hostPartDeadlineMs(input.parts.reduce((sum, part) => sum + part.length, 0))) }
+  /** One window of a download, bytes `from` to `until`, into the part file of the copy `copy`; the Host app puts the file in place when the window reaches the end. */
+  hostDownload(id: string, robotId: string, input: { copy: string; path: string; url: string; size: number; partBytes: number; from: number; until: number }, reach: Reach = 'granted') { return this.hosts.run(id, robotId, 'files', (client, access) => client.Download({ ...input, access }), hostPartDeadlineMs(input.until - input.from), undefined, reach) }
   recordHostCopy(id: string, robotId: string, detail: string, outcome: string): void { this.hosts.recordCopy({ hostId: id, robotId, detail, outcome }) }
   /**
    * A command under the shell grant's mode and roots, run by the app as a job (v1.16 ticket 03): the call waits up to `timeoutMs` and

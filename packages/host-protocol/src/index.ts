@@ -88,10 +88,12 @@ export const Upload = Rpc.make('Upload', {
 
 /**
  * Fetch bytes `from` to `until` of an object of `size` bytes from R2, in ranges of `partBytes`, into a file (creating its directories). A large
- * object comes in windows, each with a fresh link; the file appears only when a window reaches the end and all of it arrived.
+ * object comes in windows (the Worker sends one part per call), each with a fresh link; the file appears only when a window reaches the end
+ * and all of it arrived. Until then the bytes are in a part file beside the file, one per copy (deep review P12): the windows of one copy
+ * name the same `copy`, and a window with `from` above 0 continues that copy's part file or fails when the app no longer has it.
  */
 export const Download = Rpc.make('Download', {
-  payload: { path: Schema.String, url: Schema.String, size: Schema.Number, partBytes: Schema.Number, from: Schema.Number, until: Schema.Number, access: HostAccess },
+  payload: { copy: Schema.String, path: Schema.String, url: Schema.String, size: Schema.Number, partBytes: Schema.Number, from: Schema.Number, until: Schema.Number, access: HostAccess },
   success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
   error: HostError,
 })

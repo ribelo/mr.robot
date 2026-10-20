@@ -15,7 +15,7 @@ import type { BoxBackend } from '../box/backend.ts'
 import { runWs, type CopyPermits } from './copy-permit.ts'
 import { BadCall, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
 import { shellQuote } from './file-ops.ts'
-import { BoxFiles, boxPath, BOX_ROOT, HostFiles, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
+import { BoxFiles, boxPath, BOX_ROOT, HostFiles, STAGING_DIRECTORY, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
 import { hostFacetKey, hostIdOfPlace } from './host-facet.ts'
 import type { JobId } from './job-id.ts'
 import type { Transfers } from './transfers.ts'
@@ -28,8 +28,11 @@ export interface HostLink extends HostFileLink {
   copySize(path: string): Promise<{ readonly path: string; readonly size: number }>
   /** The Host app puts the parts to R2 over the presigned URLs. */
   upload(input: { path: string; size: number; parts: readonly UploadPart[] }): Promise<{ readonly path: string; readonly size: number; readonly etags: ReadonlyArray<{ readonly number: number; readonly etag: string }> }>
-  /** The Host app fetches the bytes from `from` to `until` of an object into a file, range by range; the file appears when `until` is the size. */
-  download(input: { path: string; url: string; size: number; partBytes: number; from: number; until: number }): Promise<{ readonly path: string; readonly bytes: number }>
+  /**
+   * The Host app fetches the bytes from `from` to `until` of an object into the part file of the copy `copy`, range by range; the file
+   * appears when `until` is the size.
+   */
+  download(input: { copy: string; path: string; url: string; size: number; partBytes: number; from: number; until: number }): Promise<{ readonly path: string; readonly bytes: number }>
   /** The copy as a whole is one line in the Host's log. */
   recordCopy(detail: string, outcome: string): Promise<void>
 }
@@ -61,8 +64,6 @@ export interface PlacesDeps {
   readonly transfers: Transfers
   /** The permits of the runs of ws the Robot starts on its Box; the Box's door finds them by secret. */
   readonly permits: CopyPermits
-  /** How many parts of a file a Host is handed links for at once. */
-  readonly windowParts: number
 }
 
 export interface CopyEnd {
@@ -132,8 +133,11 @@ interface Moved {
   readonly bytes: number
 }
 
-/** Where a copy that has two Hosts or a Host and the Box as its ends parks the file: tmp/<id>/ in the Workspace, deleted when the copy ends. */
-const stagingDirectory = (): string => `tmp/${crypto.randomUUID()}`
+/**
+ * Where a copy that has two Hosts or a Host and the Box as its ends parks the file: tmp/<id>/ in the Workspace, deleted when the copy
+ * ends (and by the Robot's daily tidy pass when a restart cut the copy off, workspace/spill.ts).
+ */
+const stagingDirectory = (): string => `${STAGING_DIRECTORY}/${crypto.randomUUID()}`
 
 const noGrant = (on: string, what: string, grant: string): NoGrant =>
   new NoGrant({ on, what, grant, message: `on "${on}": you hold no grant on ${what} (${grant}). Your owner can give it: propose it with propose_grants.` })
@@ -387,7 +391,8 @@ export class Places {
 
   /**
    * A Host file into the Workspace: the Host app puts it to R2 over presigned URLs, in parts; the Worker plans the parts, hands the Host
-   * their links one window at a time (so that no link outlives its use) and completes the upload.
+   * one part per call, with its link minted just before (so that no link outlives its use), and completes the upload. Each call has the
+   * deadline of one part (hostPartDeadlineMs): a large file on a slow line finishes part by part.
    */
   private async hostToWorkspace(link: HostLink, hostPath: string, workspacePath: string): Promise<Moved> {
     refuseOwnedOnHost(hostPath)
@@ -397,9 +402,9 @@ export class Places {
     const plan = await transfers.upload(key, file.size)
     try {
       const etags: Array<{ number: number; etag: string }> = []
-      for (let at = 0; at < plan.parts.length; at += this.deps.windowParts) {
-        const parts = await transfers.linkedParts(key, plan, plan.parts.slice(at, at + this.deps.windowParts))
-        etags.push(...(await link.upload({ path: hostPath, size: file.size, parts })).etags)
+      for (const part of plan.parts) {
+        const linked = await transfers.linkedPart(key, plan, part)
+        etags.push(...(await link.upload({ path: hostPath, size: file.size, parts: [linked] })).etags)
       }
       await transfers.finish(key, plan.uploadId, etags)
     } catch (error) {
@@ -410,8 +415,9 @@ export class Places {
   }
 
   /**
-   * A Workspace file onto a Host: the Host app fetches it from R2 over a presigned URL, range by range, one window at a time with a fresh
-   * link each. An owner's file or a doc is text kept in the Worker, and goes over the Host's write.
+   * A Workspace file onto a Host: the Host app fetches it from R2 over a presigned URL, one part per call with a fresh link each, into a
+   * part file of this copy's own (named by `copy`), and moves it into place after the last part. Each call has the deadline of one part.
+   * An owner's file or a doc is text kept in the Worker, and goes over the Host's write.
    */
   private async workspaceToHost(link: HostLink, workspacePath: string, hostPath: string): Promise<Moved> {
     refuseOwnedOnHost(hostPath)
@@ -423,12 +429,13 @@ export class Places {
     }
     const { transfers } = this.deps
     const first = await transfers.download(key, 'host')
+    const copy = crypto.randomUUID()
     let received = { path: hostPath, bytes: 0 }
     for (let from = 0; ; ) {
       const plan = from === 0 ? first : await transfers.download(key, 'host')
       if (plan.size !== first.size) throw new CopyRefused({ message: `copy: "${key}" changed in your Workspace while it was copied` })
-      const until = Math.min(first.size, from + first.partBytes * this.deps.windowParts)
-      received = await link.download({ path: hostPath, url: plan.url, size: first.size, partBytes: first.partBytes, from, until })
+      const until = Math.min(first.size, from + first.partBytes)
+      received = await link.download({ copy, path: hostPath, url: plan.url, size: first.size, partBytes: first.partBytes, from, until })
       if (until >= first.size) break
       from = until
     }

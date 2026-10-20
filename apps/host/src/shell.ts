@@ -302,8 +302,8 @@ export class HostShell implements FileChanges {
    * One change of a file, in the sandbox of the grant's mode and roots, as a command would run (file-change.ts). It needs no shell, so it
    * works on Windows without PowerShell 7 too.
    */
-  async change(access: HostAccess, change: FileChange, body?: Uint8Array): Promise<void> {
-    await runFileChange(this.ctx, await this.place(access), change, body)
+  async change(access: HostAccess, change: FileChange, body?: Uint8Array, signal?: AbortSignal): Promise<void> {
+    await runFileChange(this.ctx, await this.place(access), change, body, signal)
   }
 
   /**

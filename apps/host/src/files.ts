@@ -7,7 +7,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
 import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, resolvedPath } from './access.ts'
-import { targetFile } from './copy.ts'
+import type { HostDownloads } from './copy.ts'
 import { errorCode } from './error-code.ts'
 import type { FileChanges } from './file-change.ts'
 
@@ -48,7 +48,7 @@ const shown = (base: string, below: string): string => (base === '.' ? below : b
 export class HostDisk {
   private readonly home: string
 
-  constructor(private readonly changes: FileChanges) {
+  constructor(private readonly changes: FileChanges, private readonly downloads: HostDownloads) {
     this.home = changes.home
   }
 
@@ -82,15 +82,15 @@ export class HostDisk {
   }
 
   /**
-   * A file to write as a copy's target, where the mode and roots may allow it: the path with its links followed, as a write follows them
-   * (the part file is moved onto the file a link names, not onto the link). The part file and the move run in the sandbox, which refuses
-   * them when the links lead out of the roots.
+   * The file one window of the copy `copy` writes, where the mode and roots may allow it: the path with its links followed, as a write
+   * follows them (the part file is moved onto the file a link names, not onto the link). The part file and the move run in the sandbox,
+   * which refuses them when the links lead out of the roots. The window's writes stop when `signal` is aborted.
    */
-  async target(access: HostAccess, path: string, options: { readonly resume: boolean }): Promise<{ readonly path: string; readonly file: TargetFile }> {
+  async target(access: HostAccess, path: string, window: { readonly copy: string; readonly first: boolean }, signal: AbortSignal): Promise<{ readonly path: string; readonly file: TargetFile }> {
     const full = await this.full(access, path)
     await assertMayWrite(this.home, access, full)
     const real = await resolvedPath(full)
-    return { path: real, file: targetFile(real, options, (change, body) => this.changes.change(access, change, body)) }
+    return { path: real, file: this.downloads.window(window.copy, real, access, window.first, signal) }
   }
 
   async glob(access: HostAccess, pattern: string): Promise<{ paths: string[]; truncated: boolean }> {
