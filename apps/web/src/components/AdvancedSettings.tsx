@@ -2,10 +2,11 @@ import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS } from './danger-words.ts'
 import { useState, useEffect } from 'react'
-import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
+import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, DEFAULT_HOST_GRANT_ACCESS, type HostGrantAccess, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
 import { ReviewerSetting } from './ReviewerSetting.tsx'
 import { SubagentModels } from './SubagentModels.tsx'
+import { badRoots, HostAccessEditor } from './HostAccessEditor.tsx'
 import { SaveButton, type SaveOutcome } from './SaveButton.tsx'
 import { parseRobotSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import * as Option from 'effect/Option'
@@ -46,13 +47,20 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const capabilities = capabilityItems(catalog, draft.grants)
   const of = (field: CapabilityField) => capabilities.filter((entry) => entry.field === field)
   /** One grant item's three-state control (sk-746n). */
+  const accessOf = (name: string): HostGrantAccess => draft.hostAccess?.[name] ?? DEFAULT_HOST_GRANT_ACCESS
+  const setAccess = (name: string, access: HostGrantAccess) => setDraft({ ...draft, hostAccess: { ...draft.hostAccess, [name]: access } })
   const item = (entry: CapabilityItem) => (
-    <GrantItem key={`${entry.field}:${entry.name}`} label={entry.label} shown={entry.field === 'hosts' ? entry.facet : entry.label} detail={entry.description} level={entry.level} onChange={(level) => setLevel(entry.field, entry.name, level)} />
+    <div key={`${entry.field}:${entry.name}`} className="grant-entry">
+      <GrantItem label={entry.label} shown={entry.field === 'hosts' ? entry.facet : entry.label} detail={entry.description} level={entry.level} onChange={(level) => setLevel(entry.field, entry.name, level)} />
+      {entry.field === 'hosts' && entry.facet !== 'browser' && entry.level !== 'deny' ? <HostAccessEditor label={entry.label} value={accessOf(entry.name)} onChange={(access) => setAccess(entry.name, access)} /> : null}
+    </div>
   )
   const hostItems = of('hosts')
   const save = async () => {
     // An amount that is not whole dollars of at least 1 is shown under its field and not sent.
     if (Option.isNone(spendLimit)) return false
+    // A write root that is not a folder path is shown under its box and not sent.
+    if (Object.values(draft.hostAccess ?? {}).some((access) => badRoots(access.roots).length > 0)) return false
     return onSave({
       chain: draft.chain,
       contextBudget: draft.contextBudget,
@@ -66,6 +74,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       requiresHosts: draft.requiresHosts === true,
       reviewer: draft.reviewer,
       subagentModels: draft.subagentModels,
+      hostAccess: draft.hostAccess ?? {},
       grants: draft.grants,
       sharing: draft.sharing,
       notifications: draft.notifications,

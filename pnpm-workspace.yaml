@@ -12,6 +12,7 @@ allowBuilds:
   node-liblzma: false
   protobufjs: false
   '@google/genai': false
+  '@deepseek-ai/dsh-subprocess-local': false
 
 minimumReleaseAge: 0
 

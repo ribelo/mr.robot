@@ -6,7 +6,8 @@
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
-import type { NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch } from '@mr-robot/protocol'
+import type { HostAccessByFacet, NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch } from '@mr-robot/protocol'
+import { HOST_ACCESS, parseHostAccess } from './host-access.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { currentMonth } from '../home/home.ts'
 import { HOME_ID, type Env } from '../env.ts'
@@ -376,6 +377,7 @@ export const settingsWith = (defaults: HomeDefaults) => Effect.gen(function* () 
     reviewer: current.reviewer ?? null,
     homeReviewer: defaults.defaultReviewer,
     subagentModels: store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? [],
+    hostAccess: store.get<HostAccessByFacet>(HOST_ACCESS) ?? {},
   } as RobotSettings
 })
 
@@ -469,10 +471,13 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
     const refusal = yield* promise(() => platform.env.HOME.getByName(HOME_ID).chainRefusal(before.ownerId, chain))
     if (refusal !== null) return yield* invalid(refusal)
   }
+  const hostAccess = patch.hostAccess === undefined ? undefined : parseHostAccess(patch.hostAccess)
+  if (hostAccess !== undefined && 'invalid' in hostAccess) return yield* invalid(hostAccess.invalid)
   const nextActive = patch.chain !== undefined ? 0 : active
   store.transaction(() => {
     if (chain !== undefined) store.set('chain-active', nextActive)
     if (patch.grants !== undefined) store.setGrants(grantSetFrom(patch.grants))
+    if (hostAccess !== undefined) store.set(HOST_ACCESS, hostAccess.access)
     // The subagents grant carries the routes its Subagents may run on (ao-2z4n).
     if (patch.subagentModels !== undefined) store.setGrantPayload('tool', 'subagents', { allowedModels: [...new Map(patch.subagentModels.map((entry) => [`${entry.provider}/${entry.model}`, { provider: entry.provider, model: entry.model }])).values()] })
     store.updateConfig((current) => ({

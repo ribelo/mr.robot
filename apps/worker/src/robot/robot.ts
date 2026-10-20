@@ -67,7 +67,7 @@ import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platfor
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { CredentialSave } from '@mr-robot/protocol'
-import type { ChainEntry, HomeSpendLimit, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
+import type { ChainEntry, HomeSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
@@ -107,6 +107,7 @@ import { HostRunner, HostRuns } from '../places/host-runner.ts'
 import type { Place, StoredPlace } from '../places/place.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
 import type { HostLink } from '../places/places.ts'
+import { HOST_ACCESS, HOST_DIRECTORY, hostAccessOf, robotDirectoryName } from './host-access.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Ask } from '../plugins/ask.ts'
 import { IdentityTools } from '../plugins/identity.ts'
@@ -130,7 +131,7 @@ import { SkillCatalog, Skills } from '../plugins/skills.ts'
 import { platformSkillsFor } from '../skills/platform.ts'
 import { Web } from '../plugins/web.ts'
 import { onSiteDomain, withoutSite, type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserSite, type BrowserState } from '../browser/driver.ts'
-import { SERVICE, SESSION_SITE, sessionValues, SIGN_IN_TIMEOUT_MS, START_URL, type SignInKind } from '@mr-robot/host-protocol'
+import { SERVICE, SESSION_SITE, sessionValues, SIGN_IN_TIMEOUT_MS, START_URL, type HostAccess, type SignInKind } from '@mr-robot/host-protocol'
 import { connectPastedValues } from '../member/connect-pasted.ts'
 import type { SessionCapture } from '@mr-robot/protocol'
 import type { Observation } from '../browser/observe.ts'
@@ -735,11 +736,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** A Host as a place for jobs, for as long as the Host side runs one command per call (HostRunner). */
-  private hostJobPlace(host: { readonly id: string; readonly name: string }): JobPlace {
+  private hostJobPlace(host: { readonly id: string; readonly name: string }, escalated = false): JobPlace {
     const robotId = this.store.requireConfig().id
     const runner = new HostRunner(
       this.hostRuns,
-      (command, cwd, timeoutMs) => this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs })),
+      host.name,
+      (command, cwd, timeoutMs) => this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, ...(escalated ? { escalated } : {}) })),
       (pending) => this.ctx.waitUntil(pending),
     )
     return { place: `host:${host.id}`, label: host.name, start: async () => runner, runner: () => runner, alive: async () => true, touch: async () => undefined }
@@ -775,7 +777,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       hosts: () => this.home().hostsFor(this.store.requireConfig().ownerId),
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
       link: (host) => this.hostLink(host),
-      jobPlace: (place) => place.kind === 'box' ? this.boxJobPlace() : this.hostJobPlace(place),
+      jobPlace: (place, escalated) => place.kind === 'box' ? this.boxJobPlace() : this.hostJobPlace(place, escalated),
+      escalation: { approved: (callId) => this.approvedCalls.has(callId), ask: (request, exec) => this.askGateHost().askToolCall(request, exec) },
       jobs: this.jobs(),
       transfers: this.transfers(),
     })
@@ -2123,13 +2126,25 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   // ---------------------------------------------------------------- Hosts (v1.2)
 
   /** For the host owner's Member DO: who this Robot is and whether it holds the grant (hs-5ktw, hs-44cm). */
-  async hostAccess(hostId: string, grant: 'browser' | 'files' | 'shell'): Promise<{ ownerId: string; name: string; granted: boolean; mrRobot: boolean }> {
+  async hostAccess(hostId: string, grant: 'browser' | 'files' | 'shell'): Promise<{ ownerId: string; name: string; granted: boolean; mrRobot: boolean; access: HostAccess }> {
     const config = this.store.requireConfig()
     const facet = `${hostId}:${grant}`
     // The host's Member checks that the owner reaches the host; Mr. Robot then holds the facet unless his owner lowered it to deny (sk-br7y).
     const lowered = this.store.grants().hosts[facet]
     const granted = config.kind === 'mr-robot' ? lowered === undefined || usableLevel(lowered) : this.store.mayUse('host', facet)
-    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot' }
+    // The mode and roots of the facet, and the Robot's directory on the Host (v1.16 ticket 02): the Host app enforces them.
+    const { mode, roots } = hostAccessOf(this.store.get<HostAccessByFacet>(HOST_ACCESS), facet)
+    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.hostDirectory(), mode, roots } }
+  }
+
+  /** The name of this Robot's directory on its owner's Hosts: chosen when first needed and kept, so that a rename does not lose its files there. */
+  private hostDirectory(): string {
+    const kept = this.store.get<string>(HOST_DIRECTORY)
+    if (kept !== undefined) return kept
+    const config = this.store.requireConfig()
+    const chosen = robotDirectoryName(config.identity.name, config.id)
+    this.store.set(HOST_DIRECTORY, chosen)
+    return chosen
   }
 
   private async hostOwnerStub(hostId: string) {
@@ -2166,12 +2181,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       name: host.name,
       read: (path) => this.hostCall(async () => (await owner()).hostRead(host.id, robotId, path)),
       write: (path, content, encoding) => this.hostCall(async () => (await owner()).hostWrite(host.id, robotId, encoding === 'base64' ? { path, base64: content } : { path, text: content })),
-      command: (command, timeoutMs) => this.hostCall(async () => (await owner()).hostFileCommand(host.id, robotId, { command, timeoutMs })),
+      glob: (pattern) => this.hostCall(async () => (await owner()).hostGlob(host.id, robotId, pattern)),
+      grep: (input) => this.hostCall(async () => (await owner()).hostGrep(host.id, robotId, input)),
+      remove: (path) => this.hostCall(async () => (await owner()).hostDelete(host.id, robotId, path)),
       copySize: (path) => this.hostCall(async () => (await owner()).hostCopySize(host.id, robotId, path)),
       upload: (input) => this.hostCall(async () => (await owner()).hostUpload(host.id, robotId, input)),
       download: (input) => this.hostCall(async () => (await owner()).hostDownload(host.id, robotId, input)),
       recordCopy: async (detail, outcome) => (await owner()).recordHostCopy(host.id, robotId, detail, outcome),
-      run: (command, cwd, timeoutMs) => this.hostCall(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs })),
+      run: (command, cwd, timeoutMs, escalated) => this.hostCall(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, ...(escalated ? { escalated } : {}) })),
     }
   }
 

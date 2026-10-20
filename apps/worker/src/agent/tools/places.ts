@@ -4,7 +4,8 @@
  * one of its owner's computers (a Host). Nothing defaults, and copy names both ends (ob-5fjs, ob-ff4g, ob-9afl). The tools hold no
  * place logic: places/places.ts checks the grants and dispatches.
  */
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type { WaitingResult } from '../ask-gate.ts'
 import { readWindow, replaceText } from '../../places/file-ops.ts'
 import type { PlaceFiles } from '../../places/files.ts'
 import type { JobEntry, RunResult } from '../../places/jobs.ts'
@@ -14,7 +15,7 @@ import { tool } from './define.ts'
 /** What the tools ask of the Robot's places. */
 export interface PlacesHost {
   files(on: string, tool: string): Promise<PlaceFiles>
-  run(input: RunInput, signal?: AbortSignal): Promise<RunResult>
+  run(input: RunInput, exec: ToolRunContext): Promise<RunResult | WaitingResult>
   copy(from: CopyEnd, to: CopyEnd): Promise<CopyResult>
   jobList(): JobEntry[]
   jobOutput(id: string, wait: boolean, timeoutMs: number): Promise<unknown>
@@ -46,8 +47,8 @@ function filePlaces(reach: PlacesReach): string {
 
 const filePlace = (reach: PlacesReach) => ({ type: 'string', description: `workspace, box or a computer's name. ${filePlaces(reach)}` })
 
-/** A path on the place: the Workspace and the Box root at /workspace (the Box's is not the Workspace's); a computer takes an absolute path, or one relative to its home directory. */
-const PATH_RULES = 'Paths: on workspace, relative or under /workspace; on box, relative to /workspace on the Box or under it (the Box disk is scratch except box/); on a computer, absolute or relative to its home directory. Your owner\'s files, the docs and the platform skills are in your Workspace only.'
+/** A path on the place: the Workspace and the Box root at /workspace (the Box's is not the Workspace's); a computer takes an absolute path, ~/ for its home directory, or a path relative to your own directory there (~/mr-robot/<you>/). */
+const PATH_RULES = 'Paths: on workspace, relative or under /workspace; on box, relative to /workspace on the Box or under it (the Box disk is scratch except box/); on a computer, absolute, ~/ for its home directory, or relative to your own directory there (~/mr-robot/<you>/, made on first use); reads reach everything your owner\'s user can read, writes only what your grant lets you change. Your owner\'s files, the docs and the platform skills are in your Workspace only.'
 
 function end(value: unknown, which: 'from' | 'to'): CopyEnd {
   const record = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
@@ -140,7 +141,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       }),
       tool<{ on: string; pattern: string; glob?: string; ignore_case?: boolean; path?: string }>({
         name: 'grep',
-        description: `Search text files with a regular expression; returns an array of { path, line, text } (empty when nothing matches). On a computer the expression is a POSIX extended one, and it searches under path (its home directory when left out). ${filePlaces(reach)}`,
+        description: `Search text files with a regular expression; returns an array of { path, line, text } (empty when nothing matches). The expression is a JavaScript one; on a computer it searches under path (your directory there when left out). ${filePlaces(reach)}`,
         parameters: {
           properties: {
             on: filePlace(reach),
@@ -164,23 +165,25 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
     )
   }
   if (anyShell) {
-    const where = [...(reach.box ? ['"box" (your Box, in /workspace)'] : []), ...(reach.hosts.shell.length > 0 ? [`one of your owner's computers by name (${list(reach.hosts.shell)}), in their login shell and environment, as your owner's user`] : [])].join(', ')
+    const where = [...(reach.box ? ['"box" (your Box, in /workspace)'] : []), ...(reach.hosts.shell.length > 0 ? [`one of your owner's computers by name (${list(reach.hosts.shell)}), in bash as your owner's user, starting in your own directory there; the sandbox lets a command change only your directory and the roots your grant lists (or nothing, or everything, by the mode of your grant)`] : [])].join(', ')
     tools.push(
-      tool<{ on: string; command: string; cwd?: string; timeout_seconds?: number; run_in_background?: boolean }>({
+      tool<{ on: string; command: string; cwd?: string; timeout_seconds?: number; run_in_background?: boolean; escalate?: boolean; reason?: string }>({
         name: 'run',
-        description: `Run a shell command. Where: ${where}. There is no default: name the place on every call; the Workspace runs no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A command on a computer is stopped after 600 s.`,
+        description: `Run a shell command. Where: ${where}. There is no default: name the place on every call; the Workspace runs no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A command on a computer is stopped after 600 s. When the sandbox denies a write, the result says which path and how to ask for the wider reach: run the same command again with escalate and a reason; your owner is asked once, and the call runs without the sandbox only if they approve.`,
         parameters: {
           properties: {
             on: { type: 'string', description: `box or a computer's name. Where: ${where}.` },
             command: { type: 'string', description: 'The shell command line' },
-            cwd: { type: 'string', description: 'The directory to run in (default: /workspace on the Box, the home directory of a computer)' },
+            cwd: { type: 'string', description: 'The directory to run in (default: /workspace on the Box, your own directory on a computer)' },
             timeout_seconds: { type: 'integer', description: `How long to wait before the command goes on as a job, at most ${RUN_MAX_TIMEOUT}` },
             run_in_background: { type: 'boolean', description: 'Start it as a job at once and do not wait; for a server, a watcher or a long script. false when left out' },
+            escalate: { type: 'boolean', description: 'Only after the sandbox denied this command: ask your owner to let it run once without the sandbox. Needs reason. The call does not run now; you are woken with its result or the answer. Computers only' },
+            reason: { type: 'string', description: 'With escalate: why the command needs to reach outside the sandbox, in one sentence; your owner reads it. Also required when your owner approves each use of the shell grant' },
           },
           required: ['on', 'command'],
         },
-        execute: async ({ on, command, cwd, timeout_seconds, run_in_background }, exec) =>
-          host.run({ on, command, ...(cwd === undefined ? {} : { cwd }), seconds: Math.min(RUN_MAX_TIMEOUT, Math.max(1, Math.round(timeout_seconds ?? RUN_DEFAULT_TIMEOUT))), background: run_in_background === true }, exec.signal),
+        execute: async ({ on, command, cwd, timeout_seconds, run_in_background, escalate, reason }, exec) =>
+          host.run({ on, command, ...(cwd === undefined ? {} : { cwd }), seconds: Math.min(RUN_MAX_TIMEOUT, Math.max(1, Math.round(timeout_seconds ?? RUN_DEFAULT_TIMEOUT))), background: run_in_background === true, escalate: escalate === true, ...(reason === undefined ? {} : { reason }) }, exec),
       }),
       tool<Record<string, never>>({
         name: 'job_list',

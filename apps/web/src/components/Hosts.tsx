@@ -8,6 +8,11 @@ import { AsyncResult } from 'effect/reactivity'
 import { hostsAtom, keys, pairingAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { renderResult } from './AtomView.tsx'
+import type { HostSandbox } from '@mr-robot/protocol'
+
+/** What a Host's sandbox state means to its owner (v1.16 ticket 02, ob-n72n). */
+export const sandboxText = (sandbox: HostSandbox): string =>
+  sandbox === 'full' ? 'sandbox on' : sandbox === 'partial' ? 'sandbox partial' : 'no sandbox: confined commands do not run';
 
 const ago = (at: number | null) => (at === null ? 'never' : new Date(at).toLocaleString())
 
@@ -30,7 +35,7 @@ export function Hosts() {
       {hosts === undefined ? null : hosts.length === 0 ? <div className="muted">No computers paired yet.</div> : (
         <table className="grid"><tbody>{hosts.map((host) => (
           <tr key={host.id}>
-            <td><b>{host.name}</b><div className="muted">{host.platform}{host.version === null ? '' : ` · app ${host.version}`}{host.capabilities === null ? '' : ` · ${host.capabilities.chrome === null ? 'no Chrome' : 'Chrome'}${host.capabilities.graphical ? '' : ', no display'}`}</div></td>
+            <td><b>{host.name}</b><div className="muted">{host.platform}{host.version === null ? '' : ` · app ${host.version}`}{host.capabilities === null ? '' : ` · ${host.capabilities.chrome === null ? 'no Chrome' : 'Chrome'}${host.capabilities.graphical ? '' : ', no display'}`}{host.capabilities?.sandbox === undefined ? '' : ` · ${sandboxText(host.capabilities.sandbox)}`}</div></td>
             <td>{host.online ? <span>● online</span> : <span className="muted">offline · last seen {ago(host.lastSeen)}</span>}{host.users.length > 0 ? <div className="muted">used by {host.users.join(', ')}</div> : null}</td>
             <td>{host.mine ? (
               <select value={host.sharing} onChange={(event) => { const sharing = event.target.value === 'home' ? 'home' : 'private'; void command((api) => api.setHostSharing(host.id, sharing), [keys.hosts]) }}>

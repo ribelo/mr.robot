@@ -27,6 +27,24 @@ export interface JobRunner {
   /** The output of one stream of a job from a byte offset on, and the size of that stream now. */
   output(job: string, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
   kill(job: string): Promise<void>
+  /** Why the command never ran (a Host refused the call), when that is why the job is gone. */
+  refusal?(job: string): string | undefined
+  /** What a finished command adds to its result beside the output: its directory, the sandbox's facts and a note. */
+  extras?(job: string): RunExtras | undefined
+}
+
+/** The sandbox as the Robot sees it in a result (ticket 02): the mode, whether a write was denied (and where), and how completely it is enforced. */
+export interface RunSandbox {
+  readonly mode: string
+  readonly denied: boolean
+  readonly deniedPath?: string
+  readonly enforcement?: string
+}
+
+export interface RunExtras {
+  readonly cwd?: string
+  readonly sandbox?: RunSandbox
+  readonly note?: string
 }
 
 /** One place that runs jobs, as the Robot offers it. */
@@ -58,7 +76,7 @@ export interface JobsHost {
 }
 
 export type RunResult =
-  | { readonly kind: 'foreground'; readonly stdout: string; readonly stderr: string; readonly exitCode: number }
+  | ({ readonly kind: 'foreground'; readonly stdout: string; readonly stderr: string; readonly exitCode: number } & RunExtras)
   | { readonly kind: 'promoted'; readonly jobId: string; readonly stdout: string; readonly stderr: string; readonly note: string }
   | { readonly kind: 'background'; readonly jobId: string; readonly note: string }
 
@@ -144,11 +162,14 @@ export class Jobs {
         this.store.closeJob(id, 'completed', status.exitCode, this.host.now(), null)
         await where.touch()
         await this.host.changed()
-        return { kind: 'foreground', stdout, stderr, exitCode: status.exitCode }
+        return { kind: 'foreground', stdout, stderr, exitCode: status.exitCode, ...runner.extras?.(id) }
       }
       if (status.state === 'gone') {
         this.store.closeJob(id, 'lost', null, this.host.now(), null)
         await where.touch()
+        // A Host that refused the call says so as it is: the command never ran.
+        const refused = runner.refusal?.(id)
+        if (refused !== undefined) throw new Error(refused)
         // A Host says why in the error stream of the call that failed.
         const why = where.place === 'box' ? '' : (await runner.output(id, 'err', 0).catch(() => ({ text: '' }))).text.trim()
         throw new Error(`${where.place === 'box' ? 'The Box' : where.label} lost the command before it ended.${why === '' ? '' : ` ${why}`}`)

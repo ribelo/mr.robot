@@ -944,21 +944,23 @@ export class Member extends DurableObject<Env> {
   setHostSharing(id: string, sharing: 'private' | 'home'): Promise<void> { return this.hosts.setSharing(id, sharing) }
   unpairHost(id: string): Promise<void> { return this.hosts.unpair(id) }
 
-  hostRead(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client) => client.Read({ path }), undefined, { action: 'read', detail: path }) }
-  hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }) { return this.hosts.run(id, robotId, 'files', (client) => client.Write(input), undefined, { action: 'write', detail: input.path }) }
+  hostRead(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Read({ path, access }), undefined, { action: 'read', detail: path }) }
+  hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Write({ ...input, access }), undefined, { action: 'write', detail: input.path }) }
   /** One piece of a copy, under the Host's file Grant; the copy as a whole is logged once (recordHostCopy). */
-  hostCopySize(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client) => client.CopyStat({ path }), 60_000) }
+  hostCopySize(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.CopyStat({ path, access }), 60_000) }
   // The Member DO only coordinates a copy: the bytes go between the Host app and R2 (v1.16 ticket 06).
-  hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }) { return this.hosts.run(id, robotId, 'files', (client) => client.Upload(input), copyTimeoutMs(input.size)) }
-  hostDownload(id: string, robotId: string, input: { path: string; url: string; size: number; partBytes: number }) { return this.hosts.run(id, robotId, 'files', (client) => client.Download(input), copyTimeoutMs(input.size)) }
+  hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Upload({ ...input, access }), copyTimeoutMs(input.size)) }
+  hostDownload(id: string, robotId: string, input: { path: string; url: string; size: number; partBytes: number }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Download({ ...input, access }), copyTimeoutMs(input.size)) }
   recordHostCopy(id: string, robotId: string, detail: string, outcome: string): void { this.hosts.recordCopy({ hostId: id, robotId, detail, outcome }) }
-  hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number }) {
-    return this.hosts.run(id, robotId, 'shell', (client) => client.Run(input), Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000, { action: 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})`, exitCode: (result) => result.exitCode })
+  /** A command under the shell grant's mode and roots; `escalated` is a call its owner approved to run without the sandbox, once (ob-ifak). */
+  hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; escalated?: boolean }) {
+    const { escalated, ...payload } = input
+    return this.hosts.run(id, robotId, 'shell', (client, access) => client.Run({ ...payload, access }), Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000, { action: escalated === true ? 'run (escalated)' : 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})`, exitCode: (result) => result.exitCode }, escalated === true)
   }
-  /** What the file RPCs lack (listing, searching, deleting) as a command under the Host's files grant: the file tools build the command, never the Robot. */
-  hostFileCommand(id: string, robotId: string, input: { command: string; timeoutMs?: number }) {
-    return this.hosts.run(id, robotId, 'files', (client) => client.Run({ command: input.command, timeoutMs: input.timeoutMs ?? 60_000 }), Math.min(input.timeoutMs ?? 60_000, 600_000) + 10_000, { action: 'files', detail: input.command })
-  }
+  /** List, search and delete under the files grant, done by the app in Node (v1.16 ticket 02); a delete is a write and obeys the mode and roots. */
+  hostGlob(id: string, robotId: string, pattern: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Glob({ pattern, access }), 60_000, { action: 'glob', detail: pattern }) }
+  hostGrep(id: string, robotId: string, input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Grep({ ...input, access }), 60_000, { action: 'grep', detail: input.pattern }) }
+  hostDelete(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Delete({ path, access }), 60_000, { action: 'delete', detail: path }) }
   hostActions(id: string): HostAction[] { return this.hosts.actions(id) }
   hostBrowserOpen(id: string, robotId: string, robotName: string): Promise<string> { return this.hosts.openBrowser(id, robotId, robotName) }
   hostBrowserClose(id: string, robotId: string, session: string): Promise<void> { return this.hosts.closeBrowser(id, robotId, session) }

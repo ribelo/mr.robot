@@ -66,6 +66,44 @@ describe('Robot settings: Connections and Hosts (ux-5g3w, ux-q8o6)', () => {
   })
 })
 
+describe('Robot settings: what a Host grant may change (v1.16 ticket 02, ob-wh59)', () => {
+  const withGrants = { ...panel, settings: { ...panel.settings, grants: { ...emptyGrants, hosts: { 'h-desk:files': 'allow' as const, 'h-desk:shell': 'allow' as const } }, hostAccess: { 'h-desk:shell': { mode: 'workspace-write' as const, roots: ['~/projects'] } } } }
+  const render_ = (saved: SettingsPatch[]) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
+    render(<RegistryProvider><AdvancedSettings panel={withGrants} catalog={catalog} onSave={async (patch) => { saved.push(patch); return true }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
+  }
+
+  it('shows the mode and the roots of each files and shell grant, workspace-write with no root by default, and none for the browser or a denied facet', () => {
+    render_([])
+    expect((screen.getByRole('combobox', { name: 'Desk · files changes allowed' }) as HTMLSelectElement).value).toBe('workspace-write')
+    expect((screen.getByRole('textbox', { name: 'Desk · files write roots' }) as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByRole('textbox', { name: 'Desk · shell write roots' }) as HTMLTextAreaElement).value).toBe('~/projects')
+    expect(screen.queryByRole('combobox', { name: 'Desk · browser changes allowed' })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Studio · shell changes allowed' })).toBeNull()
+  })
+
+  it('saves a changed mode and a list of roots, and hides the roots when the mode is not workspace-write', async () => {
+    const saved: SettingsPatch[] = []
+    render_(saved)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Desk · shell write roots' }), { target: { value: '~/projects\n/srv/data' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Desk · files changes allowed' }), { target: { value: 'read-only' } })
+    expect(screen.queryByRole('textbox', { name: 'Desk · files write roots' })).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).at(-1)!)
+    await waitFor(() => expect(saved).toHaveLength(1))
+    expect(saved[0]!.hostAccess).toEqual({ 'h-desk:shell': { mode: 'workspace-write', roots: ['~/projects', '/srv/data'] }, 'h-desk:files': { mode: 'read-only', roots: [] } })
+  })
+
+  it('shows a root that is not a folder path and does not save it', async () => {
+    const saved: SettingsPatch[] = []
+    render_(saved)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Desk · shell write roots' }), { target: { value: 'projects' } })
+    expect(screen.getByRole('alert').textContent).toBe('Not a folder path: projects')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).at(-1)!)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(saved).toEqual([])
+  })
+})
+
 describe('Robot settings: while idle (ao-jlr0, ao-f4sp, ao-z22f)', () => {
   it('shows cache warming, idle compaction and the floor as stored, and saves the changes', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))

@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] Workerd test with the Host stub: mode and roots per grant reach the stub; default cwd is the Robot's directory; a denial result; escalate creates a tool-call Ask whose approval runs once in full; confined fails closed on sandbox none; full runs (ob-wh59, ob-397e, ob-vnld, ob-ifak, ob-n72n, ob-he20)
-- [ ] Component test: the facet editor with mode and roots; the Hosts page sandbox state (ob-wh59, ob-n72n)
-- [ ] By hand: a confined run and a denied write on Linux and macOS (ob-wsf7, ob-xj2y)
-- [ ] docs/hosts.md carries the shared-Host instruction (ob-5c8k)
+- [x] Workerd test with the Host stub: mode and roots per grant reach the stub; default cwd is the Robot's directory; a denial result; escalate creates a tool-call Ask whose approval runs once in full; confined fails closed on sandbox none; full runs (ob-wh59, ob-397e, ob-vnld, ob-ifak, ob-n72n, ob-he20)
+- [x] Component test: the facet editor with mode and roots; the Hosts page sandbox state (ob-wh59, ob-n72n)
+- [ ] By hand: a confined run and a denied write on Linux and macOS (ob-wsf7, ob-xj2y) (Linux done in this session: the bundled app code (`node apps/host/dist/shell-check.cjs`) ran a confined command, was denied a write outside the roots, wrote in an extra root, and failed closed with no sandbox, on bubblewrap and on Landlock; not run in this session: needs a Mac for Seatbelt, and the Electron window itself on Linux)
+- [x] docs/hosts.md carries the shared-Host instruction (ob-5c8k)
