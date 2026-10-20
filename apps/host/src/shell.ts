@@ -1,8 +1,9 @@
 /**
- * Commands on this computer, through DSH (v1.16 tickets 02 and 03, ob-wsf7, ob-sja4): bash and DSH's sandbox-local (bwrap or Landlock
- * on Linux, Seatbelt on macOS), and jobs-local for the commands that outlive their call. The Host app composes only the layer under
- * DSH's tools (subprocess, sandbox, shell, jobs), in a context of its own; the tools themselves belong to an agent and are not used.
- * One seam picks the shell (a later ticket puts pwsh on Windows behind it); jobs.ts takes any process the seam spawns.
+ * Commands on this computer, through DSH (v1.16 tickets 02, 03 and 04, ob-wsf7, ob-sja4, ob-e68m): bash and DSH's sandbox-local (bwrap or
+ * Landlock on Linux, Seatbelt on macOS), PowerShell 7 and the restricted-token ACL runner on Windows, and jobs-local for the commands that
+ * outlive their call. The Host app composes only the layer under DSH's tools (subprocess, sandbox, shell, jobs), in a context of its own;
+ * the tools themselves belong to an agent and are not used. One seam picks the shell: HostShell.kind. Every command, in either shell,
+ * goes through the job path of jobs.ts.
  */
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -12,13 +13,15 @@ import { join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Bash from '@deepseek-ai/dsh-bash-sandbox'
 import Jobs from '@deepseek-ai/dsh-jobs-local'
+import Pwsh from '@deepseek-ai/dsh-pwsh-sandbox'
 import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, type SandboxExecutionPolicy, type SandboxMode, type SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import Sandbox, { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
-import { SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState } from '@mr-robot/host-protocol'
+import { SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
 import { ensureRobotDirectory, expandPath, writeRoots } from './access.ts'
 import { HostJobs } from './jobs.ts'
+import { aclRunnerWorks, findInstalledPwsh7, startRunnersAsNode, withoutElectronSwitch } from './windows.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = 600_000
@@ -69,8 +72,25 @@ function loginPath(): Promise<string | undefined> {
   })
 }
 
-/** The path of the denied file effect, from the error output of the command (the bash and coreutils dialects). */
+/**
+ * How completely a command is confined here: what the provider says for a read-only call. On Windows the provider chooses the ACL runner
+ * without trying it (always partial), so the runner is started once on a command that does nothing, to find out that it starts at all.
+ */
+async function probeSandbox(ctx: Context, kind: Shell, root: string): Promise<SandboxState> {
+  try {
+    if (kind === 'bash') return (await ctx.sandbox.confine(['true'], { mode: 'read-only', workspaceRoot: root })).enforcement
+    const confined = await ctx.sandbox.confine(['cmd.exe', '/c', 'exit', '0'], { mode: 'read-only', workspaceRoot: root })
+    return (await aclRunnerWorks(confined.argv)) ? confined.enforcement : 'none'
+  } catch {
+    return 'none'
+  }
+}
+
+/** The path of the denied file effect, from the error output of the command (the bash, coreutils and PowerShell dialects). */
 export function deniedPath(stderr: string): string | undefined {
+  // PowerShell names the path in quotes: "Set-Content: Access to the path 'C:\x\y.txt' is denied."
+  const powershell = /Access to the path '([^']+)' is denied/i.exec(stderr)
+  if (powershell !== null) return powershell[1]
   for (const line of stderr.split('\n')) {
     const found = /^(.*): (?:Read-only file system|Permission denied|Operation not permitted|Access is denied)\.?$/i.exec(line.trim())
     if (found === null) continue
@@ -109,6 +129,10 @@ export class HostShell {
   readonly instance = crypto.randomUUID()
   /** The jobs of this run of the app; they outlive the connection to the Worker. */
   readonly jobs: HostJobs
+  /** Why no command can run on this computer (Windows without PowerShell 7); undefined when they do. Looked at again by recheck(). */
+  problem: string | undefined
+  private shellReady = false
+  private checking: Promise<void> | undefined
   private jobEnded: (ended: JobEnded) => void = () => undefined
 
   private constructor(
@@ -117,6 +141,8 @@ export class HostShell {
     private readonly path: string | undefined,
     /** How completely this computer confines a command, found when the app started. */
     readonly sandbox: SandboxState,
+    /** The shell the Robots write for: PowerShell 7 on Windows, bash elsewhere. */
+    readonly kind: Shell,
   ) {
     this.jobs = new HostJobs(ctx, (ended) => this.jobEnded(ended))
   }
@@ -129,11 +155,12 @@ export class HostShell {
   /** Compose DSH's layer and find out what the sandbox can do here (the heartbeat reports it, ob-n72n). */
   static async start(options: { readonly home?: string; readonly landlockLauncher?: string } = {}): Promise<HostShell> {
     const home = options.home ?? homedir()
+    const kind: Shell = process.platform === 'win32' ? 'pwsh' : 'bash'
     const ctx = new Context()
     await ctx.plugin(Subprocess)
+    if (kind === 'pwsh') startRunnersAsNode(ctx.subprocess as never)
     await ctx.plugin(ManyRootsSandbox)
     await ctx.plugin(PolicyService)
-    await ctx.plugin(Bash, {})
     // Every command is a job here, the ones a call waits for too, so the limit per owner is raised well above DSH's ten.
     await ctx.plugin(Jobs, { maxConcurrentJobsPerOwner: 200 })
     // A bundled app carries the Landlock launcher beside itself; DSH looks for it in node_modules.
@@ -141,11 +168,35 @@ export class HostShell {
     if (launcher !== undefined && existsSync(launcher)) (ctx.sandbox as LocalSandboxProvider).internals.landlockLauncher = launcher
     const probeRoot = join(home, 'mr-robot')
     await mkdir(probeRoot, { recursive: true })
-    const sandbox: SandboxState = await ctx.sandbox.confine(['true'], { mode: 'read-only', workspaceRoot: probeRoot }).then(
-      (confined) => confined.enforcement,
-      () => 'none' as const,
-    )
-    return new HostShell(ctx, home, await loginPath(), sandbox)
+    const sandbox = await probeSandbox(ctx, kind, probeRoot)
+    const shell = new HostShell(ctx, home, await loginPath(), sandbox, kind)
+    await shell.recheck()
+    return shell
+  }
+
+  /**
+   * Make the shell ready: bash always; PowerShell 7 once it is found, which may be after the app started (a person installs it, ob-vyyg).
+   * Until then problem says why, and run() fails with it.
+   */
+  recheck(): Promise<void> {
+    if (this.shellReady) return Promise.resolve()
+    this.checking ??= this.makeReady().finally(() => { this.checking = undefined })
+    return this.checking
+  }
+
+  private async makeReady(): Promise<void> {
+    if (this.kind === 'bash') {
+      await this.ctx.plugin(Bash, {})
+    } else {
+      const found = await findInstalledPwsh7()
+      if (!found.found) {
+        this.problem = found.problem
+        return
+      }
+      await this.ctx.plugin(Pwsh, { pwshPath: found.path })
+    }
+    this.shellReady = true
+    this.problem = undefined
   }
 
   /**
@@ -154,6 +205,8 @@ export class HostShell {
    * answers that it goes on as a job when it is still running at the limit (promoted).
    */
   async run(input: RunInput): Promise<RunOutcome> {
+    await this.recheck()
+    if (this.problem !== undefined) throw new Error(this.problem)
     const directory = await ensureRobotDirectory(this.home, input.access)
     const cwd = input.cwd === undefined ? directory : expandPath(this.home, directory, input.cwd)
     if (!(await stat(cwd).then((info) => info.isDirectory(), () => false))) throw Object.assign(new Error(`${cwd} is not a directory on this computer`), { code: 'ENOENT' })
@@ -164,7 +217,7 @@ export class HostShell {
     try {
       // No deadline of its own: the command lives until it ends or is stopped, and the call bounds only its own wait.
       const spec = this.ctx.shell.resolve({
-        command: input.command,
+        command: this.kind === 'pwsh' ? withoutElectronSwitch(input.command) : input.command,
         workdir: cwd,
         timeoutMs,
         onExpiry: 'none',
@@ -174,7 +227,7 @@ export class HostShell {
       started = await this.ctx.shell.execute(spec)
     } catch (error) {
       // A confined call on a computer with no usable sandbox fails closed, with the reason.
-      if ((error as { code?: unknown }).code === DSH_SANDBOX_UNAVAILABLE) throw Object.assign(new Error(`This computer has no usable sandbox (Linux needs bubblewrap or a kernel with Landlock, macOS needs sandbox-exec), so a command in ${input.access.mode} mode does not run. Only a grant in full mode runs here.`), { code: SANDBOX_UNAVAILABLE })
+      if ((error as { code?: unknown }).code === DSH_SANDBOX_UNAVAILABLE) throw Object.assign(new Error(`This computer has no usable sandbox (Linux needs bubblewrap or a kernel with Landlock, macOS needs sandbox-exec, Windows needs the restricted-token runner to start), so a command in ${input.access.mode} mode does not run. Only a grant in full mode runs here.`), { code: SANDBOX_UNAVAILABLE })
       throw error
     }
     this.jobs.start(input.job, input.command, started)

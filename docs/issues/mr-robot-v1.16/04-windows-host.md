@@ -6,6 +6,6 @@
 
 **Status:** ready-for-agent
 
-- [ ] By hand on Windows: pairing, a confined run, a denied write, a job (ob-szqb, ob-e68m)
-- [ ] Workerd test: shell and platform in the Hosts line from the heartbeat (ob-vyyg)
-- [ ] The Windows installer is a deploy artefact listed in the README
+- [ ] By hand on Windows: pairing, a confined run, a denied write, a job (ob-szqb, ob-e68m) (not run in this session: needs a Windows computer with PowerShell 7. Under Wine the installer built, the packed app's ACL runner started as Node from the Electron program, the sandbox probe said partial, and the missing-PowerShell message came back; pwsh itself did not run under Wine)
+- [ ] Workerd test: shell and platform in the Hosts line from the heartbeat (ob-vyyg) (covered by ticket 09's Hosts line test; this ticket adds the heartbeat fields `shell` and `shellProblem`)
+- [x] The Windows installer is a deploy artefact listed in the README

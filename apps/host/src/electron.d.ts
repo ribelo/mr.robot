@@ -9,7 +9,9 @@ declare module 'electron' {
     setName(name: string): void
     getVersion(): string
     requestSingleInstanceLock(): boolean
-    setLoginItemSettings(settings: { openAtLogin: boolean }): void
+    setLoginItemSettings(settings: { openAtLogin: boolean; path?: string; args?: string[] }): void
+    /** True in an installed app, false when run from source with the electron program. */
+    readonly isPackaged: boolean
     getLoginItemSettings(): { openAtLogin: boolean }
     dock?: { hide(): void }
     setBadgeCount(count: number): boolean

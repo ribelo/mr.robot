@@ -83,7 +83,7 @@ export class HostLink {
   }
 
   private beat(): void {
-    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, instance: this.shell.instance, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox } } }))
+    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, instance: this.shell.instance, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox, shell: this.shell.kind, ...(this.shell.problem === undefined ? {} : { shellProblem: this.shell.problem }) } } }))
   }
 
   private connect(): void {

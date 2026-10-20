@@ -14,6 +14,10 @@ interface HostState {
   readonly state: 'unpaired' | 'pairing' | 'connecting' | 'online' | 'offline'
   readonly detail?: string
   readonly sessions: number
+  /** The shell robots write for on this computer; the Windows app without PowerShell 7 says why no command runs and where to install it (v1.16 ticket 04). */
+  readonly shell?: 'bash' | 'pwsh'
+  readonly shellProblem?: string
+  readonly shellInstallUrl?: string
 }
 interface HostBridge {
   state(): Promise<HostState>
@@ -79,6 +83,9 @@ export function ThisComputer() {
   return (
     <div className="form">
       <div className="status-card"><b>{LINES[state.state]}</b>{state.detail === undefined ? null : <div className="muted">{state.detail}</div>}{state.sessions > 0 ? <div className="muted">{state.sessions} robot browser session(s) open</div> : null}</div>
+      {state.shellProblem === undefined ? null : (
+        <div className="status-card"><b>Robots cannot run commands here.</b><div className="muted">{state.shellProblem}</div>{state.shellInstallUrl === undefined ? null : <a href={state.shellInstallUrl} target="_blank" rel="noreferrer">Install PowerShell 7</a>}</div>
+      )}
       <label>Name of this computer
         <input value={name} onChange={(event) => setName(event.target.value)} />
       </label>
