@@ -28,6 +28,10 @@ describe('PowerShell 7 on Windows (v1.16 ticket 04, ob-e68m)', () => {
   it('reads the denied path from a PowerShell error', () => {
     expect(deniedPath("Set-Content: Access to the path 'C:\\Windows\\note.txt' is denied.")).toBe('C:\\Windows\\note.txt')
   })
+
+  it('reads a denied path that holds a quote whole (deep review P17)', () => {
+    expect(deniedPath("Set-Content: Access to the path 'C:\\Users\\o'brien\\it's.txt' is denied.")).toBe("C:\\Users\\o'brien\\it's.txt")
+  })
 })
 
 describe('Chrome on Windows', () => {

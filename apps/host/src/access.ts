@@ -1,11 +1,10 @@
 /**
  * Where a Robot may act on this computer (v1.16 ticket 02, ob-wh59, ob-397e): its own directory ~/mr-robot/<robot>/, the roots its
- * grant adds, and the mode. Reads are as wide as the OS user in every mode (ob-xj2y); a write through a file RPC obeys the same mode
- * and roots as a command does, checked here in Node because a file RPC has no shell to confine.
+ * grant adds, and the mode. Reads are as wide as the OS user in every mode (ob-xj2y). A change of a file obeys the same mode and roots as
+ * a command does: it runs in the sandbox too (file-change.ts); the checks here only refuse a plain miss early, in words the Robot reads.
  */
-import { constants } from 'node:fs'
-import { lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstat, mkdir, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import * as Data from 'effect/Data'
 import { SANDBOX_DENIED, type HostAccess } from '@mr-robot/host-protocol'
 import { errorCode } from './error-code.ts'
@@ -20,21 +19,45 @@ export function expandPath(home: string, base: string, path: string): string {
   return isAbsolute(path) ? resolve(path) : resolve(base, path)
 }
 
-/** The Robot's directory, made on first use, and where it is. */
+/** A Robot's directory that a symbolic link leads to: the app neither makes nor uses it (deep review P17). */
+export class LinkedRobotDirectory extends Data.TaggedError('LinkedRobotDirectory')<{ readonly message: string }> {}
+
+/**
+ * The Robot's directory, made on first use, and where it is. A symbolic link on the way from the home directory (~/mr-robot, or the
+ * Robot's directory itself) is refused before anything is made: the app makes the directory outside the sandbox, so it would make it
+ * where the link points.
+ * @throws LinkedRobotDirectory naming the link.
+ */
 export async function ensureRobotDirectory(home: string, access: HostAccess): Promise<string> {
   const directory = robotDirectory(home, access.robot)
+  const link = await linkOnTheWay(home, directory)
+  if (link !== undefined) throw new LinkedRobotDirectory({ message: `Nothing is read, changed or run for you on this computer: ${link} is a symbolic link on the way to your directory ${directory}, and the app does not follow it. Ask your owner to remove the link.` })
   await mkdir(directory, { recursive: true })
   return directory
 }
 
-/** The directories a command or a file write may change in workspace-write mode: the Robot's own, then the roots of its grant. */
+/** The directories a command or a file change may change in workspace-write mode: the Robot's own, then the roots of its grant. */
 export function writeRoots(home: string, access: HostAccess): string[] {
   const directory = robotDirectory(home, access.robot)
   return [directory, ...access.roots.map((root) => expandPath(home, directory, root))]
 }
 
+/**
+ * The extra roots of a workspace-write grant that the sandbox can confine to, each made on first use like the Robot's directory (the
+ * sandbox binds only a directory that is there). A root that cannot be made is left out: nothing in it can be changed then.
+ */
+export async function madeExtraRoots(home: string, access: HostAccess): Promise<string[]> {
+  if (access.mode !== 'workspace-write') return []
+  const made: string[] = []
+  for (const root of writeRoots(home, access).slice(1)) {
+    await mkdir(root, { recursive: true }).catch(() => undefined)
+    if (await stat(root).then(() => true, () => false)) made.push(root)
+  }
+  return made
+}
+
 /** A path with its symbolic links resolved as far as it exists: the deepest existing ancestor's real path, then what does not exist yet. */
-async function resolvedPath(path: string): Promise<string> {
+export async function resolvedPath(path: string): Promise<string> {
   const missing: string[] = []
   let current = path
   for (;;) {
@@ -59,92 +82,94 @@ export class WriteDenied extends Data.TaggedError('WriteDenied')<{ readonly mess
   readonly code = SANDBOX_DENIED
 }
 
-const outside = (target: string, access: HostAccess, home: string): WriteDenied =>
-  new WriteDenied({ message: `${target} was not written: it is outside the directories this grant lets you change (${writeRoots(home, access).join(', ')}).` })
-
-/** Whether the real path lies inside one of the directories the grant lets the Robot change. */
-async function insideWriteRoots(home: string, access: HostAccess, real: string): Promise<boolean> {
-  for (const root of writeRoots(home, access)) {
-    if (inside(await resolvedPath(root), real)) return true
-  }
-  return false
-}
+/** On a file system that ignores case (macOS and Windows by default) two spellings name one directory, so real paths compare without it. */
+const comparable = (path: string): string => (process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path)
 
 /**
- * Check that the mode and roots let the Robot change `target` (a path already expanded), and return the real path to act on: the
- * target with its symbolic links resolved. The caller works on that path, not on the one it was given, so that the check and the write
- * see the same file.
- * @throws WriteDenied when the mode or the roots refuse the write.
+ * The first symbolic link (a Windows junction too) on the way to `path`, the path itself included; undefined when there is none. The walk
+ * starts at the OS user's home directory when the path lies in it, since what leads to the home is the OS's and not writable by the user,
+ * and it ends at the first component that is not there yet.
  */
-export async function assertMayWrite(home: string, access: HostAccess, target: string): Promise<string> {
-  if (access.mode === 'full') return target
-  if (access.mode === 'read-only') throw new WriteDenied({ message: `${target} was not written: this grant is read-only, so nothing on this computer may be changed.` })
-  const real = await resolvedPath(target)
-  if (await insideWriteRoots(home, access, real)) return real
-  throw outside(target, access, home)
-}
-
-/** As assertMayWrite, for deleting: a symbolic link itself may go when it lies inside the roots, whatever it points at. The path returned is the link's own, in its resolved directory. */
-export async function assertMayRemove(home: string, access: HostAccess, target: string): Promise<string> {
-  if (access.mode === 'full') return target
-  if (access.mode === 'read-only') throw new WriteDenied({ message: `${target} was not changed: this grant is read-only, so nothing on this computer may be changed.` })
-  const real = join(await resolvedPath(dirname(target)), basename(target))
-  if (await insideWriteRoots(home, access, real)) return real
-  throw outside(target, access, home)
-}
-
-/** Delete one file or link that the grant lets the Robot change; false when it is not there. */
-export async function removeWithin(home: string, access: HostAccess, target: string): Promise<boolean> {
-  const real = await assertMayRemove(home, access, target)
-  try {
-    await unlink(real)
-    return true
-  } catch (error) {
-    if (errorCode(error) === 'ENOENT') return false
-    throw error
-  }
-}
-
-/**
- * Write a whole file where the grant allows. In a confined mode the final path component is never followed (O_NOFOLLOW, so a link left
- * in the Robot's directory cannot lead the write out of it), and the file that was opened is checked once more: it must be the very file
- * at a real path inside the roots. Nothing is truncated before that check passes.
- * @throws WriteDenied when the mode or the roots refuse the write.
- */
-export async function writeWithin(home: string, access: HostAccess, target: string, body: Uint8Array): Promise<void> {
-  const real = await assertMayWrite(home, access, target)
-  await mkdir(dirname(real), { recursive: true })
-  if (access.mode === 'full') {
-    const handle = await open(real, 'w')
-    try { await handle.write(body, 0, body.length, 0) } finally { await handle.close() }
-    return
-  }
-  const noFollow = constants.O_NOFOLLOW ?? 0
-  let created = true
-  let handle
-  try {
-    handle = await open(real, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow)
-  } catch (error) {
-    if (errorCode(error) !== 'EEXIST' && errorCode(error) !== 'ELOOP') throw error
-    created = false
+async function linkOnTheWay(home: string, path: string): Promise<string | undefined> {
+  const start = inside(home, path) ? home : parse(path).root
+  let current = start
+  for (const part of relative(start, path).split(sep)) {
+    if (part === '') continue
+    current = join(current, part)
+    let info
     try {
-      handle = await open(real, constants.O_WRONLY | noFollow)
-    } catch (second) {
-      if (errorCode(second) === 'ELOOP') throw outside(target, access, home)
-      throw second
+      info = await lstat(current)
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return undefined
+      throw error
     }
+    if (info.isSymbolicLink()) return current
   }
-  try {
-    const opened = await handle.stat({ bigint: true })
-    const named = await lstat(real, { bigint: true }).catch(() => undefined)
-    const sameFile = named !== undefined && named.isFile() && named.dev === opened.dev && named.ino === opened.ino
-    if (!sameFile || !(await insideWriteRoots(home, access, await realpath(real)))) {
-      if (created && sameFile) await unlink(real).catch(() => undefined)
-      throw outside(target, access, home)
+  return undefined
+}
+
+/**
+ * Check, before a command or a file change starts in workspace-write mode, that the sandbox can hold the grant's write roots (deep review
+ * P1b, P1c). bubblewrap and Landlock open each root when they start and follow a link there; so a root that lies inside another root (the
+ * Robot's directory among them), or inside a directory every confined command may change (`sandboxWritable`: the temp directories the
+ * sandbox grants, such as the real /tmp under Landlock), could be swapped for a link to any directory by the Robot itself, and one already
+ * behind a link leads where the link points. All are refused: no root may be or pass through a symbolic link now, and none may lie inside
+ * another or inside a directory of `sandboxWritable`, compared by real path. Other modes bind no root.
+ * @throws WriteDenied naming the link or the two directories, so that the owner can change the roots.
+ */
+export async function assertConfinableRoots(home: string, access: HostAccess, sandboxWritable: readonly string[]): Promise<void> {
+  if (access.mode !== 'workspace-write') return
+  const roots = writeRoots(home, access)
+  const directory = roots[0]
+  const named = (root: string): string => (root === directory ? `your directory ${root}` : `the write root ${root}`)
+  const refused = (why: string): WriteDenied =>
+    new WriteDenied({ message: `No command runs and no file is changed under this grant on this computer: ${why} Ask your owner to change the write roots of the grant in your settings so that none lies inside another, inside your directory or inside a temporary directory, and none is reached through a link.` })
+  for (const root of roots) {
+    const link = await linkOnTheWay(home, root)
+    if (link !== undefined) throw refused(`${link} is a symbolic link on the way to ${named(root)}, and the sandbox would let you change what it points at.`)
+  }
+  // A root that cannot be resolved (a file on the way) cannot be made either, and the sandbox gets no such root (madeExtraRoots).
+  const real = await Promise.all(roots.map((root) => resolvedPath(root).then(comparable, () => undefined)))
+  const writable = sandboxWritable.map(comparable)
+  for (const [i, root] of real.entries()) {
+    const temp = writable.find((path) => root !== undefined && root !== path && inside(path, root))
+    if (temp !== undefined) throw refused(`${named(roots[i]!)} lies inside ${temp}, which every command in the sandbox may change, so a link put in its place would let you change any directory.`)
+  }
+  for (const [i, inner] of real.entries()) {
+    for (const [j, outer] of real.entries()) {
+      if (inner === undefined || outer === undefined || inner === outer || !inside(outer, inner)) continue
+      throw refused(`${named(roots[i]!)} lies inside ${named(roots[j]!)}, so a link put in its place would let you change any directory.`)
     }
-    await handle.truncate(0)
-    await handle.write(body, 0, body.length, 0)
-  } finally {
-    await handle.close()
   }
 }
+
+/**
+ * Refuse early a change of `target` (a path already expanded) that the mode or the roots plainly refuse: every change in read-only, and in
+ * workspace-write a path that lies in no write root, neither as written nor with its links resolved (`resolved`). This is not the
+ * boundary: a path that passes may still lead out of the roots through a link, and the sandbox the change runs in refuses that.
+ */
+async function refusePlainMiss(home: string, access: HostAccess, target: string, resolved: () => Promise<string>, verb: string): Promise<void> {
+  if (access.mode === 'full') return
+  if (access.mode === 'read-only') throw new WriteDenied({ message: `${target} was not ${verb}: this grant is read-only, so nothing on this computer may be changed.` })
+  const roots = writeRoots(home, access)
+  if (roots.some((root) => inside(root, target))) return
+  const real = await resolved()
+  for (const root of roots) {
+    if (inside(await resolvedPath(root), real)) return
+  }
+  throw new WriteDenied({ message: `${target} was not ${verb}: it is outside the directories this grant lets you change (${roots.join(', ')}).` })
+}
+
+/**
+ * Check a write of `target` before it runs in the sandbox (see refusePlainMiss).
+ * @throws WriteDenied when the mode or the roots plainly refuse it.
+ */
+export const assertMayWrite = (home: string, access: HostAccess, target: string): Promise<void> =>
+  refusePlainMiss(home, access, target, () => resolvedPath(target), 'written')
+
+/**
+ * As assertMayWrite, for deleting: a link itself may go when it lies inside the roots, whatever it points at.
+ * @throws WriteDenied when the mode or the roots plainly refuse it.
+ */
+export const assertMayRemove = (home: string, access: HostAccess, target: string): Promise<void> =>
+  refusePlainMiss(home, access, target, async () => join(await resolvedPath(dirname(target)), basename(target)), 'changed')

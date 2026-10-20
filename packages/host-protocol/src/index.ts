@@ -88,25 +88,33 @@ export const Upload = Rpc.make('Upload', {
 
 /**
  * Fetch bytes `from` to `until` of an object of `size` bytes from R2, in ranges of `partBytes`, into a file (creating its directories). A large
- * object comes in windows, each with a fresh link; the file appears only when a window reaches the end and all of it arrived.
+ * object comes in windows (the Worker sends one part per call), each with a fresh link; the file appears only when a window reaches the end
+ * and all of it arrived. Until then the bytes are in a part file beside the file, one per copy (deep review P12): the windows of one copy
+ * name the same `copy`, and a window with `from` above 0 continues that copy's part file or fails when the app no longer has it.
  */
 export const Download = Rpc.make('Download', {
-  payload: { path: Schema.String, url: Schema.String, size: Schema.Number, partBytes: Schema.Number, from: Schema.Number, until: Schema.Number, access: HostAccess },
+  payload: { copy: Schema.String, path: Schema.String, url: Schema.String, size: Schema.Number, partBytes: Schema.Number, from: Schema.Number, until: Schema.Number, access: HostAccess },
   success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
   error: HostError,
 })
 
-/** List the files that match a glob, as the Host prints them (.git and node_modules skipped); relative paths start in the Robot's directory. */
+/**
+ * List the files that match a glob, as the Host prints them (SKIPPED_DIRECTORIES left out); relative paths start in the Robot's directory.
+ * `truncated`: the walk stopped at LISTING_MAX_FILES files, so some matches may be missing.
+ */
 export const Glob = Rpc.make('Glob', {
   payload: { pattern: Schema.String, access: HostAccess },
   success: Schema.Struct({ paths: Schema.Array(Schema.String), truncated: Schema.Boolean }),
   error: HostError,
 })
 
-/** Search the text files under a directory with a JavaScript regular expression (the Robot's directory when no path is given). */
+/**
+ * Search the text files under a directory with a JavaScript regular expression (the Robot's directory when no path is given).
+ * `truncated`: there were more than GREP_MAX_MATCHES matches, or the walk stopped at LISTING_MAX_FILES files.
+ */
 export const Grep = Rpc.make('Grep', {
   payload: { pattern: Schema.String, ignoreCase: Schema.Boolean, glob: Schema.optional(Schema.String), path: Schema.optional(Schema.String), access: HostAccess },
-  success: Schema.Struct({ matches: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Number, text: Schema.String })) }),
+  success: Schema.Struct({ matches: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Number, text: Schema.String })), truncated: Schema.Boolean }),
   error: HostError,
 })
 

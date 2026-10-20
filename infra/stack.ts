@@ -11,7 +11,13 @@ import * as Redacted from 'effect/Redacted'
 import type { ComputerContainer, Home, Member, Robot } from '../apps/worker/src/index.ts'
 import { vapidPublicKey } from './vapid.ts'
 
-export const Files = Cloudflare.R2.Bucket('Files')
+/**
+ * The Robots' Workspaces. A multipart upload that a Host app or ws started and nobody completed or aborted (the Robot restarted in the
+ * middle of a copy) is aborted by R2 after a day, so its parts are not kept (deep review P12).
+ */
+export const Files = Cloudflare.R2.Bucket('Files', {
+  lifecycleRules: [{ id: 'abort-unfinished-uploads', abortMultipartUploadsTransition: { condition: { type: 'Age', maxAge: 24 * 60 * 60 } } }],
+})
 
 export const OneTimePin = Cloudflare.Access.IdentityProvider('OneTimePin', {
   name: 'One-time PIN',
@@ -24,6 +30,7 @@ export const Edge = Effect.gen(function* () {
   const pin = yield* OneTimePin
   const dataKey = yield* Alchemy.Random('DataKey', { bytes: 32 })
   const vapidKey = yield* Alchemy.Random('VapidKey', { bytes: 32 })
+  const boxTokenKey = yield* Alchemy.Random('BoxTokenKey', { bytes: 32 })
   return yield* Cloudflare.Worker('Edge', {
     main: './apps/worker/src/index.ts',
     compatibility: { date: '2026-09-01', flags: ['nodejs_compat'] },
@@ -69,6 +76,8 @@ export const Edge = Effect.gen(function* () {
       HOME_NAME: Config.String('MR_ROBOT_HOME').pipe(Config.withDefault('Home')),
       DATA_KEY: dataKey.text,
       VAPID_PRIVATE_KEY: vapidKey.text,
+      // Signs the Box tokens (v1.16 deep review P5): the Box channel is outside Access, and the edge refuses an unsigned token before it names a Robot.
+      BOX_TOKEN_KEY: boxTokenKey.text,
       VAPID_PUBLIC_KEY: vapidKey.text.pipe(Output.map((key) => vapidPublicKey(Redacted.value(key)))),
       // The providers' public CLI OAuth clients unless the deployment sets its own.
       OPENAI_OAUTH_CLIENT_ID: Config.Redacted('MR_ROBOT_OPENAI_OAUTH_CLIENT_ID').pipe(Config.withDefault(Redacted.make('app_EMoamEEZ73f0CkXaXp7hrann'))),
@@ -121,7 +130,7 @@ export const HostChannel = Effect.gen(function* () {
 
 /**
  * The Box's door to its Workspace (v1.16 ticket 06): /api/files/presign is outside the Access login (a bypass application on that path) because
- * ws in the container has no Access identity; the Worker checks the Box token there, and the token reaches one Robot's prefix while its Box is up.
+ * ws in the container has no Access identity; the Worker checks the Box token's signature (BOX_TOKEN_KEY) before it reaches a Robot, and the token reaches one Robot's prefix while its Box is up.
  */
 export const BoxChannel = Effect.gen(function* () {
   const edge = yield* Edge

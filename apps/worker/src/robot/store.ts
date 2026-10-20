@@ -4,11 +4,11 @@
  * session log lives beside it (agent/session-log.ts).
  */
 import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
-import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
+import { SESSION_LOG_SCHEMA, storedLength } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import * as Schema from 'effect/Schema'
-import { HOST_FACETS, hostFacetKey, StoredPlace } from '../places/host-facet.ts'
-import { HOST_ACCESS, mrRobotHostLevel } from './host-access.ts'
+import { HOST_FACETS, hostFacetKey, splitHostFacet, StoredPlace } from '../places/host-facet.ts'
+import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName, unsharedMrRobotDirectory } from './host-access.ts'
 import { JobId } from '../places/job-id.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
@@ -189,7 +189,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 21
+const SCHEMA_VERSION = 23
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -263,6 +263,38 @@ function moveOffRemovedBrowsers(sql: SqlStorage): void {
   if (session !== undefined && isRemovedBrowserBackend(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(session.v)['backend'])) sql.exec("DELETE FROM kv WHERE k = 'browser-session'")
 }
 
+/** Mr. Robot's directory on the Hosts was every Member's Mr. Robot's (deep review P8): he gets one of his own. */
+function unshareMrRobotDirectory(sql: SqlStorage): void {
+  const config = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  const kept = sql.exec<{ v: string }>('SELECT v FROM kv WHERE k = ?', HOST_DIRECTORY).toArray()[0]
+  if (config === undefined || kept === undefined) return
+  const { id, kind } = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ id: Schema.String, kind: Schema.optional(Schema.String) })))(config.v)
+  if (kind !== 'mr-robot') return
+  const directory = unsharedMrRobotDirectory(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.String))(kept.v), id)
+  sql.exec('UPDATE kv SET v = ? WHERE k = ?', JSON.stringify(directory), HOST_DIRECTORY)
+}
+
+/** The tools of v1.15 that run, read and write on a place replaced in v1.16 (ob-dyg4). */
+const REMOVED_PLACE_TOOLS: ReadonlySet<string> = new Set(['box_run', 'box_read', 'box_write', 'host_run', 'host_read', 'host_write', 'host_copy'])
+
+/**
+ * An Ask left open for a removed tool would run a tool that no longer exists once approved (deep review P18): it is closed, and a notice
+ * in the Conversation tells the owner why. The Robot is not woken; the owner asks it again when the work is still wanted.
+ */
+function closeAsksForRemovedTools(sql: SqlStorage): void {
+  const open = sql.exec<{ id: string; tool: string | null }>("SELECT id, json_extract(payload, '$.toolCall.tool') AS tool FROM proposal WHERE kind = 'tool-call' AND status = 'open' ORDER BY created_at").toArray()
+    .filter((row) => row.tool !== null && REMOVED_PLACE_TOOLS.has(row.tool))
+  const config = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  if (open.length === 0 || config === undefined) return
+  const { liveSessionId, identity } = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ liveSessionId: Schema.String, identity: Schema.Struct({ name: Schema.String }) })))(config.v)
+  const now = Date.now()
+  for (const { id, tool } of open) {
+    sql.exec("UPDATE proposal SET status = 'done', answered_at = ? WHERE id = ?", now, id)
+    const text = `Since the update, ${tool} no longer exists, so ${identity.name}'s Ask to use it was closed. If the work is still needed, ask ${identity.name} to do it again.`
+    sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, NULL)', `n-${crypto.randomUUID()}`, liveSessionId, storedLength(sql, liveSessionId), now, text)
+  }
+}
+
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
 function addColumns(sql: SqlStorage, table: string, columns: readonly string[]): void {
   const present = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((column) => column.name))
@@ -270,6 +302,10 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // A v1.15 Ask still open for box_run, host_run and the like would run a removed tool when approved (deep review P18): it is closed.
+  23: [closeAsksForRemovedTools],
+  // Every Member's Mr. Robot had one directory on a shared Host (deep review P8): his own from now on.
+  22: [unshareMrRobotDirectory],
   // Two browsers (v1.16 ticket 08, ob-l24v): a Robot on Container Chrome follows the Home default.
   20: [moveOffRemovedBrowsers],
   // Jobs run in a place, the Box or a Host (v1.16 ticket 01, ob-rc3b): the Box's job table keeps its rows and learns where they ran.
@@ -505,6 +541,19 @@ export class RobotStore {
     return this.config()?.kind === 'mr-robot' ? mrRobotHostLevel(facet) : 'deny'
   }
 
+  /**
+   * The name of this Robot's directory under mr-robot/ on its owner's Hosts: chosen when first needed (a Host call, or write roots to check
+   * against it) and kept, so that a rename does not lose its files there.
+   */
+  hostDirectory(): string {
+    const kept = this.get<string>(HOST_DIRECTORY)
+    if (kept !== undefined) return kept
+    const config = this.requireConfig()
+    const chosen = robotDirectoryName(config.identity.name, config.id)
+    this.set(HOST_DIRECTORY, chosen)
+    return chosen
+  }
+
   /** The mode and roots of a Host facet that is no longer usable are forgotten: they would come back with the next grant. */
   pruneHostAccess(): void {
     const access = this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS)
@@ -513,12 +562,27 @@ export class RobotStore {
     if (kept.length !== Object.keys(access).length) this.set(HOST_ACCESS, Object.fromEntries(kept))
   }
 
-  /** Forget the mode and roots of the Hosts that are no longer among those the owner reaches (unpaired, or no longer shared). */
-  forgetHostAccessExcept(hostIds: readonly string[]): void {
-    const access = this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS)
-    if (access === undefined) return
-    const kept = Object.entries(access).filter(([facet]) => hostIds.some((id) => facet.startsWith(`${id}:`)))
-    if (kept.length !== Object.keys(access).length) this.set(HOST_ACCESS, Object.fromEntries(kept))
+  /** The Hosts this Robot keeps a grant row or a mode and roots for, reachable now or not. */
+  keptHostIds(): string[] {
+    const rows = this.sql.exec<{ name: string }>("SELECT name FROM grant_item WHERE kind = 'host'").toArray().map((row) => row.name)
+    const facets = [...rows, ...Object.keys(this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS) ?? {})]
+    return [...new Set(facets.flatMap((facet) => splitHostFacet(facet)?.hostId ?? []))]
+  }
+
+  /**
+   * Forget unpaired Hosts: their grant rows and their modes and roots. A Host that is only out of reach (no longer shared) keeps both, so
+   * that it comes back with the access its owner set, not the wider default (deep review P13).
+   */
+  forgetUnpairedHosts(hostIds: readonly string[]): void {
+    if (hostIds.length === 0) return
+    const gone = (facet: string) => hostIds.includes(splitHostFacet(facet)?.hostId ?? '')
+    this.transaction(() => {
+      for (const row of this.sql.exec<{ name: string }>("SELECT name FROM grant_item WHERE kind = 'host'").toArray()) {
+        if (gone(row.name)) this.sql.exec("DELETE FROM grant_item WHERE kind = 'host' AND name = ?", row.name)
+      }
+      const access = this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS)
+      if (access !== undefined && Object.keys(access).some(gone)) this.set(HOST_ACCESS, Object.fromEntries(Object.entries(access).filter(([facet]) => !gone(facet))))
+    })
   }
 
   /** The payload of one grant item, parsed; undefined when it has none. */
@@ -979,11 +1043,16 @@ export interface StoredToolCall {
   readonly tool: string
   readonly arguments: Readonly<Record<string, unknown>>
   readonly reason: string
+  /** The Hosts the call's places resolved to when it was asked, by id in the order it names them (deep review P14); none when it names none. */
+  readonly hosts: readonly string[]
 }
 
 export function storedToolCall(payload: Record<string, unknown>): StoredToolCall | undefined {
-  const call = payload['toolCall'] as StoredToolCall | undefined
-  return call === undefined || typeof call.tool !== 'string' ? undefined : call
+  const call = payload['toolCall'] as Omit<StoredToolCall, 'hosts'> & { readonly hosts?: unknown } | undefined
+  if (call === undefined || typeof call.tool !== 'string') return undefined
+  // An Ask stored without its Hosts pins none: a replay that names a Host is then refused, never sent to whichever Host has the name now.
+  const hosts = Array.isArray(call.hosts) ? call.hosts.filter((host): host is string => typeof host === 'string') : []
+  return { ...call, hosts }
 }
 
 function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk } | Record<string, never> {

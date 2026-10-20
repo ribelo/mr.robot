@@ -8,7 +8,9 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Me } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
+import { frame } from '@mr-robot/host-protocol'
 import { closeHosts, fakeHost, heldCommands, hostJobCalls, hostJobs, hostRuns } from './fake-host.ts'
+import { holdBoxJob } from './stub-box.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 import type { Member as TestMember } from './worker.ts'
 
@@ -194,6 +196,37 @@ describe('a finished job wakes the Robot (ob-ku5j)', () => {
   })
 })
 
+describe('a job frame speaks only for a job of its own Host (v1.16 deep P3)', () => {
+  it('a frame from another Host, or about a Box job, closes nothing; the Host that runs the job still closes it', async () => {
+    const desk = await fakeHost()
+    // Paired by the same Member; the Robot holds no grant on it.
+    const nas = await fakeHost('Nas')
+    const id = await robotOn(desk)
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { box: 'allow', files: 'allow' }, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
+    const deskJob = await startJob(id, 'make all')
+    holdBoxJob(id, 'python3 train.py')
+    const [boxStarted] = await say(id, [{ calls: [{ name: 'run', args: { on: 'box', command: 'python3 train.py', run_in_background: true } }] }, { text: '' }])
+    const boxJob = boxStarted!.jobId as string
+    expect(boxJob).toMatch(/^j-/)
+    const forged = (job: string) => frame({ t: 'job', d: { job: `${id}:${job}`, state: 'completed', exitCode: 0, signal: null } })
+    nas.socket.send(forged(deskJob))
+    nas.socket.send(forged(boxJob))
+    desk.socket.send(forged(boxJob))
+    scripts.set(id, [{ text: '' }])
+    // Desk's own frame for its job comes after the forged ones and is the only one that counts.
+    desk.finish('make all', { exitCode: 3 })
+    await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${deskJob} finished: exit 3]`), { timeout: 10_000 })
+    await settle(id)
+    const woken = requests.get(id)!.flatMap((request) => request.messages.filter((message) => message.role === 'user').map((message) => JSON.stringify(message)))
+    expect(woken.some((text) => text.includes('[Box job ') || text.includes('[Nas job '))).toBe(false)
+    const [list] = await say(id, [{ calls: [jobList] }, { text: '' }])
+    expect(list!.jobs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: boxJob, place: 'box', status: 'running' }),
+      expect.objectContaining({ id: deskJob, place: 'Desk', status: 'completed', exitCode: 3 }),
+    ]))
+  })
+})
+
 describe('jobs lost when the Host goes (ob-cgn1)', () => {
   it('a connection that drops and returns with the same app loses nothing', async () => {
     const desk = await fakeHost()
@@ -245,6 +278,63 @@ describe('jobs lost when the Host goes (ob-cgn1)', () => {
     scripts.set(id, [{ text: '' }])
     expect((await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'DELETE' })).status).toBe(200)
     await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${jobId} failed: Desk was unpaired while it ran]`), { timeout: 10_000 })
+  })
+})
+
+describe('a run that loses its connection or its Robot while it waits (deep review P11)', () => {
+  /** Start a Turn whose run waits for a held command, and return once the app runs it, with the Robot's id for the job. */
+  async function waitingRun(id: string, command: string): Promise<string> {
+    heldCommands.add(command)
+    scripts.set(id, [{ calls: [run(command, { timeout_seconds: 30 })] }, { text: '' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+    await vi.waitFor(() => expect(hostRuns.map((call) => call.command)).toContain(command), { timeout: 10_000 })
+    return hostRuns.find((call) => call.command === command)!.job.split(':').at(-1)!
+  }
+  const lastResult = (id: string) => JSON.parse(requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').at(-1)!.content.map((block) => ('text' in block ? block.text : '')).join('')) as Record<string, unknown>
+
+  it('a connection that drops and comes back loses nothing: the command goes on and the run answers with its result', async () => {
+    const desk = await fakeHost()
+    const id = await robotOn(desk)
+    await waitingRun(id, 'make all')
+    desk.print('make all', 'cc a.c\n')
+    await desk.blip()
+    desk.finish('make all', { stdout: 'done\n', exitCode: 0 })
+    await settle(id)
+    expect(lastResult(id)).toMatchObject({ kind: 'foreground', stdout: 'cc a.c\ndone\n', exitCode: 0 })
+    expect(hostRuns).toHaveLength(1)
+  })
+
+  it('a connection that stays down past the limit makes the run a job, and its end over the next connection wakes the Robot', async () => {
+    const desk = await fakeHost()
+    const id = await robotOn(desk)
+    heldCommands.add('make all')
+    scripts.set(id, [{ calls: [run('make all', { timeout_seconds: 2 })] }, { text: '' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+    await vi.waitFor(() => expect(hostRuns.map((call) => call.command)).toContain('make all'), { timeout: 10_000 })
+    await desk.drop()
+    await settle(id)
+    const promoted = lastResult(id)
+    expect(promoted).toMatchObject({ kind: 'promoted', jobId: expect.stringMatching(/^j-/) })
+    desk.finish('make all', { stdout: 'built\n', exitCode: 0 })
+    scripts.set(id, [{ text: '' }])
+    await desk.back()
+    await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${promoted.jobId as string} finished: exit 0]`), { timeout: 10_000 })
+    expect(wakes(id)[0]).toContain('built')
+  })
+
+  it('a Robot that restarts while its run waits is woken with the result the app kept, not told the command was lost', async () => {
+    const desk = await fakeHost()
+    const id = await robotOn(desk)
+    const jobId = await waitingRun(id, 'make all')
+    await testRobot(id).restartForTest().catch(() => undefined)
+    // The app answers the call that waited, to a Robot that is no longer there; it sends no frame, since the call carried the result.
+    desk.finish('make all', { stdout: 'built\n', exitCode: 0 })
+    await vi.waitFor(() => expect(hostJobs.get(`${id}:${jobId}`)?.awaited).toBe(false))
+    scripts.set(id, [{ text: '' }, { text: '' }])
+    await tick(id)
+    await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${jobId} finished: exit 0]`), { timeout: 10_000 })
+    expect(wakes(id)[0]).toContain('built')
+    expect(hostRuns).toHaveLength(1)
   })
 })
 

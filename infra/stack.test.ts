@@ -47,6 +47,8 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     ComputerContainer: 'Cloudflare.Container',
   })
   expect(plan.resources.ComputerContainer.props).toMatchObject({ className: 'ComputerContainer', context: './infra/computer', instanceType: 'standard-1' })
+  // An upload a restart cut off is aborted by R2 after a day (deep review P12).
+  expect(plan.resources.Files.props.lifecycleRules).toEqual([{ id: 'abort-unfinished-uploads', abortMultipartUploadsTransition: { condition: { type: 'Age', maxAge: 86_400 } } }])
   expect(existsSync(join(dirname(fileURLToPath(import.meta.url)), 'computer', 'Dockerfile'))).toBe(true)
   const bindings = plan.resources.Edge.bindings.flatMap((b: any) => b.data.bindings ?? [])
     .filter((b: any) => typeof b.type === 'string' && typeof b.name === 'string')

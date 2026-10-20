@@ -30,8 +30,8 @@ export interface JobRunner {
   kill(job: JobId): Promise<void>
   /** The registry has closed the job: whatever the runner kept in memory for it (a pending call, an answer) can go. */
   release(job: JobId): void
-  /** Why the command never ran (a Host refused the call), when that is why the job is gone. */
-  refusal?(job: JobId): string | undefined
+  /** Why the command never ran (a Host refused the call), when that is why the job is gone: the call's error as it was, a tagged refusal tagged. */
+  refusal?(job: JobId): Error | undefined
   /** What a finished command adds to its result beside the output: its directory, the sandbox's facts and a note. */
   extras?(job: JobId): RunExtras | undefined
 }
@@ -189,10 +189,11 @@ export class Jobs {
     } finally {
       this.waiting.delete(id)
     }
-    // Still going at the limit, or the Turn was stopped: it becomes a job. What it printed so far is returned and counts as read.
+    // Still going at the limit, or the Turn was stopped: it becomes a job. What it printed so far is returned and counts as read. A Host
+    // that is away now (its connection dropped while it ran the command, deep review P11) keeps the job: its output is read later.
     this.store.promoteJob(id)
-    const stdout = await this.readAll(runner, id, 'out', 0)
-    const stderr = await this.readAll(runner, id, 'err', 0)
+    const printed = await Promise.all([this.readAll(runner, id, 'out', 0), this.readAll(runner, id, 'err', 0)]).catch(() => ['', ''] as const)
+    const [stdout, stderr] = printed
     this.store.setJobOffsets(id, new TextEncoder().encode(stdout).length, new TextEncoder().encode(stderr).length)
     await where.touch()
     await this.host.changed()
@@ -218,7 +219,7 @@ export class Jobs {
         const why = refused !== undefined || where.place === 'box' ? '' : (await runner.output(id, 'err', 0).catch(() => ({ text: '' }))).text.trim()
         this.close(where, id, 'lost', null, null)
         await where.touch()
-        if (refused !== undefined) throw new Error(refused)
+        if (refused !== undefined) throw refused
         throw new Error(`${where.subject} lost the command before it ended.${why === '' ? '' : ` ${why}`}`)
       }
       if (this.host.now() >= deadline || signal?.aborted === true) return undefined
@@ -312,11 +313,14 @@ export class Jobs {
     }
   }
 
-  /** A Host says a job of its own ended (the job frame, ob-ku5j): it is closed and the Robot is woken, once. */
-  async hostEnded(id: JobId, ended: { readonly state: 'completed' | 'killed' | 'failed'; readonly exitCode: number | null; readonly signal: string | null }): Promise<void> {
+  /**
+   * The Host `place` says a job of its own ended (the job frame, ob-ku5j): it is closed and the Robot is woken, once. A Host speaks only
+   * for the jobs that run on it: a frame about a job of another place changes nothing.
+   */
+  async hostEnded(place: StoredPlace, id: JobId, ended: { readonly state: 'completed' | 'killed' | 'failed'; readonly exitCode: number | null; readonly signal: string | null }): Promise<void> {
     const job = this.store.job(id)
     // A run waiting for it in this isolate closes it itself.
-    if (job === undefined || job.status !== 'running' || this.waiting.has(id)) return
+    if (job === undefined || job.place !== place || job.status !== 'running' || this.waiting.has(id)) return
     if (job.foreground) this.store.promoteJob(id)
     const stopped = ended.state === 'completed' ? undefined : ended.signal === null ? `it was ${ended.state}` : `it was stopped by signal ${ended.signal}`
     await this.finish(job, ended.state === 'completed' ? ended.exitCode : null, this.placeOf(job).runner(), stopped)

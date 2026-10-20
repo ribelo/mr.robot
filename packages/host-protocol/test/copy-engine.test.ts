@@ -3,7 +3,10 @@
  * the expected bytes are made by the test and compared byte for byte.
  */
 import { describe, expect, it } from 'vitest'
-import { copyTimeoutMs, CopyFailed, downloadFile, uploadFile, type CopyIo, type TargetFile } from '../src/index.ts'
+import { copyTimeoutMs, CopyFailed, downloadFile, hostPartDeadlineMs, uploadFile, type CopyIo, type TargetFile } from '../src/index.ts'
+
+/** The signal of a copy nobody stops. */
+const running = new AbortController().signal
 
 const bytesOf = (length: number) => Uint8Array.from({ length }, (_, index) => (index * 13 + (index >> 9)) & 255)
 
@@ -43,6 +46,7 @@ function target() {
       written.bytes = grown
     },
     finish: async () => { written.finished = true },
+    release: async () => undefined,
     abandon: async () => { written.abandoned = true },
   }
   return { written, sink }
@@ -54,7 +58,7 @@ describe('upload', () => {
     const objects = new Map<string, Uint8Array>()
     const { io } = r2(objects)
     const parts = [0, 1, 2].map((index) => ({ number: index + 1, url: `https://r2.test/part${index + 1}`, offset: index * 1000, length: Math.min(1000, 2500 - index * 1000) }))
-    const etags = await uploadFile(file(bytes), bytes.length, parts, io)
+    const etags = await uploadFile(file(bytes), bytes.length, parts, io, running)
     expect(etags).toEqual([{ number: 1, etag: '"etag-https://r2.test/part1"' }, { number: 2, etag: '"etag-https://r2.test/part2"' }, { number: 3, etag: '"etag-https://r2.test/part3"' }])
     expect([...objects.values()].flatMap((part) => [...part])).toEqual([...bytes])
   })
@@ -62,7 +66,7 @@ describe('upload', () => {
   it('tries a part again after a network failure and a busy R2, pausing longer each time, and then succeeds', async () => {
     const objects = new Map<string, Uint8Array>()
     const { io, requests, sleeps } = r2(objects, ['network', 503])
-    await uploadFile(file(bytesOf(10)), 10, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 10 }], io)
+    await uploadFile(file(bytesOf(10)), 10, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 10 }], io, running)
     expect(requests).toHaveLength(3)
     expect(sleeps).toEqual([500, 1000])
     expect(objects.get('https://r2.test/only')).toEqual(bytesOf(10))
@@ -70,7 +74,7 @@ describe('upload', () => {
 
   it('gives up after four attempts, naming the last answer', async () => {
     const { io, requests } = r2(new Map(), [500, 500, 500, 500, 500])
-    const failure = await uploadFile(file(bytesOf(10)), 10, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 10 }], io).catch((error: unknown) => error)
+    const failure = await uploadFile(file(bytesOf(10)), 10, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 10 }], io, running).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(CopyFailed)
     expect((failure as Error).message).toBe('part 1 failed after 4 attempts: R2 answered 500')
     expect(requests).toHaveLength(4)
@@ -78,14 +82,14 @@ describe('upload', () => {
 
   it('does not try a refusal again: an expired link says so at once', async () => {
     const { io, requests } = r2(new Map(), [403])
-    const failure = await uploadFile(file(bytesOf(10)), 10, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 10 }], io).catch((error: unknown) => error)
+    const failure = await uploadFile(file(bytesOf(10)), 10, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 10 }], io, running).catch((error: unknown) => error)
     expect((failure as Error).message).toContain('R2 answered 403 (the link expired or was refused)')
     expect(requests).toHaveLength(1)
   })
 
   it('refuses a file that changed size while it was copied', async () => {
     const { io } = r2(new Map())
-    const failure = await uploadFile(file(bytesOf(10)), 12, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 12 }], io).catch((error: unknown) => error)
+    const failure = await uploadFile(file(bytesOf(10)), 12, [{ number: 1, url: 'https://r2.test/only', offset: 0, length: 12 }], io, running).catch((error: unknown) => error)
     expect((failure as Error).message).toBe('the file changed while it was copied')
   })
 })
@@ -95,7 +99,7 @@ describe('download', () => {
     const bytes = bytesOf(2500)
     const { io, requests } = r2(new Map([['https://r2.test/obj', bytes]]))
     const { written, sink } = target()
-    const total = await downloadFile(sink, { url: 'https://r2.test/obj', size: 2500, partBytes: 1000 }, io)
+    const total = await downloadFile(sink, { url: 'https://r2.test/obj', size: 2500, partBytes: 1000 }, io, running)
     expect(total).toBe(2500)
     expect(written.bytes).toEqual(bytes)
     expect(written.finished).toBe(true)
@@ -114,25 +118,34 @@ describe('download', () => {
       if (!short) return response
       short = false
       return new Response((await response.arrayBuffer()).slice(0, 40), { status: 206 })
-    } })
+    } }, running)
     expect(total).toBe(100)
     expect(written.bytes).toEqual(bytes)
     const empty = target()
-    expect(await downloadFile(empty.sink, { url: 'https://r2.test/none', size: 0, partBytes: 100 }, io)).toBe(0)
+    expect(await downloadFile(empty.sink, { url: 'https://r2.test/none', size: 0, partBytes: 100 }, io, running)).toBe(0)
     expect(empty.written.finished).toBe(true)
   })
 
   it('leaves no file behind when a range cannot be fetched', async () => {
     const { io } = r2(new Map([['https://r2.test/obj', bytesOf(100)]]), [403])
     const { written, sink } = target()
-    await expect(downloadFile(sink, { url: 'https://r2.test/obj', size: 100, partBytes: 50 }, io)).rejects.toBeInstanceOf(CopyFailed)
+    await expect(downloadFile(sink, { url: 'https://r2.test/obj', size: 100, partBytes: 50 }, io, running)).rejects.toBeInstanceOf(CopyFailed)
     expect(written.finished).toBe(false)
     expect(written.abandoned).toBe(true)
   })
 })
 
 describe('copy timeout', () => {
-  it('allows two minutes and a second per megabyte, at most six hours', () => {
+  it('gives a Host one part at a time a deadline that a line of half a megabit a second meets (deep review P12)', () => {
+    const part = 64 * 1024 * 1024
+    // 64 MiB is 536 870 912 bits: 1073.7 s at 500 000 bits a second.
+    expect(hostPartDeadlineMs(part)).toBeGreaterThan(1_073_742)
+    // Two minutes and a second for each 64 kB started: 120 s and 1049 s.
+    expect(hostPartDeadlineMs(part)).toBe(1_169_000)
+    expect(hostPartDeadlineMs(0)).toBe(120_000)
+  })
+
+  it('allows ws two minutes and a second per megabyte, at most six hours', () => {
     expect(copyTimeoutMs(0)).toBe(120_000)
     // 2 GB is 2000 MB: 120 s and 2000 s, in milliseconds.
     expect(copyTimeoutMs(2_000_000_000)).toBe(2_120_000)

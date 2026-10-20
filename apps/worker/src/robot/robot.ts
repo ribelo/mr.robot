@@ -8,7 +8,7 @@
  * interrupted Turn resumes from the last persisted event.
  */
 import { clearWorkspace } from '../workspace/workspace.ts'
-import { SPILL_SWEEP_EVERY_MS, sweepSpill } from '../workspace/spill.ts'
+import { SPILL_SWEEP_EVERY_MS, sweepSpill, sweepStaged } from '../workspace/spill.ts'
 import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCREEN_SWEEP_EVERY_MS, sweepScreenshots } from '../workspace/screens.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -67,7 +67,7 @@ import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platfor
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { CredentialSave } from '@mr-robot/protocol'
-import type { ChainEntry, HomeSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
+import type { ChainEntry, GrantLevel, HomeSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
@@ -99,18 +99,22 @@ import { Credentials } from '../plugins/credentials.ts'
 import { Exa } from '../plugins/exa.ts'
 import { Places as PlacesCapability } from '../plugins/places.ts'
 import { Places } from '../places/places.ts'
-import { HOST_WINDOW_PARTS, PART_BYTES, Transfers } from '../places/transfers.ts'
+import { PART_BYTES, Transfers } from '../places/transfers.ts'
 import { boxTransfer as boxDoor } from '../places/box-door.ts'
+import { CopyPermits, type PermitSecret } from '../places/copy-permit.ts'
 import { hostJobPlace, hostLink, type HostCaller } from '../places/host-links.ts'
 import { parseS3Credentials, s3ObjectStore, type ObjectStore } from '../workspace/object-store.ts'
-import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, newBoxToken, type BoxToken } from '../box/token.ts'
+import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, mintBoxToken, type BoxToken } from '../box/token.ts'
+import { BOX_CACHE_FOLDER, BOX_CACHE_KEY, inBoxCache, restoreBoxCache, saveBoxCache } from '../box/box-cache.ts'
 import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRuns } from '../places/host-runner.ts'
-import { hostFacetKey, hostIdOfPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
-import { SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
+import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
+import { AmbiguousPlace, SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
+import { answerOf, HostNoSandbox, HostOffline, HostWriteDenied, type HostCallReply } from '../member/host-call.ts'
+import { withDistinctNames } from '../places/host-names.ts'
 import { parseJobId, type JobId } from '../places/job-id.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
-import { HOST_ACCESS, HOST_DIRECTORY, hostAccessOf, hostIdsOf, robotDirectoryName } from './host-access.ts'
+import { HOST_ACCESS, hostAccessOf, hostIdsOf, hostsInOrder } from './host-access.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Ask } from '../plugins/ask.ts'
 import { IdentityTools } from '../plugins/identity.ts'
@@ -167,7 +171,8 @@ import type { RobotInit } from './programs.ts'
 
 export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost, SayHost {
   protected readonly store: RobotStore
-  private composition: { readonly revision: number; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
+  /** The composition, with the settings revision and the reach (mountsKey) it was built for. */
+  private composition: { readonly revision: number; readonly reach: string; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
   private browserPage: Promise<BrowserPage> | undefined
@@ -190,8 +195,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private secretValues: Array<readonly [string, string]> = []
   /** Secret values fetched during the running Turn; redacted from everything stored. */
   private turnSecrets: Array<readonly [string, string]> = []
-  /** Calls the platform runs because their owner approved them (sk-ed7r): they pass the ask gate once. */
-  private readonly approvedCalls = new Set<string>()
+  /** Calls the platform runs because their owner approved them (sk-ed7r): they pass the ask gate once, on the Hosts the Ask names (deep review P14). */
+  private readonly approvedCalls = new Map<string, readonly string[]>()
   /** backend|host pairs that showed a block page in the running Turn. */
   private readonly blockedThisTurn = new Map<string, string>()
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
@@ -633,8 +638,23 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.store.get<BoxState>(BOX) ?? { state: 'off' }
   }
 
-  /** Boot (ao-7ptt, ao-ia4z): the Workspace's box/ folder is copied in, then box/setup.sh runs when present. */
-  private async bootBox(): Promise<BoxBackend> {
+  /** The boot in flight in this isolate; every caller that needs the Box meanwhile waits for it (deep review P9). */
+  private boxBoot: Promise<BoxBackend> | undefined
+
+  /**
+   * The running Box, booted at most once at a time per Robot: parallel calls on a cold Box share one boot, so setup.sh runs once and
+   * the token in the container is the one the record holds (deep review P9). A record left at booting by a lost isolate boots again.
+   */
+  private bootBox(): Promise<BoxBackend> {
+    this.boxBoot ??= this.startBox().finally(() => { this.boxBoot = undefined })
+    return this.boxBoot
+  }
+
+  /**
+   * Boot (ao-7ptt, ao-ia4z): the Workspace's box/ folder is copied in, the uv and Bun caches come back from their archive
+   * (box/box-cache.ts), then box/setup.sh runs when present.
+   */
+  private async startBox(): Promise<BoxBackend> {
     const backend = this.boxBackend()
     const current = this.boxState()
     if (current.state === 'running' && (await backend.running())) return backend
@@ -642,7 +662,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A Box that is not up holds no job: what still ran in the old one is lost (gb-aafm).
     await this.jobs().loseAll('the Box was restarted').catch((error: unknown) => console.warn('jobs not closed', error))
     // The token ws uses is made before the Box starts and dies with this record (v1.16 ticket 06).
-    const token = newBoxToken(this.store.requireConfig().id)
+    const token = await mintBoxToken(this.env.BOX_TOKEN_KEY, this.store.requireConfig().id)
     this.store.set(BOX, { state: 'booting', since: now, lastCommandAt: now, baseline: {}, token } satisfies BoxState)
     await this.changed()
     try {
@@ -652,13 +672,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const origin = await this.home().appOrigin()
       if (origin !== null) await backend.write(BOX_ORIGIN_PATH, encode.encode(origin))
       const ws = this.workspace
-      const files = (await this.run(ws.list(BOX_FOLDER))).filter((entry) => entry.path.startsWith(`${BOX_FOLDER}/`))
+      const files = (await this.run(ws.list(BOX_FOLDER))).filter((entry) => entry.path.startsWith(`${BOX_FOLDER}/`) && !inBoxCache(entry.path))
       for (const entry of files) {
         const file = await this.run(ws.read(entry.path))
         if (file !== undefined) await backend.write(`${BOX_ROOT}/${entry.path}`, new Uint8Array(file.body))
       }
+      // The caches come back whole before setup.sh, which may use them; a failure is a cold cache, not a failed boot (deep review P7).
+      const archive = await this.run(ws.stat(BOX_CACHE_KEY))
+      const caches = await restoreBoxCache(backend, this.wsPermits, archive?.size)
+      if (caches._tag === 'Cold') console.warn('Box caches not restored', caches.reason)
       if (files.some((entry) => entry.path === `${BOX_FOLDER}/setup.sh`)) await backend.run('bash setup.sh', `${BOX_ROOT}/${BOX_FOLDER}`, 900)
-      const baseline = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`))
+      const baseline = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`, [BOX_CACHE_FOLDER]))
       this.store.set(BOX, { state: 'running', since: now, lastCommandAt: Date.now(), baseline, token } satisfies BoxState)
       return backend
     } catch (error) {
@@ -670,11 +694,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** Changed and new files under /workspace/box go back to the Workspace's box/ (ao-7ptt). */
+  /** Changed and new files under /workspace/box go back to the Workspace's box/ (ao-7ptt); the caches go whole, at the stop. */
   private async syncBox(backend: BoxBackend): Promise<void> {
     const current = this.boxState()
     if (current.state !== 'running' && current.state !== 'stopping') return
-    const now = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`))
+    const now = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`, [BOX_CACHE_FOLDER]))
     const ws = this.workspace
     for (const [path, stamp] of Object.entries(now)) {
       if (current.baseline[path] === stamp) continue
@@ -697,8 +721,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.recordUsage('box', 0, 0, cost)
   }
 
-  /** Sync back, stop, bill (ao-joux, ao-9q18). */
+  /**
+   * Sync back, stop, bill (ao-joux, ao-9q18). A boot in flight ends first, failed or not, so the stop is the last word: the record and the
+   * container both end stopped (deep review P9b).
+   */
   async stopBox(): Promise<{ stopped: boolean }> {
+    await this.boxBoot?.catch(() => undefined)
     const current = this.boxState()
     if (current.state === 'off') return { stopped: false }
     const backend = this.boxBackend()
@@ -708,6 +736,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // What still runs ends with the Box; its output so far is saved and the Robot is told (gb-aafm).
       await this.jobs().loseAll('the Box was stopped', boxRunner(backend)).catch((error: unknown) => console.warn('jobs not closed', error))
       await this.syncBox(backend).catch((error: unknown) => console.warn('Box not synced', error))
+      const caches = await saveBoxCache(backend, this.wsPermits)
+      if (caches._tag === 'NotSaved') console.warn('Box caches not saved', caches.reason)
       await backend.stop()
     } finally {
       await this.accountBox()
@@ -757,10 +787,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The pending calls of the Robot's Host jobs (HostRunner); lost with the isolate, after which the Host is asked. */
   private readonly hostRuns = new HostRuns()
 
-  /** For the Member of a Host: a job of this Robot ended there with nobody waiting for it (the job frame, ob-ku5j). */
-  async hostJobEnded(jobId: string, ended: { state: 'completed' | 'killed' | 'failed'; exitCode: number | null; signal: string | null }): Promise<void> {
+  /** For the Member of a Host: a job of this Robot ended on `hostId` with nobody waiting for it (the job frame, ob-ku5j). */
+  async hostJobEnded(hostId: string, jobId: string, ended: { state: 'completed' | 'killed' | 'failed'; exitCode: number | null; signal: string | null }): Promise<void> {
     const id = parseJobId(jobId)
-    if (id !== undefined) await this.jobs().hostEnded(id, ended)
+    if (id !== undefined) await this.jobs().hostEnded(hostPlace(hostId), id, ended)
   }
 
   /** For the Member of a Host: these jobs of this Robot are gone, because the app restarted or the Host stayed away (ob-cgn1). */
@@ -791,17 +821,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private places(): Places {
     this.placeService ??= new Places({
       workspace: this,
-      workspaceUsable: () => this.workspaceUsable(),
-      boxUsable: () => this.groupUsable('box'),
-      hostUsable: (hostId, facet) => this.store.mayUse('host', hostFacetKey(hostId, facet)),
+      inSetup: () => this.store.config()?.status === 'setup',
+      workspaceLevel: () => this.groupLevel('files'),
+      boxLevel: () => this.groupLevel('box'),
+      hostLevel: (hostId, facet) => this.store.levelOf('host', hostFacetKey(hostId, facet)),
       hosts: () => this.home().hostsFor(this.store.requireConfig().ownerId),
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
       link: (host, reach) => hostLink(this.hostCaller(), host, reach),
       jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach),
-      escalation: { approved: (callId) => this.approvedCalls.has(callId), ask: (request, exec) => this.askGateHost().askToolCall(request, exec) },
+      asks: {
+        approval: (callId) => {
+          const hosts = this.approvedCalls.get(callId)
+          return hosts === undefined ? undefined : { hosts }
+        },
+        ask: (request, exec) => this.askGateHost().askToolCall(request, exec),
+      },
       jobs: this.jobs(),
       transfers: this.transfers(),
-      windowParts: this.hostWindowParts(),
+      permits: this.wsPermits,
     })
     return this.placeService
   }
@@ -813,7 +850,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Whether a tool group is usable now: allow or ask, and the Home has its plugin on. */
   private groupUsable(group: 'files' | 'box'): boolean {
-    return !disabledToolGroups(this.pluginsOn).has(group) && this.store.mayUse('tool', group)
+    return usableLevel(this.groupLevel(group))
+  }
+
+  /** The level of a tool group now: deny when the Home has its plugin off (in `plugins`, the switches the last Turn read by default). */
+  private groupLevel(group: 'files' | 'box', plugins: Readonly<Record<string, boolean>> = this.pluginsOn): GrantLevel {
+    return disabledToolGroups(plugins).has(group) ? 'deny' : this.store.levelOf('tool', group)
   }
 
   /** The S3 side of the Files bucket (v1.16 ticket 06); tests give a recorded one. */
@@ -827,10 +869,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return PART_BYTES
   }
 
-  /** How many parts of a file a Host is handed links for at once; tests make it small. */
-  protected hostWindowParts(): number {
-    return HOST_WINDOW_PARTS
-  }
+  /** The permits of the runs of ws this Robot starts on its Box (a copy, the caches' archive); the door finds them by secret. */
+  private readonly wsPermits = new CopyPermits()
 
   /** The Workspace as presigned URLs, for Hosts and for ws (v1.16 ticket 06). */
   private transferService: Transfers | undefined
@@ -840,17 +880,22 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The Box's door to its Workspace (v1.16 ticket 06): ws calls it with the token written into the container at boot (places/box-door.ts). */
-  async boxTransfer(token: BoxToken, body: string): Promise<{ readonly status: number; readonly json: string }> {
+  async boxTransfer(token: BoxToken, permit: PermitSecret | undefined, body: string): Promise<{ readonly status: number; readonly json: string }> {
     return boxDoor({
+      // A stopping Box still sends its caches to the Workspace (box/box-cache.ts).
       liveToken: () => {
         const box = this.boxState()
-        return box.state === 'booting' || box.state === 'running' ? box.token : undefined
+        return box.state === 'off' ? undefined : box.token
       },
       containerUp: async () => this.boxState().state === 'booting' || (await this.boxBackend().running().catch(() => false)),
-      filesAccess: () => (this.groupUsable('files') ? (this.store.levelOf('tool', 'files') === 'allow' ? 'allow' : 'ask') : 'none'),
-      permitted: (path) => this.places().isPermitted(path),
+      // The Home's switches as they are now: the Robot's own copy (pluginsOn) is the last Turn's, and empty in a cold isolate.
+      levels: async () => {
+        const plugins = await this.home().pluginsEnabled()
+        return { files: this.groupLevel('files', plugins), box: this.groupLevel('box', plugins) }
+      },
+      permit: (secret) => this.wsPermits.find(secret),
       transfers: this.transfers(),
-    }, token, body)
+    }, token, permit, body)
   }
 
   /** The owner's Stop on one job in the panel; the Robot is told (gb-66kh). */
@@ -1232,7 +1277,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.store.get(started) !== undefined) return 'The call was started before a platform restart; whether it finished is unknown. Check its effect before you do it again.'
     this.store.set(started, Date.now())
     const callId = `approved-${askId}`
-    this.approvedCalls.add(callId)
+    this.approvedCalls.set(callId, call.hosts)
     try {
       const result = await ctx.tools.execute({ callId: ToolCallId(callId), name: call.tool, arguments: call.arguments, signal: new AbortController().signal })
       if (result.isError) return `The call failed: ${result.error.message}`
@@ -1308,7 +1353,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const unconfined = request.arguments['escalate'] === true
     const reason = unconfined ? `This runs without the sandbox, once. ${request.reason}` : request.reason
     const proposal = this.propose('tool-call', `${request.tool}${unconfined ? ' without the sandbox' : ''}: ${request.reason}`, {
-      toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason, items: request.items },
+      toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason, items: request.items, hosts: hostsInOrder(request.uses) },
     }, hostIdsOf(request.items))
     return { askId: proposal.id }
   }
@@ -1845,7 +1890,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async agent(): Promise<Composition> {
     const config = this.store.requireConfig()
-    if (this.composition?.revision === config.revision) return this.composition.value
+    const reach = this.mountsKey()
+    if (this.composition?.revision === config.revision && this.composition.reach === reach) return this.composition.value
     // Running Subagents live in this composition: a settings change applies once they are done (ao-ij3i).
     if (this.composition !== undefined && this.children.size > 0) return this.composition.value
     await this.releaseComposition()
@@ -1894,9 +1940,23 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await Effect.runPromise(Scope.close(scope, Exit.void))
       throw error
     })
-    this.composition = { revision: config.revision, value, scope }
+    this.composition = { revision: config.revision, reach, value, scope }
     this.pendingSeed = undefined
     return value
+  }
+
+  /**
+   * What the mounted tools follow beside the settings revision: the levels that apply (Mr. Robot's follow what his owner reaches, which
+   * changes without a settings change), the Hosts and Connections the owner reaches, and the Home's plugin switches. A composition built
+   * for another reach is rebuilt, so that a tool at ask is wrapped by the ask gate.
+   */
+  private mountsKey(): string {
+    return JSON.stringify({
+      grants: this.store.effectiveGrants(),
+      hosts: this.knownHosts.map((host) => [host.id, host.name]),
+      connections: this.knownConnections.map((connection) => connection.id),
+      plugins: this.pluginsOn,
+    })
   }
 
   /** The identity line the adapter of the Robot's model puts before its prompt; null when none, or when no adapter can be built for it. */
@@ -2036,14 +2096,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       try {
         return [{ kind: 'host', name: hostFacetKey((await this.places().hostNamed(name)).id, facet) }]
       } catch (error) {
-        // Only a computer that is not there is the tool's own refusal; a lookup that failed leaves the call unchecked, so it fails closed.
-        if (error instanceof UnknownPlace) return []
+        // Only a computer that is not there, or a name more than one has, is the tool's own refusal; a lookup that failed leaves the call unchecked, so it fails closed.
+        if (error instanceof UnknownPlace || error instanceof AmbiguousPlace) return []
         throw error
       }
     }
     const everywhere = (facet: 'files' | 'shell'): readonly GrantItem[] => [...(facet === 'files' ? [tool('files')] : []), tool('box'), ...hostFacets(facet)]
-    const onItems = (facet: 'files' | 'shell'): ToolItems => ({ possible: everywhere(facet), used: (args) => placeItem(args['on'], facet) })
+    // The places ask the owner themselves (deep review P2, P14): the gate wants the reason and reviews calls at allow.
+    const onItems = (facet: 'files' | 'shell'): ToolItems => ({ possible: everywhere(facet), used: (args) => placeItem(args['on'], facet), asksAtExecution: true })
     const jobItems: ToolItems = {
+      asksAtExecution: true,
       possible: everywhere('shell'),
       used: async (args) => {
         const job = parseJobId(args['job_id'])
@@ -2071,7 +2133,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         if (name === 'run') return onItems('shell')
         if (name === 'job_output' || name === 'job_kill') return jobItems
         if (name === 'job_list') return NO_ITEMS
-        if (name === 'copy') return { possible: everywhere('files'), used: async (args) => [...(await placeItem(copyEnd(args['from']), 'files')), ...(await placeItem(copyEnd(args['to']), 'files'))] }
+        if (name === 'copy') return { possible: everywhere('files'), used: async (args) => [...(await placeItem(copyEnd(args['from']), 'files')), ...(await placeItem(copyEnd(args['to']), 'files'))], asksAtExecution: true }
         return onItems('files')
       },
     }
@@ -2180,39 +2242,29 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const granted = usableLevel(this.store.hostLevel(facet))
     // The mode and roots of the facet, and the Robot's directory on the Host (v1.16 ticket 02): the Host app enforces them.
     const { mode, roots } = hostAccessOf(this.store.get<HostAccessByFacet>(HOST_ACCESS), facet)
-    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.hostDirectory(), mode, roots } }
-  }
-
-  /** The name of this Robot's directory on its owner's Hosts: chosen when first needed and kept, so that a rename does not lose its files there. */
-  private hostDirectory(): string {
-    const kept = this.store.get<string>(HOST_DIRECTORY)
-    if (kept !== undefined) return kept
-    const config = this.store.requireConfig()
-    const chosen = robotDirectoryName(config.identity.name, config.id)
-    this.store.set(HOST_DIRECTORY, chosen)
-    return chosen
+    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.store.hostDirectory(), mode, roots } }
   }
 
   private async hostOwnerStub(hostId: string) {
     const owner = await this.home().hostOwner(hostId)
-    if (owner === null) throw Object.assign(new Error(`there is no host ${hostId} any more`), { name: 'HostOffline' })
+    if (owner === null) throw new HostOffline({ message: `there is no host ${hostId} any more` })
     return this.env.MEMBER.getByName(owner)
   }
 
   /**
-   * Host calls fail clearly (hs-bfr8); a Task's Turn that hits an offline host tells the owner (hs-nwcl). A refusal the app or the Member
-   * made on purpose comes back as the place error the tools word: a mode that does not allow a change, a computer that cannot confine.
+   * Host calls fail clearly (hs-bfr8); a Task's Turn that hits an offline host tells the owner (hs-nwcl). The Member answers with a reply
+   * whose failure is a tagged value (deep review P16); a refusal the app or the Member made on purpose becomes the place error the tools
+   * word: a mode that does not allow a change, a computer that cannot confine.
    */
-  private async hostCall<A>(call: () => Promise<A>, hostName = 'the computer'): Promise<A> {
+  private async hostCall<A>(call: () => Promise<HostCallReply<A>>, hostName = 'the computer'): Promise<A> {
     try {
-      return await call()
+      return answerOf(await call())
     } catch (error) {
-      if (error instanceof Error && error.name === 'HostWriteDenied') throw new WriteDenied({ host: hostName, message: error.message })
-      if (error instanceof Error && error.name === 'HostNoSandbox') throw new SandboxUnavailable({ host: hostName, message: error.message })
-      if (error instanceof Error && error.name === 'HostOffline' && this.currentWakeup === 'task') {
-        await this.notifyMembers('needs you', `could not finish a task: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
-      }
-      throw error instanceof Error && error.name === 'HostOffline' ? new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running; do not switch to a cloud browser.`) : error
+      if (error instanceof HostWriteDenied) throw new WriteDenied({ host: hostName, message: error.message })
+      if (error instanceof HostNoSandbox) throw new SandboxUnavailable({ host: hostName, message: error.message })
+      if (!(error instanceof HostOffline)) throw error
+      if (this.currentWakeup === 'task') await this.notifyMembers('needs you', `could not finish a task: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
+      throw new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running; do not switch to a cloud browser.`)
     }
   }
 
@@ -2525,11 +2577,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.tidySpill(Date.now())
   }
 
-  /** Spill files older than 30 days go (ao-ry61); the Workspace is listed at most once a day for it. */
+  /**
+   * Spill files older than 30 days go (ao-ry61), and so do files a copy parked under tmp/ more than a day ago (a restart cut the copy off,
+   * deep review P12); the Workspace is listed at most once a day for it.
+   */
   protected async tidySpill(now: number): Promise<void> {
     const due = this.store.get<number>('spill-sweep-next')
     if (due !== undefined && due > now) return
-    await sweepSpill(this.env.FILES, this.store.requireConfig().id, now)
+    const robotId = this.store.requireConfig().id
+    await sweepSpill(this.env.FILES, robotId, now)
+    await sweepStaged(this.env.FILES, robotId, now)
     this.store.set('spill-sweep-next', now + SPILL_SWEEP_EVERY_MS)
   }
 
@@ -2537,11 +2594,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async refreshReach(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
-    ;[this.knownHosts, this.knownConnections, this.pluginsOn, this.knownOrigin] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled(), this.home().appOrigin()])
+    const [hosts, connections, pluginsOn, origin] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled(), this.home().appOrigin()])
+    // The Robot calls its Hosts by names no two share (deep review P14b): the Hosts line, my_capabilities, the tool descriptions, the browser.
+    ;[this.knownHosts, this.knownConnections, this.pluginsOn, this.knownOrigin] = [withDistinctNames(hosts), connections, pluginsOn, origin]
     const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), config.kind === 'mr-robot' ? this.home().skills(config.ownerId) : Promise.resolve([])])
-    this.knownCatalog = catalog
-    // The mode and roots of a Host that is gone (unpaired, no longer shared) are not kept.
-    this.store.forgetHostAccessExcept(this.knownHosts.map((host) => host.id))
+    this.knownCatalog = catalog.hosts === undefined ? catalog : { ...catalog, hosts: withDistinctNames(catalog.hosts) }
+    // An unpaired Host's grant rows, mode and roots are not kept; a Host shared no more keeps them for its return (deep review P13).
+    const unreached = this.store.keptHostIds().filter((id) => !this.knownHosts.some((host) => host.id === id))
+    if (unreached.length > 0) {
+      const paired = await this.home().pairedHosts(unreached)
+      this.store.forgetUnpairedHosts(unreached.filter((id) => !paired.includes(id)))
+    }
     if (config.kind !== 'mr-robot') return
     this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name), hosts: this.knownHosts.map((host) => host.id), connections: this.knownConnections.map((connection) => connection.id) })
   }

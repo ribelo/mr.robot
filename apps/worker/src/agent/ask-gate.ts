@@ -22,6 +22,11 @@ export interface ToolItems {
   readonly possible: readonly GrantItem[]
   /** The items one call uses, from its arguments (a Connection picked by account, a login by name). */
   readonly used: (args: CallArgs) => Promise<readonly GrantItem[]>
+  /**
+   * The tool asks the owner itself when a call uses an item at ask (the places: they know the computer an escalated call lifts the sandbox
+   * of, and the Hosts each end resolved to, deep review P14). The gate still wants the reason and still reviews calls at allow.
+   */
+  readonly asksAtExecution?: true
 }
 
 /** Items of the tools of one mounted capability, by tool name. */
@@ -61,6 +66,11 @@ export interface ToolCallRequest {
   readonly reason: string
   /** The items at ask that made this call wait. */
   readonly items: readonly GrantItem[]
+  /**
+   * Every item the call uses, at ask or not, in the order the call names them: the Hosts among them are the ones the approved call may run
+   * on, and a replay that resolves to other Hosts is refused (deep review P14).
+   */
+  readonly uses: readonly GrantItem[]
 }
 
 /** What the reviewer decided about one call (Auto review, v1.14 ticket 08). */
@@ -174,12 +184,13 @@ export function gateTool(definition: ToolDefinition, items: ToolItems, host: Ask
         })
         if (outcome.decision === 'allow') return definition.execute(given, exec)
         // A denial is never final: the owner decides, with the reviewer's reason (ao-gf33).
-        const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: `Auto review denied this call: ${outcome.reason}`, items: used }, exec)
+        const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: `Auto review denied this call: ${outcome.reason}`, items: used, uses: used }, exec)
         return waitingResult(askId, definition.name)
       }
       const reason = argsOf(args)[REASON_PARAMETER]
       if (typeof reason !== 'string' || reason.trim() === '') throw new Error(`${definition.name}: parameter "${REASON_PARAMETER}" is required: your owner approves each call of this tool and reads why you need it.`)
-      const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: reason.trim(), items: asking }, exec)
+      if (items.asksAtExecution === true) return definition.execute(given, exec)
+      const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: reason.trim(), items: asking, uses: used }, exec)
       return waitingResult(askId, definition.name)
     },
   } as ToolDefinition

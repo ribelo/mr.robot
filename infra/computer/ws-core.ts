@@ -28,11 +28,16 @@ export interface WsIo {
   sleep(ms: number): Promise<void>
   out(line: string): void
   err(line: string): void
+  /** The permit of the copy that runs this ws (from PERMIT_ENV), sent with each request; a script's ws has none. */
+  readonly permit: string | undefined
 }
 
 /** Where the Box backend writes the token and the address of the Worker when the Box boots. */
 export const TOKEN_PATH = '/run/mr-robot/token'
 export const ORIGIN_PATH = '/run/mr-robot/origin'
+/** The variable a copy puts its permit in when it runs ws, and the header ws sends it back in (the Worker's places/copy-permit.ts). */
+export const PERMIT_ENV = 'MR_ROBOT_PERMIT'
+const PERMIT_HEADER = 'x-mr-robot-permit'
 const ATTEMPTS = 4
 const BACKOFF_MS = 500
 /** A download link is asked for again when it is this old (it lives fifteen minutes). */
@@ -83,7 +88,7 @@ const classify = (response: Response, body: string): Outcome => {
 async function ask(io: WsIo, request: Json): Promise<Json> {
   const { origin, token } = await configuration(io)
   const response = await attempts('the Workspace', async () => {
-    const reply = await io.fetch(`${origin}/api/files/presign`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(request) })
+    const reply = await io.fetch(`${origin}/api/files/presign`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(io.permit === undefined ? {} : { [PERMIT_HEADER]: io.permit }) }, body: JSON.stringify(request) })
     const text = reply.ok ? '' : await reply.text()
     const message = (() => { try { return String(record(JSON.parse(text))?.['error'] ?? text) } catch { return text } })()
     return classify(reply, message)

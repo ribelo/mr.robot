@@ -3,6 +3,7 @@
  * Cloudflare Container adapter is the one runtime today; another runtime later is another adapter. Tests use a stub.
  */
 import type { Env } from '../env.ts'
+import type { BoxFileList, BoxGrepQuery, BoxGrepResult } from './box-search.ts'
 
 export interface BoxFile {
   /** Relative to the listed directory. */
@@ -27,12 +28,18 @@ export interface BoxBackend {
   output(job: string, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
   /** TERM to the job's whole session, KILL five seconds later. */
   kill(job: string): Promise<void>
-  run(command: string, cwd: string, timeoutSeconds: number): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>
+  /** One command; `env` adds variables to its environment only (a copy's permit for ws: never in the command line). */
+  run(command: string, cwd: string, timeoutSeconds: number, env?: Readonly<Record<string, string>>): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>
   read(path: string): Promise<Uint8Array | null>
   write(path: string, bytes: Uint8Array): Promise<void>
   /** Delete a file; one that is not there is not an error. */
   remove(path: string): Promise<void>
-  list(directory: string): Promise<readonly BoxFile[]>
+  /** Every file under `directory`, except those under the folders `pruned` names relative to it (they are not walked). */
+  list(directory: string, pruned?: readonly string[]): Promise<readonly BoxFile[]>
+  /** The files under `under` (relative to /workspace; all of it when undefined) as ripgrep lists them, for glob (box-search.ts). */
+  files(under: string | undefined): Promise<BoxFileList>
+  /** The lines of the files under /workspace that match a ripgrep pattern (box-search.ts); a refused pattern is a BadPattern value. */
+  grep(query: BoxGrepQuery): Promise<BoxGrepResult>
   stop(): Promise<void>
 }
 
@@ -54,11 +61,13 @@ export function containerBox(env: Env, robotId: string): BoxBackend {
     status: (job) => stub.status(job),
     output: (job, stream, offset) => stub.output(job, stream, offset),
     kill: (job) => stub.killJob(job),
-    run: (command, cwd, seconds) => stub.run(command, cwd, seconds),
+    run: (command, cwd, seconds, env) => stub.run(command, cwd, seconds, env),
     read: (path) => stub.read(path),
     write: (path, bytes) => stub.write(path, bytes),
     remove: (path) => stub.remove(path),
-    list: (directory) => stub.list(directory),
+    list: (directory, pruned) => stub.list(directory, pruned),
+    files: (under) => stub.files(under),
+    grep: (query) => stub.grep(query),
     stop: () => stub.end(),
   }
 }

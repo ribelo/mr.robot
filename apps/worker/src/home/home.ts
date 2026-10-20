@@ -706,6 +706,13 @@ const allHosts = Effect.gen(function* () {
   return yield* hostViews(yield* sql.all<HostSql>('SELECT * FROM host ORDER BY name'), null)
 })
 
+/** Which of these Hosts are paired still, whoever owns them and whether they are shared (deep review P13). */
+const pairedHosts = (ids: readonly string[]) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const rows = yield* sql.all<{ id: string }>('SELECT id FROM host WHERE id IN (SELECT value FROM json_each(?))', JSON.stringify(ids))
+  return rows.map((row) => row.id)
+})
+
 const hostOwner = (id: string) => Effect.gen(function* () {
   const sql = yield* Sql
   return (yield* sql.first<{ owner_id: string }>('SELECT owner_id FROM host WHERE id = ?', id))?.owner_id ?? null
@@ -1458,12 +1465,9 @@ export class Home extends DurableObject<Env> {
     })
   }
 
-  /** Whether the Task is still open and assigned to this Robot: a parked Wake-up of any other Task is dropped (v1.16 ticket 05). */
-  taskStillOpenFor(taskId: string, robotId: string): Promise<boolean> {
-    return this.run(Effect.gen(function* () {
-      const task = yield* Tasks.taskRow(taskId)
-      return task !== undefined && task.state === 'open' && task.assignee.kind === 'robot' && task.assignee.robotId === robotId
-    }))
+  /** A parked scheduled occurrence as it is now, or null when the Robot drops it (Tasks.parkedOccurrence, v1.16 ticket 05). */
+  parkedOccurrence(taskId: string, robotId: string, takenAt: number): Promise<Tasks.DueOccurrence | null> {
+    return this.run(Tasks.parkedOccurrence(taskId, robotId, takenAt))
   }
 
   /** A Robot's alarm asks for its due Tasks; the Home hands them out and moves them on (mc-s1aa, mc-s2bb). */
@@ -1656,6 +1660,7 @@ export class Home extends DurableObject<Env> {
   }
   hostsFor(memberId: string): Promise<HostView[]> { return this.run(hostsFor(memberId)) }
   hostOwner(id: string): Promise<string | null> { return this.run(hostOwner(id)) }
+  pairedHosts(ids: readonly string[]): Promise<string[]> { return this.run(pairedHosts(ids)) }
   startPairing(name: string, platform: string): Promise<{ code: string }> { return this.run(startPairing(name, platform)) }
   pairingView(code: string): Promise<{ name: string; platform: string; approved: boolean }> { return this.run(pairingView(code)) }
   approvePairing(code: string, memberId: string): Promise<{ hostId: string; name: string }> { return this.run(approvePairing(code, memberId)) }

@@ -6,9 +6,10 @@
  */
 import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Conversation, HostView, ProposalView, RobotPanel } from '@mr-robot/protocol'
+import type { HostNotification } from '@mr-robot/host-protocol'
+import type { Conversation, HostView, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { closeHosts, fakeHost, hostCommands, hostDisk, hostFileCalls, hostRuns, ran } from './fake-host.ts'
+import { closeHosts, fakeHost, hostCommands, hostDisk, hostFileCalls, hostRuns, linkedRoots, ran } from './fake-host.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -90,6 +91,39 @@ describe('the mode and roots of a Host grant (ob-wh59, ob-397e)', () => {
     const saved = await api<RobotPanel['settings']>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { hostAccess: { [facet]: { mode: 'full', roots: [] }, [`${desk.hostId}:files`]: { mode: 'workspace-write', roots: [] } } } })
     expect(saved.body.hostAccess).toEqual({ [facet]: { mode: 'full', roots: [] } })
   })
+
+  // Deep review P1b: the sandbox follows a link at a root, so a root the Robot could replace by a link (one inside another root or inside
+  // its own directory) is refused when the owner saves it, whatever the mode.
+  it('refuse a root inside another root, inside the Robot\'s directory, or holding it', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk)
+    await calls(id, [{ name: 'run', args: { on: 'Desk', command: 'pwd' } }])
+    const directory = `~/mr-robot/${hostRuns[0]!.access.robot}`
+    const facet = `${desk.hostId}:shell`
+    const save = (roots: string[]) => api<{ error?: string }>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { hostAccess: { [facet]: { mode: 'read-only', roots } } } })
+    for (const roots of [['~/projects', '~/projects/app'], ['/srv/data/', '/srv/./data/cache'], ['C:\\Work', 'c:/work/sub'], [`${directory}/inner`], ['~'], ['~/mr-robot']]) {
+      const refused = await save(roots)
+      expect(refused.status, roots.join(' ')).toBe(400)
+      expect(JSON.stringify(refused.body)).toContain('lies inside')
+    }
+    expect((await env.ROBOT.getByName(id).settings()).hostAccess ?? {}).toEqual({})
+    const saved = await save(['~/projects', '~/projects-old', '/srv/data', `~/mr-robot/another-robot`])
+    expect(saved.status).toBe(200)
+  })
+
+  // Deep review P1c: a command in the sandbox may change /tmp on some Hosts, so it could swap a root there for a link between two calls.
+  it('refuse a root inside a temporary directory', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk)
+    const facet = `${desk.hostId}:files`
+    const save = (roots: string[]) => api<{ error?: string }>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { hostAccess: { [facet]: { mode: 'workspace-write', roots } } } })
+    for (const [root, temp] of [['/tmp/work', '/tmp'], ['/var/tmp/cache/', '/var/tmp'], ['/dev//shm/x', '/dev/shm'], ['/srv/../tmp/x', '/tmp']]) {
+      const refused = await save([root!])
+      expect(refused.status, root).toBe(400)
+      expect(JSON.stringify(refused.body)).toContain(`lies inside ${temp}`)
+    }
+    expect((await save(['/tmpfiles/work', '/srv/tmp/x'])).status).toBe(200)
+  })
 })
 
 describe('a denied write (ob-vnld)', () => {
@@ -104,6 +138,24 @@ describe('a denied write (ob-vnld)', () => {
     expect(json(result)).toMatchObject({ kind: 'foreground', exitCode: 1, sandbox: { mode: 'workspace-write', denied: true, deniedPath: '/etc/hosts' } })
     expect(json(result).note).toContain('the write to /etc/hosts was denied under workspace-write mode')
     expect(json(result).note).toContain('escalate: true')
+  })
+
+  // Deep review P16: a command the app refused before it ran came back from a foreground run as a plain error, so the Robot lost the
+  // way to escalate that the same refusal of a background run (or of a file tool) shows.
+  it('refused by the app before the command runs keeps the way to escalate, in the foreground as in the background', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk, { files: 'allow', shell: 'allow' }, { [`${desk.hostId}:shell`]: { mode: 'workspace-write', roots: ['/srv/data'] } })
+    linkedRoots.add('/srv/data')
+    const [foreground, background, listed] = await calls(id, [
+      { name: 'run', args: { on: 'Desk', command: 'make' } },
+      { name: 'run', args: { on: 'Desk', command: 'make', run_in_background: true } },
+      { name: 'job_list', args: {} },
+    ])
+    for (const refused of [foreground, background]) {
+      expect(refused).toContain('/srv/data is a symbolic link')
+      expect(refused).toContain('call run again with escalate: true and a reason')
+    }
+    expect(listed).not.toContain('make')
   })
 })
 
@@ -155,6 +207,70 @@ describe('escalate (ob-ifak)', () => {
     await api(ANNA, `/api/robots/${id}/proposals/${open[0]!.id}`, { body: { revision: open[0]!.revision, approve: true } })
     await settle(id)
     expect(hostRuns.map((run) => run.access.mode)).toEqual(['full'])
+  })
+})
+
+describe('the Hosts an Ask names (deep review P14)', () => {
+  it('runs an approved call only on the Host it was asked for, not on another one that took its name meanwhile', async () => {
+    const first = await fakeHost('Desk')
+    const id = await robotWith(first, { files: 'allow' }, { [`${first.hostId}:files`]: { mode: 'read-only', roots: [] } })
+    await calls(id, [{ name: 'write', args: { on: 'Desk', file_path: '/etc/motd', content: 'hello', escalate: true, reason: 'Set the message of the day' } }])
+    expect((await asks(id)).filter((ask) => ask.status === 'open')).toHaveLength(1)
+    await api(ANNA, `/api/hosts/${first.hostId}`, { method: 'DELETE' })
+    const second = await fakeHost('Desk')
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${second.hostId}:files`]: 'allow' } } } })
+    await approveOpen(id)
+    expect(hostDisk.has('/etc/motd')).toBe(false)
+    expect(hostFileCalls.filter((call) => call.rpc === 'Write')).toEqual([])
+    const woken = requests.get(id)!.map((request) => JSON.stringify(request.messages)).join('\n')
+    expect(woken).toContain('write did not run: the computers it names (Desk) are not the ones your owner approved it for')
+  })
+
+  it('names the Host an escalated copy writes to, even when only its source is at ask', async () => {
+    const laptop = await fakeHost('Laptop')
+    const desk = await fakeHost('Desk')
+    const id = await robotWith(desk, { files: 'allow' }, { [`${desk.hostId}:files`]: { mode: 'read-only', roots: [] } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${laptop.hostId}:files`]: 'ask', [`${desk.hostId}:files`]: 'allow' } } } })
+    hostDisk.set('/home/anna/report.txt', new TextEncoder().encode('the report'))
+    const [waiting] = await calls(id, [{ name: 'copy', args: { from: { on: 'Laptop', path: '/home/anna/report.txt' }, to: { on: 'Desk', path: '/etc/report.txt' }, escalate: true, reason: 'Publish the report' } }])
+    expect(waiting).toContain('waiting for your owner')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const asked = (notices: HostNotification[]) => notices.filter((notice) => notice.body.startsWith('wants to use'))
+    expect(asked(desk.notices)).toEqual([expect.objectContaining({ body: 'wants to use copy without the sandbox: Publish the report' })])
+    expect(asked(laptop.notices)).toHaveLength(1)
+    await approveOpen(id)
+    expect(new TextDecoder().decode(hostDisk.get('/etc/report.txt'))).toBe('the report')
+    expect(hostFileCalls.filter((call) => call.rpc === 'Download').map((call) => call.access.mode)).toEqual(['full'])
+  })
+})
+
+describe('two Hosts of one name (deep review P14b)', () => {
+  it("names each by its owner, refuses the shared name with the names to use, and reaches the one a call names", async () => {
+    const BEN = 'ben@example.com'
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    const bens = await fakeHost('Desk', { owner: BEN })
+    await api(BEN, `/api/hosts/${bens.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    const annas = await fakeHost('desk')
+    const laptop = await fakeHost('Laptop')
+    const id = await robotWith(bens, { files: 'allow' })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${bens.hostId}:files`]: 'allow', [`${laptop.hostId}:files`]: 'allow', [`${annas.hostId}:shell`]: 'allow' } } } })
+    const platform = (await api<{ sections: Array<{ name: string; text: string }> }>(ANNA, `/api/robots/${id}/prompt`)).body.sections.find((section) => section.name === 'Platform')!.text
+    const hostsLine = platform.split('\n').find((line) => line.startsWith('- Hosts: '))!
+    expect(hostsLine.slice('- Hosts: '.length, -1).split('; ').sort()).toEqual(['Desk (Ben) · online · Ben\'s · bash on linux · sandbox full', 'Laptop · online · bash on linux · sandbox full', 'desk (Anna) · online · bash on linux · sandbox full'])
+    const [shared, ben, anna] = await calls(id, [
+      { name: 'write', args: { on: 'DESK', file_path: 'a.txt', content: 'a' } },
+      { name: 'write', args: { on: 'desk (ben)', file_path: 'b.txt', content: 'b' } },
+      { name: 'write', args: { on: 'Desk (Anna)', file_path: 'c.txt', content: 'c' } },
+    ])
+    expect(shared).toContain('more than one of your owner\'s computers has this name')
+    expect(shared).toMatch(/"Desk \(Ben\)"/)
+    expect(shared).toMatch(/"desk \(Anna\)"/)
+    expect(ben).toContain('"bytes": 1')
+    expect(anna).toContain('the grant "desk (Anna) · files"')
+    expect(hostFileCalls.map((call) => [call.rpc, call.path])).toEqual([['Write', 'b.txt']])
+    const write = requests.get(id)!.at(-1)!.tools!.find((definition) => definition.name === 'write')!
+    expect(write.description).toMatch(/computers by name \((Desk \(Ben\), Laptop|Laptop, Desk \(Ben\))\)/)
   })
 })
 
@@ -293,9 +409,63 @@ describe('the mode and roots of a facet are forgotten with the facet', () => {
     // The shell of Desk goes to deny: its mode goes with it.
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${desk.hostId}:files`]: 'allow', [`${laptop.hostId}:files`]: 'allow' } } } })
     expect(await stored()).toEqual([`${desk.hostId}:files`, `${laptop.hostId}:files`].sort())
-    // Laptop is unpaired: at the Robot's next look at its Hosts its mode is gone.
+    // Laptop is unpaired: at the Robot's next look at its Hosts its mode is gone, and so are its grant rows (deep review P13).
     await api(ANNA, `/api/hosts/${laptop.hostId}`, { method: 'DELETE' })
     await calls(id, [{ name: 'read', args: { on: 'Desk', file_path: 'a.txt' } }])
     expect(await stored()).toEqual([`${desk.hostId}:files`])
+    expect((await env.ROBOT.getByName(id).settings()).grants.hosts).toEqual({ [`${desk.hostId}:files`]: 'allow' })
+  })
+
+  // Deep review P13: a shared Host that left a Member's reach lost its mode and roots but kept its grant row, so when it was shared again
+  // the grant came back at the wider default (workspace-write) instead of read-only.
+  it('not when a shared Host is out of reach for a while: it comes back read-only', async () => {
+    const BEN = 'ben@example.com'
+    const desk = await fakeHost('Desk')
+    const share = (sharing: 'home' | 'private') => api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing } })
+    await share('home')
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    const mr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    const facet = `${desk.hostId}:shell`
+    await api(BEN, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: {}, hosts: { [facet]: 'allow' } }, hostAccess: { [facet]: { mode: 'read-only', roots: [] } } } })
+    const turn = async (call: Call) => {
+      scripts.set(mr, [{ calls: [call] }, { text: 'Done.' }])
+      await api(BEN, `/api/robots/${mr}/messages`, { body: { text: 'go' } })
+      await settle(mr)
+    }
+    await share('private')
+    await turn({ name: 'my_capabilities', args: {} })
+    await share('home')
+    await turn({ name: 'run', args: { on: 'Desk', command: 'touch a' } })
+    expect(hostRuns.at(-1)).toMatchObject({ command: 'touch a', access: { mode: 'read-only' } })
+    expect((await env.ROBOT.getByName(mr).settings()).hostAccess).toEqual({ [facet]: { mode: 'read-only', roots: [] } })
+  })
+})
+
+// Deep review P8: the directory's suffix was the start of the Robot's id, and every Mr. Robot's id starts with mr-robot-, so every Member's
+// Mr. Robot wrote into ~/mr-robot/mr-robot-mr-robot/ on a shared Host.
+describe("each Member's Mr. Robot on a shared Host", () => {
+  it('has a directory of his own, also the one who kept the shared name', async () => {
+    const BEN = 'ben@example.com'
+    const desk = await fakeHost('Desk')
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    const mrOf = async (member: string) => (await api<RobotSummary[]>(member, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    const directoryOf = async (member: string, upgraded: boolean): Promise<string> => {
+      const mr = await mrOf(member)
+      await api(member, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: {}, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
+      if (upgraded) await testRobot(mr).legacyHostDirectoryForTest('mr-robot-mr-robot')
+      scripts.set(mr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'pwd' } }] }, { text: 'Done.' }])
+      await api(member, `/api/robots/${mr}/messages`, { body: { text: 'go' } })
+      await settle(mr)
+      return hostRuns.at(-1)!.access.robot
+    }
+    const annas = await directoryOf(ANNA, true)
+    const bens = await directoryOf(BEN, false)
+    expect(hostRuns).toHaveLength(2)
+    expect(annas).toMatch(/^mr-robot-[0-9a-f]{8}$/)
+    expect(bens).toMatch(/^mr-robot-[0-9a-f]{8}$/)
+    expect(annas).not.toBe(bens)
   })
 })

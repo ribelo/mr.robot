@@ -1,5 +1,7 @@
+import { globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, LISTING_MAX_FILES, skipped } from '@mr-robot/host-protocol'
 import type { BoxBackend, BoxFile, BoxJobStatus } from '../src/box/backend.ts'
-import { main as ws, type WsIo } from '../../../infra/computer/ws-core.ts'
+import type { BoxFileList, BoxGrepMatch, BoxGrepQuery, BoxGrepResult } from '../src/box/box-search.ts'
+import { main as ws, PERMIT_ENV, type WsIo } from '../../../infra/computer/ws-core.ts'
 
 /** What a stub Box did, per Robot: boots, commands with their directory, stops. */
 export const boxLog = new Map<string, string[]>()
@@ -35,6 +37,11 @@ export function loseBoxJobs(robotId: string): void {
   for (const [id, job] of jobs) if (id.startsWith(robotId + ':') && job.exit === null) job.gone = true
 }
 export const boxJobIds = (robotId: string): string[] => [...jobs.keys()].filter((id) => id.startsWith(robotId + ':')).map((id) => id.slice(robotId.length + 1))
+
+/** Commands run in the foreground (setup.sh at boot) that wait until the test releases them: robot id → command. */
+const heldRuns = new Map<string, Set<string>>()
+export const holdBoxRun = (robotId: string, command: string): void => { heldRuns.set(robotId, (heldRuns.get(robotId) ?? new Set()).add(command)) }
+export const releaseBoxRun = (robotId: string, command: string): void => { heldRuns.get(robotId)?.delete(command) }
 
 const running = new Set<string>()
 let clock = 1
@@ -81,6 +88,9 @@ function shellWords(line: string): string[] {
 /** The Box's network: where ws's requests go (the Worker's presign endpoint, and R2 by presigned URL). */
 export type BoxNetwork = (url: string, init?: RequestInit) => Promise<Response>
 
+/** A test's look at each request of ws as it goes out, per Robot: it may act as another script on the Box at that moment, over the Box's network. */
+export const wsTaps = new Map<string, (url: string, init: RequestInit | undefined, network: BoxNetwork) => Promise<void>>()
+
 /** The Box seam over memory (ao-33fs): no container, the same behaviour the Robot relies on. */
 export class StubBox implements BoxBackend {
   constructor(private readonly robotId: string, private readonly network: BoxNetwork = async () => { throw new Error('this stub Box has no network') }) {}
@@ -89,7 +99,7 @@ export class StubBox implements BoxBackend {
    * Commands the stub Box really runs: ws (the program of the image, ws-core.ts, over this disk and this network) and the stat the Robot
    * asks for sizes. Anything else is scripted or echoed.
    */
-  private async builtin(command: string, cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
+  private async builtin(command: string, cwd: string, env: Readonly<Record<string, string>> = {}): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
     const words = shellWords(command)
     const disk = this.disk()
     const at = (path: string): string => (path.startsWith('/') ? path : `${cwd}/${path}`)
@@ -101,7 +111,10 @@ export class StubBox implements BoxBackend {
     let stdout = ''
     let stderr = ''
     const io: WsIo = {
-      fetch: (input, init) => this.network(String(input), init),
+      fetch: async (input, init) => {
+        await wsTaps.get(this.robotId)?.(String(input), init, this.network)
+        return this.network(String(input), init)
+      },
       now: () => Date.now(),
       size: async (path) => disk.get(at(path))?.bytes.length,
       read: async (path, offset, length) => (disk.get(at(path))?.bytes ?? new Uint8Array()).slice(offset, offset + length),
@@ -122,6 +135,7 @@ export class StubBox implements BoxBackend {
       sleep: async () => undefined,
       out: (line) => { stdout += `${line}\n` },
       err: (line) => { stderr += `${line}\n` },
+      permit: env[PERMIT_ENV],
     }
     const exitCode = await ws(words.slice(1), io)
     return { stdout, stderr, exitCode }
@@ -189,10 +203,11 @@ export class StubBox implements BoxBackend {
     this.log(`kill ${job}`)
   }
 
-  async run(command: string, cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  async run(command: string, cwd: string, _seconds?: number, env?: Readonly<Record<string, string>>): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (!running.has(this.robotId)) throw new Error('the Box is not running')
     this.log(`run ${cwd}: ${command}`)
-    const answer = (await this.builtin(command, cwd)) ?? boxScripts.get(this.robotId)?.(command, new StubDisk(this.disk()))
+    while (heldRuns.get(this.robotId)?.has(command) === true) await new Promise((resolve) => setTimeout(resolve, 10))
+    const answer = (await this.builtin(command, cwd, env)) ?? boxScripts.get(this.robotId)?.(command, new StubDisk(this.disk()))
     return { stdout: answer?.stdout ?? `ran: ${command}`, stderr: answer?.stderr ?? '', exitCode: answer?.exitCode ?? 0 }
   }
 
@@ -208,9 +223,44 @@ export class StubBox implements BoxBackend {
     this.disk().delete(path)
   }
 
-  async list(directory: string): Promise<readonly BoxFile[]> {
+  async list(directory: string, pruned: readonly string[] = []): Promise<readonly BoxFile[]> {
     const prefix = `${directory}/`
-    return [...this.disk().entries()].filter(([path]) => path.startsWith(prefix)).map(([path, file]) => ({ path: path.slice(prefix.length), size: file.bytes.byteLength, mtime: file.mtime }))
+    return [...this.disk().entries()]
+      .filter(([path]) => path.startsWith(prefix) && !pruned.some((folder) => path.startsWith(`${prefix}${folder}/`)))
+      .map(([path, file]) => ({ path: path.slice(prefix.length), size: file.bytes.byteLength, mtime: file.mtime }))
+  }
+
+  /** The files ripgrep would walk under /workspace: not the skipped directories at any depth, not .jobs; sorted, unlike rg. */
+  private walked(under: string | undefined): Array<[string, Uint8Array]> {
+    return [...this.disk().entries()]
+      .filter(([path]) => path.startsWith('/workspace/'))
+      .map(([path, file]): [string, Uint8Array] => [path.slice('/workspace/'.length), file.bytes])
+      .filter(([path]) => !skipped(path) && !path.startsWith('.jobs/') && (under === undefined || path === under || path.startsWith(`${under}/`)))
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+  }
+
+  async files(under: string | undefined): Promise<BoxFileList> {
+    const paths = this.walked(under).map(([path]) => path)
+    return { paths: paths.slice(0, LISTING_MAX_FILES), truncated: paths.length > LISTING_MAX_FILES }
+  }
+
+  /** A JavaScript regular expression stands in for ripgrep's; binary files and files over the size limit are skipped as rg skips them. */
+  async grep(query: BoxGrepQuery): Promise<BoxGrepResult> {
+    let regex: RegExp
+    try {
+      regex = new RegExp(query.pattern, query.ignoreCase ? 'i' : '')
+    } catch (error) {
+      return { _tag: 'BadPattern', message: `rg: regex parse error: ${String(error)}` }
+    }
+    const glob = query.glob === undefined ? undefined : globToRegExp(query.glob)
+    const found: BoxGrepMatch[] = []
+    for (const [path, bytes] of this.walked(query.under)) {
+      if (bytes.length > GREP_MAX_FILE_BYTES || (glob !== undefined && !glob.test(path))) continue
+      const text = new TextDecoder().decode(bytes)
+      if (text.includes('\u0000')) continue
+      for (const [index, line] of text.split('\n').entries()) if (regex.test(line)) found.push({ path, line: index + 1, text: line.slice(0, GREP_MAX_LINE) })
+    }
+    return { _tag: 'Matches', matches: found.slice(0, GREP_MAX_MATCHES), truncated: found.length > GREP_MAX_MATCHES }
   }
 
   async stop(): Promise<void> {

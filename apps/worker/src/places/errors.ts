@@ -10,6 +10,9 @@ export class NoGrant extends Data.TaggedError('NoGrant')<{ readonly on: string; 
 /** The call names a place that does not exist: not workspace, box or one of the owner's computers. */
 export class UnknownPlace extends Data.TaggedError('UnknownPlace')<{ readonly on: string; readonly known: readonly string[]; readonly message: string }> {}
 
+/** The call names a computer by a name more than one of the owner's computers have (deep review P14b); `names` are the ones to use. */
+export class AmbiguousPlace extends Data.TaggedError('AmbiguousPlace')<{ readonly on: string; readonly names: readonly string[]; readonly message: string }> {}
+
 /** The call asks a place for what it cannot do (the Workspace runs no commands). */
 export class WrongPlace extends Data.TaggedError('WrongPlace')<{ readonly on: string; readonly message: string }> {}
 
@@ -37,10 +40,13 @@ export class SandboxUnavailable extends Data.TaggedError('SandboxUnavailable')<{
 /** The computer's app refused a change: the mode or the roots of the grant do not allow it. Escalate asks the owner to let it through once. */
 export class WriteDenied extends Data.TaggedError('WriteDenied')<{ readonly host: string; readonly message: string }> {}
 
+/** An approved call names other Hosts now than when it was asked (one renamed, unpaired or paired under the same name), so it does not run. */
+export class ApprovedHostsChanged extends Data.TaggedError('ApprovedHostsChanged')<{ readonly tool: string; readonly message: string }> {}
+
 /** A copy that failed: the words say which end and why. */
 export class CopyRefused extends Data.TaggedError('CopyRefused')<{ readonly message: string }> {}
 
-export type PlaceError = NoGrant | UnknownPlace | WrongPlace | OwnedPath | ReadOnlyPath | BadPath | MissingFile | FileTooLarge | BadCall | SandboxUnavailable | WriteDenied | CopyRefused
+export type PlaceError = NoGrant | UnknownPlace | AmbiguousPlace | WrongPlace | OwnedPath | ReadOnlyPath | BadPath | MissingFile | FileTooLarge | BadCall | SandboxUnavailable | WriteDenied | CopyRefused | ApprovedHostsChanged
 
 /** Tools whose calls can ask for escalate, so that a denial can point at it. */
 export const ESCALATING_TOOLS: readonly string[] = ['run', 'write', 'edit', 'delete_file', 'copy']
@@ -57,8 +63,8 @@ export function placeErrorText(error: PlaceError, tool: string): string {
       return ESCALATING_TOOLS.includes(tool)
         ? `${error.message} If you need it, call ${tool} again with escalate: true and a reason: your owner is asked once, and when they approve it runs without the sandbox, that one time. Otherwise change where it writes.`
         : error.message
-    case 'NoGrant': case 'UnknownPlace': case 'WrongPlace': case 'OwnedPath': case 'ReadOnlyPath': case 'BadPath':
-    case 'MissingFile': case 'FileTooLarge': case 'BadCall': case 'SandboxUnavailable': case 'CopyRefused':
+    case 'NoGrant': case 'UnknownPlace': case 'AmbiguousPlace': case 'WrongPlace': case 'OwnedPath': case 'ReadOnlyPath': case 'BadPath':
+    case 'MissingFile': case 'FileTooLarge': case 'BadCall': case 'SandboxUnavailable': case 'CopyRefused': case 'ApprovedHostsChanged':
       return error.message
     default:
       return casesHandled(error)
@@ -67,7 +73,7 @@ export function placeErrorText(error: PlaceError, tool: string): string {
 
 /** The tagged refusals of the places, and only those: anything else is not ours to word. */
 export function isPlaceError(error: unknown): error is PlaceError {
-  return error instanceof NoGrant || error instanceof UnknownPlace || error instanceof WrongPlace || error instanceof OwnedPath || error instanceof ReadOnlyPath
+  return error instanceof NoGrant || error instanceof UnknownPlace || error instanceof AmbiguousPlace || error instanceof WrongPlace || error instanceof OwnedPath || error instanceof ReadOnlyPath
     || error instanceof BadPath || error instanceof MissingFile || error instanceof FileTooLarge || error instanceof BadCall || error instanceof SandboxUnavailable
-    || error instanceof WriteDenied || error instanceof CopyRefused
+    || error instanceof WriteDenied || error instanceof CopyRefused || error instanceof ApprovedHostsChanged
 }

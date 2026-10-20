@@ -6,7 +6,7 @@
  * access to it. Both callers use this: the Robot's own copy (for a Host) and the Box's token door (for ws).
  *
  * A link lives only as long as its holder needs it (S4): a Box link fifteen minutes (ws asks again for each part), a Host link an hour
- * (the Worker mints the links of the next window of parts just before it sends them). Nothing is minted for a whole file at once.
+ * (the Worker mints the link of each part just before it hands the part to the Host). Nothing is minted for a whole file at once.
  */
 import * as Data from 'effect/Data'
 import * as Schema from 'effect/Schema'
@@ -25,9 +25,6 @@ export const MAX_PARTS = 10_000
 /** Who holds a link: the Box (through ws, which asks again for each part) or a Host app. It decides how long the link lives. */
 export type LinkHolder = 'box' | 'host'
 export const LINK_SECONDS: Readonly<Record<LinkHolder, number>> = { box: 15 * 60, host: 60 * 60 }
-
-/** The parts of a window a Host is handed at once: its links are minted for this window only. */
-export const HOST_WINDOW_PARTS = 16
 
 /** The request is not one the door answers. */
 export class BadTransfer extends Data.TaggedError('BadTransfer')<{ readonly message: string }> {}
@@ -156,9 +153,9 @@ export class Transfers {
     return this.sign({ method: 'PUT', key: this.prefix + key, ...(part.uploadId === undefined ? {} : { query: { partNumber: String(part.number), uploadId: part.uploadId } }) }, holder)
   }
 
-  /** The parts of one window with their links, for a Host app to send. */
-  async linkedParts(path: string, plan: UploadPlan, window: readonly PartPlan[]): Promise<UploadPart[]> {
-    return Promise.all(window.map(async (part) => ({ ...part, url: await this.partLink(path, { uploadId: plan.uploadId, number: part.number }, 'host') })))
+  /** One part with its link, for a Host app to send. */
+  async linkedPart(path: string, plan: UploadPlan, part: PartPlan): Promise<UploadPart> {
+    return { ...part, url: await this.partLink(path, { uploadId: plan.uploadId, number: part.number }, 'host') }
   }
 
   /** The upload arrived: complete a multipart one with the ETags the client got; for a single PUT, check the object is there. Returns the size. */

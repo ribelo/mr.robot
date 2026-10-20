@@ -1,8 +1,10 @@
 /**
  * Jobs on this computer (v1.16 ticket 03, ob-sja4): every command a Robot runs is a job of DSH's jobs-local registry. The call waits
- * for it up to its limit; a command that is still running then goes on as a job, and the call can also start one at once. The registry
- * holds the jobs in this process's memory, so they live as long as the app does and no longer: the heartbeat's `instance` tells the
- * Worker when the app has restarted.
+ * for it up to its limit; a command that is still running then goes on as a job, and the call can also start one at once. A command whose
+ * call goes away (the connection to the Worker dropped) goes on as a job too, and a command that ended within its call stays among the
+ * ended jobs, so a Worker that lost the answer finds the result by asking (deep review P11). The registry holds the jobs in this
+ * process's memory, so they live as long as the app does and no longer: the heartbeat's `instance` tells the Worker when the app has
+ * restarted.
  *
  * Nothing here knows which shell started a process. A caller hands over a process it has spawned (a ShellExecution) with the name the
  * Worker gave the job; a later ticket's PowerShell passes its processes the same way.
@@ -14,7 +16,10 @@ import type { JobId } from '@deepseek-ai/dsh-jobs'
 import type { ShellExecution } from '@deepseek-ai/dsh-shell'
 import { NO_SUCH_JOB, type JobEnded, type JobInfo, type JobState } from '@mr-robot/host-protocol'
 
-/** The ended jobs the app keeps for the Worker to read, the newest ones; older ones are dropped when a new job starts. */
+/**
+ * The ended jobs the app keeps for the Worker to read, the newest ones, those that ended within their call included; older ones are
+ * dropped when a new job starts.
+ */
 const KEEP_ENDED = 50
 /** The most one JobOutput answer carries. */
 const PIECE_BYTES = 256 * 1024
@@ -107,24 +112,16 @@ export class HostJobs {
 
   /**
    * Wait up to `timeoutMs` for the job to end: true when it did, false when it is still running (it goes on as a job). A caller that
-   * goes away first (`signal`, the connection that asked) takes the command down with it, as a foreground command is in DSH.
+   * goes away first (`signal`, the connection that asked) ends only the wait, with an error: the command goes on as a job, and since
+   * nobody waits for it any more its end is told with a job frame (deep review P11). A dropped connection is no reason to stop it.
    */
   async settled(ref: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
-    const entry = this.entry(ref)
-    try {
-      const view = await this.ctx.jobs.wait(entry.id, timeoutMs, undefined, signal)
-      return view.status !== 'running' && view.status !== 'stopping'
-    } catch (error) {
-      if (signal?.aborted === true) {
-        this.stop(ref)
-        this.release(ref)
-      }
-      throw error
-    }
+    const view = await this.ctx.jobs.wait(this.entry(ref).id, timeoutMs, undefined, signal)
+    return view.status !== 'running' && view.status !== 'stopping'
   }
 
-  /** The job is read and no longer needed (a command that ended within its call): drop it. */
-  release(ref: string): void {
+  /** Drop an ended job the app no longer keeps. */
+  private release(ref: string): void {
     const entry = this.byRef.get(ref)
     if (entry === undefined) return
     this.byRef.delete(ref)
@@ -160,6 +157,13 @@ export class HostJobs {
   /** Ask a job to stop. */
   stop(ref: string): 'requested' | 'already-finished' {
     return this.ctx.jobs.kill(this.entry(ref).id, undefined, 'stopped by the Robot')
+  }
+
+  /** Stop every job that still runs: this computer is no longer paired, so none of them can report anywhere (deep review P17). */
+  stopAll(): void {
+    for (const entry of this.byRef.values()) {
+      if (entry.finishedAt === null) this.ctx.jobs.kill(entry.id, undefined, 'this computer was unpaired')
+    }
   }
 
   /** The jobs of one Robot (their names start with its id and a colon). */

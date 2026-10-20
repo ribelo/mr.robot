@@ -20,7 +20,7 @@ describe('slackToken', () => {
     expect(slackToken(config(teams), 'https://app.slack.com/client/T2/C9')).toBe('xoxc-two')
   })
   it('falls back to the first workspace with a token when the URL names none of them', () => {
-    expect(slackToken(config({ T1: { name: 'no token' }, ...teams }), 'https://app.slack.com/client/E99/C9')).toBe('xoxc-one')
+    expect(slackToken(config({ T1: { name: 'no token' }, T2: teams.T2 }), 'https://app.slack.com/client/E99/C9')).toBe('xoxc-two')
   })
   it('is undefined while the configuration is missing, broken or holds no xoxc token', () => {
     expect(slackToken(null, 'https://app.slack.com/client/T1/C9')).toBeUndefined()

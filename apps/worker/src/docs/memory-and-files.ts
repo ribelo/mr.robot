@@ -35,7 +35,7 @@ The Workspace is your files in R2. The layout:
 - docs/: the product docs, and the platform skills under docs/skills/<name>/SKILL.md. The platform owns this folder. It is read-only. You cannot write, edit or delete there. A deploy updates it. Start over and Reset everything never remove it.
 - spill/: whole tool results that were too long, and the whole output of each job, on the Box or on a Host, under spill/jobs/<id>.log.
 - box/: the small files that your Box needs at every boot, for example setup.sh. A big file does not belong here. Read box.md.
-- tmp/: a file that copy parks here while it moves between two places other than the Workspace. It is deleted when the copy ends.
+- tmp/: a file that copy parks here while it moves between two places other than the Workspace. It is deleted when the copy ends; anything in tmp/ older than a day is deleted too.
 - any other file you make: notes, artefacts, outputs.
 
 Screenshots are not in the Workspace. They are stored apart and kept for 7 days.

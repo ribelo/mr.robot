@@ -1,11 +1,11 @@
 /**
- * The Windows side of the Host's shell (v1.16 ticket 04, ob-e68m): PowerShell 7 found and checked, and the two things DSH's
- * restricted-token sandbox needs from an Electron app. DSH starts its helper programs (the process runner and the ACL runner) with
- * process.execPath and a script; in Electron that file is the app itself, which runs a script only when ELECTRON_RUN_AS_NODE is set.
+ * The Windows side of the Host's shell (v1.16 ticket 04, ob-e68m): PowerShell 7 found and checked, and the check that DSH's
+ * restricted-token runner starts. How DSH's helper programs start in an Electron app is in run-as-node.ts.
  */
 import { execFile } from 'node:child_process'
 import { lstatSync } from 'node:fs'
 import { candidatePwshPaths } from '@deepseek-ai/dsh-pwsh-local'
+import { RUN_AS_NODE } from './run-as-node.ts'
 
 /** Where a person installs PowerShell 7 (the page of Microsoft's installer and winget). */
 export const PWSH_INSTALL_URL = 'https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows'
@@ -60,33 +60,10 @@ export const pwshMajor = (path: string): Promise<number | undefined> =>
 export const findInstalledPwsh7 = (): Promise<PwshSearch> =>
   findPwsh7(candidatePwshPaths().filter((path) => !/[\\/]powershell\.exe$/i.test(path) && exists(path)), pwshMajor)
 
-/**
- * A command's text with the Electron switch taken out of its environment. The switch is on while the runners start (below), and the
- * ACL runner passes its environment on to the command; a program of the Robot's that is an Electron app would then run as plain Node.
- */
-export const withoutElectronSwitch = (command: string): string => `[Environment]::SetEnvironmentVariable('ELECTRON_RUN_AS_NODE', $null); ${command}`
-
-/**
- * Let DSH's runners start. subprocess-local starts its runner as [process.execPath, runner.js] with the app's own environment, and the
- * runner starts the ACL runner the same way with the command's environment. The switch is set only for the length of one synchronous
- * spawn call, so no other process of this app (Chromium's renderers) can start while it is set, and it is out of the environment at once.
- */
-export function startRunnersAsNode<Spec, Handle>(subprocess: { spawn(spec: Spec): Handle }): void {
-  const spawn = subprocess.spawn.bind(subprocess)
-  subprocess.spawn = (spec) => {
-    process.env['ELECTRON_RUN_AS_NODE'] = '1'
-    try {
-      return spawn(spec)
-    } finally {
-      delete process.env['ELECTRON_RUN_AS_NODE']
-    }
-  }
-}
-
 /** Whether the ACL runner (argv from the sandbox provider) starts and runs a command under its restricted token; the check behind "partial" in the heartbeat. */
 export const aclRunnerWorks = (argv: readonly string[]): Promise<boolean> =>
   new Promise((done) => {
     const [program, ...args] = argv
     if (program === undefined) return done(false)
-    execFile(program, args, { timeout: 30_000, windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }, (error) => done(error === null))
+    execFile(program, args, { timeout: 30_000, windowsHide: true, env: { ...process.env, [RUN_AS_NODE]: '1' } }, (error) => done(error === null))
   })

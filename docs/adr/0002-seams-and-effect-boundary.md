@@ -23,18 +23,21 @@ registration; the operations themselves live in experimental MCP packages for de
 Leash-style primitives over Browser Rendering are browser_* tools; the registration is made so DSH
 sees the provider.
 
-**Search over Workspace files (glob, grep) and delete are Mr. Robot tools.** DSH's tool-fs-search
-runs ripgrep, which a Worker cannot.
+**The file and command tools are Mr. Robot tools (v1.16).** run, read, write, edit, glob, grep,
+delete_file, copy and the job tools (apps/worker/src/agent/tools/places.ts) name their Place with
+`on` and go through apps/worker/src/places/places.ts to the Workspace, the Box or a Host. DSH's
+tool-fs works on one local file system and its search runs ripgrep, which a Worker cannot; no DSH
+file or shell tool is mounted.
 
 ## Effect
 
-**The Workspace has one access path (v1.16).** The Robot's files are not behind a DSH fs seam any more: the file tools, copy, the Box's door (ws) and the edge all reach R2 through the Effect Workspace service (apps/worker/src/workspace/workspace.ts: read, stat, write, remove, list, page, open, removeUnder). Nothing else reads or writes the Files bucket for a Robot's prefix. Presigned links are the one exception that never touches the bytes: the Worker only signs them (workspace/object-store.ts) for a key the Workspace service has already looked at.
+**The Workspace has one access path (v1.16).** The Robot's files are not behind a DSH fs seam any more: the file tools, copy, the Box's door (ws) and the edge all reach R2 through the Effect Workspace service (apps/worker/src/workspace/workspace.ts: read, stat, write, remove, list, page, open, removeUnder). Nothing else reads or writes the Files bucket for a Robot's prefix. Presigned links are the one exception that never touches the bytes: the Worker only signs them (workspace/object-store.ts, places/transfers.ts). A GET link is for a key the Workspace service has just looked at; a PUT link (a single upload or the parts of a multipart one) is for a key that the write rules of the file tools accept (writableWorkspaceKey in places/files.ts), which may not exist yet.
 
 Effect owns: the edge API (router, errors, request decoding), the Workspace (R2), the Vault,
 OAuth, Web Push, skill sync, and the scope of every Cordis composition (closing the scope disposes
 the agent and its plugins: `composeScoped` in apps/worker/src/agent/compose.ts).
 
-The three Durable Objects run their work as Effect programs over services (platform/durable.ts; member/member.ts; home/home.ts; robot/programs.ts, views.ts, browsing.ts); each class declares its tables and adapts RPC and the alarm. Typed failures (NotFound, Invalid, Conflict) cross RPC with a status the edge maps to HTTP. Plain code remains only at the boundaries: the Turn driver feeding DSH's agent loop, the WebSocket handlers, and the CDP page driver (ticket 23).
+The three Durable Objects run their work as Effect programs over services (platform/durable.ts; member/member.ts; home/home.ts; robot/programs.ts, views.ts, browsing.ts); each class declares its tables and adapts RPC and the alarm. Typed failures (NotFound, Invalid, Conflict) cross RPC with a status the edge maps to HTTP. Plain code remains at the boundaries: the Turn driver feeding DSH's agent loop, the WebSocket handlers, and the CDP page driver (ticket 23). The places (apps/worker/src/places: dispatch, jobs, copies) are plain async code too, with tagged errors (places/errors.ts); a Host call's failure crosses from the Member DO to the Robot as a Schema-encoded tagged value (member/host-call.ts) and is decoded there. Converting the places to Effect services was left out of v1.16 (deep review P16).
 
 ## The one patch on a DSH package
 

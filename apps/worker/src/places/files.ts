@@ -8,13 +8,15 @@ import { MEMBER_FILE_NAMES, type MemberFileName } from '../member/member.ts'
 import type { BoxBackend } from '../box/backend.ts'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { normalizePath } from '../workspace/workspace.ts'
-import { BadPath, FileTooLarge, MissingFile, ReadOnlyPath } from './errors.ts'
-import { globToRegExp, GREP_MAX_MATCHES, skipped } from '@mr-robot/host-protocol'
+import { BadCall, BadPath, FileTooLarge, MissingFile, ReadOnlyPath } from './errors.ts'
+import { globBase, globToRegExp, GREP_MAX_MATCHES } from '@mr-robot/host-protocol'
 import { grepText, type GrepMatch } from './file-ops.ts'
 import { refuseOwned } from './place.ts'
 
 export const WORKSPACE_ROOT = '/workspace'
 export const BOX_ROOT = '/workspace'
+/** Where a copy between two places other than the Workspace parks its file (places.ts): tmp/<id>/ in the Workspace. */
+export const STAGING_DIRECTORY = 'tmp'
 
 /** A file read: its text, or base64 when it is not UTF-8. */
 export type FileContent =
@@ -29,19 +31,32 @@ export interface GrepInput {
   readonly path?: string
 }
 
+/** The paths a glob matched, sorted; `truncated` when the place stopped listing early, so some matches may be missing (deep review P15). */
+export interface FileListing {
+  readonly paths: readonly string[]
+  readonly truncated: boolean
+}
+
+/** At most GREP_MAX_MATCHES matches; `truncated` when there were more, or when the place did not search every file (deep review P15). */
+export interface GrepResult {
+  readonly matches: readonly GrepMatch[]
+  readonly truncated: boolean
+}
+
 export interface PlaceFiles {
   /** How errors name the place: "your Workspace", "your Box", "Desk". */
   readonly label: string
   readFile(path: string): Promise<FileContent>
   writeFile(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ readonly path: string; readonly bytes: number }>
   removeFile(path: string): Promise<{ readonly path: string }>
-  glob(pattern: string): Promise<string[]>
-  grep(input: GrepInput): Promise<GrepMatch[]>
+  glob(pattern: string): Promise<FileListing>
+  grep(input: GrepInput): Promise<GrepResult>
 }
 
 const MAX_READ_BYTES = 10 * 1024 * 1024
 const MAX_GREP_FILE_BYTES = 1_000_000
-const MAX_GREP_FILES = 500
+/** The most Workspace files one grep reads: each is an R2 read from the Worker. */
+export const WORKSPACE_GREP_MAX_FILES = 500
 
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })
 
@@ -104,15 +119,16 @@ function searchableText(read: FileContent | undefined): string | undefined {
   return read === undefined || !('text' in read) || read.text.includes('\u0000') ? undefined : read.text
 }
 
-/** The matches of a regular expression over the files at `paths`, read one by one; stops at the match limit and at MAX_GREP_FILES files. */
-async function grepFiles(paths: readonly string[], readOne: (path: string) => Promise<FileContent | undefined>, regex: RegExp): Promise<GrepMatch[]> {
+/** The matches of a regular expression over the files at `paths`, read one by one; truncated past the match limit or WORKSPACE_GREP_MAX_FILES files. */
+async function grepFiles(paths: readonly string[], readOne: (path: string) => Promise<FileContent | undefined>, regex: RegExp): Promise<GrepResult> {
   const matches: GrepMatch[] = []
-  for (const path of paths.slice(0, MAX_GREP_FILES)) {
-    if (matches.length >= GREP_MAX_MATCHES) break
+  for (const path of paths.slice(0, WORKSPACE_GREP_MAX_FILES)) {
     const text = searchableText(await readOne(path))
-    if (text !== undefined) matches.push(...grepText(path, text, regex, GREP_MAX_MATCHES - matches.length))
+    // One match past the limit is asked for, to know that there are more.
+    if (text !== undefined) matches.push(...grepText(path, text, regex, GREP_MAX_MATCHES + 1 - matches.length))
+    if (matches.length > GREP_MAX_MATCHES) return { matches: matches.slice(0, GREP_MAX_MATCHES), truncated: true }
   }
-  return matches
+  return { matches, truncated: paths.length > WORKSPACE_GREP_MAX_FILES }
 }
 
 export class WorkspaceFiles implements PlaceFiles {
@@ -158,12 +174,13 @@ export class WorkspaceFiles implements PlaceFiles {
     return [...MEMBER_FILE_NAMES, ...DOCS_PATHS, ...stored(entries).filter((entry) => maxBytes === undefined || entry.size <= maxBytes).map((entry) => entry.path)]
   }
 
-  async glob(pattern: string): Promise<string[]> {
+  /** Every stored path is listed: never truncated. */
+  async glob(pattern: string): Promise<FileListing> {
     const matcher = globToRegExp(pattern.replace(/^\/workspace\//, ''))
-    return (await this.visible()).filter((path) => matcher.test(path)).sort()
+    return { paths: (await this.visible()).filter((path) => matcher.test(path)).sort(), truncated: false }
   }
 
-  async grep(input: GrepInput): Promise<GrepMatch[]> {
+  async grep(input: GrepInput): Promise<GrepResult> {
     const files = input.glob === undefined ? undefined : globToRegExp(input.glob)
     const under = input.path === undefined ? undefined : workspaceKey(input.path)
     const paths = (await this.visible(MAX_GREP_FILE_BYTES)).filter((path) => (files === undefined || files.test(path)) && (under === undefined || path === under || path.startsWith(`${under}/`)))
@@ -232,28 +249,24 @@ export class BoxFiles implements PlaceFiles {
     })
   }
 
-  /** Every file of the Box with its path relative to /workspace, without the platform's own job files and without .git and node_modules. */
-  private async listing(backend: BoxBackend): Promise<ReadonlyArray<{ path: string; size: number }>> {
-    return (await backend.list(BOX_ROOT)).filter((file) => !file.path.startsWith('.jobs/') && !skipped(file.path))
-  }
-
-  async glob(pattern: string): Promise<string[]> {
-    const matcher = globToRegExp(pattern.replace(/^\/workspace\//, ''))
-    return this.onBox(async (backend) => (await this.listing(backend)).map((file) => file.path).filter((path) => matcher.test(path)).sort())
-  }
-
-  async grep(input: GrepInput): Promise<GrepMatch[]> {
-    const files = input.glob === undefined ? undefined : globToRegExp(input.glob)
-    const under = input.path === undefined ? undefined : boxPath(input.path).slice(BOX_ROOT.length + 1)
+  /** ripgrep lists the files under the directory before the pattern's first wildcard (box-search.ts); the pattern picks from them. */
+  async glob(pattern: string): Promise<FileListing> {
+    const relative = pattern.replace(/^\/workspace\//, '')
+    const base = globBase(relative)
+    const under = base === '.' ? undefined : boxPath(base).slice(BOX_ROOT.length + 1)
+    const matcher = globToRegExp(relative)
     return this.onBox(async (backend) => {
-      const paths = (await this.listing(backend))
-        .filter((file) => file.size <= MAX_GREP_FILE_BYTES && (files === undefined || files.test(file.path)) && (under === undefined || file.path === under || file.path.startsWith(`${under}/`)))
-        .map((file) => file.path)
-      return grepFiles(paths, async (path) => {
-        const bytes = await backend.read(`${BOX_ROOT}/${path}`)
-        return bytes === null ? undefined : contentOf(path, bytes)
-      }, regexOf(input))
+      const listed = await backend.files(under)
+      return { paths: listed.paths.filter((path) => matcher.test(path)).sort(), truncated: listed.truncated }
     })
+  }
+
+  /** ripgrep searches on the Box (box-search.ts), so the pattern is ripgrep's; a pattern it refuses is a BadCall. */
+  async grep(input: GrepInput): Promise<GrepResult> {
+    const under = input.path === undefined ? undefined : boxPath(input.path).slice(BOX_ROOT.length + 1)
+    const found = await this.onBox((backend) => backend.grep({ pattern: input.pattern, ignoreCase: input.ignoreCase, ...(input.glob === undefined ? {} : { glob: input.glob }), ...(under === undefined ? {} : { under }) }))
+    if (found._tag === 'BadPattern') throw new BadCall({ tool: 'grep', message: `grep on your Box refused the pattern: ${found.message}` })
+    return { matches: [...found.matches].sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1)), truncated: found.truncated }
   }
 }
 
@@ -266,7 +279,7 @@ export interface HostFileLink {
   write(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ readonly path: string; readonly bytes: number }>
   /** The files a glob matches, listed by the app in Node. */
   glob(pattern: string): Promise<{ readonly paths: readonly string[]; readonly truncated: boolean }>
-  grep(input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }): Promise<{ readonly matches: readonly GrepMatch[] }>
+  grep(input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }): Promise<{ readonly matches: readonly GrepMatch[]; readonly truncated: boolean }>
   remove(path: string): Promise<{ readonly path: string }>
 }
 
@@ -298,11 +311,13 @@ export class HostFiles implements PlaceFiles {
     return this.link.remove(path)
   }
 
-  async glob(pattern: string): Promise<string[]> {
-    return [...(await this.link.glob(pattern)).paths]
+  async glob(pattern: string): Promise<FileListing> {
+    const listed = await this.link.glob(pattern)
+    return { paths: listed.paths, truncated: listed.truncated }
   }
 
-  async grep(input: GrepInput): Promise<GrepMatch[]> {
-    return [...(await this.link.grep({ pattern: input.pattern, ignoreCase: input.ignoreCase, ...(input.glob === undefined ? {} : { glob: input.glob }), ...(input.path === undefined ? {} : { path: input.path }) })).matches]
+  async grep(input: GrepInput): Promise<GrepResult> {
+    const found = await this.link.grep({ pattern: input.pattern, ignoreCase: input.ignoreCase, ...(input.glob === undefined ? {} : { glob: input.glob }), ...(input.path === undefined ? {} : { path: input.path }) })
+    return { matches: found.matches, truncated: found.truncated }
   }
 }

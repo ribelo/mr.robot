@@ -7,15 +7,17 @@
  * Refusals are tagged errors (errors.ts) thrown from here; the tool boundary words them.
  */
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import type { HostView } from '@mr-robot/protocol'
-import { copyTimeoutMs, type UploadPart } from '@mr-robot/host-protocol'
+import type { GrantLevel, HostView } from '@mr-robot/protocol'
+import type { UploadPart } from '@mr-robot/host-protocol'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
 import type { BoxBackend } from '../box/backend.ts'
-import { BadCall, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
+import { runWs, type CopyPermits } from './copy-permit.ts'
+import { AmbiguousPlace, ApprovedHostsChanged, BadCall, casesHandled, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
 import { shellQuote } from './file-ops.ts'
-import { BoxFiles, boxPath, BOX_ROOT, HostFiles, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
-import { hostFacetKey, hostIdOfPlace, type StoredPlace } from './host-facet.ts'
+import { BoxFiles, boxPath, BOX_ROOT, HostFiles, STAGING_DIRECTORY, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
+import { hostFacetKey, hostIdOfPlace } from './host-facet.ts'
+import { lookUpHost } from './host-names.ts'
 import type { JobId } from './job-id.ts'
 import type { Transfers } from './transfers.ts'
 import { Jobs, type JobEntry, type JobPlace, type JobOutputView, type KillView, type RunResult } from './jobs.ts'
@@ -27,35 +29,43 @@ export interface HostLink extends HostFileLink {
   copySize(path: string): Promise<{ readonly path: string; readonly size: number }>
   /** The Host app puts the parts to R2 over the presigned URLs. */
   upload(input: { path: string; size: number; parts: readonly UploadPart[] }): Promise<{ readonly path: string; readonly size: number; readonly etags: ReadonlyArray<{ readonly number: number; readonly etag: string }> }>
-  /** The Host app fetches the bytes from `from` to `until` of an object into a file, range by range; the file appears when `until` is the size. */
-  download(input: { path: string; url: string; size: number; partBytes: number; from: number; until: number }): Promise<{ readonly path: string; readonly bytes: number }>
+  /**
+   * The Host app fetches the bytes from `from` to `until` of an object into the part file of the copy `copy`, range by range; the file
+   * appears when `until` is the size.
+   */
+  download(input: { copy: string; path: string; url: string; size: number; partBytes: number; from: number; until: number }): Promise<{ readonly path: string; readonly bytes: number }>
   /** The copy as a whole is one line in the Host's log. */
   recordCopy(detail: string, outcome: string): Promise<void>
 }
 
 export interface PlacesDeps {
   readonly workspace: WorkspaceHost
-  /** Whether the Robot may use the Workspace now: the files group at allow or ask, or the Robot is in setup (its first Conversation writes its persona files). */
-  workspaceUsable(): boolean
-  /** Whether the Robot may use the Box now: the box group at allow or ask, and the Home has the plugin on. */
-  boxUsable(): boolean
-  hostUsable(hostId: string, facet: PlaceFacet): boolean
+  /** Whether the Robot is in setup: its first Conversation writes its persona files, so it reaches its Workspace and no other place. */
+  inSetup(): boolean
+  /** The levels the Robot holds the places at now, read at each call: the files group, the box group (deny when the Home has the plugin off), a Host's facet. */
+  workspaceLevel(): GrantLevel
+  boxLevel(): GrantLevel
+  hostLevel(hostId: string, facet: PlaceFacet): GrantLevel
   /** The Hosts the Robot's owner reaches. */
   hosts(): Promise<readonly HostView[]>
   readonly box: BoxAccess
   link(host: HostView, reach: Reach): HostLink
   /** The jobs of a place; `reach` makes a Host command run without the sandbox when the owner approved that. */
   jobPlace(place: JobsPlace, reach: Reach): JobPlace
-  /** The one-call Ask of a call with escalate (ob-ifak): the owner's approval runs the same call again, and only then is it approved. */
-  readonly escalation: {
-    approved(callId: string): boolean
+  /**
+   * The tool-call Asks (sk-hx8j, ob-ifak): the one-call Ask of a call to a place at ask, or with escalate. The owner's approval runs the same
+   * call again, and only then is it approved.
+   */
+  readonly asks: {
+    /** The Hosts an approved call was asked for, by id in the order it names them; undefined when the call is not one the owner approved. */
+    approval(callId: string): { readonly hosts: readonly string[] } | undefined
     ask(request: ToolCallRequest, exec: ToolRunContext): { readonly askId: string }
   }
   readonly jobs: Jobs
   /** The Robot's Workspace as presigned URLs: how a file reaches a Host without the Worker in the pipe. */
   readonly transfers: Transfers
-  /** How many parts of a file a Host is handed links for at once. */
-  readonly windowParts: number
+  /** The permits of the runs of ws the Robot starts on its Box; the Box's door finds them by secret. */
+  readonly permits: CopyPermits
 }
 
 export interface CopyEnd {
@@ -89,12 +99,15 @@ export function durationWords(ms: number): string {
 }
 
 /**
- * A call that asks to run once without the sandbox (ob-ifak): the owner's reason, and the arguments exactly as the Robot gave them, which
- * the Ask stores and the platform runs again when the owner approves.
+ * One call of a tool as the Robot made it. When the call has to wait for the owner (its place is at ask, or it asks to run once without the
+ * sandbox, ob-ifak), the Ask stores the arguments exactly as given, and the platform runs them again when the owner approves.
  */
-export interface Escalation {
-  readonly reason: string | undefined
+export interface PlaceCall {
+  readonly tool: string
   readonly arguments: Readonly<Record<string, unknown>>
+  /** The call asks to run once without the sandbox of the computer it acts on. */
+  readonly escalate: boolean
+  readonly exec: ToolRunContext
 }
 
 export interface RunInput {
@@ -103,15 +116,17 @@ export interface RunInput {
   readonly cwd?: string
   readonly seconds: number
   readonly background: boolean
-  readonly escalation?: Escalation
 }
 
-/** What a file tool asks of a place: its name, the tool (for the grant it names in a refusal), and an escalation when the call asked for one. */
-export interface FilesRequest {
-  readonly on: string
-  readonly tool: string
-  readonly escalation?: Escalation
+/** A place a call may use: the grant item it stands under, and its level (at ask each call waits for the owner). */
+interface Granted<P extends Place = Place> {
+  readonly place: P
+  readonly item: GrantItem
+  readonly level: 'allow' | 'ask'
 }
+
+/** What the owner reads when a call that waits for them came without a reason: the tool was registered when nothing it reaches was at ask, so it asked for none. */
+const NO_REASON = 'No reason given.'
 
 /** What a copy moved: both paths as the places print them, and the bytes. */
 interface Moved {
@@ -120,127 +135,162 @@ interface Moved {
   readonly bytes: number
 }
 
-/** Where a copy that has two Hosts or a Host and the Box as its ends parks the file: tmp/<id>/ in the Workspace, deleted when the copy ends. */
-const stagingDirectory = (): string => `tmp/${crypto.randomUUID()}`
+/**
+ * Where a copy that has two Hosts or a Host and the Box as its ends parks the file: tmp/<id>/ in the Workspace, deleted when the copy
+ * ends (and by the Robot's daily tidy pass when a restart cut the copy off, workspace/spill.ts).
+ */
+const stagingDirectory = (): string => `${STAGING_DIRECTORY}/${crypto.randomUUID()}`
 
 const noGrant = (on: string, what: string, grant: string): NoGrant =>
   new NoGrant({ on, what, grant, message: `on "${on}": you hold no grant on ${what} (${grant}). Your owner can give it: propose it with propose_grants.` })
 
+/** The place a call may use at the level it holds, or the refusal that names the grant. */
+function granted<P extends Place>(place: P, item: GrantItem, level: GrantLevel, refusal: () => NoGrant): Granted<P> {
+  if (level === 'deny') throw refusal()
+  return { place, item, level }
+}
+
+const sameItem = (a: GrantItem, b: GrantItem): boolean => a.kind === b.kind && a.name === b.name
+
 export class Places {
   private readonly workspaceFiles: WorkspaceFiles
-  /** The Workspace paths a copy in flight has opened to ws on the Box, with how many copies hold each. */
-  private readonly permits = new Map<string, number>()
 
   constructor(private readonly deps: PlacesDeps) {
     this.workspaceFiles = new WorkspaceFiles(deps.workspace)
   }
 
   /**
-   * The place a call names, after the Robot's grants allowed it (allow or ask: an ask is the ask gate's to put to the owner).
-   * @throws NoGrant, UnknownPlace or WrongPlace.
+   * The place a call names, with the level the Robot holds it at (allow or ask: a call to a place at ask waits for the owner, see waiting).
+   * While in setup the Robot reaches its Workspace and nothing else.
+   * @throws NoGrant, UnknownPlace, AmbiguousPlace or WrongPlace.
    */
-  async resolve(on: string, facet: PlaceFacet, tool: string): Promise<Place> {
+  private async resolve(on: string, facet: PlaceFacet, tool: string): Promise<Granted> {
     const name = parseOn(on, tool)
     if (name === WORKSPACE_PLACE) {
       if (facet === 'shell') throw new WrongPlace({ on: name, message: `on "workspace": the Workspace holds files, it runs no commands. Run on "box" or on one of your owner's computers.` })
-      if (!this.deps.workspaceUsable()) throw noGrant(name, 'your Workspace files', 'the tool group "files"')
-      return { kind: 'workspace' }
+      const level = this.deps.inSetup() ? 'allow' : this.deps.workspaceLevel()
+      return granted({ kind: 'workspace' }, { kind: 'tool', name: 'files' }, level, () => noGrant(name, 'your Workspace files', 'the tool group "files"'))
     }
-    if (name === BOX_PLACE) {
-      if (!this.deps.boxUsable()) throw noGrant(name, 'your Box', 'the tool group "box"')
-      return { kind: 'box' }
-    }
+    if (this.deps.inSetup()) throw new NoGrant({ on: name, what: 'any place but your Workspace', grant: 'none while in setup', message: `on "${name}": while you are being set up you reach only your Workspace (on "workspace").` })
+    if (name === BOX_PLACE) return granted({ kind: 'box' }, { kind: 'tool', name: 'box' }, this.deps.boxLevel(), () => noGrant(name, 'your Box', 'the tool group "box"'))
     const host = await this.hostNamed(name)
-    if (!this.deps.hostUsable(host.id, facet)) throw noGrant(name, `the ${facet} of ${host.name}`, `the grant "${host.name} · ${facet}"`)
-    return { kind: 'host', host }
+    return granted({ kind: 'host', host }, { kind: 'host', name: hostFacetKey(host.id, facet) }, this.deps.hostLevel(host.id, facet), () => noGrant(name, `the ${facet} of ${host.name}`, `the grant "${host.name} · ${facet}"`))
   }
 
-  /** A Host the Robot names, by name or id, among those its owner reaches. @throws UnknownPlace when there is none; a failed lookup is the Home's own error. */
+  /**
+   * A Host the Robot names, by id or by the name it calls the Host (host-names.ts: two Hosts of one name go by their owners' names), among
+   * those its owner reaches; it comes back under that name.
+   * @throws UnknownPlace when there is none, AmbiguousPlace when the name is the own name of more than one; a failed lookup is the Home's own error.
+   */
   async hostNamed(name: string): Promise<HostView> {
-    const hosts = await this.deps.hosts()
-    const found = hosts.find((host) => host.id === name) ?? hosts.find((host) => host.name.toLowerCase() === name.toLowerCase())
-    if (found === undefined) {
-      const known = hosts.map((host) => host.name)
-      throw new UnknownPlace({ on: name, known, message: `on "${name}": there is no such place. Use workspace, box or one of your owner's computers: ${known.length === 0 ? 'none are paired' : known.join(', ')}.` })
+    const found = lookUpHost(await this.deps.hosts(), name)
+    switch (found.kind) {
+      case 'found':
+        return found.host
+      case 'shared':
+        throw new AmbiguousPlace({ on: name, names: found.names, message: `on "${name}": more than one of your owner's computers has this name. Name the one you mean: ${found.names.map((known) => `"${known}"`).join(', ')}.` })
+      case 'unknown':
+        throw new UnknownPlace({ on: name, known: found.names, message: `on "${name}": there is no such place. Use workspace, box or one of your owner's computers: ${found.names.length === 0 ? 'none are paired' : found.names.join(', ')}.` })
+      default:
+        return casesHandled(found)
     }
-    return found
   }
 
   /** The place a call to run or a job tool names. */
-  private async shellPlace(on: string, tool: string): Promise<JobsPlace> {
-    const place = await this.resolve(on, 'shell', tool)
+  private async shellPlace(on: string, tool: string): Promise<Granted<JobsPlace>> {
+    const reached = await this.resolve(on, 'shell', tool)
+    const place = reached.place
     if (place.kind === 'workspace') throw new WrongPlace({ on, message: `${tool}: the Workspace runs no commands` })
-    return place
+    return { ...reached, place }
+  }
+
+  /**
+   * Whether a call waits for the owner instead of running now (sk-hx8j, ob-ifak): a place it uses is at ask, or it asks to run without the
+   * sandbox of the computer `unconfined`. One tool-call Ask covers both, the same Ask the ask gate stores; the call the owner approved
+   * comes back here and runs. A level is read at each call, so a place that went to ask after the tools were registered still asks.
+   * The Ask keeps the Hosts the call's places resolved to, by id; the approved call runs only when its places resolve to the same Hosts
+   * again, so a computer renamed, unpaired or paired under the same name meanwhile does not get a call the owner approved for another
+   * (deep review P14).
+   * @returns the waiting result the Robot is told, or undefined when the call runs now.
+   * @throws ApprovedHostsChanged when the approved call names other Hosts now.
+   */
+  private waiting(call: PlaceCall, used: readonly Granted[], unconfined?: Granted): WaitingResult | undefined {
+    const approval = this.deps.asks.approval(String(call.exec.callId))
+    if (approval !== undefined) {
+      const now = used.flatMap((reached) => (reached.place.kind === 'host' ? [reached.place.host] : []))
+      const same = now.length === approval.hosts.length && now.every((host, at) => host.id === approval.hosts[at])
+      if (!same) {
+        throw new ApprovedHostsChanged({
+          tool: call.tool,
+          message: `${call.tool} did not run: the computers it names (${now.map((host) => host.name).join(', ') || 'none'}) are not the ones your owner approved it for. A computer was renamed, unpaired or paired under the same name meanwhile. Check which computer you mean, and call it again if you still need it.`,
+        })
+      }
+      return undefined
+    }
+    const items: GrantItem[] = []
+    for (const item of [...used.filter((reached) => reached.level === 'ask').map((reached) => reached.item), ...(unconfined === undefined ? [] : [unconfined.item])]) {
+      if (!items.some((known) => sameItem(known, item))) items.push(item)
+    }
+    if (items.length === 0) return undefined
+    const given = call.arguments['reason']
+    const reason = typeof given === 'string' ? given.trim() : ''
+    if (unconfined !== undefined && reason === '') throw new BadCall({ tool: call.tool, message: `${call.tool}: escalate needs a reason: your owner reads it before they approve the call.` })
+    const { askId } = this.deps.asks.ask({ tool: call.tool, arguments: call.arguments, reason: reason === '' ? NO_REASON : reason, items, uses: used.map((reached) => reached.item) }, call.exec)
+    return waitingResult(askId, call.tool)
+  }
+
+  /** The computer a call with escalate runs on without its sandbox, once approved. @throws BadCall when the place is not a computer. */
+  private unconfined(call: PlaceCall, target: Granted, refusal: string): Granted | undefined {
+    if (!call.escalate) return undefined
+    if (target.place.kind !== 'host') throw new BadCall({ tool: call.tool, message: refusal })
+    return target
   }
 
   private filesOf(place: Place, reach: Reach): PlaceFiles {
     return place.kind === 'workspace' ? this.workspaceFiles : place.kind === 'box' ? new BoxFiles(this.deps.box) : new HostFiles(this.deps.link(place.host, reach))
   }
 
-  /** The filesystem backend of a place, for a call that reads (the files facet of a Host, the box grant, the files group). */
-  async files(on: string, tool: string): Promise<PlaceFiles> {
-    return this.filesOf(await this.resolve(on, 'files', tool), 'granted')
-  }
-
   /**
-   * Do `action` on the files of a place. A call that asked to escalate acts on a computer without the sandbox, once: the owner is asked
-   * first, and the answer is the waiting result; the approved call comes back here and runs.
+   * Do `action` on the files of the place `on` names. A call to a place at ask, or one that asked to escalate (it then acts on a computer
+   * without the sandbox, once), waits for the owner: the answer is the waiting result, and the approved call comes back here and runs.
    */
-  async withFiles<A>(request: FilesRequest, exec: ToolRunContext, action: (files: PlaceFiles) => Promise<A>): Promise<A | WaitingResult> {
-    const place = await this.resolve(request.on, 'files', request.tool)
-    if (request.escalation === undefined) return action(this.filesOf(place, 'granted'))
-    if (place.kind !== 'host') throw new BadCall({ tool: request.tool, message: `${request.tool}: escalate lifts the sandbox of a computer. ${place.kind === 'box' ? 'Your Box has none to lift: it is yours.' : 'The Workspace has none to lift.'}` })
-    const reach = this.escalate(place.host, 'files', request.tool, request.escalation, exec)
-    return reach === 'escalated' ? action(this.filesOf(place, 'escalated')) : reach
-  }
-
-  /**
-   * The reach of a call that asked to escalate: 'escalated' when the owner approved this very call, else the Ask is stored and the waiting
-   * result is what the Robot is told.
-   */
-  private escalate(host: HostView, facet: PlaceFacet, tool: string, escalation: Escalation, exec: ToolRunContext): 'escalated' | WaitingResult {
-    if (this.deps.escalation.approved(String(exec.callId))) return 'escalated'
-    const reason = escalation.reason?.trim() ?? ''
-    if (reason === '') throw new BadCall({ tool, message: `${tool}: escalate needs a reason: your owner reads it before they approve the call.` })
-    const items: GrantItem[] = [{ kind: 'host', name: hostFacetKey(host.id, facet) }]
-    const { askId } = this.deps.escalation.ask({ tool, arguments: escalation.arguments, reason, items }, exec)
-    return waitingResult(askId, tool)
+  async withFiles<A>(on: string, call: PlaceCall, action: (files: PlaceFiles) => Promise<A>): Promise<A | WaitingResult> {
+    const target = await this.resolve(on, 'files', call.tool)
+    const unconfined = this.unconfined(call, target, `${call.tool}: escalate lifts the sandbox of a computer. ${target.place.kind === 'box' ? 'Your Box has none to lift: it is yours.' : 'The Workspace has none to lift.'}`)
+    const waiting = this.waiting(call, [target], unconfined)
+    if (waiting !== undefined) return waiting
+    return action(this.filesOf(target.place, unconfined === undefined ? 'granted' : 'escalated'))
   }
 
   // ---------------------------------------------------------------- run and jobs
 
-  async run(input: RunInput, exec: ToolRunContext): Promise<RunResult | WaitingResult> {
-    const place = await this.shellPlace(input.on, 'run')
+  async run(input: RunInput, call: PlaceCall): Promise<RunResult | WaitingResult> {
+    const target = await this.shellPlace(input.on, 'run')
+    const place = target.place
     const cwd = input.cwd === undefined ? undefined : place.kind === 'box' ? boxPath(input.cwd) : input.cwd
-    let reach: Reach = 'granted'
-    if (input.escalation !== undefined) {
-      if (place.kind !== 'host') throw new BadCall({ tool: 'run', message: 'run: escalate lifts the sandbox of a computer. Your Box has none to lift: it is yours.' })
-      const escalated = this.escalate(place.host, 'shell', 'run', input.escalation, exec)
-      if (escalated !== 'escalated') return escalated
-      reach = 'escalated'
-    }
-    return this.deps.jobs.run(this.deps.jobPlace(place, reach), { command: input.command, cwd, seconds: input.seconds, background: input.background }, exec.signal)
+    const unconfined = this.unconfined(call, target, 'run: escalate lifts the sandbox of a computer. Your Box has none to lift: it is yours.')
+    const waiting = this.waiting(call, [target], unconfined)
+    if (waiting !== undefined) return waiting
+    return this.deps.jobs.run(this.deps.jobPlace(place, unconfined === undefined ? 'granted' : 'escalated'), { command: input.command, cwd, seconds: input.seconds, background: input.background }, call.exec.signal)
   }
 
-  /** The place a job runs in must still be one the Robot may use; the ask gate asks about it by the same place. */
-  private async jobPlace(id: JobId, tool: string): Promise<void> {
-    const stored: StoredPlace | undefined = this.deps.jobs.placeOfJob(id)
-    if (stored === undefined) return
-    await this.shellPlace(hostIdOfPlace(stored) ?? BOX_PLACE, tool)
+  /** The place a job runs in must still be one the Robot may use; at ask the call waits for the owner, by that place. */
+  private async jobWaiting(id: JobId, call: PlaceCall): Promise<WaitingResult | undefined> {
+    const stored = this.deps.jobs.placeOfJob(id)
+    if (stored === undefined) return undefined
+    return this.waiting(call, [await this.shellPlace(hostIdOfPlace(stored) ?? BOX_PLACE, call.tool)])
   }
 
   jobList(): JobEntry[] {
     return this.deps.jobs.list()
   }
 
-  async jobOutput(id: JobId, wait: boolean, timeoutMs: number): Promise<JobOutputView> {
-    await this.jobPlace(id, 'job_output')
-    return this.deps.jobs.output(id, wait, timeoutMs)
+  async jobOutput(id: JobId, wait: boolean, timeoutMs: number, call: PlaceCall): Promise<JobOutputView | WaitingResult> {
+    return (await this.jobWaiting(id, call)) ?? this.deps.jobs.output(id, wait, timeoutMs)
   }
 
-  async jobKill(id: JobId): Promise<KillView> {
-    await this.jobPlace(id, 'job_kill')
-    return this.deps.jobs.kill(id)
+  async jobKill(id: JobId, call: PlaceCall): Promise<KillView | WaitingResult> {
+    return (await this.jobWaiting(id, call)) ?? this.deps.jobs.kill(id)
   }
 
   // ---------------------------------------------------------------- copy
@@ -249,20 +299,20 @@ export class Places {
    * Copy one file between two places, as it is (binary too), the content never passing through the model or the Worker. A Host and the
    * Workspace exchange it through presigned R2 URLs; the Box and the Workspace through ws inside the Box; inside the Workspace R2 copies it;
    * two Hosts, or the Box and a Host, stage it in the Workspace under tmp/ and delete it after (ob-d3rt, ob-qshq, ob-fgyk, ob-qr7v).
-   * A copy that asked to escalate writes on its destination computer without the sandbox, once, after the owner approved.
+   * A copy that asked to escalate writes on its destination computer without the sandbox, once, after the owner approved; a copy with an
+   * end at ask waits for the owner too.
    * @returns the waiting result when the owner is being asked.
    */
-  async copy(from: CopyEnd, to: CopyEnd, exec: ToolRunContext, escalation?: Escalation): Promise<CopyResult | WaitingResult> {
+  async copy(from: CopyEnd, to: CopyEnd, call: PlaceCall): Promise<CopyResult | WaitingResult> {
     const started = Date.now()
-    const source = await this.resolve(from.on, 'files', 'copy')
-    const target = await this.resolve(to.on, 'files', 'copy')
-    let reach: Reach = 'granted'
-    if (escalation !== undefined) {
-      if (target.kind !== 'host') throw new BadCall({ tool: 'copy', message: 'copy: escalate lifts the sandbox of the computer a file is written to, and the destination is not a computer.' })
-      const escalated = this.escalate(target.host, 'files', 'copy', escalation, exec)
-      if (escalated !== 'escalated') return escalated
-      reach = 'escalated'
-    }
+    const sourceEnd = await this.resolve(from.on, 'files', 'copy')
+    const targetEnd = await this.resolve(to.on, 'files', 'copy')
+    const unconfined = this.unconfined(call, targetEnd, 'copy: escalate lifts the sandbox of the computer a file is written to, and the destination is not a computer.')
+    const waiting = this.waiting(call, [sourceEnd, targetEnd], unconfined)
+    if (waiting !== undefined) return waiting
+    const reach: Reach = unconfined === undefined ? 'granted' : 'escalated'
+    const source = sourceEnd.place
+    const target = targetEnd.place
     const links = [source, target].flatMap((place) => place.kind === 'host' ? [this.deps.link(place.host, 'granted')] : [])
     const detail = `${from.path} → ${to.path}`
     try {
@@ -317,21 +367,13 @@ export class Places {
     return { from: `/workspace/${from}`, to: `/workspace/${to}`, bytes: object.size }
   }
 
-  /** Whether a copy in flight has opened this Workspace path to ws: the Box's door lets it through even when the files group is at ask. */
-  isPermitted(path: string): boolean {
-    return (this.permits.get(path) ?? 0) > 0
-  }
-
-  /** ws inside the Box moves the file between the Box's disk and R2; its token and the Worker's address were written when the Box booted. The Workspace `key` is open to it for the length of the call. */
-  private async ws(backend: BoxBackend, key: string, args: string, bytes: number): Promise<void> {
-    const seconds = Math.ceil(copyTimeoutMs(bytes) / 1000)
-    this.permits.set(key, (this.permits.get(key) ?? 0) + 1)
-    const result = await backend.run(`ws ${args}`, BOX_ROOT, seconds).finally(() => {
-      const left = (this.permits.get(key) ?? 1) - 1
-      if (left > 0) this.permits.set(key, left)
-      else this.permits.delete(key)
-    })
-    if (result.exitCode !== 0) throw new CopyRefused({ message: `copy: ws ${result.exitCode === 124 ? `ran out of time (${seconds} s)` : 'failed'}: ${(result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`).slice(0, 500)}` })
+  /**
+   * ws inside the Box moves the file between the Box's disk and R2; its token and the Worker's address were written when the Box booted.
+   * This run of ws gets a permit for `key` in direction `op`, in its environment; the permit ends with the run.
+   */
+  private async ws(backend: BoxBackend, op: 'get' | 'put', key: string, args: string, bytes: number): Promise<void> {
+    const result = await runWs(backend, this.deps.permits, op, key, args, bytes)
+    if (result.exitCode !== 0) throw new CopyRefused({ message: `copy: ws ${result.exitCode === 124 ? `ran out of time (${result.seconds} s)` : 'failed'}: ${(result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`).slice(0, 500)}` })
   }
 
   private async workspaceToBox(fromPath: string, toPath: string): Promise<Moved> {
@@ -349,7 +391,7 @@ export class Places {
         return { from: `/workspace/${key}`, to: target, bytes: owned.byteLength }
       }
       const size = object?.size ?? 0
-      await this.ws(backend, key, `get ${shellQuote(key)} ${shellQuote(target)}`, size)
+      await this.ws(backend, 'get', key, `${shellQuote(key)} ${shellQuote(target)}`, size)
       return { from: `/workspace/${key}`, to: target, bytes: size }
     } finally {
       await this.deps.box.touch()
@@ -365,7 +407,7 @@ export class Places {
       const sized = await backend.run(`stat -c %s ${shellQuote(source)}`, BOX_ROOT, 10).catch(() => ({ stdout: '', exitCode: 1 }))
       const bytes = Number(sized.stdout.trim())
       if (sized.exitCode !== 0 || !Number.isSafeInteger(bytes)) throw new MissingFile({ place: 'your Box', path: source, message: `copy: ${source} does not exist on your Box` })
-      await this.ws(backend, key, `put ${shellQuote(source)} ${shellQuote(key)}`, bytes)
+      await this.ws(backend, 'put', key, `${shellQuote(source)} ${shellQuote(key)}`, bytes)
       return { from: source, to: `/workspace/${key}`, bytes }
     } finally {
       await this.deps.box.touch()
@@ -374,7 +416,8 @@ export class Places {
 
   /**
    * A Host file into the Workspace: the Host app puts it to R2 over presigned URLs, in parts; the Worker plans the parts, hands the Host
-   * their links one window at a time (so that no link outlives its use) and completes the upload.
+   * one part per call, with its link minted just before (so that no link outlives its use), and completes the upload. Each call has the
+   * deadline of one part (hostPartDeadlineMs): a large file on a slow line finishes part by part.
    */
   private async hostToWorkspace(link: HostLink, hostPath: string, workspacePath: string): Promise<Moved> {
     refuseOwnedOnHost(hostPath)
@@ -384,9 +427,9 @@ export class Places {
     const plan = await transfers.upload(key, file.size)
     try {
       const etags: Array<{ number: number; etag: string }> = []
-      for (let at = 0; at < plan.parts.length; at += this.deps.windowParts) {
-        const parts = await transfers.linkedParts(key, plan, plan.parts.slice(at, at + this.deps.windowParts))
-        etags.push(...(await link.upload({ path: hostPath, size: file.size, parts })).etags)
+      for (const part of plan.parts) {
+        const linked = await transfers.linkedPart(key, plan, part)
+        etags.push(...(await link.upload({ path: hostPath, size: file.size, parts: [linked] })).etags)
       }
       await transfers.finish(key, plan.uploadId, etags)
     } catch (error) {
@@ -397,8 +440,9 @@ export class Places {
   }
 
   /**
-   * A Workspace file onto a Host: the Host app fetches it from R2 over a presigned URL, range by range, one window at a time with a fresh
-   * link each. An owner's file or a doc is text kept in the Worker, and goes over the Host's write.
+   * A Workspace file onto a Host: the Host app fetches it from R2 over a presigned URL, one part per call with a fresh link each, into a
+   * part file of this copy's own (named by `copy`), and moves it into place after the last part. Each call has the deadline of one part.
+   * An owner's file or a doc is text kept in the Worker, and goes over the Host's write.
    */
   private async workspaceToHost(link: HostLink, workspacePath: string, hostPath: string): Promise<Moved> {
     refuseOwnedOnHost(hostPath)
@@ -410,12 +454,13 @@ export class Places {
     }
     const { transfers } = this.deps
     const first = await transfers.download(key, 'host')
+    const copy = crypto.randomUUID()
     let received = { path: hostPath, bytes: 0 }
     for (let from = 0; ; ) {
       const plan = from === 0 ? first : await transfers.download(key, 'host')
       if (plan.size !== first.size) throw new CopyRefused({ message: `copy: "${key}" changed in your Workspace while it was copied` })
-      const until = Math.min(first.size, from + first.partBytes * this.deps.windowParts)
-      received = await link.download({ path: hostPath, url: plan.url, size: first.size, partBytes: first.partBytes, from, until })
+      const until = Math.min(first.size, from + first.partBytes)
+      received = await link.download({ copy, path: hostPath, url: plan.url, size: first.size, partBytes: first.partBytes, from, until })
       if (until >= first.size) break
       from = until
     }

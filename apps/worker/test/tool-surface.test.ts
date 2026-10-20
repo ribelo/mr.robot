@@ -58,7 +58,7 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
     expect(JSON.parse(deleted!)).toEqual({ deleted: 'notes/a.md' })
   })
 
-  it('glob and grep return arrays (ts-uy4d)', async () => {
+  it('glob and grep return their lists with a truncated flag (ts-uy4d, deep review P15)', async () => {
     const id = await robotWith({ tools: ['files'] })
     const results = await say(id, [
       { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'alpha\nbeta' } },
@@ -66,9 +66,9 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
       { name: 'grep', args: { on: 'workspace', pattern: 'beta' } },
       { name: 'glob', args: { on: 'workspace', pattern: 'nothing/**' } },
     ])
-    expect(JSON.parse(results[1]!)).toEqual(['notes/a.md'])
-    expect(JSON.parse(results[2]!)).toEqual([{ path: 'notes/a.md', line: 2, text: 'beta' }])
-    expect(JSON.parse(results[3]!)).toEqual([])
+    expect(JSON.parse(results[1]!)).toEqual({ paths: ['notes/a.md'], truncated: false })
+    expect(JSON.parse(results[2]!)).toEqual({ matches: [{ path: 'notes/a.md', line: 2, text: 'beta' }], truncated: false })
+    expect(JSON.parse(results[3]!)).toEqual({ paths: [], truncated: false })
   })
 
   it('task_create refuses a recurring rule under 5 minutes and two rules at once, in Task words (ts-lnox, ts-x0kl)', async () => {

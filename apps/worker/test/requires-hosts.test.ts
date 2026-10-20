@@ -1,6 +1,6 @@
-import { env, reset, runDurableObjectAlarm, SELF } from 'cloudflare:test'
+import { abortAllDurableObjects, env, reset, runDurableObjectAlarm, SELF } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Conversation, Me, ProposalView, TaskView } from '@mr-robot/protocol'
+import type { Conversation, Me, ProposalView, RobotSummary, TaskView } from '@mr-robot/protocol'
 import { frame } from '@mr-robot/host-protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
@@ -236,6 +236,75 @@ describe('A Robot that waits for its Hosts (v1.16 ticket 05)', () => {
     await settle(id)
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'I am here.' })
+  })
+})
+
+describe('which Hosts count, and what a parked Task does when it changed (deep P10)', () => {
+  it("counts only the Hosts where Mr. Robot's owner raised a facet, also in a fresh instance", async () => {
+    const desk = await pairedHost('Desk')
+    const studio = await pairedHost('Studio')
+    const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, requiresHosts: true, grants: { hosts: { [`${desk.hostId}:files`]: 'allow' } } } })
+    const task = await create({ title: 'Clean the disk', assignee: { kind: 'robot', robotId: mr }, timing: { kind: 'recurring', schedule: { kind: 'interval', everyMinutes: 5 } } })
+    // A Turn: he reaches both Hosts now.
+    scripts.set(mr, [{ text: 'Cleaned.' }])
+    await occurrence(mr)
+    expect(await taskTurns(mr)).toBe(1)
+    // Studio he holds only as his owner's computer, at his defaults: its outage does not stop his Tasks.
+    await studio.drop()
+    scripts.set(mr, [{ text: 'Cleaned again.' }])
+    await occurrence(mr)
+    expect(await taskTurns(mr)).toBe(2)
+    // Desk his owner raised to allow: its outage does, also after a restart, before any Turn refreshed what he reaches.
+    await desk.drop()
+    await abortAllDurableObjects()
+    await occurrence(mr)
+    expect(await taskTurns(mr)).toBe(2)
+    const [failed] = await attempts(task.id)
+    expect(failed).toMatchObject({ outcome: 'failed', firstLine: expect.stringContaining('"Desk"') })
+    expect(failed!.firstLine).not.toContain('Studio')
+  })
+
+  it('a parked Task that was run now gets no second Turn when the Host returns', async () => {
+    const desk = await pairedHost('Desk')
+    const id = await robotOn([desk.hostId], true)
+    await desk.drop()
+    const task = await create({ title: 'Back up photos', instructions: 'Copy the photos.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } })
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    expect(await taskTurns(id)).toBe(0)
+    scripts.set(id, [{ text: 'Copied.' }, { text: 'Copied again.' }])
+    expect((await api(ANNA, `/api/tasks/${task.id}/run`, { body: {} })).status).toBe(200)
+    await settle(id)
+    expect(await taskTurns(id)).toBe(1)
+    await desk.back()
+    await pause(300)
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    expect(await taskTurns(id)).toBe(1)
+  })
+
+  it('a parked Task given a new time waits for that time; one with new instructions runs them when the Host returns', async () => {
+    const desk = await pairedHost('Desk')
+    const id = await robotOn([desk.hostId], true)
+    await desk.drop()
+    const moved = await create({ title: 'Back up photos', instructions: 'Copy the photos.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } })
+    const reworded = await create({ title: 'Sync notes', instructions: 'Sync the notes.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } })
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    expect(await taskTurns(id)).toBe(0)
+    await api(ANNA, `/api/tasks/${moved.id}`, { method: 'PATCH', body: { timing: { kind: 'scheduled', at: Date.now() + 3_600_000 } } })
+    await api(ANNA, `/api/tasks/${reworded.id}`, { method: 'PATCH', body: { instructions: 'Sync the notes and the drafts.' } })
+    scripts.set(id, [{ text: 'Synced.' }, { text: 'Not yet.' }])
+    await desk.back()
+    await until(async () => (await taskTurns(id)) === 1)
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    expect(await taskTurns(id)).toBe(1)
+    expect(await attempts(moved.id)).toEqual([])
+    expect(await attempts(reworded.id)).toEqual([expect.objectContaining({ outcome: 'ok' })])
+    const turn = (await env.ROBOT.getByName(id).trajectory()).find((event) => event.type === 'user/message' && JSON.parse(event.data).source?.kind === 'task')!
+    expect(turn.data).toContain('Sync the notes and the drafts.')
   })
 })
 

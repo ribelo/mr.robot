@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost, hostCommands, hostDisk } from './fake-host.ts'
-import { boxDisks, boxLog, boxScripts, holdBoxJob } from './stub-box.ts'
+import { boxDisks, boxLog, boxScripts, finishBoxJob, holdBoxJob } from './stub-box.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -92,21 +92,21 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
     expect(json(wWrite)).toMatchObject({ on: 'workspace', written: '/workspace/notes/a.md', bytes: 11 })
     expect(wRead).toContain('2: beta')
     expect(json(wEdit)).toMatchObject({ on: 'workspace', edited: '/workspace/notes/a.md' })
-    expect(JSON.parse(wGlob!)).toEqual(['notes/a.md'])
-    expect(JSON.parse(wGrep!)).toEqual([{ path: 'notes/a.md', line: 2, text: 'gamma' }])
+    expect(JSON.parse(wGlob!)).toEqual({ paths: ['notes/a.md'], truncated: false })
+    expect(JSON.parse(wGrep!)).toEqual({ matches: [{ path: 'notes/a.md', line: 2, text: 'gamma' }], truncated: false })
     expect(json(bWrite)).toMatchObject({ on: 'box', written: '/workspace/work/b.txt', bytes: 8 })
     expect(bRead).toContain('2: two')
     expect(json(bEdit)).toMatchObject({ on: 'box', edited: '/workspace/work/b.txt' })
-    expect(JSON.parse(bGlob!)).toEqual(['work/b.txt'])
-    expect(JSON.parse(bGrep!)).toEqual([{ path: 'work/b.txt', line: 2, text: 'three' }])
+    expect(JSON.parse(bGlob!)).toEqual({ paths: ['work/b.txt'], truncated: false })
+    expect(JSON.parse(bGrep!)).toEqual({ matches: [{ path: 'work/b.txt', line: 2, text: 'three' }], truncated: false })
     expect(json(bRun)).toEqual({ kind: 'foreground', stdout: '/workspace\n', stderr: '', exitCode: 0 })
     expect(json(bDelete)).toEqual({ deleted: '/workspace/work/b.txt' })
     expect(boxDisks.get(id)!.has('/workspace/work/b.txt')).toBe(false)
     expect(json(hWrite)).toMatchObject({ on: 'Desk', written: '/home/anna/h.txt', bytes: 9 })
     expect(hRead).toContain('1: host text')
     expect(json(hEdit)).toMatchObject({ on: 'Desk', edited: '/home/anna/h.txt' })
-    expect(JSON.parse(hGlob!)).toEqual(['docs/a.md'])
-    expect(JSON.parse(hGrep!)).toEqual([{ path: 'docs/a.md', line: 2, text: 'beta' }])
+    expect(JSON.parse(hGlob!)).toEqual({ paths: ['docs/a.md'], truncated: false })
+    expect(JSON.parse(hGrep!)).toEqual({ matches: [{ path: 'docs/a.md', line: 2, text: 'beta' }], truncated: false })
     expect(json(hRun)).toMatchObject({ kind: 'foreground', stdout: 'ran: uptime', exitCode: 0 })
     expect(json(hDelete)).toEqual({ deleted: '/home/anna/h.txt' })
     expect(hostDisk.has('/home/anna/h.txt')).toBe(false)
@@ -139,6 +139,45 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
     const id = await robotWith({ tools: { files: 'allow', box: 'allow' } })
     const [run] = await calls(id, [{ name: 'run', args: { on: 'workspace', command: 'ls' } }])
     expect(run).toContain('the Workspace holds files, it runs no commands')
+  })
+})
+
+describe('glob and grep say when they stopped early (deep review P15)', () => {
+  it('flags a Workspace search past its file limit, a Box search past its match limit and a Host listing past its file limit; skips .cache', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { files: 'allow', box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
+    const names = (count: number) => Array.from({ length: count }, (_, index) => `f${String(index).padStart(3, '0')}.txt`)
+    for (const name of names(500)) await env.FILES.put(`robots/${id}/even/${name}`, 'nothing here')
+    for (const name of names(501)) await env.FILES.put(`robots/${id}/over/${name}`, 'nothing here')
+    for (let index = 0; index <= 20_000; index++) hostDisk.set(`tree/${index}.txt`, new Uint8Array())
+    hostDisk.set('logs/hits.txt', new TextEncoder().encode('hit\n'.repeat(201)))
+    const results = await calls(id, [
+      { name: 'grep', args: { on: 'workspace', pattern: 'needle', glob: 'even/*' } },
+      { name: 'grep', args: { on: 'workspace', pattern: 'needle', glob: 'over/*' } },
+      { name: 'write', args: { on: 'box', file_path: 'proj/exact.txt', content: 'hit\n'.repeat(200) } },
+      { name: 'write', args: { on: 'box', file_path: 'logs/hits.txt', content: 'hit\n'.repeat(201) } },
+      { name: 'write', args: { on: 'box', file_path: 'proj/.cache/uv/hit.txt', content: 'hit\n' } },
+      { name: 'grep', args: { on: 'box', pattern: 'hit', path: 'proj' } },
+      { name: 'grep', args: { on: 'box', pattern: 'hit' } },
+      { name: 'glob', args: { on: 'box', pattern: 'proj/**' } },
+      { name: 'grep', args: { on: 'box', pattern: 'a(' } },
+      { name: 'glob', args: { on: 'Desk', pattern: 'tree/**' } },
+      { name: 'grep', args: { on: 'Desk', pattern: 'hit', path: 'logs' } },
+    ])
+    const [even, over, , , , boxExact, boxOver, boxGlob, boxBad, hostGlob, hostGrep] = results
+    // A result over the context budget arrives cut; the whole of it is in the Workspace under spill/.
+    const whole = async (text: string | undefined): Promise<{ matches?: unknown[]; paths?: unknown[]; truncated: boolean }> => {
+      const spilled = /\/workspace\/(spill\/\S+?\.txt)/.exec(text!)?.[1]
+      return JSON.parse(spilled === undefined ? text! : (await workspaceText(id, spilled))!)
+    }
+    expect(json(even)).toEqual({ matches: [], truncated: false })
+    expect(json(over)).toEqual({ matches: [], truncated: true })
+    expect(await whole(boxExact)).toMatchObject({ truncated: false, matches: expect.objectContaining({ length: 200 }) })
+    expect(await whole(boxOver)).toMatchObject({ truncated: true, matches: expect.objectContaining({ length: 200 }) })
+    expect(json(boxGlob)).toEqual({ paths: ['proj/exact.txt'], truncated: false })
+    expect(boxBad).toContain('grep on your Box refused the pattern')
+    expect(await whole(hostGlob)).toMatchObject({ truncated: true })
+    expect(await whole(hostGrep)).toMatchObject({ truncated: true, matches: expect.objectContaining({ length: 200 }) })
   })
 })
 
@@ -277,6 +316,49 @@ describe('old events still render (ob-j9nx)', () => {
     const trajectory = JSON.stringify((await api(ANNA, `/api/robots/${id}/trajectory`)).body)
     expect(trajectory).toContain('box_run')
     expect(trajectory).toContain('host_read')
+  })
+})
+
+describe('the upgrade from v1.15 (deep review P18)', () => {
+  it('closes an Ask left open for a removed tool and tells the owner; an Ask for a tool that stays waits as before', async () => {
+    const id = await robotWith({ tools: { box: 'ask', files: 'ask' } })
+    const [old, kept] = await testRobot(id).legacyToolAsksForTest([
+      { tool: 'box_run', arguments: { command: 'rm -rf build' }, reason: 'Clean the build' },
+      { tool: 'write', arguments: { on: 'workspace', file_path: 'notes/a.md', content: 'milk' }, reason: 'Keep the list' },
+    ])
+    const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
+    const asks = items.flatMap((item) => (item.kind === 'proposal' ? [item.proposal] : []))
+    const closed = asks.find((ask) => ask.id === old)
+    expect(closed).toMatchObject({ status: 'done' })
+    expect(asks.find((ask) => ask.id === kept)).toMatchObject({ status: 'open' })
+    const notices = items.flatMap((item) => (item.kind === 'notice' ? [item.text] : []))
+    expect(notices.filter((text) => text.includes('box_run no longer exists'))).toHaveLength(1)
+    // An approval that arrives for the closed Ask is refused: nothing runs and the Robot is not woken.
+    expect((await api(ANNA, `/api/robots/${id}/proposals/${old}`, { body: { revision: closed!.revision, approve: true } })).status).toBe(409)
+    await settle(id)
+    expect(requests.get(id)).toBeUndefined()
+    expect(boxLog.get(id) ?? []).toEqual([])
+  })
+
+  it('keeps the Box jobs of v1.15 as jobs on the box: listed with their place, and a running one wakes the Robot when it ends', async () => {
+    const id = await robotWith({ tools: { box: 'allow' } })
+    holdBoxJob(id, 'python3 serve.py')
+    const [started] = await calls(id, [{ name: 'run', args: { on: 'box', command: 'python3 serve.py', run_in_background: true } }])
+    const running = json(started).jobId as string
+    await testRobot(id).legacyBoxJobsForTest({ id: 'j-00015aaa', command: 'make all', exitCode: 2 })
+    const [list] = await calls(id, [{ name: 'job_list', args: {} }])
+    const jobs = (json(list).jobs as Array<{ id: string; place: string; command: string; status: string; exitCode: number | null }>).map(({ id: job, place, command, status, exitCode }) => ({ job, place, command, status, exitCode }))
+    expect(jobs).toEqual(expect.arrayContaining([
+      { job: running, place: 'box', command: 'python3 serve.py', status: 'running', exitCode: null },
+      { job: 'j-00015aaa', place: 'box', command: 'make all', status: 'completed', exitCode: 2 },
+    ]))
+    expect(jobs).toHaveLength(2)
+    finishBoxJob(id, 'python3 serve.py', { stdout: 'served\n' })
+    scripts.set(id, [{ text: '' }])
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    const wakes = requests.get(id)!.flatMap((request) => request.messages.filter((message) => message.role === 'user').map((message) => JSON.stringify(message)))
+    expect(wakes.some((text) => text.includes(`[Box job ${running} finished: exit 0]`))).toBe(true)
   })
 })
 

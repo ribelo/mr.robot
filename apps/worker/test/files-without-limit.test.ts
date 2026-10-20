@@ -3,13 +3,13 @@
  * Driven through the edge API with the scripted model, the stub Box (which runs the real ws program), the fake Host app (which runs the real
  * copy engine) and R2 played by the FILES binding behind the URLs the Worker's real signer made (fake-r2.ts).
  */
-import { env, reset, SELF } from 'cloudflare:test'
+import { env, listDurableObjectIds, reset, SELF } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost, hostCopies, hostDisk } from './fake-host.ts'
 import { r2Faults, r2Log } from './fake-r2.ts'
-import { boxDisks, boxLog, boxScripts } from './stub-box.ts'
+import { boxDisks, boxLog, boxScripts, wsTaps, type BoxNetwork } from './stub-box.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -23,6 +23,7 @@ beforeEach(async () => {
   boxLog.clear()
   boxDisks.clear()
   boxScripts.clear()
+  wsTaps.clear()
   hostDisk.clear()
   hostCopies.length = 0
   r2Log.length = 0
@@ -136,6 +137,28 @@ describe('the Box token and the presign door (ob-qshq, ob-o6aw)', () => {
     expect((await presign(token, { op: 'get', path: 'private.txt' })).status).toBe(401)
     expect((await presign(tokenOf(one), { op: 'get', path: 'private.txt' })).status).toBe(200)
   })
+
+  it('refuses a forged token at the edge, and no Robot is made for it', async () => {
+    const one = await robotWith({ tools: { box: 'allow', files: 'allow' } })
+    await calls(one, [{ name: 'run', args: { on: 'box', command: 'echo up' } }])
+    const hex = (bytes: number) => [...crypto.getRandomValues(new Uint8Array(bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+    const stranger = `r-${crypto.randomUUID()}`
+    const before = (await listDurableObjectIds(env.ROBOT)).length
+    const forged = [
+      // A Robot that does not exist, in the shape of a real token and of the earlier one.
+      `${stranger}.${hex(32)}.${hex(32)}`,
+      `${stranger}.${hex(32)}`,
+      // A name that is no Robot id at all.
+      `x-${hex(8)}.${hex(32)}.${hex(32)}`,
+      // A real Robot with a signature that is not the Worker's.
+      `${one}.${hex(32)}.${hex(32)}`,
+      `${tokenOf(one).slice(0, -64)}${hex(32)}`,
+    ]
+    for (const token of forged) expect((await presign(token, { op: 'ls', path: '' })).status).toBe(401)
+    expect((await listDurableObjectIds(env.ROBOT)).length).toBe(before)
+    expect((await listDurableObjectIds(env.ROBOT)).map((id) => id.toString())).not.toContain(env.ROBOT.idFromName(stranger).toString())
+    expect((await presign(tokenOf(one), { op: 'ls', path: '' })).status).toBe(200)
+  })
 })
 
 describe('ws in the Box (ob-fgyk, ob-63nt)', () => {
@@ -197,12 +220,11 @@ describe('copy over presigned links (ob-d3rt, ob-qshq, ob-fgyk, ob-qr7v, ob-7hp3
     expect(sameBytes(await workspaceBytes(id, 'inbox/video.bin'), bytes)).toBe(true)
     expect(json(down)).toMatchObject({ to: { on: 'Desk', path: '/home/anna/back/video.bin' }, bytes: bytes.length })
     expect(sameBytes(hostDisk.get('/home/anna/back/video.bin'), bytes)).toBe(true)
-    // The Host app moved the bytes, a window of two parts at a time, each window on links minted just before it: three parts up, three ranges down.
+    // The Host app moved the bytes one part per call, each with its own deadline and on a link minted just before it (deep review P12):
+    // three parts up, three ranges down.
     expect(hostCopies).toEqual([
-      { rpc: 'Upload', path: '/home/anna/video.bin', size: bytes.length, parts: 2 },
-      { rpc: 'Upload', path: '/home/anna/video.bin', size: bytes.length, parts: 1 },
-      { rpc: 'Download', path: '/home/anna/back/video.bin', size: bytes.length, parts: 2 },
-      { rpc: 'Download', path: '/home/anna/back/video.bin', size: bytes.length, parts: 1 },
+      ...[1, 2, 3].map(() => ({ rpc: 'Upload', path: '/home/anna/video.bin', size: bytes.length, parts: 1 })),
+      ...[1, 2, 3].map(() => ({ rpc: 'Download', path: '/home/anna/back/video.bin', size: bytes.length, parts: 1 })),
     ])
     expect(r2Log.every((entry) => entry.key === `robots/${id}/inbox/video.bin`)).toBe(true)
     expect(r2Log).toHaveLength(6)
@@ -329,5 +351,110 @@ describe('the Box\'s door applies the Workspace rules of the tools (D1)', () => 
       expect((await presign(tokenOf(id), { op: 'rm', path })).status).toBe(400)
     }
     expect((await presign(tokenOf(id), { op: 'put', path: 'ok.bin', size: 3 })).status).toBe(200)
+  })
+})
+
+/** The secret a copy's ws sends with its requests (none for a script's ws). */
+const permitOf = (init: RequestInit | undefined): string | undefined => new Headers(init?.headers).get('x-mr-robot-permit') ?? undefined
+
+/** A script on the Box asks the door, over the Box's own network, with or without a permit it got hold of: the status. */
+async function scriptAsks(network: BoxNetwork, token: string, body: unknown, permit?: string): Promise<number> {
+  const response = await network(PRESIGN, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(permit === undefined ? {} : { 'x-mr-robot-permit': permit }) }, body: JSON.stringify(body) })
+  return response.status
+}
+
+/** The owner approves the one open tool-call Ask of a Robot; the approved call runs. */
+async function approveAsk(id: string): Promise<void> {
+  const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
+  const ask = conversation.items.flatMap((item) => (item.kind === 'proposal' && item.proposal.kind === 'tool-call' && item.proposal.status === 'open' ? [item.proposal] : []))[0]!
+  scripts.set(id, [{ text: 'Copied.' }])
+  expect((await api(ANNA, `/api/robots/${id}/proposals/${ask.id}`, { body: { revision: ask.revision, approve: true } })).status).toBe(200)
+  await settle(id)
+}
+
+describe('a copy\'s permit at the Box\'s door (deep review P4)', () => {
+  it('lets only the copy\'s own ws through, for its one key and direction, and only while the copy runs', async () => {
+    const id = await robotWith({ tools: { box: 'allow', files: 'ask' } })
+    await calls(id, [{ name: 'run', args: { on: 'box', command: 'echo up' } }])
+    await env.FILES.put(`robots/${id}/data.bin`, binary(1000))
+    await env.FILES.put(`robots/${id}/other.bin`, 'other')
+    const token = tokenOf(id)
+    let permit: string | undefined
+    const seen: Record<string, number> = {}
+    wsTaps.set(id, async (url, init, network) => {
+      if (permit !== undefined || new URL(url).pathname !== '/api/files/presign') return
+      permit = permitOf(init)
+      // Another script, while the approved copy of data.bin runs: without the permit it is at ask like any script.
+      seen['script put'] = await scriptAsks(network, token, { op: 'put', path: 'data.bin', size: 3 })
+      seen['script rm'] = await scriptAsks(network, token, { op: 'rm', path: 'data.bin' })
+      seen['script part'] = await scriptAsks(network, token, { op: 'part', path: 'data.bin', number: 1 })
+      // With the copy's permit it may fetch data.bin, as the copy does, and nothing else.
+      seen['permit get'] = await scriptAsks(network, token, { op: 'get', path: 'data.bin' }, permit)
+      seen['permit put'] = await scriptAsks(network, token, { op: 'put', path: 'data.bin', size: 3 }, permit)
+      seen['permit part'] = await scriptAsks(network, token, { op: 'part', path: 'data.bin', number: 1 }, permit)
+      seen['permit rm'] = await scriptAsks(network, token, { op: 'rm', path: 'data.bin' }, permit)
+      seen['permit other'] = await scriptAsks(network, token, { op: 'get', path: 'other.bin' }, permit)
+      seen['permit ls'] = await scriptAsks(network, token, { op: 'ls', path: '' }, permit)
+    })
+    const [waiting] = await calls(id, [{ name: 'copy', args: { from: { on: 'workspace', path: 'data.bin' }, to: { on: 'box', path: 'in/data.bin' }, reason: 'Work on it' } }])
+    expect(waiting).toContain('waiting for your owner')
+    await approveAsk(id)
+    expect(sameBytes(boxBytes(id, '/workspace/in/data.bin'), binary(1000))).toBe(true)
+    expect(permit).toMatch(/^[0-9a-f]{64}$/)
+    // The permit is not in the command the Box ran.
+    expect(boxLog.get(id)!.some((entry) => entry.includes(permit!))).toBe(false)
+    expect(seen).toEqual({ 'script put': 403, 'script rm': 403, 'script part': 403, 'permit get': 200, 'permit put': 403, 'permit part': 403, 'permit rm': 403, 'permit other': 403, 'permit ls': 403 })
+    expect(sameBytes(await workspaceBytes(id, 'data.bin'), binary(1000))).toBe(true)
+    // The copy ended, and its permit with it.
+    expect((await presign(token, { op: 'get', path: 'data.bin' })).status).toBe(403)
+    const after = await SELF.fetch(PRESIGN, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-mr-robot-permit': permit! }, body: JSON.stringify({ op: 'get', path: 'data.bin' }) })
+    expect(after.status).toBe(403)
+  })
+
+  it('copies between the Box and a Host on the box grant and the Host\'s files facet, without the files group', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
+    await calls(id, [{ name: 'run', args: { on: 'box', command: 'echo up' } }])
+    const bytes = binary(3 * MIB + 1)
+    boxDisks.get(id)!.set('/workspace/out/result.bin', { bytes, mtime: 1 })
+    hostDisk.set('/home/anna/input.bin', binary(2000))
+    const token = tokenOf(id)
+    const seen: Record<string, number> = {}
+    wsTaps.set(id, async (url, init, network) => {
+      const permit = permitOf(init)
+      if (permit === undefined || Object.keys(seen).length > 0 || JSON.parse(String(init?.body))['op'] !== 'part') return
+      const staged = String(JSON.parse(String(init?.body))['path'])
+      // The upload of the staged file has started: its permit starts no second upload, and reads or deletes nothing.
+      seen['permit put'] = await scriptAsks(network, token, { op: 'put', path: staged, size: 3 }, permit)
+      seen['permit get'] = await scriptAsks(network, token, { op: 'get', path: staged }, permit)
+      seen['permit rm'] = await scriptAsks(network, token, { op: 'rm', path: staged }, permit)
+      seen['script ls'] = await scriptAsks(network, token, { op: 'ls', path: '' })
+    })
+    const [toHost, toBox] = await calls(id, [
+      { name: 'copy', args: { from: { on: 'box', path: 'out/result.bin' }, to: { on: 'Desk', path: '/home/anna/result.bin' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/input.bin' }, to: { on: 'box', path: 'in/input.bin' } } },
+    ])
+    expect(json(toHost)).toMatchObject({ to: { on: 'Desk', path: '/home/anna/result.bin' }, bytes: bytes.length })
+    expect(json(toBox)).toMatchObject({ to: { on: 'box', path: '/workspace/in/input.bin' }, bytes: 2000 })
+    expect(sameBytes(hostDisk.get('/home/anna/result.bin'), bytes)).toBe(true)
+    expect(sameBytes(boxBytes(id, '/workspace/in/input.bin'), binary(2000))).toBe(true)
+    expect(seen).toEqual({ 'permit put': 403, 'permit get': 403, 'permit rm': 403, 'script ls': 403 })
+  })
+
+  it('closes when the box grant is taken back or the Home switches the plugin off, without a new Turn', async () => {
+    const id = await robotWith({ tools: { box: 'allow', files: 'allow' } })
+    await calls(id, [{ name: 'run', args: { on: 'box', command: 'echo up' } }])
+    const token = tokenOf(id)
+    expect((await presign(token, { op: 'ls', path: '' })).status).toBe(200)
+    for (const plugin of ['box', 'files']) {
+      expect((await api(ANNA, `/api/admin/plugins/${plugin}`, { method: 'PUT', body: { enabled: false } })).status).toBe(200)
+      const closed = await presign(token, { op: 'ls', path: '' })
+      expect(closed.status).toBe(403)
+      expect(closed.body['error']).toContain(`the tool group "${plugin}"`)
+      expect((await api(ANNA, `/api/admin/plugins/${plugin}`, { method: 'PUT', body: { enabled: true } })).status).toBe(200)
+      expect((await presign(token, { op: 'ls', path: '' })).status).toBe(200)
+    }
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' }, hosts: {} } } })
+    expect((await presign(token, { op: 'ls', path: '' })).status).not.toBe(200)
   })
 })

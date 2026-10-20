@@ -1,7 +1,7 @@
 import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { WorkspaceFileView } from '@mr-robot/protocol'
-import { SPILL_KEEP_MS } from '../src/workspace/spill.ts'
+import { SPILL_KEEP_MS, STAGED_KEEP_MS } from '../src/workspace/spill.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
@@ -92,5 +92,17 @@ describe('spill files are tidied after 30 days (ao-ry61)', () => {
     await testRobot(id).tidySpillForTest(Date.now() + SPILL_KEEP_MS + 60_000)
     expect((await env.FILES.list({ prefix: `robots/${id}/spill/` })).objects).toEqual([])
     expect(await env.FILES.get(`robots/${id}/notes.md`)).not.toBeNull()
+  })
+
+  it('the tidy pass removes a file a copy parked under tmp/ more than a day ago, which a restart left behind (deep review P12)', async () => {
+    const id = await robot(32_000)
+    const parked = `robots/${id}/tmp/${crypto.randomUUID()}/file`
+    await env.FILES.put(parked, 'half a copy')
+    await testRobot(id).tidySpillForTest(Date.now() + STAGED_KEEP_MS - 60_000)
+    expect(await env.FILES.get(parked)).not.toBeNull()
+
+    await testRobot(id).tidySpillForTest(Date.now() + STAGED_KEEP_MS + 60_000)
+    expect((await env.FILES.list({ prefix: `robots/${id}/tmp/` })).objects).toEqual([])
+    expect(await env.FILES.get(`robots/${id}/data/big.txt`)).not.toBeNull()
   })
 })

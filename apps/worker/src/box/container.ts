@@ -4,7 +4,9 @@
  * runs commands with the Container exec API and keeps no state the Robot needs: its disk is scratch.
  */
 import { Container } from '@cloudflare/containers'
+import { GREP_MAX_MATCHES, LISTING_MAX_FILES } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
+import { cappedRg, filesArgs, grepArgs, parseFiles, parseGrep, type BoxFileList, type BoxGrepQuery, type BoxGrepResult, type RgOutput } from './box-search.ts'
 
 const text = new TextDecoder()
 
@@ -22,10 +24,10 @@ export class ComputerContainer extends Container<Env> {
     return this.ctx.container?.running === true
   }
 
-  /** One command under bash, killed after its time limit (exit code 124). */
-  async run(command: string, cwd: string, seconds: number): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  /** One command under bash, killed after its time limit (exit code 124); `env` adds variables to its environment. */
+  async run(command: string, cwd: string, seconds: number, env: Readonly<Record<string, string>> = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     this.renewActivityTimeout()
-    const process = await this.ctx.container!.exec(['timeout', '--kill-after=5', String(seconds), 'bash', '-lc', command], { cwd, env: { HOME: '/root', PATH: '/usr/local/python/bin:/usr/local/bin:/usr/bin:/bin' } })
+    const process = await this.ctx.container!.exec(['timeout', '--kill-after=5', String(seconds), 'bash', '-lc', command], { cwd, env: { ...env, HOME: '/root', PATH: '/usr/local/python/bin:/usr/local/bin:/usr/bin:/bin' } })
     const out = await process.output()
     return { stdout: text.decode(out.stdout), stderr: text.decode(out.stderr), exitCode: out.exitCode }
   }
@@ -90,14 +92,33 @@ export class ComputerContainer extends Container<Env> {
     if (out.exitCode !== 0) throw new Error(`cannot delete ${path}: ${text.decode(out.stderr)}`)
   }
 
-  /** Every file under a directory with its size and change time: the manifest the sync compares. */
-  async list(directory: string): Promise<Array<{ path: string; size: number; mtime: number }>> {
-    const process = await this.ctx.container!.exec(['bash', '-lc', 'test -d "$0" && find "$0" -type f -printf "%P\\t%s\\t%T@\\n"', directory], {})
+  /** Every file under a directory with its size and change time, the folders `pruned` names (relative to it) left out: the manifest the sync compares. */
+  async list(directory: string, pruned: readonly string[] = []): Promise<Array<{ path: string; size: number; mtime: number }>> {
+    const script = 'test -d "$0" || exit 0; skip=(); for p in "$@"; do skip+=(-path "$0/$p" -prune -o); done; find "$0" "${skip[@]}" -type f -printf "%P\\t%s\\t%T@\\n"'
+    const process = await this.ctx.container!.exec(['bash', '-lc', script, directory, ...pruned], {})
     const out = await process.output()
     return text.decode(out.stdout).split('\n').filter((line) => line !== '').map((line) => {
       const [path, size, mtime] = line.split('\t')
       return { path: path!, size: Number(size), mtime: Number(mtime) }
     })
+  }
+
+  /** The files under /workspace or a path in it, by rg --files (box-search.ts). */
+  async files(under: string | undefined): Promise<BoxFileList> {
+    return parseFiles(await this.rg(cappedRg(LISTING_MAX_FILES + 1), filesArgs(under)))
+  }
+
+  /** The matching lines under /workspace or a path in it, by rg (box-search.ts). */
+  async grep(query: BoxGrepQuery): Promise<BoxGrepResult> {
+    return parseGrep(await this.rg(cappedRg(GREP_MAX_MATCHES + 1), grepArgs(query)))
+  }
+
+  /** A cappedRg script with rg's arguments as its own (no shell quoting), in /workspace. */
+  private async rg(script: string, args: readonly string[]): Promise<RgOutput> {
+    this.renewActivityTimeout()
+    const process = await this.ctx.container!.exec(['bash', '-c', script, 'rg', ...args], { cwd: '/workspace', env: { HOME: '/root', PATH: '/usr/local/python/bin:/usr/local/bin:/usr/bin:/bin' } })
+    const out = await process.output()
+    return { stdout: text.decode(out.stdout), stderr: text.decode(out.stderr), exitCode: out.exitCode }
   }
 
   async end(): Promise<void> {

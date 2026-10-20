@@ -38,15 +38,18 @@ export function globBase(pattern: string): string {
   return base
 }
 
-/** Directories no listing of a Box or a Host shows: version control and installed packages are noise for a Robot. */
-export const SKIPPED_DIRECTORIES = ['.git', 'node_modules'] as const
+/** Directories no listing of a Box or a Host shows, at any depth: version control, installed packages and caches are noise for a Robot. */
+export const SKIPPED_DIRECTORIES = ['.git', 'node_modules', '.cache'] as const
 
 /** Whether a directory name is one no listing shows. */
 export const isSkippedDirectory = (name: string): boolean => SKIPPED_DIRECTORIES.some((skippedName) => skippedName === name)
 
 export const skipped = (path: string): boolean => path.split('/').some(isSkippedDirectory)
 
-/** The most matches one grep returns, the longest line it shows, and the largest file it searches. */
+/** The most files one glob or grep on a Box or a Host walks; past it the answer says it is truncated. */
+export const LISTING_MAX_FILES = 20_000
+
+/** The most matches one grep returns (past it the answer says it is truncated), the longest line it shows, and the largest file it searches. */
 export const GREP_MAX_MATCHES = 200
 export const GREP_MAX_LINE = 300
 export const GREP_MAX_FILE_BYTES = 1_000_000

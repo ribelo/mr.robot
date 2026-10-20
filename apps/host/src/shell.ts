@@ -5,24 +5,26 @@
  * the tools themselves belong to an agent and are not used. One seam picks the shell: HostShell.kind. Every command, in either shell,
  * goes through the job path of jobs.ts.
  */
-import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { execFile, spawnSync } from 'node:child_process'
+import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Bash from '@deepseek-ai/dsh-bash-sandbox'
 import Jobs from '@deepseek-ai/dsh-jobs-local'
 import Pwsh from '@deepseek-ai/dsh-pwsh-sandbox'
-import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, type SandboxExecutionPolicy, type SandboxMode, type SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, canonicalPath, type SandboxExecutionPolicy, type SandboxMode, type SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import Sandbox, { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import { RUN_MAX_WAIT_SECONDS, SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
 import { errorCode } from './error-code.ts'
-import { ensureRobotDirectory, expandPath, writeRoots } from './access.ts'
+import { assertConfinableRoots, ensureRobotDirectory, expandPath, madeExtraRoots } from './access.ts'
+import { runFileChange, type ChangePlace, type FileChange, type FileChanges } from './file-change.ts'
 import { HostJobs } from './jobs.ts'
-import { aclRunnerWorks, findInstalledPwsh7, startRunnersAsNode, withoutElectronSwitch } from './windows.ts'
+import { startRunnersAsNode } from './run-as-node.ts'
+import { aclRunnerWorks, findInstalledPwsh7 } from './windows.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
@@ -34,24 +36,61 @@ const HOST_MODE: Readonly<Record<SandboxMode, HostMode>> = { 'read-only': 'read-
 
 /** A policy that also carries the extra write roots of a grant. */
 type RootedPolicy = SandboxPolicy & { readonly extraRoots?: readonly string[] }
+type RootedExecutionPolicy = SandboxExecutionPolicy & { readonly extraRoots?: readonly string[] }
+
+/** The first executable file named `name` in the directories of `path` (a PATH value); undefined when none is. */
+function onPath(name: string, path: string | undefined): string | undefined {
+  for (const directory of (path ?? '').split(delimiter)) {
+    if (!isAbsolute(directory)) continue
+    const file = join(directory, name)
+    try {
+      if (statSync(file).isFile()) {
+        accessSync(file, constants.X_OK)
+        return file
+      }
+    } catch {
+      // Not here: the next directory.
+    }
+  }
+  return undefined
+}
+
+/** How long the probe of a runner may take, as DSH's own probe (sandbox-local's probeTimeoutMs). */
+const PROBE_TIMEOUT_MS = 5000
 
 /**
  * DSH's sandbox-local confines one write root. A grant has several, so this provider adds the others to the argv of the runner it
  * selected: bwrap binds them, Landlock grants them read-write. A runner that cannot take them (Seatbelt, the Windows token) fails the
- * call closed instead of running it with fewer roots than the grant names.
+ * call closed instead of running it with fewer roots than the grant names. Commands and file changes both go through it.
+ *
+ * It also runs bubblewrap by its absolute path (deep review P6). DSH names the runner `bwrap`, and the spawn finds it on the PATH of the
+ * process it starts, which for a command is `commandPath` (the login shell's); DSH's probe looks on the app's PATH and runs `true` from
+ * there. A package that puts bubblewrap only on the app's PATH (the Nix build) so had the probe say full while every confined command
+ * failed. Here bubblewrap is found once, on the app's PATH, and the probe and every confined process run that one file; the probe starts
+ * bash in it with the PATH commands get, as a command does. When it fails, DSH tries Landlock.
  */
-class ManyRootsSandbox extends LocalSandboxProvider {
-  override async confine(argv: readonly string[], policy: RootedPolicy, signal?: AbortSignal) {
-    const confined = await super.confine(argv, policy, signal)
-    const extra = policy.mode === 'workspace-write' ? (policy.extraRoots ?? []) : []
-    if (extra.length === 0) return confined
-    const runner = confined.argv[0] ?? ''
-    const grants = runner.endsWith('bwrap') ? extra.flatMap((root) => ['--bind', root, root]) : runner.endsWith('landlock-run') ? extra.flatMap((root) => ['--rw', root]) : undefined
-    if (grants === undefined) throw Object.assign(new Error('This computer\'s sandbox confines one directory, so a grant with more write roots cannot run commands here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
-    const separator = confined.argv.indexOf('--')
-    // Without the separator the grants cannot be put where the runner reads them: run nothing rather than run with fewer roots.
-    if (separator < 0) throw Object.assign(new Error('This computer\'s sandbox runner has an argument list this app cannot add write roots to, so a grant with more write roots cannot run commands here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
-    return { ...confined, argv: [...confined.argv.slice(0, separator), ...grants, ...confined.argv.slice(separator)] }
+function manyRootsSandbox(commandPath: string | undefined) {
+  const bwrap = process.platform === 'linux' ? onPath('bwrap', process.env['PATH']) : undefined
+  const probeEnv = { ...process.env, ...(commandPath === undefined ? {} : { PATH: commandPath }) }
+  return class ManyRootsSandbox extends LocalSandboxProvider {
+    override internals: LocalSandboxProvider['internals'] = {
+      // DSH's own probe (its read-only profile), with the file found above and bash in place of `true`.
+      probeBwrap: () => bwrap !== undefined && spawnSync(bwrap, ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '--', 'bash', '-c', 'true'], { env: probeEnv, timeout: PROBE_TIMEOUT_MS, stdio: 'ignore' }).status === 0,
+    }
+
+    override async confine(argv: readonly string[], policy: RootedPolicy, signal?: AbortSignal) {
+      const selected = await super.confine(argv, policy, signal)
+      const confined = bwrap !== undefined && selected.argv[0] === 'bwrap' ? { ...selected, argv: [bwrap, ...selected.argv.slice(1)] } : selected
+      const extra = policy.mode === 'workspace-write' ? (policy.extraRoots ?? []) : []
+      if (extra.length === 0) return confined
+      const runner = confined.argv[0] ?? ''
+      const grants = runner.endsWith('bwrap') ? extra.flatMap((root) => ['--bind', root, root]) : runner.endsWith('landlock-run') ? extra.flatMap((root) => ['--rw', root]) : undefined
+      if (grants === undefined) throw Object.assign(new Error('This computer\'s sandbox confines one directory, so a grant with more write roots cannot run commands or change files here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
+      const separator = confined.argv.indexOf('--')
+      // Without the separator the grants cannot be put where the runner reads them: run nothing rather than run with fewer roots.
+      if (separator < 0) throw Object.assign(new Error('This computer\'s sandbox runner has an argument list this app cannot add write roots to, so a grant with more write roots cannot run commands or change files here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
+      return { ...confined, argv: [...confined.argv.slice(0, separator), ...grants, ...confined.argv.slice(separator)] }
+    }
   }
 }
 
@@ -76,13 +115,22 @@ function loginPath(): Promise<string | undefined> {
   })
 }
 
+/** The environment a command gets besides DSH's own: the login shell's PATH, when it could be asked. */
+const commandEnv = (path: string | undefined): { readonly env?: Readonly<Record<string, string>> } => (path === undefined ? {} : { env: { PATH: path } })
+
 /**
- * How completely a command is confined here: what the provider says for a read-only call. On Windows the provider chooses the ACL runner
- * without trying it (always partial), so the runner is started once on a command that does nothing, to find out that it starts at all.
+ * How completely a command is confined here. With bash, a command that does nothing runs confined the way run() starts one, with the
+ * environment commands get (deep review P6): the state is the enforcement it ran under, and none when it did not run. On Windows the
+ * provider chooses the ACL runner without trying it (always partial), and PowerShell 7 may not be there yet, so the runner is started once
+ * on a command that does nothing, to find out that it starts at all.
  */
-async function probeSandbox(ctx: Context, kind: Shell, root: string): Promise<SandboxState> {
+async function probeSandbox(ctx: Context, kind: Shell, root: string, path: string | undefined): Promise<SandboxState> {
   try {
-    if (kind === 'bash') return (await ctx.sandbox.confine(['true'], { mode: 'read-only', workspaceRoot: root })).enforcement
+    if (kind === 'bash') {
+      const spec = ctx.shell.resolve({ command: 'true', workdir: root, timeoutMs: PROBE_TIMEOUT_MS, sandboxPolicy: { mode: 'workspace-write', workspaceRoot: root }, ...commandEnv(path) })
+      const result = await (await ctx.shell.execute(spec)).result()
+      return result.exitCode === 0 ? (result.sandbox?.enforcement ?? 'none') : 'none'
+    }
     const confined = await ctx.sandbox.confine(['cmd.exe', '/c', 'exit', '0'], { mode: 'read-only', workspaceRoot: root })
     return (await aclRunnerWorks(confined.argv)) ? confined.enforcement : 'none'
   } catch {
@@ -90,10 +138,36 @@ async function probeSandbox(ctx: Context, kind: Shell, root: string): Promise<Sa
   }
 }
 
+/**
+ * The directories the selected runner lets every command in workspace-write change besides the call's own roots (deep review P1c), read
+ * from the runner's grants for `root` and as real paths: Landlock grants the real /tmp (--rw), Seatbelt /private/tmp and the user's temp
+ * directory (subpath), the Windows runner a private directory it makes in the temp directory (--temp); bubblewrap gives a private /tmp
+ * and binds only the roots (--bind). A file among them (/dev/null) holds no root and is left out. None when no runner is usable: then
+ * nothing confined runs at all.
+ */
+async function sandboxWritable(ctx: Context, root: string): Promise<string[]> {
+  let argv: readonly string[]
+  try {
+    argv = (await ctx.sandbox.confine(['true'], { mode: 'workspace-write', workspaceRoot: root })).argv
+  } catch {
+    return []
+  }
+  const grants = argv.slice(0, argv.lastIndexOf('--'))
+  const named = grants.flatMap((arg, at) => {
+    if (['--rw', '--bind', '--temp'].includes(grants[at - 1] ?? '')) return [arg]
+    return [...arg.matchAll(/\(subpath "((?:[^"\\]|\\.)*)"\)/g)].map((found) => found[1]!.replace(/\\(.)/g, '$1'))
+  })
+  const own = canonicalPath(root)
+  const real = [...new Set(named.map(canonicalPath))].filter((path) => path !== own)
+  // A path that is not there is kept: a root inside it is still refused.
+  const directories = await Promise.all(real.map((path) => stat(path).then((info) => info.isDirectory(), () => true)))
+  return real.filter((_, at) => directories[at])
+}
+
 /** The path of the denied file effect, from the error output of the command (the bash, coreutils and PowerShell dialects). */
 export function deniedPath(stderr: string): string | undefined {
-  // PowerShell names the path in quotes: "Set-Content: Access to the path 'C:\x\y.txt' is denied."
-  const powershell = /Access to the path '([^']+)' is denied/i.exec(stderr)
+  // PowerShell names the path in quotes: "Set-Content: Access to the path 'C:\x\y.txt' is denied." The path may hold a quote itself.
+  const powershell = /Access to the path '(.+)' is denied/i.exec(stderr)
   if (powershell !== null) return powershell[1]
   for (const line of stderr.split('\n')) {
     const found = /^(.*): (?:Read-only file system|Permission denied|Operation not permitted|Access is denied)\.?$/i.exec(line.trim())
@@ -121,14 +195,14 @@ export interface RunInput {
   /** The name the Worker gives the job. */
   readonly job: string
   readonly access: HostAccess
-  /** The call is cancelled (its connection went away): a command still being waited for is stopped. */
+  /** The call is cancelled (its connection went away): a command still being waited for goes on as a job (jobs.ts, settled). */
   readonly signal?: AbortSignal | undefined
 }
 
 /** What a job that is still running has printed so far, for the answer that tells the Robot it goes on. */
 const printedSoFar = (out: string, err: string): string => (err === '' ? out : `${out}\n[stderr]\n${err}`)
 
-export class HostShell {
+export class HostShell implements FileChanges {
   /** Which run of the app this is: new at every start. The heartbeat carries it so that the Worker can tell a restart from a lost connection. */
   readonly instance = crypto.randomUUID()
   /** The jobs of this run of the app; they outlive the connection to the Worker. */
@@ -141,12 +215,15 @@ export class HostShell {
 
   private constructor(
     private readonly ctx: Context,
-    private readonly home: string,
+    /** The OS user's home directory, where the Robots' directories are. */
+    readonly home: string,
     private readonly path: string | undefined,
     /** How completely this computer confines a command, found when the app started. */
     readonly sandbox: SandboxState,
     /** The shell the Robots write for: PowerShell 7 on Windows, bash elsewhere. */
     readonly kind: Shell,
+    /** The directories every confined command may change besides its roots (sandboxWritable): no write root may lie inside them. */
+    private readonly writable: readonly string[],
   ) {
     this.jobs = new HostJobs(ctx, (ended) => this.jobEnded(ended))
   }
@@ -157,14 +234,14 @@ export class HostShell {
   }
 
   /** Compose DSH's layer and find out what the sandbox can do here (the heartbeat reports it, ob-n72n). */
-  static async start(options: { readonly home?: string; readonly landlockLauncher?: string } = {}): Promise<HostShell> {
+  static async start(options: { readonly home?: string; readonly landlockLauncher?: string; readonly sandboxChain?: LocalSandboxProvider['internals']['chain'] } = {}): Promise<HostShell> {
     const home = options.home ?? homedir()
     const kind: Shell = process.platform === 'win32' ? 'pwsh' : 'bash'
     const ctx = new Context()
     await ctx.plugin(Subprocess)
-    // SAFETY: windows.ts needs only the runner-path hook of subprocess-local, which DSH does not export as a type.
-    if (kind === 'pwsh') startRunnersAsNode(ctx.subprocess as never)
-    await ctx.plugin(ManyRootsSandbox)
+    startRunnersAsNode(ctx.subprocess)
+    const path = await loginPath()
+    await ctx.plugin(manyRootsSandbox(path))
     await ctx.plugin(PolicyService)
     // Every command is a job here, the ones a call waits for too, so the limit per owner is raised well above DSH's ten.
     await ctx.plugin(Jobs, { maxConcurrentJobsPerOwner: 200 })
@@ -172,10 +249,17 @@ export class HostShell {
     const launcher = options.landlockLauncher
     // SAFETY: the sandbox service above is the LocalSandboxProvider this app plugged in; Cordis types it as the abstract sandbox.
     if (launcher !== undefined && existsSync(launcher)) (ctx.sandbox as LocalSandboxProvider).internals.landlockLauncher = launcher
+    // The runners to try, in order, in place of the platform's: a test picks Landlock on a machine that has bubblewrap too.
+    // SAFETY: as above.
+    if (options.sandboxChain !== undefined) (ctx.sandbox as LocalSandboxProvider).internals.chain = options.sandboxChain
+    // bash is always there, and the probe below runs through it.
+    if (kind === 'bash') await ctx.plugin(Bash, {})
     const probeRoot = join(home, 'mr-robot')
-    await mkdir(probeRoot, { recursive: true })
-    const sandbox = await probeSandbox(ctx, kind, probeRoot)
-    const shell = new HostShell(ctx, home, await loginPath(), sandbox, kind)
+    // Not recursive, and an existing entry is left as it is: a link at ~/mr-robot is not followed to make anything where it points. The
+    // Robots' calls refuse such a link (access.ts, ensureRobotDirectory).
+    await mkdir(probeRoot).catch((error: unknown) => { if (errorCode(error) !== 'EEXIST') throw error })
+    const sandbox = await probeSandbox(ctx, kind, probeRoot, path)
+    const shell = new HostShell(ctx, home, path, sandbox, kind, await sandboxWritable(ctx, probeRoot))
     await shell.recheck()
     return shell
   }
@@ -191,9 +275,8 @@ export class HostShell {
   }
 
   private async makeReady(): Promise<void> {
-    if (this.kind === 'bash') {
-      await this.ctx.plugin(Bash, {})
-    } else {
+    // bash was plugged in at start().
+    if (this.kind === 'pwsh') {
       const found = await findInstalledPwsh7()
       if (!found.found) {
         this.problem = found.problem
@@ -206,6 +289,27 @@ export class HostShell {
   }
 
   /**
+   * Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy of its mode and roots. The way to
+   * the directory and the roots are checked before anything is made, on every call, since links can appear between calls (access.ts,
+   * ensureRobotDirectory and assertConfinableRoots).
+   */
+  private async place(access: HostAccess): Promise<ChangePlace> {
+    const directory = await ensureRobotDirectory(this.home, access)
+    await assertConfinableRoots(this.home, access, this.writable)
+    const extraRoots = await madeExtraRoots(this.home, access)
+    const policy: RootedExecutionPolicy = { mode: SANDBOX_MODE[access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }
+    return { home: this.home, access, directory, policy }
+  }
+
+  /**
+   * One change of a file, in the sandbox of the grant's mode and roots, as a command would run (file-change.ts). It needs no shell, so it
+   * works on Windows without PowerShell 7 too.
+   */
+  async change(access: HostAccess, change: FileChange, body?: Uint8Array, signal?: AbortSignal): Promise<void> {
+    await runFileChange(this.ctx, await this.place(access), change, body, signal)
+  }
+
+  /**
    * One command in the Robot's directory (or the cwd it names), under the mode and roots of its grant. It runs as a job: the call
    * waits for it up to its limit and answers with the result (foreground), answers at once when asked for a job (background), and
    * answers that it goes on as a job when it is still running at the limit (promoted).
@@ -213,22 +317,20 @@ export class HostShell {
   async run(input: RunInput): Promise<RunOutcome> {
     await this.recheck()
     if (this.problem !== undefined) throw new Error(this.problem)
-    const directory = await ensureRobotDirectory(this.home, input.access)
+    const { directory, policy } = await this.place(input.access)
     const cwd = input.cwd === undefined ? directory : expandPath(this.home, directory, input.cwd)
     if (!(await stat(cwd).then((info) => info.isDirectory(), () => false))) throw Object.assign(new Error(`${cwd} is not a directory on this computer`), { code: 'ENOENT' })
-    const extraRoots = writeRoots(this.home, input.access).slice(1)
-    const policy: SandboxExecutionPolicy & { extraRoots?: readonly string[] } = { mode: SANDBOX_MODE[input.access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }
     const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
     let started: ShellExecution
     try {
       // No deadline of its own: the command lives until it ends or is stopped, and the call bounds only its own wait.
       const spec = this.ctx.shell.resolve({
-        command: this.kind === 'pwsh' ? withoutElectronSwitch(input.command) : input.command,
+        command: input.command,
         workdir: cwd,
         timeoutMs,
         onExpiry: 'none',
         sandboxPolicy: policy,
-        ...(this.path === undefined ? {} : { env: { PATH: this.path } }),
+        ...commandEnv(this.path),
       })
       started = await this.ctx.shell.execute(spec)
     } catch (error) {
@@ -242,8 +344,9 @@ export class HostShell {
       const [out, err] = await Promise.all([this.jobs.output(input.job, 'out', 0), this.jobs.output(input.job, 'err', 0)])
       return { kind: 'promoted', cwd, timeoutMs, jobId: input.job, output: printedSoFar(out.text, err.text) }
     }
+    // The job stays among the ended ones: a Worker that lost this answer (a dropped connection, a Robot that restarted while it waited)
+    // reads the result there (deep review P11).
     const result: ShellRunResult = await started.result()
-    this.jobs.release(input.job)
     const sandbox = result.sandbox
     return {
       kind: 'foreground',

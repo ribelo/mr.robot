@@ -1,9 +1,9 @@
 # The Windows installer of the Host app (v1.16 ticket 04, ob-szqb): pnpm --filter @mr-robot/host dist:win
-# It packs dist/ (build.mjs --windows writes the bundle, DSH's two helper programs, koffi and a package.json there) as the app.
+# It packs dist/ (build.mjs --windows writes the bundle, DSH's two helper programs, koffi, the shell check and a package.json there) as the app.
 # The installer is not signed: Windows SmartScreen warns on first run. Code signing and auto-update are not part of v1.16.
 appId: ai.mr-robot.host
 productName: Mr. Robot host
-# The Electron the Nix package wraps (nixpkgs); electron-builder fetches the Windows build of it.
+# An Electron 43 release, the line the Nix package wraps (nixpkgs has 43.7.7); electron-builder fetches the Windows build of it.
 electronVersion: 43.7.11
 directories:
   app: dist
@@ -14,7 +14,6 @@ npmRebuild: false
 files:
   - "**/*"
   - "!**/*.map"
-  - "!shell-check.cjs"
 executableName: mr-robot-host
 win:
   target:
