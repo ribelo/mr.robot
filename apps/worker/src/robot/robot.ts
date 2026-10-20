@@ -107,7 +107,7 @@ import { HostRunner, HostRuns, type HostJobLink } from '../places/host-runner.ts
 import type { Place, StoredPlace } from '../places/place.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
 import type { HostLink } from '../places/places.ts'
-import { HOST_ACCESS, HOST_DIRECTORY, hostAccessOf, robotDirectoryName } from './host-access.ts'
+import { HOST_ACCESS, HOST_DIRECTORY, hostAccessOf, hostIdsOf, newHostLevels, robotDirectoryName } from './host-access.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Ask } from '../plugins/ask.ts'
 import { IdentityTools } from '../plugins/identity.ts'
@@ -1290,7 +1290,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     const proposal = this.propose('tool-call', `${request.tool}: ${request.reason}`, {
       toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason: request.reason, items: request.items },
-    })
+    }, hostIdsOf(request.items))
     return { askId: proposal.id }
   }
 
@@ -1369,13 +1369,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * `replyCopy` marks a notification that only repeats the Turn's reply: Discord never gets it.
    * @returns how many Members were notified; 0 when notifications are off (robot-r2uz).
    */
-  async notifyMembers(kind: NotificationKind, body: string, skip: (memberId: string) => boolean = () => false, replyCopy = false): Promise<number> {
+  async notifyMembers(kind: NotificationKind, body: string, skip: (memberId: string) => boolean = () => false, replyCopy = false, hosts: readonly string[] = []): Promise<number> {
     const config = this.store.requireConfig()
     if (!config.notifications.enabled) return 0
     const members = (config.notifications.members.length === 0 ? [config.ownerId] : config.notifications.members).filter((member) => !skip(member))
     await this.sendToChannels({
       kind: 'notification', id: `n-${crypto.randomUUID()}`, robotId: config.id, robotName: config.identity.name,
-      notification: kind, text: body, memberIds: members, replyCopy,
+      notification: kind, text: body, memberIds: members, replyCopy, hosts,
     })
     return members.length
   }
@@ -2154,6 +2154,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.hostDirectory(), mode, roots } }
   }
 
+  /**
+   * A computer was paired to this Robot's owner (v1.16 ticket 09, ob-2k5x): Mr. Robot's files and shell on it start at ask. The Member DO calls
+   * this before it records the computer, so a refusal leaves nothing paired at allow. Any other Robot takes no default.
+   */
+  pairedHost(hostId: string): void {
+    if (this.store.requireConfig().kind !== 'mr-robot') return
+    this.store.setGrants(overlayGrants(this.store.grants(), { ...emptyGrants, hosts: newHostLevels(hostId) }))
+  }
+
   /** The name of this Robot's directory on its owner's Hosts: chosen when first needed and kept, so that a rename does not lose its files there. */
   private hostDirectory(): string {
     const kept = this.store.get<string>(HOST_DIRECTORY)
@@ -2563,7 +2572,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return Date.now()
   }
 
-  propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView {
+  propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>, hosts: readonly string[] = []): ProposalView {
     // Reviews, help requests and tool calls are each their own Ask: a new one never replaces an open one.
     const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind === 'review' || kind === 'help' || kind === 'tool-call' || kind === 'question' || kind === 'credential' ? false : kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
     this.ctx.waitUntil(this.changed())
@@ -2571,7 +2580,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const body = kind === 'question' ? questionText(proposalView(row).question!)
       : kind === 'credential' ? `asks you for ${proposalView(row).credential!.credential === 'login' ? 'a login' : 'a secret'} for ${proposalView(row).credential!.service}: ${proposalView(row).credential!.why}. Open the Conversation to fill it in${this.appLink()}.`
       : kind === 'help' ? `asks for help: ${purpose}` : kind === 'tool-call' ? `wants to use ${purpose}` : `${purpose}: waiting for your answer.`
-    this.ctx.waitUntil(this.notifyMembers('needs you', body).catch(() => 0))
+    this.ctx.waitUntil(this.notifyMembers('needs you', body, undefined, false, hosts).catch(() => 0))
     return proposalView(row)
   }
 

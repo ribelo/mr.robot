@@ -10,6 +10,7 @@ import type { HostView } from '@mr-robot/protocol'
 import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, type Heartbeat, type HostAccess, type HostNotification, type JobEnded, type JobInfo, type RunOutcome } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
 import { HOME_ID } from '../env.ts'
+import { mrRobotIdOf } from '../robot/delivery.ts'
 
 export type HostGrant = 'browser' | 'files' | 'shell'
 
@@ -127,6 +128,8 @@ export class HostHub {
   async pair(name: string, platform: string): Promise<{ hostId: string; token: string }> {
     const hostId = `h-${crypto.randomUUID()}`
     const token = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+    // Mr. Robot's files and shell on the new computer start at ask (ob-2k5x). This comes first: when the default is refused, nothing is paired.
+    await this.env.ROBOT.getByName(mrRobotIdOf(this.ownerId())).pairedHost(hostId)
     this.ctx.storage.sql.exec('INSERT INTO host (id, name, platform, token_hash, sharing, paired_at) VALUES (?, ?, ?, ?, ?, ?)', hostId, name.trim().slice(0, 80) || 'Host', platform, await sha256(token), 'private', Date.now())
     await this.report(hostId)
     return { hostId, token }
@@ -457,12 +460,18 @@ export class HostHub {
     }
     await this.run(id, robotId, 'browser', (client) => client.BrowserClose({ session }), 15_000).catch(() => undefined)
     await this.report(id)
-  }  /** Show a notification on every online computer of this Member (pl-b5vp). */
-  notify(notification: HostNotification): number {
+  }
+
+  /**
+   * Show a notification on the computers of this Member (pl-b5vp). A tool-call Ask names the Host of the facet it uses, and that Host
+   * shows it alone (ob-6jr5); when no named Host is online, every online computer shows it, as before.
+   */
+  notify(notification: HostNotification, named: readonly string[] = []): number {
+    const online = this.list().filter((host) => host.online)
+    const targeted = online.filter((host) => named.includes(host.id))
     const text = frame({ t: 'notify', d: notification })
     let sent = 0
-    for (const host of this.list()) {
-      if (!host.online) continue
+    for (const host of targeted.length > 0 ? targeted : online) {
       for (const socket of this.ctx.getWebSockets(`host:${host.id}`)) {
         try { socket.send(text); sent++ } catch { /* closing */ }
       }

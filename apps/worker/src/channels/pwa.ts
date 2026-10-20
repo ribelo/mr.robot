@@ -7,7 +7,7 @@ import type { NotificationKind } from '@mr-robot/protocol'
 import type { ChannelAdapter, ChannelOutput, InboundEvent, InboundWakeup } from './channel.ts'
 
 export interface PushTarget {
-  notify(memberId: string, event: { robotId: string; robotName: string; kind: NotificationKind; body: string }): Promise<unknown>
+  notify(memberId: string, event: { robotId: string; robotName: string; kind: NotificationKind; body: string; hosts: readonly string[] }): Promise<unknown>
 }
 
 export class PwaChannel implements ChannelAdapter {
@@ -28,7 +28,7 @@ export class PwaChannel implements ChannelAdapter {
   async deliver(output: ChannelOutput): Promise<boolean> {
     if (output.kind === 'reply') return true
     await Promise.all(output.memberIds.map((memberId) => this.push.notify(memberId, {
-      robotId: output.robotId, robotName: output.robotName, kind: output.notification, body: output.text,
+      robotId: output.robotId, robotName: output.robotName, kind: output.notification, body: output.text, hosts: output.hosts,
     }).catch((error: unknown) => console.warn('push failed', memberId, error))))
     return output.memberIds.length > 0
   }

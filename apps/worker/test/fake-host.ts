@@ -5,7 +5,7 @@
 import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type JobEnded, type JobState, type Sandbox, type SandboxReport } from '@mr-robot/host-protocol'
+import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -39,9 +39,10 @@ const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
 const skippedPath = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
 
 
-/** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). */
-export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {}) {
-  const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform: 'linux' }) })
+/** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). Its notifications (notify frames) are kept in `notices`. */
+export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell } = {}) {
+  const platform = options.platform ?? 'linux'
+  const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform }) })
   const { code, approveUrl } = (await start.json()) as { code: string; approveUrl: string }
   expect(approveUrl).toBe(`https://mr-robot.test/#/pair/${code}`)
   expect((await api<{ name: string }>(ANNA, `/api/hosts/pair/${code}`)).body.name).toBe(name)
@@ -165,8 +166,9 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {
     BrowserClose: () => Effect.void,
   })
   let current = socket
+  const notices: HostNotification[] = []
   let instance = `app-run-${++runs}`
-  const beat = (as = instance) => current.send(frame({ t: 'hb', d: { version: '0.1.0', instance: as, platform: 'linux', hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full' } } }))
+  const beat = (as = instance) => current.send(frame({ t: 'hb', d: { version: '0.1.0', instance: as, platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full', shell: options.shell ?? 'bash' } } }))
   /** The app serves the Host RPCs on a socket: its first connection, and each time it comes back. */
   const serve = (on: WebSocket) => {
     current = on
@@ -174,6 +176,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {
     on.addEventListener('message', (event) => {
       const parsed = parseFrame(String(event.data))
       if (parsed?.t === 'rpc') Effect.runFork(host.deliver(parsed.d))
+      if (parsed?.t === 'notify') notices.push(parsed.d)
     })
     Effect.runFork(host.server)
     beat()
@@ -187,7 +190,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {
     return found
   }
   return {
-    hostId: paired.hostId, token: paired.token, socket, closes, connect,
+    hostId: paired.hostId, token: paired.token, socket, closes, connect, notices,
     /** The job printed something. */
     print: (command: string, text: string, stream: 'out' | 'err' = 'out') => { const job = jobOf(command); if (stream === 'out') job.out += text; else job.err += text },
     /** The job ended; the app tells the Worker with a job frame unless the test says its connection was down. */

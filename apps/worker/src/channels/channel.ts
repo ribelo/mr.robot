@@ -80,6 +80,8 @@ export type ChannelOutput =
       readonly memberIds: readonly string[]
       /** The notification only repeats a Turn's reply. */
       readonly replyCopy: boolean
+      /** The computers it names: a tool-call Ask on a Host shows on that Host (ob-6jr5). Empty: every computer of each Member. */
+      readonly hosts: readonly string[]
     }
 
 export interface ChannelAdapter {

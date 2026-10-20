@@ -307,6 +307,10 @@ export type WorkspaceFileContent = typeof WorkspaceFileContent.Type
 export const HostSandbox = Schema.Literals(['full', 'partial', 'none'])
 export type HostSandbox = typeof HostSandbox.Type
 
+/** The shell a Host runs a Robot's commands in (v1.16 ticket 09, ob-vyyg): bash, or pwsh on Windows. The same words as the Host protocol's Shell. */
+export const HostShellName = Schema.Literals(['bash', 'pwsh'])
+export type HostShellName = typeof HostShellName.Type
+
 /**
  * What a Host grant lets a Robot change (v1.16 ticket 02, ob-wh59): read-only, workspace-write (its own directory on the Host and the
  * roots listed) or full. Reads are as wide as the OS user in every mode. The same words as the Host protocol's HostMode.
@@ -343,7 +347,7 @@ export const HostView = Schema.Struct({
   online: Schema.Boolean,
   lastSeen: Schema.NullOr(Schema.Number),
   version: Schema.NullOr(Schema.String),
-  capabilities: Schema.NullOr(Schema.Struct({ graphical: Schema.Boolean, chrome: Schema.NullOr(Schema.String), sandbox: Schema.optional(HostSandbox) })),
+  capabilities: Schema.NullOr(Schema.Struct({ graphical: Schema.Boolean, chrome: Schema.NullOr(Schema.String), sandbox: Schema.optional(HostSandbox), shell: Schema.optional(HostShellName) })),
   /** The caller paired it (may share and unpair it). */
   mine: Schema.Boolean,
   /** Robots using it right now (its browser). */

@@ -5,7 +5,7 @@
  *
  * Self-contained on purpose (type imports only): index.ts re-exports it.
  */
-import type { GrantLevel, GrantSet, SettingsCatalog } from './index.ts'
+import type { GrantLevel, GrantSet, HostView, SettingsCatalog } from './index.ts'
 
 export type CapabilityField = 'tools' | 'skills' | 'recipients' | 'connections' | 'hosts' | 'secrets'
 
@@ -22,6 +22,10 @@ export interface CapabilityHost {
   readonly online: boolean
   readonly mine: boolean
   readonly ownerName: string
+  /** The platform the Host reports (linux, darwin, win32); the runtime section's Hosts line names it. */
+  readonly platform?: string
+  /** What the Host's last heartbeat reported: its shell and sandbox state. */
+  readonly capabilities?: HostView['capabilities']
 }
 
 interface ItemFields {
@@ -71,6 +75,20 @@ export const hostState = (host: CapabilityHost): string => `${host.online ? 'onl
 
 /** The heading of a Host's facets: "Desk · online". */
 export const hostHeading = (host: CapabilityHost): string => `${host.name} · ${hostState(host)}`
+
+const PLATFORM_NAMES: Readonly<Record<string, string>> = { darwin: 'macOS', win32: 'Windows' }
+
+/**
+ * A Host as the runtime section names it: its heading, the shell its commands run in on its platform, and its sandbox state
+ * as the last heartbeat reported them (ob-gjp9, ob-vyyg): "Desk · online · bash on linux · sandbox full".
+ */
+export const hostLine = (host: CapabilityHost): string => {
+  const shell = host.capabilities?.shell
+  const platform = host.platform === undefined ? undefined : (PLATFORM_NAMES[host.platform] ?? host.platform)
+  const runs = shell === undefined ? platform : platform === undefined ? shell : `${shell} on ${platform}`
+  const sandbox = host.capabilities?.sandbox
+  return [hostHeading(host), runs, sandbox === undefined ? undefined : `sandbox ${sandbox}`].filter((part): part is string => part !== undefined).join(' · ')
+}
 
 /** The Hosts the host items belong to, each once, in the order of the items. */
 export function hostsOf(items: readonly CapabilityItem[]): CapabilityHost[] {

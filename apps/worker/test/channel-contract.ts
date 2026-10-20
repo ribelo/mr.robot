@@ -31,7 +31,7 @@ export function describeChannelContract(name: string, make: () => ChannelAdapter
       const delivered = new Set<string>()
       const before = sent()
       const reply: ChannelOutput = { kind: 'reply', id: 'out-1', robotId: 'r', robotName: 'R', text: 'done', attachments: [], route: null, unprompted: false }
-      const notification: ChannelOutput = { kind: 'notification', id: 'out-2', robotId: 'r', robotName: 'R', notification: 'finished', text: 'done', memberIds: ['m-1'], replyCopy: false }
+      const notification: ChannelOutput = { kind: 'notification', id: 'out-2', robotId: 'r', robotName: 'R', notification: 'finished', text: 'done', memberIds: ['m-1'], replyCopy: false, hosts: [] }
       expect(await fanOut(reply, [adapter.id], adapters, delivered)).toEqual([adapter.id])
       await fanOut(reply, [adapter.id], adapters, delivered)
       await fanOut(notification, [adapter.id], adapters, delivered)
@@ -44,7 +44,7 @@ export function describeChannelContract(name: string, make: () => ChannelAdapter
       const reply: ChannelOutput = { kind: 'reply', id: 'out-3', robotId: 'r', robotName: 'R', text: 'answer', attachments: [], route: { channel: adapter.id, address: 'thread-7' }, unprompted: false }
       expect(recipientsOf(reply, [])).toEqual([adapter.id])
       expect(recipientsOf({ ...reply, route: null }, [])).toEqual([])
-      const notification: ChannelOutput = { kind: 'notification', id: 'out-4', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [], replyCopy: false }
+      const notification: ChannelOutput = { kind: 'notification', id: 'out-4', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [], replyCopy: false, hosts: [] }
       expect(recipientsOf(notification, [])).toEqual([])
     })
   })

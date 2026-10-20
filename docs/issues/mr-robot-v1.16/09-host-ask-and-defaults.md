@@ -6,5 +6,5 @@
 
 **Status:** ready-for-agent
 
-- [ ] Workerd test: the notify frame for a Host Ask; Mr. Robot's facets at ask after pairing; the Hosts line (ob-6jr5, ob-2k5x, ob-gjp9)
-- [ ] By hand: the notification opens the Ask (ob-6jr5)
+- [x] Workerd test: the notify frame for a Host Ask; Mr. Robot's facets at ask after pairing; the Hosts line (ob-6jr5, ob-2k5x, ob-gjp9)
+- [ ] By hand: the notification opens the Ask (ob-6jr5) (not run in this session: needs a person at a desktop to click the native notification)
