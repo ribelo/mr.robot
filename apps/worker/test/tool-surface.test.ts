@@ -142,7 +142,8 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
   it('migrates grants stored before levels to allow (sk-xj5q)', async () => {
     const id = await robotWith({})
     await testRobot(id).grantsBeforeLevelsForTest([{ kind: 'tool', name: 'exa' }, { kind: 'tool', name: 'files' }, { kind: 'secret', name: 'shop' }])
-    expect(await grantsOf(id)).toEqual({ ...emptyGrants, tools: { exa: 'allow', files: 'allow' }, secrets: { shop: 'allow' } })
+    // The upgrade also gives the Robot the chief recipient Grant (v1.15 ticket 04, gb-qmnc).
+    expect(await grantsOf(id)).toEqual({ ...emptyGrants, tools: { exa: 'allow', files: 'allow', messaging: 'allow' }, recipients: { [`mr-robot-${annaId}`]: 'allow' }, secrets: { shop: 'allow' } })
     expect(await registered(id)).toEqual(expect.arrayContaining(['web_search_exa', 'delete_file']))
   })
 
@@ -153,8 +154,8 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
     // The Conversation so far comes back too: the newest result is the last.
     const asked = (await say(id, [{ name: 'propose_grants', args: { purpose: 'Read listing pages', tools: [{ name: 'web', level: 'ask' }, 'tasks'] } }])).at(-1)
     expect(JSON.parse(asked!).grants.tools).toEqual({ web: 'ask', tasks: 'allow' })
-    const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
-    if (question?.kind !== 'question') throw new Error('no grant question')
+    const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'proposal' && item.proposal.status === 'open')
+    if (question?.kind !== 'proposal') throw new Error('no grant question')
     scripts.set(id, [{ text: 'Thanks.' }])
     await api(ANNA, `/api/robots/${id}/proposals/${question.proposal.id}`, { body: { revision: question.proposal.revision, approve: true } })
     await settle(id)

@@ -12,7 +12,7 @@ export interface DirectoryEntry {
 
 export interface MessagingHost {
   directory(): Promise<DirectoryEntry[]>
-  sendRobotMessage(to: string, text: string, idempotencyKey: string): Promise<{ requestId: string; status: string }>
+  sendRobotMessage(to: string, text: string, idempotencyKey: string, question?: boolean): Promise<{ requestId: string; status: string }>
   replyRobotMessage(handle: string, text: string): Promise<{ status: string }>
 }
 
@@ -31,18 +31,19 @@ export function messagingTools(host: MessagingHost): ToolDefinition[] {
           : { robots: entries }
       },
     }),
-    tool<{ to: string; request: string; idempotency_key: string }>({
+    tool<{ to: string; request: string; idempotency_key: string; question?: boolean }>({
       name: 'robot_send',
-      description: 'Ask another Robot to do work. Give it a self-contained request. Its reply arrives later as a labelled message in your Conversation. Use a fresh idempotency_key per distinct request; resending the same key does not send twice.',
+      description: "Ask another Robot to do work, or put a question to it. Give it a self-contained request. Its reply arrives later as a labelled message in your Conversation. Use a fresh idempotency_key per distinct request; resending the same key does not send twice. Set question when you only want an answer (a fact, a preference, how things are done here): the message is labelled as a question for the recipient. Your owner's Mr. Robot is your chief: ask him for facts and know-how; consent and decisions are your owner's, asked with ask.",
       parameters: {
         properties: {
           to: { type: 'string', description: 'Robot id from robot_directory' },
           request: { type: 'string', description: 'The self-contained work request' },
           idempotency_key: { type: 'string', description: 'A fresh key per distinct request; resending a key does not send twice' },
+          question: { type: 'boolean', description: 'true when this is a question, not work to do; false when left out' },
         },
         required: ['to', 'request', 'idempotency_key'],
       },
-      execute: async ({ to, request, idempotency_key }) => host.sendRobotMessage(to, request, idempotency_key),
+      execute: async ({ to, request, idempotency_key, question }) => host.sendRobotMessage(to, request, idempotency_key, question === true),
     }),
   ]
 }

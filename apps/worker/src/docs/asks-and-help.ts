@@ -1,6 +1,6 @@
-export const ASKS_AND_HELP = `# Asks and need_help
+export const ASKS_AND_HELP = `# Asks, questions and requests
 
-An Ask is a pending decision that a Robot puts to its owner. The Conversation shows it in place of the composer. The composer is the message input. When there are several Asks, the oldest shows first, with a count. The owner answers, and the composer returns. The owner can also reply with text instead.
+An Ask is a pending decision that a Robot puts to its owner. The Conversation shows it in place of the composer (the message input). When there are several Asks, the oldest shows first, with a count. The owner can also reply with text instead.
 
 ## Kinds of Ask
 
@@ -14,46 +14,58 @@ An Ask is a pending decision that a Robot puts to its owner. The Conversation sh
 | review | Approve a list of items, one by one or all at once. |
 | thread | Accept or decline a Thread invitation, and set its Scope. |
 | tool-call | Approve or reject one call of a tool at the ask level. |
-| help | Answer a need_help request. |
+| question | Answer one question with an option or in words (the ask tool). |
+| credential | Give the Robot a login or a secret (the request_credential tool). |
+| help | An old request for help (see the end of this page). |
 
-The platform stores each Ask exactly. When the owner approves, the platform applies the stored Ask. It does not apply prose from the Conversation.
+The platform stores each Ask exactly and applies the stored Ask when the owner approves. A tool-call Ask comes from a grant item at the ask level (read grants.md). One approval covers one call. Only the owner answers it.
 
-## Tool-call Asks
+## Questions: the ask tool
 
-A tool-call Ask comes from a grant item at the ask level. Read grants.md. One approval covers one call. Only the owner answers a tool-call Ask. Mr. Robot never approves it.
+Every active Robot has ask. It needs no Grant. The call returns at once. It does not block.
 
-## need_help
+Ask only in three cases:
+- Before an act that has a big effect or that you cannot undo.
+- When the request is truly ambiguous and a wrong guess costs something.
+- When only your owner holds the fact.
 
-Call need_help when you are stuck. Do not chat with other Robots to get help. need_help takes four fields:
-- doing: what you are doing.
-- tried: what you tried.
-- need: what you need.
-- urgent: true or false.
+In every other case, decide, say your assumption, and go on.
 
-Write the request in your owner's language. Every Robot except Mr. Robot has need_help. It needs no recipient Grant.
+The fields:
+- prompt: the question, in the words you would say to your owner.
+- help: one line of context (optional).
+- options: up to 6. Each has a label (the button text), a value (what you get back), an optional description, and a style: default, primary (the one you recommend, first in the list) or danger (destructive or irreversible).
+- allow_custom: the owner may write their own answer.
+- dismiss_on_move_on: the question is dismissed when the owner's next message arrives and the question is still open. Use it for low-stakes questions.
+- urgent: the owner gets a "needs you" push at once. Use it only when waiting does harm.
+
+Make the options real. Check that each one is possible before you offer it. Never add an option that is only a way out.
 
 What happens next:
-1. The platform creates an Ask of kind help in your Conversation. Your owner sees it at once and can answer in text.
-2. Your Turn ends as waiting for help. You use no tokens while you wait.
-3. If your owner does not answer within 30 minutes, Mr. Robot wakes with your request. If the request is urgent, he wakes at once.
-4. Mr. Robot reads what he needs. He can read your Conversation, files and settings. Then he answers.
-5. The answer wakes you as a labelled reply. For example: "[Answer to your request <id> from Mr. Robot]". Then you continue.
+1. The platform stores an Ask of kind question and returns { askId, status: "waiting" }.
+2. You go on with work that does not depend on the answer. If there is none, end your Turn with one short line. Take no visible action while you wait.
+3. The owner answers with one tap, with words (when you allowed them), or dismisses the question.
+4. The answer wakes you as a steer, for example "[Your owner answered your question <id>: \"Order the red one\" (value: red)]".
+5. A dismissal wakes you with that fact. Do not ask the same question again. If the owner moved on, their next message tells you.
 
-Only urgent requests skip the 30 minutes. Use urgent when waiting costs the owner something.
+On Discord, a question is text with numbered options. The owner answers it in the app.
 
-## One answer per request
+## Questions to your chief
 
-An answered request is closed. Mr. Robot is not woken for it again. You get one answer per request. A second answer is refused. The owner is the exception. If the owner answers a request that Mr. Robot already answered, you get the owner's answer as a new labelled message: "[Your owner answered your request <id> (after Mr. Robot)]". The owner sees the whole exchange and can override Mr. Robot.
+Every Robot is created with a recipient Grant to its owner's Mr. Robot, its chief. The owner can remove it in the Robot's Grants. Send the question with robot_send and set question to true. The chief answers with robot_reply.
 
-## Mr. Robot's part
+Ask your chief for facts, the owner's preferences, and how things are done here. Ask your owner, with ask, for consent and decisions. The chief may know, but he may not consent. A yes from another Robot is never the owner's yes.
 
-Mr. Robot has two tools for this:
-- help_requests: lists the open requests of the owner's Robots.
-- help_answer: takes a Robot id, a request id and a text, and answers the request.
+## Credentials: the request_credential tool
 
-help_answer works only on help Asks. It refuses a tool-call Ask. Mr. Robot has no chief, so he has no need_help.
+When a site needs a login you do not have, call request_credential. It takes the kind (login or secret), the service, why you need it, and for a login the websites and what you will use it for. The owner sees the Login form in your Conversation, filled in with what you gave. When the owner saves it:
+- The entry is created under the owner.
+- It is granted to you at allow.
+- You wake with the name of the entry.
 
-## Messages between Robots
+The password never reaches you. Use a login with login_fill and a secret with secret_get. If the owner declines, you wake with the refusal. Do not ask again. On Discord the request is one line with a link into the app.
 
-need_help is not robot_send. robot_send sends a work request to a Robot you have a recipient Grant for. To message Mr. Robot with robot_send, you need that Grant. need_help always works.
+## Old requests for help
+
+Before v1.15, a Robot called need_help. That tool, help_requests, help_answer and the 30-minute wait are gone. A request that was still open stays in the Conversation. The owner can answer it in words. The answer closes it and wakes the Robot with "[Answer to your request <id> from <name>]".
 `

@@ -14,7 +14,7 @@ import {
   LoginView, Me, MemberAvatar, MemberCosts, MemberView, SubagentView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
   SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
-  type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
+  type CredentialSave, type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
 
@@ -87,6 +87,10 @@ const make = Effect.gen(function* () {
     retry: (id: string) => request(RetryResult, 'POST', `/api/robots/${enc(id)}/retry`, {}),
     updateSettings: (id: string, patch: SettingsPatch) => request(RobotSettings, 'PATCH', `/api/robots/${enc(id)}/settings`, patch),
     answer: (id: string, proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string, note?: string) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}`, { revision: proposal.revision, approve, ...(approved === undefined ? {} : { approved }), ...(scope === undefined ? {} : { scope }), ...(note === undefined ? {} : { note }) }),
+    /** A question Ask: an option by value, the owner's own words, or a dismissal (v1.15). */
+    choose: (id: string, proposal: ProposalView, choice: { readonly value?: string; readonly text?: string; readonly dismiss?: true }) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}`, { revision: proposal.revision, approve: choice.dismiss !== true, ...(choice.value === undefined ? {} : { value: choice.value }), ...(choice.text === undefined ? {} : { text: choice.text }) }),
+    /** A credential Ask saved: the form's password goes to the Home through this call (v1.15). */
+    saveCredential: (id: string, proposal: ProposalView, entry: Omit<CredentialSave, 'revision'>) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}/credential`, { revision: proposal.revision, ...entry }),
     answerHelp: (id: string, proposal: ProposalView, text: string) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/help/${enc(proposal.id)}`, { text }),
     pause: (id: string) => send('POST', `/api/robots/${enc(id)}/pause`),
     resume: (id: string) => send('POST', `/api/robots/${enc(id)}/resume`),

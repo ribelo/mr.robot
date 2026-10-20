@@ -60,8 +60,8 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
     ])
     expect(toolResults(id)[0]).toContain('read-only')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    const question = conversation.items.find((item) => item.kind === 'question')
-    if (question?.kind !== 'question') throw new Error('no proposal')
+    const question = conversation.items.find((item) => item.kind === 'proposal')
+    if (question?.kind !== 'proposal') throw new Error('no proposal')
     expect(question.proposal).toMatchObject({ kind: 'member-file', file: { name: 'USER.md' } })
     scripts.set(id, [{ text: 'Thanks.' }])
     await api<ProposalView>(ANNA, `/api/robots/${id}/proposals/${question.proposal.id}`, { body: { revision: question.proposal.revision, approve: true } })

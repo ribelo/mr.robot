@@ -726,7 +726,7 @@ export const TaskPause = Schema.Struct({ paused: Schema.Boolean })
 
 // ---------------------------------------------------------------- Grant proposals and questions
 
-export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover', 'review', 'thread', 'help', 'tool-call'])
+export const ProposalKind = Schema.Literals(['setup', 'grants', 'member-file', 'skill', 'takeover', 'review', 'thread', 'help', 'tool-call', 'question', 'credential'])
 export type ProposalKind = typeof ProposalKind.Type
 
 /** A review Ask (cd-dt2x): a titled list of items the owner approves one by one or all at once. */
@@ -804,6 +804,52 @@ export const ToolCallAsk = Schema.Struct({
 })
 export type ToolCallAsk = typeof ToolCallAsk.Type
 
+/**
+ * A question Ask (v1.15, gb-b4wz): one natural question with real options, put to the owner by the ask tool. `answer` is null while
+ * it is open: an option the owner chose, their own words, or a dismissal (by them, or because they moved on without answering).
+ */
+export const QuestionOption = Schema.Struct({
+  label: Schema.String,
+  value: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  style: Schema.Literals(['default', 'primary', 'danger']),
+})
+export type QuestionOption = typeof QuestionOption.Type
+
+export const QuestionAnswer = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('option'), value: Schema.String, label: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('custom'), text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('dismissed'), reason: Schema.Literals(['owner', 'moved-on']) }),
+])
+export type QuestionAnswer = typeof QuestionAnswer.Type
+
+export const QuestionAsk = Schema.Struct({
+  prompt: Schema.String,
+  help: Schema.NullOr(Schema.String),
+  options: Schema.Array(QuestionOption),
+  allowCustom: Schema.Boolean,
+  dismissOnMoveOn: Schema.Boolean,
+  urgent: Schema.Boolean,
+  answer: Schema.NullOr(QuestionAnswer),
+})
+export type QuestionAsk = typeof QuestionAsk.Type
+
+/**
+ * A credential Ask (v1.15, gb-3192): a Robot asks for a login or a secret. The form is pre-filled with what the Robot gave; saving it creates
+ * the entry under the owner, grants it to the Robot and wakes it with the entry's name. The password goes to the Home, never to the Robot.
+ */
+export const CredentialAsk = Schema.Struct({
+  credential: Schema.Literals(['login', 'secret']),
+  service: Schema.String,
+  why: Schema.String,
+  websites: Schema.Array(Schema.String),
+  scope: Schema.NullOr(Schema.String),
+  /** The name of the entry the owner saved, once saved; declined: true once declined. */
+  entry: Schema.NullOr(Schema.String),
+  declined: Schema.Boolean,
+})
+export type CredentialAsk = typeof CredentialAsk.Type
+
 export const ProposalView = Schema.Struct({
   id: Schema.String,
   kind: ProposalKind,
@@ -824,6 +870,10 @@ export const ProposalView = Schema.Struct({
   help: Schema.optional(HelpAsk),
   /** Tool-call Ask: the stored call and, once answered, the owner's note. */
   toolCall: Schema.optional(ToolCallAsk),
+  /** Question Ask: the question, its options and, once answered, the answer. */
+  question: Schema.optional(QuestionAsk),
+  /** Credential Ask: what the Robot asked for and, once answered, the entry saved or the refusal. */
+  credential: Schema.optional(CredentialAsk),
 })
 export type ProposalView = typeof ProposalView.Type
 
@@ -836,7 +886,23 @@ export const ProposalAnswer = Schema.Struct({
   scope: Schema.optional(Schema.String),
   /** Tool-call Ask only: the owner's optional text, given to the Robot with the answer (why a call was rejected). */
   note: Schema.optional(Schema.String),
+  /** Question Ask only: the value of the option chosen, or the owner's own words in `text`; approve false dismisses. */
+  value: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
 })
+
+/** Saving a credential Ask: the entry the owner filled in (v1.15, gb-923q). The password is sent once, to the Home. */
+export const CredentialSave = Schema.Struct({
+  revision: Schema.Number,
+  name: Schema.String,
+  username: Schema.String,
+  password: Schema.String,
+  websites: Schema.Array(Schema.String),
+  notes: Schema.String,
+  allowRead: Schema.Boolean,
+  shared: Schema.Boolean,
+})
+export type CredentialSave = typeof CredentialSave.Type
 
 /** The owner's text answer to a help Ask. */
 export const HelpAnswer = Schema.Struct({ text: Schema.String.check(Schema.isMinLength(1)) })
@@ -981,6 +1047,8 @@ export const ChatItem = Schema.Union([
     clientId: Schema.optional(Schema.String),
     /** A message of a Thread between two chiefs (ch-iy16): which one. */
     thread: Schema.optional(Schema.Struct({ id: Schema.String, topic: Schema.String })),
+    /** A Robot's question to this Robot, which answers it with robot_reply (v1.15, gb-l1x1). */
+    question: Schema.optional(Schema.Literal(true)),
   }),
   /** A Thread card (ch-iy16): what happened to the Thread, with its state now. */
   Schema.Struct({ kind: Schema.Literal('thread'), ...itemFields, event: ThreadEvent, thread: ThreadView }),
@@ -991,7 +1059,7 @@ export const ChatItem = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String, attachments: Schema.optional(Schema.Array(Attachment)), fallback: Schema.optional(Schema.Boolean) }),
   /** A Task card (mc-c1aa); `by` names who changed it when it was not this Robot. `taskId` is null on a card stored before v1.13 that named none. */
   Schema.Struct({ kind: Schema.Literal('task'), ...itemFields, action: TaskAction, taskId: Schema.NullOr(Schema.String), title: Schema.String, by: Schema.optional(Schema.String) }),
-  Schema.Struct({ kind: Schema.Literal('question'), ...itemFields, proposal: ProposalView }),
+  Schema.Struct({ kind: Schema.Literal('proposal'), ...itemFields, proposal: ProposalView }),
   Schema.Struct({ kind: Schema.Literal('notice'), ...itemFields, text: Schema.String }),
   /** Tools the Robot used in one step, shown collapsed (robot-gr94). */
   Schema.Struct({ kind: Schema.Literal('activity'), ...itemFields, tools: Schema.Array(Schema.String), calls: Schema.optional(Schema.Array(ToolCallView)) }),

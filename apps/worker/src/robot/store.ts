@@ -7,9 +7,10 @@ import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
+import { mrRobotIdOf } from './delivery.ts'
 import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
 import { costBreakdown, type CostBreakdown, type UsageSource } from '@mr-robot/protocol'
-import { GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
+import { emptyGrants, GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
 import type {
   GrantKind,
   GrantLevel,
@@ -23,6 +24,8 @@ import type {
   ProposalView,
   ThreadAsk,
   ToolCallAsk,
+  QuestionAsk,
+  CredentialAsk,
   ReviewView,
   RewindView,
   RobotStatus,
@@ -152,7 +155,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 18
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -164,6 +167,21 @@ function typedSpendLimit(sql: SqlStorage): void {
   const { spendLimitUsd, ...config } = JSON.parse(row.v) as Record<string, unknown>
   if ('spendLimit' in config) return
   sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, spendLimit: legacyRobotSpendLimit(spendLimitUsd) }))
+}
+
+/** The Grants every ordinary Robot is created with (v1.15 ticket 04, gb-qmnc): to message its owner's Mr. Robot, its chief. Removable like any other. */
+export function chiefGrants(ownerId: string): GrantSet {
+  return { ...emptyGrants, tools: { messaging: 'allow' }, recipients: { [mrRobotIdOf(ownerId)]: 'allow' } }
+}
+
+/** A Robot that exists gets them once; a row it already has stays as it is. Mr. Robot is the chief and needs none. */
+function giveChiefRecipient(sql: SqlStorage): void {
+  const row = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  if (row === undefined) return
+  const config = JSON.parse(row.v) as { readonly kind?: string; readonly ownerId?: string }
+  if (config.kind !== 'robot' || config.ownerId === undefined) return
+  sql.exec("INSERT OR IGNORE INTO grant_item (kind, name, level) VALUES ('recipient', ?, 'allow')", mrRobotIdOf(config.ownerId))
+  sql.exec("INSERT OR IGNORE INTO grant_item (kind, name, level) VALUES ('tool', 'messaging', 'allow')")
 }
 
 /**
@@ -203,6 +221,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Every Robot can ask its chief (v1.15 ticket 04, gb-qmnc): the recipient Grant to its owner's Mr. Robot and the messaging group, given once to the Robots that exist.
+  18: [giveChiefRecipient],
   // The Computer became the Box (v1.15 ticket 06, gb-ao8m): its grant, its running time, its cost rows, its state and its open Asks.
   17: [renameComputerToBox],
   // The Box's running time per month (v1.14 ticket 10, ao-54j2); the computer's until v1.15.
@@ -536,26 +556,30 @@ export class RobotStore {
     return this.proposal(id)
   }
 
-  /** When an open, not yet escalated help Ask falls due: at once when urgent, else HELP_ESCALATION_MS after it was made. */
-  helpEscalationDue(row: ProposalRow): number | undefined {
-    if (row.kind !== 'help' || row.status !== 'open' || row.help === undefined || row.help.escalated) return undefined
-    return row.help.urgent ? row.help.created : row.help.created + HELP_ESCALATION_MS
+  /**
+   * Close a question Ask with the owner's answer (or a dismissal, which is a rejection). Compare-and-swap on the revision.
+   * @returns the closed Ask, or undefined when it is not an open question at this revision.
+   */
+  answerQuestion(id: string, revision: number, answer: NonNullable<QuestionAsk['answer']>, now: number): ProposalRow | undefined {
+    const status = answer.kind === 'dismissed' ? 'rejected' : 'approved'
+    const cursor = this.sql.exec("UPDATE proposal SET status = ?, answered_at = ?, payload = json_set(payload, '$.questionAnswer', json(?)) WHERE id = ? AND kind = 'question' AND revision = ? AND status = 'open'", status, now, JSON.stringify(answer), id, revision)
+    return cursor.rowsWritten === 1 ? this.proposal(id) : undefined
   }
 
-  /** The open help Asks whose escalation is due by now. */
-  helpDue(now: number): ProposalRow[] {
-    return this.proposals('open').filter((row) => (this.helpEscalationDue(row) ?? Infinity) <= now)
+  /** Dismiss the open questions that asked to go when the owner moved on; their rows, for the message that carries the news. */
+  dismissOnMoveOn(now: number): ProposalRow[] {
+    const open = this.proposals('open').filter((row) => row.kind === 'question' && row.question?.dismissOnMoveOn === true)
+    return open.flatMap((row) => this.answerQuestion(row.id, row.revision, { kind: 'dismissed', reason: 'moved-on' }, now) ?? [])
   }
 
-  /** The earliest escalation still to come, for the alarm. */
-  nextHelpEscalation(): number | undefined {
-    const dues = this.proposals('open').flatMap((row) => this.helpEscalationDue(row) ?? [])
-    return dues.length === 0 ? undefined : Math.min(...dues)
-  }
-
-  /** Remember that Mr. Robot was told about this help Ask: it is escalated once. */
-  markHelpEscalated(id: string, now: number): void {
-    this.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.escalatedAt', ?) WHERE id = ?", now, id)
+  /** Close a credential Ask: saved (the entry's name) or declined. */
+  answerCredential(id: string, revision: number, result: { readonly entry: string } | { readonly declined: true }, now: number): ProposalRow | undefined {
+    const outcome = 'entry' in result ? { status: 'approved', patch: { credentialEntry: result.entry } } : { status: 'rejected', patch: { credentialDeclined: true } }
+    const cursor = this.sql.exec(
+      "UPDATE proposal SET status = ?, answered_at = ?, payload = json_patch(payload, json(?)) WHERE id = ? AND kind = 'credential' AND revision = ? AND status = 'open'",
+      outcome.status, now, JSON.stringify(outcome.patch), id, revision,
+    )
+    return cursor.rowsWritten === 1 ? this.proposal(id) : undefined
   }
 
   closeProposal(id: string, now: number): void {
@@ -809,9 +833,6 @@ function threadOf(payload: Record<string, unknown>): { thread: ThreadAsk } | Rec
   return { thread: { ...thread, scope: typeof payload['scope'] === 'string' ? payload['scope'] : thread.scope } }
 }
 
-/** A help Ask goes to Mr. Robot this long after it was made if nobody answered; an urgent one goes at once (sk-35i9, sk-myhb). */
-export const HELP_ESCALATION_MS = 30 * 60_000
-
 function helpOf(payload: Record<string, unknown>): { help: HelpAsk } | Record<string, never> {
   const help = payload['help'] as Omit<HelpAsk, 'answeredBy' | 'answer' | 'escalated' | 'override'> | undefined
   if (help === undefined) return {}
@@ -848,6 +869,18 @@ function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk }
   }
 }
 
+function questionOf(payload: Record<string, unknown>): { question: QuestionAsk } | Record<string, never> {
+  const question = payload['question'] as Omit<QuestionAsk, 'answer'> | undefined
+  if (question === undefined) return {}
+  return { question: { ...question, answer: (payload['questionAnswer'] as QuestionAsk['answer'] | undefined) ?? null } }
+}
+
+function credentialOf(payload: Record<string, unknown>): { credential: CredentialAsk } | Record<string, never> {
+  const credential = payload['credential'] as Omit<CredentialAsk, 'entry' | 'declined'> | undefined
+  if (credential === undefined) return {}
+  return { credential: { ...credential, entry: typeof payload['credentialEntry'] === 'string' ? payload['credentialEntry'] : null, declined: payload['credentialDeclined'] === true } }
+}
+
 function proposalFromSql(row: ProposalSql): ProposalRow {
   const payload = JSON.parse(row.payload) as Record<string, unknown>
   return {
@@ -864,6 +897,8 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
     ...threadOf(payload),
     ...helpOf(payload),
     ...toolCallOf(payload),
+    ...questionOf(payload),
+    ...credentialOf(payload),
     createdAt: row.created_at,
     answeredAt: row.answered_at,
   }

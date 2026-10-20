@@ -122,11 +122,11 @@ export const conversation = (details = false) => Effect.gen(function* () {
   })
   // A proposal made inside a code-mode program has no direct tool result to project from (robot-vy9z);
   // answered ones stay too, as the stream's record of the ask (rb-r0oj).
-  const shown = new Set(items.flatMap((item) => (item.kind === 'question' ? [item.proposal.id] : [])))
+  const shown = new Set(items.flatMap((item) => (item.kind === 'proposal' ? [item.proposal.id] : [])))
   for (const row of store.proposals().filter((proposal) => proposal.createdAt >= current.createdAt && proposal.status !== 'superseded')) {
     if (shown.has(row.id)) continue
     const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
-    items.splice(position, 0, { kind: 'question', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
+    items.splice(position, 0, { kind: 'proposal', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
   }
   // One card per delegation (ao-15ui), where the Robot started it; it follows the Subagent's state.
   for (const row of new SubagentStore(store.sql).of(current.liveSessionId).reverse()) {
@@ -157,7 +157,7 @@ function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
     case 'delegation': return { ...item, label: mask(item.label), result: item.result === null ? null : mask(item.result) }
     case 'activity': return item.calls === undefined ? item : { ...item, calls: item.calls.map((call) => ({ ...call, args: mask(call.args), result: mask(call.result), inner: call.inner.map((inner) => ({ ...inner, args: mask(inner.args) })) })) }
     // A tool-call Ask shows the stored arguments; a secret value among them is masked like the chat (sk-hx8j).
-    case 'question': {
+    case 'proposal': {
       const call = item.proposal.toolCall
       if (call === undefined) return item
       return { ...item, proposal: { ...item.proposal, purpose: mask(item.proposal.purpose), toolCall: { ...call, reason: mask(call.reason), arguments: call.arguments.map((argument) => ({ ...argument, value: mask(argument.value) })) } } }
@@ -386,7 +386,7 @@ function lastLine(items: readonly ChatItem[]): { text: string; at: number } | un
     // A failure notice is shown in the conversation; the list keeps the last real line.
     if (item.kind === 'notice' && !item.text.startsWith('The Turn failed')) return { text: item.text, at: item.at }
     // Only an open Ask is news for the list; an answered one is history.
-    if (item.kind === 'question' && item.proposal.status === 'open') return { text: `Waiting for you: ${item.proposal.purpose}`, at: item.at }
+    if (item.kind === 'proposal' && item.proposal.status === 'open') return { text: `Waiting for you: ${item.proposal.purpose}`, at: item.at }
   }
   return undefined
 }

@@ -9,6 +9,7 @@ import * as Schema from 'effect/Schema'
 import {
   LoginInput,
   ConnectionPaste,
+  CredentialSave,
   ConnectionPatch,
   PluginSettingsInput,
   PluginSwitch,
@@ -604,7 +605,15 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/robots/:id/proposals/:proposal', (c, { id, proposal }) => Effect.gen(function* () {
     yield* owner(c, id)
     const answer = yield* decodeBody(c.request, ProposalAnswer)
-    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved, answer.scope, answer.note))
+    const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved, answer.scope, answer.note, { ...(answer.value === undefined ? {} : { value: answer.value }), ...(answer.text === undefined ? {} : { text: answer.text }) }))
+    if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : result.reason === 'not-yours' ? forbidden('only the owner answers this Ask') : notFound('no such proposal'))
+    return result.proposal
+  }))
+  // Saving a credential Ask (v1.15 ticket 05): the form's password goes to the Home through this call and nowhere else.
+  .on('POST', '/api/robots/:id/proposals/:proposal/credential', (c, { id, proposal }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const save = yield* decodeBody(c.request, CredentialSave)
+    const result = yield* call((): Promise<AnswerResult> => robot(c, id).saveCredential(proposal, save.revision, save))
     if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : result.reason === 'not-yours' ? forbidden('only the owner answers this Ask') : notFound('no such proposal'))
     return result.proposal
   }))

@@ -43,7 +43,7 @@ describe('help card (sk-fcr1)', () => {
   })
 
   it('keeps one line while open and the whole exchange once answered', () => {
-    const item = (proposal: ProposalView): ChatItem[] => [{ kind: 'question', id: 'q', seq: 1, at, proposal }]
+    const item = (proposal: ProposalView): ChatItem[] => [{ kind: 'proposal', id: 'q', seq: 1, at, proposal }]
     const { rerender } = render(<ChatView items={item(help)} meId="m-1" working={false} canAnswer={true} now={at} />)
     expect(screen.getByText('Asks for help · answer below')).toBeTruthy()
     expect(screen.queryByLabelText('Your answer')).toBeNull()
@@ -67,7 +67,7 @@ describe('help card (sk-fcr1)', () => {
   })
 
   it('lets the owner answer once more after Mr. Robot, and shows both answers (sk-q86i)', () => {
-    const item = (proposal: ProposalView): ChatItem[] => [{ kind: 'question', id: 'q', seq: 1, at, proposal }]
+    const item = (proposal: ProposalView): ChatItem[] => [{ kind: 'proposal', id: 'q', seq: 1, at, proposal }]
     const onHelp = vi.fn()
     const byChief: ProposalView = { ...help, status: 'done', help: { ...help.help!, answeredBy: 'mr-robot', answer: 'Use the old number.' } }
     const { rerender } = render(<ChatView items={item(byChief)} meId="m-1" working={false} canAnswer={true} onHelp={onHelp} now={at} />)
@@ -86,7 +86,7 @@ describe('help card (sk-fcr1)', () => {
   })
 
   it('offers no override to someone who cannot answer, or after the owner answered', () => {
-    const item = (proposal: ProposalView): ChatItem[] => [{ kind: 'question', id: 'q', seq: 1, at, proposal }]
+    const item = (proposal: ProposalView): ChatItem[] => [{ kind: 'proposal', id: 'q', seq: 1, at, proposal }]
     const byChief: ProposalView = { ...help, status: 'done', help: { ...help.help!, answeredBy: 'mr-robot', answer: 'Use the old number.' } }
     const { rerender } = render(<ChatView items={item(byChief)} meId="m-1" working={false} canAnswer={false} now={at} />)
     expect(screen.queryByLabelText('Your answer')).toBeNull()

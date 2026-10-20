@@ -34,6 +34,13 @@ export const SCREEN_PREFIX = 'screen:'
 /** How many attachments one say may carry. */
 export const SAY_MAX_ATTACHMENTS = 10
 
+/** What the owner's message tells the Robot about the questions it moved past, after the message (gb-nr8s); the chat drops it (projection.ts). */
+export const DISMISSED_TRAILER = /\n\n\[Platform: you asked [^\n]*\]$/
+
+export function dismissedTrailer(asks: ReadonlyArray<{ readonly askId: string; readonly prompt: string }>): string {
+  return `\n\n[Platform: you asked ${asks.map((ask) => `"${ask.prompt.replace(/\s+/g, ' ').slice(0, 120)}" (${ask.askId})`).join(' and ')}; your owner moved on without answering, so it was dismissed. Do not ask again.]`
+}
+
 // ---------------------------------------------------------------- the safety net (v1.15 ticket 02)
 
 /** How the platform step that follows a Turn without a say begins (tests of the scripted model know it by this). */

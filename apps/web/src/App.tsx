@@ -16,6 +16,7 @@ import { Composer } from './components/Composer.tsx'
 import { ChatScroll } from './components/ChatScroll.tsx'
 import { usePendingSends, type OutgoingMessage } from './components/use-pending-sends.ts'
 import { AskBar } from './components/AskBar.tsx'
+import type { AskReply } from './components/ask-reply.ts'
 import { Panel } from './components/Panel.tsx'
 import { RobotList, type GroupChange } from './components/RobotList.tsx'
 import type { SaveOutcome } from './components/SaveButton.tsx'
@@ -177,12 +178,17 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   const answerHelp = async (proposal: ProposalView, text: string) => {
     setFailure(exitFailure(await command((api) => api.answerHelp(id, proposal, text), [keys.robot(id), keys.robots])))
   }
+  const reply = async (proposal: ProposalView, answered: AskReply) => {
+    setFailure(exitFailure(await command((api) => answered.kind === 'save' ? api.saveCredential(id, proposal, answered.entry)
+      : answered.kind === 'decline' ? api.answer(id, proposal, false)
+        : api.choose(id, proposal, answered.kind === 'option' ? { value: answered.value } : answered.kind === 'custom' ? { text: answered.text } : { dismiss: true }), [keys.robot(id), keys.robots, keys.secrets])))
+  }
   const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string, note?: string) => {
     setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved, scope, note), [keys.robot(id), keys.robots])))
   }
 
   // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
-  const asks = panel.canEdit ? conversation.items.flatMap((item) => (item.kind === 'question' && item.proposal.status === 'open' ? [item.proposal] : [])) : []
+  const asks = panel.canEdit ? conversation.items.flatMap((item) => (item.kind === 'proposal' && item.proposal.status === 'open' ? [item.proposal] : [])) : []
   const identity = robot?.identity ?? panel.summary.identity
   // Search within the conversation (pl-8594): every item's text, newest match first.
   const needle = search?.query.trim().toLowerCase() ?? ''
@@ -244,7 +250,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
           </>)}
         </ChatScroll>
         {asks.length > 0 && !replyingInstead ? (
-          <AskBar asks={asks} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} onReplyInstead={() => setReplyingInstead(true)} />
+          <AskBar asks={asks} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} onReply={(proposal, answered) => void reply(proposal, answered)} onReplyInstead={() => setReplyingInstead(true)} />
         ) : (
         <Composer
           placeholder={`Message ${identity.name}`}
@@ -284,7 +290,7 @@ function searchText(item: ConversationData['items'][number]): string {
     case 'message': return item.text + ' ' + item.attachments.map((file) => file.name).join(' ')
     case 'reply': case 'notice': case 'thinking': return item.text
     case 'task': return item.title
-    case 'question': return item.proposal.purpose
+    case 'proposal': return item.proposal.purpose
     case 'thread': return item.thread.topic
     default: return ''
   }

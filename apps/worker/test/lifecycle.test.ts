@@ -1,6 +1,7 @@
 import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, ProposalView, RegistryEntry } from './types.ts'
+import type { Me } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels } from './api.ts'
 import { scripts } from './stub-llm.ts'
 
@@ -36,8 +37,8 @@ async function setupThroughProposal(as: string): Promise<{ id: string; proposal:
   await api(as, `/api/robots/${id}/messages`, { body: { text: 'Check Otodom every morning.' } })
   await settle(id)
   const conversation = (await api<Conversation>(as, `/api/robots/${id}/conversation`)).body
-  const question = conversation.items.find((item) => item.kind === 'question')
-  if (question?.kind !== 'question') throw new Error('no setup question in the conversation')
+  const question = conversation.items.find((item) => item.kind === 'proposal')
+  if (question?.kind !== 'proposal') throw new Error('no setup question in the conversation')
   return { id, proposal: question.proposal }
 }
 
@@ -74,7 +75,8 @@ describe('creating a Robot', () => {
     const robot = (await robots(ANNA)).find((entry) => entry.id === id)
     expect(robot).toMatchObject({ status: 'active', identity: { name: 'Flat Watcher' } })
     const settings = await env.ROBOT.getByName(id).settings()
-    expect(settings.grants).toEqual({ tools: { exa: 'ask', files: 'ask', tasks: 'allow', web: 'allow' }, skills: {}, recipients: {}, secrets: {}, hosts: {}, connections: {} })
+    // The approved set over what every Robot is created with: messaging, and the recipient Grant to its owner's Mr. Robot (gb-qmnc).
+    expect(settings.grants).toEqual({ tools: { exa: 'ask', files: 'ask', messaging: 'allow', tasks: 'allow', web: 'allow' }, skills: {}, recipients: { [`mr-robot-${(await api<Me>(ANNA, '/api/me')).body.id}`]: 'allow' }, secrets: {}, hosts: {}, connections: {} })
     // Ask items are registered; what was neither approved nor a default is not (sk-3sij).
     const registered = await env.ROBOT.getByName(id).toolNames()
     expect(registered).toEqual(expect.arrayContaining(['delete_file', 'web_search_exa', 'task_create']))

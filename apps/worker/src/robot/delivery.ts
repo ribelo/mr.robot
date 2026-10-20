@@ -25,6 +25,9 @@ export function deliveryOf(input: DeliveryInput, ownerId: string): Delivery {
     case 'channel':
       // The Channel identified the sender as the owner (ao-rsfo); a webhook never is.
       return input.payload?.['fromOwner'] === true ? 'steer' : 'followup'
+    // The owner's answer to a question or a credential request is theirs, like a message (v1.15).
+    case 'platform':
+      return input.payload?.['askAnswer'] !== undefined ? 'steer' : 'followup'
     default:
       return 'followup'
   }
@@ -34,7 +37,7 @@ export function deliveryOf(input: DeliveryInput, ownerId: string): Delivery {
  * Whether the owner caused a Wake-up (v1.15, gb-xgd7): their message in the app or on a Channel that knows them, their answer to an Ask,
  * the Takeover they handed back. Tasks, Robot messages (Mr. Robot's to his staff too), Subagent reports and platform notices are nobody's ask.
  */
-export function causedByOwner(wakeup: Wakeup, ownerId: string): boolean {
+export function causedByOwner(wakeup: Pick<Wakeup, 'kind' | 'sender' | 'payload'>, ownerId: string): boolean {
   switch (wakeup.kind) {
     case 'member': return wakeup.sender.kind === 'member' && wakeup.sender.memberId === ownerId
     case 'channel': return wakeup.payload['fromOwner'] === true
@@ -50,7 +53,7 @@ export function robotMessageDelivery(from: { readonly robotId: string; readonly 
 }
 
 /** Payload fields that tie a Wake-up to something of its own (an Ask's answer, a request to reply to): it is never joined. */
-const OWN_FIELDS = ['toolCallAnswer', 'helpAnswer', 'requestId', 'replyHandle', 'replyTo', 'thread', 'threadId', 'taskId', 'summary']
+const OWN_FIELDS = ['toolCallAnswer', 'helpAnswer', 'askAnswer', 'requestId', 'replyHandle', 'replyTo', 'thread', 'threadId', 'taskId', 'summary']
 
 const senderKey = (wakeup: Wakeup): string | undefined => {
   if (OWN_FIELDS.some((field) => wakeup.payload[field] !== undefined)) return undefined

@@ -33,8 +33,8 @@ async function proposeReview(id: string) {
   scripts.set(id, [{ calls: [{ name: 'propose_review', args: { title: 'Replies to send', items: ITEMS } }] }, { text: 'Asked.' }])
   await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'draft the replies' } })
   await settle(id)
-  const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.findLast((item) => item.kind === 'question')
-  if (question?.kind !== 'question') throw new Error('no review question')
+  const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.findLast((item) => item.kind === 'proposal')
+  if (question?.kind !== 'proposal') throw new Error('no review question')
   return question.proposal
 }
 
@@ -60,7 +60,7 @@ describe('review Ask (v1.6 ticket 06)', () => {
     // The answer is final: a second one is stale, and no new proposal was made.
     const again = await api(ANNA, `/api/robots/${id}/proposals/${proposal.id}`, { body: { revision: proposal.revision, approve: true } })
     expect(again.status).toBe(409)
-    const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'question')
+    const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'proposal')
     expect(items).toHaveLength(1)
   })
 
@@ -82,7 +82,7 @@ describe('review Ask (v1.6 ticket 06)', () => {
     const id = await activeRobot()
     const items = (count: number, body = 'x') => Array.from({ length: count }, (_, index) => ({ id: `i${index}`, title: `Item ${index}`, body }))
     const toolResult = () => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join('')).at(-1)!
-    const questions = async () => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'question')
+    const questions = async () => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'proposal')
 
     for (const [tooMany, expected] of [[items(201), 'at most 200 items'], [items(1, 'x'.repeat(8 * 1024 + 1)), 'at most 8 KB']] as const) {
       scripts.set(id, [{ calls: [{ name: 'propose_review', args: { title: 'Too much', items: tooMany } }] }, { text: 'Too much.' }])

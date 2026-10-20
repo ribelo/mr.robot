@@ -31,7 +31,7 @@ describe('the chat in code mode (the default)', () => {
     const items = (await api<Conversation>(ANNA, `/api/robots/${body.id}/conversation`)).body.items
     expect(items.find((item) => item.kind === 'message')).toMatchObject({ reaction: '👍' })
     expect(items.find((item) => item.kind === 'task')).toMatchObject({ action: 'created', title: 'Invoice check' })
-    expect(items.find((item) => item.kind === 'question')).toMatchObject({ proposal: { kind: 'grants', purpose: 'Read the web for prices' } })
+    expect(items.find((item) => item.kind === 'proposal')).toMatchObject({ proposal: { kind: 'grants', purpose: 'Read the web for prices' } })
     // One collapsed line for the program and the tools it called (react is shown as the 👍 instead).
     expect(items.find((item) => item.kind === 'activity')).toMatchObject({ tools: ['code', 'task_create', 'propose_grants'] })
   })

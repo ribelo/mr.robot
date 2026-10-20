@@ -4,9 +4,9 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: a new Robot holds the chief recipient Grant; the migration gives it to an existing Robot; removing it makes robot_send to the chief refuse (gb-qmnc)
-- [ ] Workerd test: the question flag labels the delivered message (gb-l1x1)
-- [ ] Workerd test: need_help and the help tools are absent from every composition; an open help Ask from before still closes with an answer (gb-c0ub)
-- [ ] The chief rule and the addressee rule are in the prompt sections role and how-you-work (gb-2o04, gb-84zu)
+- [x] Workerd test: a new Robot holds the chief recipient Grant; the migration gives it to an existing Robot; removing it makes robot_send to the chief refuse (gb-qmnc)
+- [x] Workerd test: the question flag labels the delivered message (gb-l1x1)
+- [x] Workerd test: need_help and the help tools are absent from every composition; an open help Ask from before still closes with an answer (gb-c0ub)
+- [x] The chief rule and the addressee rule are in the prompt sections role and how-you-work (gb-2o04, gb-84zu)

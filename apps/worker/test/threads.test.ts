@@ -41,7 +41,7 @@ async function say(as: string, id: string, script: Parameters<typeof scripts.set
 const chat = async (as: string, id: string) => (await api<Conversation>(as, `/api/robots/${id}/conversation`)).body.items
 const toolResults = (id: string) => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 const openAsk = async (as: string, id: string): Promise<ProposalView> => {
-  const ask = (await chat(as, id)).flatMap((item) => (item.kind === 'question' && item.proposal.status === 'open' && item.proposal.kind === 'thread' ? [item.proposal] : [])).at(-1)
+  const ask = (await chat(as, id)).flatMap((item) => (item.kind === 'proposal' && item.proposal.status === 'open' && item.proposal.kind === 'thread' ? [item.proposal] : [])).at(-1)
   if (ask === undefined) throw new Error('no open Thread Ask')
   return ask
 }
@@ -115,7 +115,7 @@ describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', (
     expect(told).not.toContain('because')
     expect((await api<RobotPanel>(ANNA, `/api/robots/${anna}/panel`)).body.threads![0]).toMatchObject({ id, state: 'declined' })
     // The Ask on the other side is gone.
-    expect((await chat(ANNA, anna)).some((item) => item.kind === 'question' && item.proposal.status === 'open')).toBe(false)
+    expect((await chat(ANNA, anna)).some((item) => item.kind === 'proposal' && item.proposal.status === 'open')).toBe(false)
     await say(ANNA, anna, [{ calls: [{ name: 'thread_send', args: { thread_id: id, text: 'hello?', idempotency_key: 'k' } }] }, { text: 'ok' }])
     expect(toolResults(anna).at(-1)).toContain('declined')
   })
@@ -250,7 +250,7 @@ describe('closing and the lists (ch-6g7j, ch-rlnd, ch-gckb, ch-6fcp, ch-5ngu)', 
   it('puts an outcome to the owner as a review Ask (ch-6g7j)', async () => {
     const id = await openThread()
     await say(ANNA, anna, [{ calls: [{ name: 'propose_review', args: { title: `Outcome of "Dinner on Friday"`, items: [{ id: 'dinner', title: 'Dinner Friday 19:00', body: 'Agreed with Ben\'s Mr. Robot in Thread ' + id }] } }] }, { text: 'Asked you.' }])
-    const review = (await chat(ANNA, anna)).find((item) => item.kind === 'question' && item.proposal.kind === 'review')
+    const review = (await chat(ANNA, anna)).find((item) => item.kind === 'proposal' && item.proposal.kind === 'review')
     expect(review).toMatchObject({ proposal: { status: 'open', review: { title: 'Outcome of "Dinner on Friday"' } } })
   })
 
@@ -277,7 +277,7 @@ describe('closing and the lists (ch-6g7j, ch-rlnd, ch-gckb, ch-6fcp, ch-5ngu)', 
       expect((await api<RobotPanel>(as, `/api/robots/${robot}/panel`)).body.threads![0]).toMatchObject({ id, state: 'closed', closedBy: 'expired' })
       const items = await chat(as, robot)
       expect(items.some((item) => item.kind === 'thread' && item.event === 'expired')).toBe(true)
-      expect(items.some((item) => item.kind === 'question' && item.proposal.status === 'open')).toBe(false)
+      expect(items.some((item) => item.kind === 'proposal' && item.proposal.status === 'open')).toBe(false)
     }
   })
 

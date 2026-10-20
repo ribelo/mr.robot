@@ -51,8 +51,8 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     await settle(id)
     expect(toolResults(id)[0]).toContain('nothing is granted until they approve')
     expect((await api<RobotPanel>(ANNA, `/api/robots/${other}/panel`)).body.settings.grants.tools['web']).toBeUndefined()
-    const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
-    expect(ask?.kind === 'question' ? ask.proposal.purpose : '').toBe('Mr. Robot asks: it needs to search the web')
+    const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'proposal' && item.proposal.status === 'open')
+    expect(ask?.kind === 'proposal' ? ask.proposal.purpose : '').toBe('Mr. Robot asks: it needs to search the web')
   })
 
   it('proposes levels for another Robot and reads them back with robot_grants (sk-iq3n)', async () => {
@@ -67,8 +67,8 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     scripts.set(id, [{ calls: [{ name: 'robot_propose_grants', args: { robot_id: other, purpose: 'it should browse with you watching', tools } }] }, { text: 'Asked.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'set up the new robot' } })
     await settle(id)
-    const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'question' && item.proposal.status === 'open')
-    if (ask?.kind !== 'question') throw new Error('no grant question')
+    const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'proposal' && item.proposal.status === 'open')
+    if (ask?.kind !== 'proposal') throw new Error('no grant question')
     expect(ask.proposal.grants?.tools).toEqual({ web: 'allow', browser: 'ask', tasks: 'deny' })
     await api(ANNA, `/api/robots/${other}/proposals/${ask.proposal.id}`, { body: { revision: ask.proposal.revision, approve: true } })
     await settle(other)

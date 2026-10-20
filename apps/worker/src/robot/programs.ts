@@ -12,7 +12,7 @@ import { currentMonth } from '../home/home.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { chainOf, modelOf, withModel } from './chain.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
-import type { ProposalRow, RobotConfig, RobotStore, WakeupKind } from './store.ts'
+import { chiefGrants, type ProposalRow, type RobotConfig, type RobotStore, type WakeupKind } from './store.ts'
 import { setupGrants } from '../agent/catalog.ts'
 import { effectiveSpendLimit, emptyGrants, grantSetFrom, overlayGrants, usableNames, type HomeSpendLimit } from '@mr-robot/protocol'
 import { THREAD_PAUSE_AT } from '../agent/sources.ts'
@@ -21,7 +21,7 @@ import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-s
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
-import { deliveryOf, robotMessageDelivery } from './delivery.ts'
+import { causedByOwner, deliveryOf, robotMessageDelivery } from './delivery.ts'
 import { SubagentStore } from './subagent-store.ts'
 import { DEFAULT_IDLE_FLOOR_TOKENS, idleSettings, type IdleStep } from './idle.ts'
 
@@ -49,6 +49,8 @@ interface MessageCommon {
   readonly text: string
   readonly requestId: string
   readonly chain: { readonly id: string; readonly hops: number }
+  /** A question for the recipient to answer, not work to do (v1.15, gb-l1x1). */
+  readonly question?: boolean
 }
 
 export type RobotMessage =
@@ -124,8 +126,11 @@ export const wake = (input: WakeInput) => Effect.gen(function* () {
   if (seen !== undefined) return seen[1]
   // Any Wake-up ends the idle wait: no warming or idle compaction is due any more (ao-8hi8).
   store.delete(IDLE_PLAN)
+  // The owner moved on: a question that asked to go when they did is dismissed, and this message tells the Robot so (gb-nr8s).
+  const dismissed = causedByOwner({ kind: input.kind, sender: input.sender, payload: input.payload ?? {} }, current.ownerId) && input.kind !== 'platform' ? store.dismissOnMoveOn(Date.now()) : []
   const id = store.enqueue(input.kind, input.sender, input.text, {
     ...input.payload,
+    ...(dismissed.length === 0 ? {} : { dismissedAsks: dismissed.map((row) => ({ askId: row.id, prompt: row.question?.prompt ?? row.purpose })) }),
     attachments: input.attachments ?? [],
     ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
   }, Date.now(), deliveryOf(input, current.ownerId))
@@ -237,7 +242,7 @@ const sender = Effect.map(config, (current) => ({ robotId: current.id, ownerId: 
 const robotSender = (from: RobotMessage['from']): Sender =>
   ({ kind: 'robot', robotId: from.robotId, name: from.name, avatarColor: from.avatarColor, avatarSeed: from.avatarSeed ?? from.robotId })
 
-export const sendRobotMessage = (to: string, text: string, idempotencyKey: string) => Effect.gen(function* () {
+export const sendRobotMessage = (to: string, text: string, idempotencyKey: string, question = false) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
@@ -248,9 +253,9 @@ export const sendRobotMessage = (to: string, text: string, idempotencyKey: strin
   const id = `msg-${yield* promise(() => digest(`${current.id}:${idempotencyKey}`))}`
   const existing = store.sql.exec<{ status: string }>('SELECT status FROM outbox WHERE id = ?', id).toArray()[0]
   if (existing !== undefined) return { requestId: id, status: existing.status === 'failed' ? 'failed earlier' : 'already sent' }
-  yield* enqueueOutbox(to, { id, kind: 'request', from: yield* sender, text: yield* platform.mask(text), requestId: id, chain: { id: chain.id, hops: chain.hops + 1 } })
+  yield* enqueueOutbox(to, { id, kind: 'request', from: yield* sender, text: yield* platform.mask(text), requestId: id, chain: { id: chain.id, hops: chain.hops + 1 }, ...(question ? { question: true } : {}) })
   yield* platform.background(deliverOutbox)
-  return { requestId: id, status: 'sent; the reply will arrive as a message' }
+  return { requestId: id, status: question ? 'asked; the answer will arrive as a message' : 'sent; the reply will arrive as a message' }
 })
 
 export const replyRobotMessage = (handle: string, text: string) => Effect.gen(function* () {
@@ -307,7 +312,7 @@ export const receive = (message: RobotMessage) => Effect.gen(function* () {
       'robot',
       robotSender(message.from),
       message.text,
-      message.kind === 'request' ? { requestId: message.requestId, replyHandle: handle, chain: message.chain } : { replyTo: message.requestId, chain: message.chain },
+      message.kind === 'request' ? { requestId: message.requestId, replyHandle: handle, chain: message.chain, ...(message.question === true ? { question: true } : {}) } : { replyTo: message.requestId, chain: message.chain },
       Date.now(),
       robotMessageDelivery(message.from, message.kind, current.ownerId),
     )
@@ -507,18 +512,22 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
 // ------------------------------------------------------------------ proposals and the owner's answers (robot-cobv, robot-vy9z)
 
 export function proposalView(row: ProposalRow): ProposalView {
-  return { id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill, ...(row.review === undefined ? {} : { review: row.review }), ...(row.thread === undefined ? {} : { thread: row.thread }), ...(row.help === undefined ? {} : { help: row.help }), ...(row.toolCall === undefined ? {} : { toolCall: row.toolCall }) }
+  return {
+    id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill,
+    ...(row.review === undefined ? {} : { review: row.review }), ...(row.thread === undefined ? {} : { thread: row.thread }), ...(row.help === undefined ? {} : { help: row.help }), ...(row.toolCall === undefined ? {} : { toolCall: row.toolCall }),
+    ...(row.question === undefined ? {} : { question: row.question }), ...(row.credential === undefined ? {} : { credential: row.credential }),
+  }
 }
 
 /** Who answers an Ask. */
 export type Answerer = 'owner' | 'mr-robot'
 
 /**
- * The only Asks Mr. Robot answers: requests for help (sk-gag7). Every other Ask is the owner's alone; consent to
+ * The Asks Mr. Robot answers: none since v1.15 (his help_answer is gone; open help Asks are the owner's to answer). Every Ask is the owner's alone; consent to
  * a tool call above all (sk-iis1). A list of what he may answer, not of what he may not: a new kind of Ask is the owner's
  * until someone decides otherwise.
  */
-const MR_ROBOT_ASKS: ReadonlySet<ProposalView['kind']> = new Set(['help'])
+const MR_ROBOT_ASKS: ReadonlySet<ProposalView['kind']> = new Set()
 
 /** Whether this answerer may answer an Ask of this kind. */
 export function mayAnswer(kind: ProposalView['kind'], by: Answerer): boolean {
@@ -563,7 +572,7 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
   switch (proposal.kind) {
     case 'setup': {
       // Approved items as proposed, files, web and exa at ask unless proposed, the rest deny (sk-3sij).
-      const grants = setupGrants(proposal.grants ?? emptyGrants)
+      const grants = overlayGrants(store.grants(), setupGrants(proposal.grants ?? emptyGrants))
       store.transaction(() => {
         store.setGrants(grants)
         store.updateConfig(() => ({ status: 'active' }))
@@ -628,13 +637,18 @@ const threadAnswered = (proposal: ProposalRow, approved: boolean) => Effect.gen(
   if (told._tag === 'Failure') store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), `Thread "${ask.topic}": ${String(told.failure)}`, Date.now())
 })
 
-export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[], scope?: string, extra: { readonly note?: string; readonly by?: Answerer } = {}) => Effect.gen(function* () {
+export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[], scope?: string, extra: { readonly note?: string; readonly value?: string; readonly text?: string; readonly by?: Answerer } = {}) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const pending = store.proposal(proposalId)
   if (pending === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
   if (!mayAnswer(pending.kind, extra.by ?? 'owner')) return { ok: false, reason: 'not-yours' } as AnswerResult
   if (pending.kind === 'tool-call') return yield* answerToolCall(pending, revision, approve, extra.note)
+  if (pending.kind === 'question') return yield* answerQuestion(pending, revision, approve, extra.value, extra.text)
+  if (pending.kind === 'credential') {
+    if (approve) return yield* invalid('save the form to answer a credential request; to refuse it, decline')
+    return yield* answerCredential(pending, revision, { declined: true })
+  }
   // A review is one answer: the listed ids are approved, every other item is rejected (cd-ueft).
   const review = pending.kind === 'review' ? pending.review : undefined
   const ids = review?.items.map((item) => item.id) ?? []
@@ -686,6 +700,56 @@ const answerToolCall = (pending: ProposalRow, revision: number, approve: boolean
   return { ok: true, proposal: proposalView(answered) } as AnswerResult
 })
 
+/**
+ * The owner's answer to a question Ask (v1.15, gb-1lfb, gb-ewfe): an option (by value), their own words when the question allows them, or a
+ * dismissal. One answer per Ask, compare-and-swap on the revision. It wakes the Robot as a steer carrying the Ask id and the value.
+ */
+const answerQuestion = (pending: ProposalRow, revision: number, approve: boolean, value: string | undefined, text: string | undefined) => Effect.gen(function* () {
+  const platform = yield* RobotPlatform
+  const store = yield* RobotState
+  const question = pending.question
+  if (question === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
+  const custom = text?.trim() ?? ''
+  const option = value === undefined ? undefined : question.options.find((entry) => entry.value === value)
+  if (approve && option === undefined && !(question.allowCustom && custom !== '')) {
+    return yield* invalid(value !== undefined ? `"${value}" is not one of the options of this question` : question.allowCustom ? 'answer with an option or write your answer' : 'answer with one of the options')
+  }
+  const answer: NonNullable<ProposalView['question']>['answer'] = !approve ? { kind: 'dismissed', reason: 'owner' } : option !== undefined ? { kind: 'option', value: option.value, label: option.label } : { kind: 'custom', text: custom }
+  const answered = store.answerQuestion(pending.id, revision, answer!, Date.now())
+  if (answered === undefined) return { ok: false, reason: 'stale' } as AnswerResult
+  yield* platform.changed()
+  const label = answer!.kind === 'option' ? { askId: answered.id, kind: 'option' as const, label: answer!.label, value: answer!.value } : answer!.kind === 'custom' ? { askId: answered.id, kind: 'custom' as const } : { askId: answered.id, kind: 'dismissed' as const }
+  yield* wake({
+    kind: 'platform',
+    sender: { kind: 'platform' },
+    text: answer!.kind === 'option' ? answer!.value : answer!.kind === 'custom' ? answer!.text : 'Your owner chose not to answer. Do not ask it again; decide yourself, or leave it.',
+    payload: { byOwner: true, summary: answer!.kind === 'dismissed' ? 'Dismissed a question' : 'Answered a question', askAnswer: label },
+  })
+  return { ok: true, proposal: proposalView(answered) } as AnswerResult
+})
+
+/**
+ * The owner declined a credential request, or saved it (saveCredential below calls this with the entry). One answer per Ask. It wakes the
+ * Robot as a steer: with the entry's name, or with the refusal (gb-923q, gb-7dl9).
+ */
+export const answerCredential = (pending: ProposalRow, revision: number, result: { readonly entry: string } | { readonly declined: true }) => Effect.gen(function* () {
+  const platform = yield* RobotPlatform
+  const store = yield* RobotState
+  const answered = store.answerCredential(pending.id, revision, result, Date.now())
+  if (answered === undefined) return { ok: false, reason: 'stale' } as AnswerResult
+  yield* platform.changed()
+  const service = pending.credential?.service ?? 'the service'
+  yield* wake({
+    kind: 'platform',
+    sender: { kind: 'platform' },
+    text: 'entry' in result
+      ? `${answered.credential?.credential === 'login' ? 'Use it with login_fill on its login page.' : 'Read it with secret_get.'} It is granted to you; you have not seen the password${answered.credential?.credential === 'login' ? ' and never will' : ''}.${store.mayUse('tool', 'secrets') ? '' : ' You do not have the logins tools yet: ask for the secrets tool group with propose_grants.'}`
+      : `Your owner does not want to give you access to ${service}. Do not ask again unless they bring it up; tell them in one line what you do instead.`,
+    payload: { byOwner: true, summary: 'entry' in result ? `Saved ${result.entry} for ${service}` : `Declined access to ${service}`, askAnswer: 'entry' in result ? { askId: answered.id, kind: 'credential-saved', entry: result.entry } : { askId: answered.id, kind: 'credential-declined' } },
+  })
+  return { ok: true, proposal: proposalView(answered) } as AnswerResult
+})
+
 /** Who answers a help Ask: the owner (by name) or Mr. Robot (by his configured name). */
 export type HelpAnswerer = { readonly by: 'owner' | 'mr-robot'; readonly name: string }
 
@@ -727,51 +791,6 @@ export const answerHelp = (requestId: string, text: string, answerer: HelpAnswer
     },
   })
   return { ok: true, proposal: proposalView(answered) } as HelpAnswerResult
-})
-
-/** What wakes Mr. Robot when a request for help stays open: the Robot, the request and how to answer it (sk-35i9, sk-myhb). */
-export function escalationText(robot: { readonly id: string; readonly name: string }, request: { readonly id: string; readonly urgent: boolean; readonly doing: string; readonly tried: string; readonly need: string }): string {
-  return [
-    request.urgent
-      ? `The Robot "${robot.name}" (${robot.id}) asks for help and marked it urgent. Request ${request.id}.`
-      : `The Robot "${robot.name}" (${robot.id}) asked for help and its owner has not answered for 30 minutes. Request ${request.id}.`,
-    `Doing: ${request.doing}`,
-    `Tried: ${request.tried}`,
-    `Needs: ${request.need}`,
-    'Read what you need to answer with robot_conversation, robot_files, robot_file_read and robot_settings. Then answer with help_answer (robot_id, request_id, text), in your owner\'s language. If you cannot answer, tell your owner in one line.',
-  ].join('\n')
-}
-
-/**
- * The alarm's escalation (sk-35i9, sk-myhb): a request for help still open after 30 minutes, or urgent, wakes the
- * owner's Mr. Robot with the request. It happens once per request: the request is marked before Mr. Robot is told.
- */
-export const escalateHelp = (now: number) => Effect.gen(function* () {
-  const store = yield* RobotState
-  const platform = yield* RobotPlatform
-  const current = yield* config
-  if (current.status === 'deleted' || current.kind === 'mr-robot') return
-  for (const row of store.helpDue(now)) {
-    const help = row.help
-    if (help === undefined) continue
-    store.markHelpEscalated(row.id, now)
-    const told = yield* Effect.tryPromise({
-      try: async () => {
-        const chief = await platform.env.HOME.getByName(HOME_ID).mrRobotOf(current.ownerId)
-        if (chief === null) return false
-        await platform.env.ROBOT.getByName(chief).wake({
-          kind: 'platform',
-          sender: { kind: 'platform' },
-          text: escalationText({ id: current.id, name: current.identity.name }, { id: row.id, urgent: help.urgent, doing: help.doing, tried: help.tried, need: help.need }),
-          payload: { summary: `${current.identity.name} asks for help: ${help.need.slice(0, 100)}` },
-        })
-        return true
-      },
-      catch: (error) => error instanceof Error ? error.message : String(error),
-    }).pipe(Effect.result)
-    if (told._tag === 'Failure') console.warn('help request not escalated', { robot: current.id, request: row.id, reason: told.failure })
-  }
-  yield* platform.changed()
 })
 
 // ------------------------------------------------------------------ secrets (robot-0bde)
@@ -898,6 +917,8 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
     store.saveConfig(config)
     // A Robot made since v1.15 always had say: no Conversation of it shows assistant text as replies (gb-psyl).
     store.set('voice-upgraded', true)
+    // And it can ask its chief from the start (gb-qmnc).
+    if (init.kind === 'robot') store.setGrants(chiefGrants(init.ownerId))
     store.set('owner', { id: init.ownerId, name: init.ownerName, ...(init.ownerNickname === undefined ? {} : { nickname: init.ownerNickname }) })
     if (init.brief !== undefined) store.set('brief', init.brief)
   })
@@ -956,7 +977,6 @@ export const rearm = Effect.gen(function* () {
   const watch = store.get<number>('watch-next')
   const sweep = store.get<number>('screens-sweep-next')
   const resume = store.get<number>('chain-resume-at')
-  const escalation = store.nextHelpEscalation()
   const taskDue = store.get<number>(NEXT_DUE)
   // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
   const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
@@ -969,7 +989,6 @@ export const rearm = Effect.gen(function* () {
     ...(boxStop === undefined ? [] : [boxStop]),
     ...(quiet === undefined ? [] : [quiet]),
     ...(idle === undefined || !runnable ? [] : [idle]),
-    ...(escalation === undefined ? [] : [escalation]),
     ...(taskDue === undefined ? [] : [taskDue]),
     ...(signInEnds === undefined ? [] : [signInEnds]),
     ...(resume === undefined ? [] : [resume]),

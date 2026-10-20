@@ -685,3 +685,13 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .reply-image { display: block; max-width: 100%; max-height: 320px; border-radius: 8px; margin-top: 6px; }
 .reply-attachments { margin-top: 6px; }
 .file-card { display: inline-flex; gap: 6px; align-items: baseline; padding: 4px 8px; }
+
+/* Question and credential Asks (v1.15 tickets 03 and 05) */
+.question-prompt { font-size: 15px; margin-bottom: 4px; }
+.question-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.question-option { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; }
+.question-custom { display: flex; gap: 8px; margin-top: 8px; }
+.question-custom input { flex: 1; }
+.credential-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.credential-form label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.credential-form label.check { flex-direction: row; align-items: center; gap: 6px; }

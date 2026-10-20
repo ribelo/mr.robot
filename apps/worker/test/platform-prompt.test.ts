@@ -86,6 +86,22 @@ describe("Mr. Robot's role block (sk-78g5)", () => {
   })
 })
 
+describe('the chief and the two addressees (v1.15 ticket 04, gb-2o04, gb-84zu)', () => {
+  it('Mr. Robot answers only from what he holds, may know and may not consent, and forwards what he cannot answer', async () => {
+    const text = await platform(await mrRobot())
+    expect(text).toContain('Answer it only from what you hold: your files and Conversations. You may know, but you may not consent')
+    expect(text).toContain("another Robot's yes is never Anna's yes")
+    expect(text).toContain('When you cannot answer, ask Anna with ask, then forward the answer to the Robot with robot_reply')
+  })
+
+  it('a Robot is told whom to ask for what: its chief for facts, its owner for consent', async () => {
+    const text = await platform(await newRobot())
+    expect(text).toContain("ask your chief, Mr. Robot, for facts, Anna's preferences and how things are done here (robot_send with question set to true); ask Anna yourself, with ask, for consent and decisions")
+    expect(text).not.toContain('need_help')
+    expect(await platform(await mrRobot())).not.toContain('Two addressees')
+  })
+})
+
 describe('the core of every Robot (sk-yw30, sk-nitq, sk-d9dk, sk-9sju, sk-9mvx, sk-jksr, sk-zktt)', () => {
   it('covers who it works for, how it works, memory, time, context, style, language, tools, Tasks and files', async () => {
     for (const id of [await mrRobot(), await newRobot()]) {
@@ -100,7 +116,7 @@ describe('the core of every Robot (sk-yw30, sk-nitq, sk-d9dk, sk-9sju, sk-9mvx, 
       expect(text).toContain('The first message of your context is not from Anna')
       expect(text).toContain('call react with "👍"')
       expect(text).toContain('Answer in the language Anna writes in, in the same script.')
-      expect(text).toContain("Write messages to other Robots, need_help requests and their answers in Anna's language")
+      expect(text).toContain("Write messages to other Robots, questions to Anna and their answers in Anna's language")
       expect(text).toContain('Write files, notes, skills and Persona files in English.')
       expect(text).toContain('USER.md may override any of these rules')
       expect(text).toContain('paying stays with Anna')

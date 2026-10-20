@@ -66,10 +66,11 @@ import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../age
 import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
+import type { CredentialSave } from '@mr-robot/protocol'
 import type { ChainEntry, HomeSpendLimit, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
-import { capabilitiesView, capabilityItems, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
+import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
-import { joinedMessage, wakeupMessage, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
+import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, UserMessage } from '@deepseek-ai/dsh-llm'
 import { causedByOwner, joinable, mrRobotIdOf } from './delivery.ts'
@@ -81,7 +82,8 @@ import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelFile, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
-import { QUIET_STEER_MS, quietSteerNote, SAFETY_NET_STEPS, safetyNetNote, SAY_MAX_ATTACHMENTS, SAY_RECORD, sayOf, SCREEN_PREFIX, type SayRecord } from '../agent/say.ts'
+import { questionText } from '../agent/tools/ask.ts'
+import { dismissedTrailer, QUIET_STEER_MS, quietSteerNote, SAFETY_NET_STEPS, safetyNetNote, SAY_MAX_ATTACHMENTS, SAY_RECORD, sayOf, SCREEN_PREFIX, type SayRecord } from '../agent/say.ts'
 import type { SayHost } from '../agent/tools/say.ts'
 import { Say } from '../plugins/say.ts'
 import { PwaChannel } from '../channels/pwa.ts'
@@ -98,7 +100,7 @@ import { Credentials } from '../plugins/credentials.ts'
 import { Exa } from '../plugins/exa.ts'
 import { Files } from '../plugins/files.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
-import { Help } from '../plugins/help.ts'
+import { Ask } from '../plugins/ask.ts'
 import { IdentityTools } from '../plugins/identity.ts'
 import { Host } from '../plugins/host.ts'
 import { connectorCapability } from '../plugins/connector.ts'
@@ -428,7 +430,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config !== undefined && config.status !== 'deleted') await this.sweepScreens(Date.now()).catch((error: unknown) => console.warn('screenshots not swept', error))
     if (config !== undefined) await this.deliverOutbox()
     if (config !== undefined && config.status !== 'deleted') this.resumeChain(Date.now())
-    if (config !== undefined && config.status !== 'deleted') await this.escalateHelp(Date.now()).catch((error: unknown) => console.warn('help not escalated', error))
     if (config !== undefined && config.status !== 'deleted') await this.idleBox(Date.now()).catch((error: unknown) => console.warn('Box not stopped', error))
     if (config !== undefined && config.status === 'active') await this.resumeChildren().catch((error: unknown) => console.warn('subagents not resumed', error))
     if (config !== undefined && config.status === 'active') await this.runIdle(Date.now()).catch((error: unknown) => console.warn('idle work failed', error))
@@ -1042,17 +1043,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** A Wake-up as the model reads it: its source label, the local time, and the steer's Wake-up id. */
   private wakeupMessageOf(wakeup: Wakeup, text: string, toolCallAnswer?: ToolCallAnswerWake, steer = false): UserMessage {
+    // Questions the owner's message moved past are dismissed; the Robot reads that after the message (gb-nr8s).
+    const dismissed = (wakeup.payload['dismissedAsks'] as Array<{ askId: string; prompt: string }> | undefined) ?? []
     return wakeupMessage({
       sender: wakeup.sender,
-      text,
+      text: dismissed.length === 0 ? text : `${text}${dismissedTrailer(dismissed)}`,
       ...(toolCallAnswer === undefined ? {} : { toolCallAnswer }),
       attachments: (wakeup.payload['attachments'] as Attachment[] | undefined) ?? [],
       ...optionalString(wakeup.payload, 'requestId'),
       ...optionalString(wakeup.payload, 'replyTo'),
       ...optionalString(wakeup.payload, 'replyHandle'),
+      ...(wakeup.payload['question'] === true ? { question: true } : {}),
       ...optionalString(wakeup.payload, 'summary'),
       ...(wakeup.payload['thread'] !== undefined && wakeup.kind === 'robot' ? { thread: wakeup.payload['thread'] as ThreadWake } : {}),
       ...(wakeup.payload['helpAnswer'] !== undefined && wakeup.kind === 'platform' ? { helpAnswer: wakeup.payload['helpAnswer'] as HelpAnswerWake } : {}),
+      ...(wakeup.payload['askAnswer'] !== undefined && wakeup.kind === 'platform' ? { askAnswer: wakeup.payload['askAnswer'] as AskAnswerLabel } : {}),
       ...optionalString(wakeup.payload, 'clientId'),
       ...(wakeup.kind === 'task' ? { taskRun: taskRunOf(wakeup.payload) } : {}),
       ...(steer ? { steer: { wakeupId: wakeup.id } } : {}),
@@ -1816,7 +1821,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config.status === 'setup') {
       return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
-    mounts.push(mount(ConversationPlugin, { host: this }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), ...(config.kind === 'mr-robot' ? [] : [mount(Help, { host: this })]), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
+    mounts.push(mount(ConversationPlugin, { host: this }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), mount(Ask, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
     const grants = this.store.effectiveGrants()
     // Plugins the Home switched off are not mounted for anyone (cn-dbm9).
@@ -2374,7 +2379,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async refreshReach(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
-    ;[this.knownHosts, this.knownConnections, this.pluginsOn] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled()])
+    ;[this.knownHosts, this.knownConnections, this.pluginsOn, this.knownOrigin] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled(), this.home().appOrigin()])
     const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), config.kind === 'mr-robot' ? this.home().skills(config.ownerId) : Promise.resolve([])])
     this.knownCatalog = catalog
     if (config.kind !== 'mr-robot') return
@@ -2410,14 +2415,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView {
     // Reviews, help requests and tool calls are each their own Ask: a new one never replaces an open one.
-    const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind === 'review' || kind === 'help' || kind === 'tool-call' ? false : kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
+    const row = this.store.propose(kind, purpose, payload, Date.now(), (open) => kind === 'review' || kind === 'help' || kind === 'tool-call' || kind === 'question' || kind === 'credential' ? false : kind !== 'member-file' || open.file?.name === (payload['file'] as { name?: string } | undefined)?.name)
     this.ctx.waitUntil(this.changed())
-    // A request for help falls due 30 minutes on, or at once when urgent: the alarm must know.
-    if (kind === 'help') this.ctx.waitUntil(this.rearm())
-    const body = kind === 'help' ? `asks for help: ${purpose}` : kind === 'tool-call' ? `wants to use ${purpose}` : `${purpose}: waiting for your answer.`
+    // A question reads as a question wherever it is read, a Channel without buttons included (gb-viep); a credential request links into the app (gb-atqq).
+    const body = kind === 'question' ? questionText(proposalView(row).question!)
+      : kind === 'credential' ? `asks you for ${proposalView(row).credential!.credential === 'login' ? 'a login' : 'a secret'} for ${proposalView(row).credential!.service}: ${proposalView(row).credential!.why}. Open the Conversation to fill it in${this.appLink()}.`
+      : kind === 'help' ? `asks for help: ${purpose}` : kind === 'tool-call' ? `wants to use ${purpose}` : `${purpose}: waiting for your answer.`
     this.ctx.waitUntil(this.notifyMembers('needs you', body).catch(() => 0))
     return proposalView(row)
   }
+
+  /** " (https://…/#/r/<id>)" when the app's address is known, else nothing. */
+  private appLink(): string {
+    const origin = this.knownOrigin
+    return origin === null ? '' : ` (${origin}/#/r/${encodeURIComponent(this.store.requireConfig().id)})`
+  }
+
+  /** The address the app is served from, as the Home last saw it (kept in memory, read at each refreshReach). */
+  private knownOrigin: string | null = null
 
   setIdentity(patch: Partial<Identity>): Identity {
     const clean = Object.fromEntries(Object.entries(patch).filter(([, value]) => typeof value === 'string' && value.trim() !== '')) as Partial<Identity>
@@ -2432,8 +2447,32 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
    * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
    */
-  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string): Promise<AnswerResult> {
-    return this.program(Programs.answer(proposalId, revision, approve, approved, scope, note === undefined ? {} : { note }))
+  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string, choice: { readonly value?: string; readonly text?: string } = {}): Promise<AnswerResult> {
+    return this.program(Programs.answer(proposalId, revision, approve, approved, scope, { ...(note === undefined ? {} : { note }), ...choice }))
+  }
+
+  /**
+   * Save a credential Ask (v1.15 ticket 05, gb-923q): the entry is created under the owner at the Home, granted to this Robot at allow, and
+   * the Robot is woken with its name. The password goes from here to the Home and nowhere else: it is not stored in the Ask, the log or a
+   * Wake-up, and this Robot's tools never see it (gb-196l).
+   */
+  async saveCredential(proposalId: string, revision: number, entry: CredentialSave): Promise<AnswerResult> {
+    const config = this.store.requireConfig()
+    const pending = this.store.proposal(proposalId)
+    if (pending === undefined || pending.kind !== 'credential') return { ok: false, reason: 'not-found' }
+    if (pending.status !== 'open' || pending.revision !== revision) return { ok: false, reason: 'stale' }
+    const name = entry.name.trim()
+    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) throw Object.assign(new Error('login names use letters, digits, ".", "_" and "-"'), { name: 'Invalid', status: 400 })
+    if (entry.password === '') throw Object.assign(new Error('a login needs a password'), { name: 'Invalid', status: 400 })
+    if (await this.home().resolveLogin(config.ownerId, name) !== null) throw Object.assign(new Error(`you already have a login named "${name}": choose another name`), { name: 'Conflict', status: 409 })
+    await this.home().putLogin(config.ownerId, name, {
+      username: entry.username, password: entry.password, websites: entry.websites.map((site) => site.trim()).filter((site) => site !== ''), notes: entry.notes, allowRead: pending.credential?.credential === 'secret' ? true : entry.allowRead,
+    }, entry.shared)
+    this.store.setGrants(overlayGrants(this.store.grants(), { ...emptyGrants, secrets: { [name]: 'allow' } }))
+    this.store.updateConfig(() => ({}))
+    const answered = await this.program(Programs.answerCredential(pending, revision, { entry: name }))
+    await this.refreshReach().catch(() => undefined)
+    return answered
   }
 
 
@@ -2934,8 +2973,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  sendRobotMessage(to: string, text: string, idempotencyKey: string): Promise<{ requestId: string; status: string }> {
-    return this.program(Programs.sendRobotMessage(to, text, idempotencyKey))
+  sendRobotMessage(to: string, text: string, idempotencyKey: string, question = false): Promise<{ requestId: string; status: string }> {
+    return this.program(Programs.sendRobotMessage(to, text, idempotencyKey, question))
   }
 
 
@@ -2946,9 +2985,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   /** Requests for help that stayed open 30 minutes, or are urgent, go to the owner's Mr. Robot (sk-35i9, sk-myhb). */
-  private escalateHelp(now: number): Promise<void> {
-    return this.program(Programs.escalateHelp(now))
-  }
 
   /** Deliver pending outbox rows; a lost RPC is retried on the alarm, the recipient dedupes. */
   private deliverOutbox(): Promise<void> {
@@ -3674,7 +3710,7 @@ const RESTART_NOTE = 'Your previous Turn was interrupted by a platform restart. 
  */
 const SUBAGENT_DENIED_TOOLS = [
   ...SUBAGENT_TOOL_NAMES, 'robot_send', 'robot_directory', 'robot_reply', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list',
-  'memory_write_shared', 'propose_member_file_edit', 'propose_grants', 'propose_review', 'need_help', 'react', 'say', 'browser_request_takeover',
+  'memory_write_shared', 'propose_member_file_edit', 'propose_grants', 'propose_review', 'ask', 'request_credential', 'react', 'say', 'browser_request_takeover',
   'task_focus', 'task_done', 'set_identity', 'setup_complete', 'robot_propose_grants',
 ]
 /** The session record of an Auto review decision (ao-jn6z): the Trajectory shows it on the reviewed call. */

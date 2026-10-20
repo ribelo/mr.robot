@@ -33,7 +33,7 @@ Mr. Robot does these tasks:
 - He configures Robots: settings, model chains and files.
 - He creates and assigns Tasks for his owner and the Robots, also as one of them (robot_id).
 - He reads their Conversations and files when he needs to.
-- He answers when a Robot calls need_help.
+- He answers a Robot's question from what he holds, or asks his owner and forwards the answer. He may know, but he may not consent.
 
 Mr. Robot has every capability the owner can grant, unless the owner lowered one. He never approves another Robot's tool-call Asks. Only the owner does. Mr. Robot of one Member can talk with Mr. Robot of another Member in a Thread. Other Robots never talk across Members.
 
@@ -61,7 +61,7 @@ A Robot works in code mode by default. It writes a program that calls its tools,
 - robots.md: Robots and their setup.
 - grants.md: what a Robot may do.
 - tasks.md: Tasks, scheduled and recurring work, reminders.
-- asks-and-help.md: decisions and requests for help.
+- asks-and-help.md: questions, credential requests and the chief rule.
 - memory-and-files.md: memory and the Workspace.
 - connections.md, hosts.md, browser.md, providers.md.
 `

@@ -198,6 +198,13 @@ export class Robot extends ProductionRobot {
     return true
   }
 
+  /** The Robot as a v1.14 deploy left it: no chief recipient Grant and no messaging group, the schema before them (v1.15 ticket 04). */
+  async withoutChiefGrantForTest(): Promise<void> {
+    this.store.sql.exec("DELETE FROM grant_item WHERE (kind = 'recipient' AND name LIKE 'mr-robot-%') OR (kind = 'tool' AND name = 'messaging')")
+    this.store.sql.exec('UPDATE schema_version SET version = 17')
+    this.store.prepare()
+  }
+
   /** The Box's last command was `ms` ago, and the alarm is due. */
   async backdateBoxForTest(ms: number): Promise<void> {
     const state = this.store.get<{ state: string; since?: number; lastCommandAt?: number }>('box')
@@ -259,10 +266,9 @@ export class Robot extends ProductionRobot {
   }
 
 
-  /** Pretend `ms` passed since the Robot asked for help: open requests move into the past and the alarm comes due (v1.11 ticket 07). */
-  async backdateHelpForTest(ms: number): Promise<void> {
-    this.ctx.storage.sql.exec("UPDATE proposal SET payload = json_set(payload, '$.help.created', json_extract(payload, '$.help.created') - ?) WHERE kind = 'help' AND status = 'open'", ms)
-    await this.ctx.storage.setAlarm(Date.now() - 1)
+  /** A help Ask as v1.14 left it open (need_help is gone; the owner's answer path stays until it is closed). */
+  helpFromBeforeForTest(need: string): string {
+    return this.propose('help', need, { help: { doing: 'Filing the VAT return', tried: 'Looked in my notes', need, urgent: false, created: Date.now() } }).id
   }
 
   /** Put a message in the outbox without delivering it (as if the DO died right after writing). */

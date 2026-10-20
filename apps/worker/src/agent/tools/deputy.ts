@@ -22,21 +22,6 @@ export interface RobotListing {
   readonly mine: boolean
 }
 
-/** One open request for help (need_help) of one of the owner's Robots, as help_requests lists it (sk-cj9v). */
-export interface HelpListing {
-  readonly robot: string
-  readonly robotId: string
-  readonly id: string
-  /** When the Robot asked, as an ISO time. */
-  readonly created: string
-  readonly urgent: boolean
-  /** Whether Mr. Robot was already woken with it. */
-  readonly escalated: boolean
-  readonly doing: string
-  readonly tried: string
-  readonly need: string
-}
-
 /** What Mr. Robot, as his owner's deputy, can do with the Robots the owner reaches. Every call checks that reach. */
 export interface DeputyHost {
   list(): Promise<RobotListing[]>
@@ -52,8 +37,6 @@ export interface DeputyHost {
   settingsSet(robotId: string, patch: unknown): Promise<RobotSettings>
   connections(): Promise<ConnectionView[]>
   connectionInstructionsSet(connectionId: string, instructions: string): Promise<{ id: string; label: string; instructions: string }>
-  helpRequests(): Promise<HelpListing[]>
-  helpAnswer(robotId: string, requestId: string, text: string): Promise<{ requestId: string; status: string }>
 }
 
 /** Longest text of one chat item the deputy gets back; the Conversation view itself is whole. */
@@ -148,19 +131,6 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
       parameters: { properties: { connection_id: { type: 'string', description: 'Connection id from connection_list' }, instructions: { type: 'string', description: 'The whole new instructions; empty clears them' } }, required: ['connection_id', 'instructions'] },
       emptyAllowed: ['instructions'],
       execute: async ({ connection_id, instructions }) => host.connectionInstructionsSet(connection_id, instructions),
-    }),
-    tool<Record<string, never>>({
-      name: 'help_requests',
-      description: "List the open requests for help (need_help) of your owner's Robots: Robot, request id, when it asked, urgent, whether you were already woken with it (escalated), and what it is doing, tried and needs. Read what you need to answer with robot_conversation, robot_files, robot_file_read and robot_settings, then answer with help_answer.",
-      parameters: { properties: {} },
-      concurrencySafe: true,
-      execute: async () => ({ requests: await host.helpRequests() }),
-    }),
-    tool<{ robot_id: string; request_id: string; text: string }>({
-      name: 'help_answer',
-      description: "Answer one open request for help of a Robot of your owner. The text wakes that Robot as 'Answer to your request … from <your name>' and closes the request; write it in your owner's language and make it complete, because the Robot cannot ask you back. Only requests for help: a request your owner answered first, or that you answered, is closed and refused. Your owner may still answer after you and overrides you.",
-      parameters: { properties: { robot_id: robotId, request_id: { type: 'string', description: 'Request id from help_requests' }, text: { type: 'string', description: 'The answer' } }, required: ['robot_id', 'request_id', 'text'] },
-      execute: async ({ robot_id, request_id, text }) => host.helpAnswer(robot_id, request_id, text),
     }),
     tool<{ robot_id: string; path: string; content: string }>({
       name: 'robot_file_write',

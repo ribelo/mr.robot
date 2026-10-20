@@ -5,7 +5,7 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender, TaskAction, ThreadView } from '@mr-robot/protocol'
 import { JOIN_SEPARATOR, MEMBER_TIME_LABEL } from '../agent/sources.ts'
-import { sayOf } from '../agent/say.ts'
+import { DISMISSED_TRAILER, sayOf } from '../agent/say.ts'
 import type { NoticeRow, StoredRoutineCard } from './store.ts'
 
 interface ContentBlock { readonly type: string; readonly text?: string }
@@ -55,7 +55,7 @@ function taskAction(name: string, args: Record<string, unknown>): TaskAction | u
   }
 }
 
-const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'propose_review', 'request_takeover', 'setup_complete', 'need_help'])
+const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'propose_review', 'request_takeover', 'setup_complete', 'need_help', 'ask', 'request_credential'])
 
 export interface ProjectionInput {
   /** Tool arguments, results and thinking for Standard, Detailed and Verbose (pl-6eir). */
@@ -148,6 +148,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
             reaction: null,
             ...(part.clientId === undefined ? {} : { clientId: part.clientId }),
             ...(typeof message.source?.['threadId'] === 'string' ? { thread: { id: message.source['threadId'], topic: String(message.source['topic'] ?? '') } } : {}),
+            ...(message.source?.['question'] === true ? { question: true as const } : {}),
           })
         }
         if (sender.kind === 'member') lastMemberMessage = items.length - 1
@@ -240,9 +241,9 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
         } else if (action !== undefined) {
           const title = String(result['title'] ?? result['name'] ?? call.args['title'] ?? call.args['name'] ?? 'a Task')
           items.push({ kind: 'task', id: message.id, seq: event.seq, at: event.time, action, taskId: typeof (result['id'] ?? call.args['id']) === 'string' ? String(result['id'] ?? call.args['id']) : null, title })
-        } else if (QUESTION_TOOLS.has(call.name) && typeof (result['proposalId'] ?? result['requestId']) === 'string') {
-          const proposal = input.proposal(String(result['proposalId'] ?? result['requestId']))
-          if (proposal !== undefined) items.push({ kind: 'question', id: message.id, seq: event.seq, at: event.time, proposal })
+        } else if (QUESTION_TOOLS.has(call.name) && typeof (result['proposalId'] ?? result['requestId'] ?? result['askId']) === 'string') {
+          const proposal = input.proposal(String(result['proposalId'] ?? result['requestId'] ?? result['askId']))
+          if (proposal !== undefined) items.push({ kind: 'proposal', id: message.id, seq: event.seq, at: event.time, proposal })
         }
         break
       }
@@ -328,7 +329,7 @@ function visibleText(message: MessageLike, sender: Sender): string {
   const text = message.content.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('')
   // A Member's message carries only the time label the model reads; every other source has its label line.
   const body = sender.kind === 'member' ? text.replace(MEMBER_TIME_LABEL, '') : text.replace(/^\[[^\n]*\]\n/, '')
-  return body.replace(/\n\nAttached files \(in your workspace\): .*$/s, '')
+  return body.replace(DISMISSED_TRAILER, '').replace(/\n\nAttached files \(in your workspace\): .*$/s, '')
 }
 
 function parseArgs(value: unknown): Record<string, unknown> {

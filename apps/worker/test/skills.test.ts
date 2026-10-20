@@ -100,8 +100,8 @@ describe('the Home skill library', () => {
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'remember how you did that' } })
     await settle(id)
-    const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'question')
-    if (question?.kind !== 'question') throw new Error('no skill question')
+    const question = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'proposal')
+    if (question?.kind !== 'proposal') throw new Error('no skill question')
     expect(question.proposal).toMatchObject({ kind: 'skill', skill: { name: 'allegro-cart' } })
     expect((await api<{ skills: SkillView[] }>(ANNA, '/api/skills')).body.skills).toEqual([])
 

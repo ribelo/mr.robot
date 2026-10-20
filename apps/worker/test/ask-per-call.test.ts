@@ -32,7 +32,7 @@ async function say(id: string, text: string, script: Parameters<typeof scripts.s
 
 async function asks(id: string): Promise<ProposalView[]> {
   const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-  return conversation.items.flatMap((item) => (item.kind === 'question' && item.proposal.kind === 'tool-call' ? [item.proposal] : []))
+  return conversation.items.flatMap((item) => (item.kind === 'proposal' && item.proposal.kind === 'tool-call' ? [item.proposal] : []))
 }
 
 async function answer(id: string, ask: ProposalView, approve: boolean, note?: string) {

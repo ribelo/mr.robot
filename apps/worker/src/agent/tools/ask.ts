@@ -1,0 +1,80 @@
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { RobotHost } from '../host.ts'
+import { tool } from './define.ts'
+
+export const ASK_MAX_OPTIONS = 6
+const STYLES = ['default', 'primary', 'danger'] as const
+
+interface AskInput {
+  prompt: string
+  help?: string
+  options?: Array<{ label: string; value: string; description?: string; style?: (typeof STYLES)[number] }>
+  allow_custom?: boolean
+  dismiss_on_move_on?: boolean
+  urgent?: boolean
+}
+
+/** The text form of a question, for a Channel without buttons (Discord, gb-viep): the prompt, numbered options, how to answer. */
+export function questionText(question: { readonly prompt: string; readonly help: string | null; readonly options: ReadonlyArray<{ readonly label: string; readonly description: string | null }>; readonly allowCustom: boolean; readonly urgent: boolean }): string {
+  return [
+    question.urgent ? `Urgent: ${question.prompt}` : question.prompt,
+    ...(question.help === null ? [] : [question.help]),
+    ...question.options.map((option, index) => `${index + 1}. ${option.label}${option.description === null ? '' : ` — ${option.description}`}`),
+    question.allowCustom || question.options.length === 0 ? 'Answer in the app, or write your own answer here.' : 'Answer in the app.',
+  ].join('\n')
+}
+
+/**
+ * Asking the owner (v1.15 ticket 03, gb-b4wz): one question with real options, stored as an Ask. The call returns at once; the Robot goes on
+ * with work that does not depend on the answer, or ends its Turn, and the answer wakes it as a steer (gb-htdw, gb-1lfb).
+ */
+export function askTools(host: RobotHost): ToolDefinition[] {
+  return [
+    tool<AskInput>({
+      name: 'ask',
+      description: "Put one question to your owner, with options they answer in one tap. Ask only before a consequential or irreversible act, for a true ambiguity, or for a fact only they hold; otherwise decide, state your assumption and go on. Write the prompt as you would say it to them. Give up to 6 real options, the one you recommend first; never an option that is only a way out. The call returns at once: go on with work that does not depend on the answer, or end your Turn with one short line. You are woken with the answer, so do not wait or poll. A dismissal is an answer too: do not ask again. For a question to another Robot, use robot_send.",
+      parameters: {
+        properties: {
+          prompt: { type: 'string', description: 'The question, in your owner\'s language' },
+          help: { type: 'string', description: 'Optional: one line of context that helps them choose' },
+          options: {
+            type: 'array',
+            description: `At most ${ASK_MAX_OPTIONS} options`,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                label: { type: 'string', description: 'What the button says, short' },
+                value: { type: 'string', description: 'What you get back when they choose it' },
+                description: { type: 'string', description: 'Optional: what choosing it does' },
+                style: { type: 'string', enum: [...STYLES], description: 'primary: the recommended; danger: destructive or irreversible; default otherwise' },
+              },
+              required: ['label', 'value'],
+            },
+          },
+          allow_custom: { type: 'boolean', description: 'Let them write their own answer; false when left out' },
+          dismiss_on_move_on: { type: 'boolean', description: 'Dismiss the question if their next message arrives unanswered; for low-stakes questions. false when left out' },
+          urgent: { type: 'boolean', description: 'Push "needs you" at once: only when waiting would do harm. false when left out' },
+        },
+        required: ['prompt'],
+      },
+      execute: async ({ prompt, help, options, allow_custom, dismiss_on_move_on, urgent }) => {
+        if (prompt.trim() === '') throw new Error('ask: parameter "prompt" is required and must not be empty.')
+        const listed = options ?? []
+        if (listed.length > ASK_MAX_OPTIONS) throw new Error(`ask: at most ${ASK_MAX_OPTIONS} options; you gave ${listed.length}. Keep the real ones.`)
+        if (listed.length === 0 && allow_custom !== true) throw new Error('ask: give at least one option, or set allow_custom so they can answer in their own words.')
+        const seen = new Set<string>()
+        const clean = listed.map((option, index) => {
+          if (option.label.trim() === '' || option.value.trim() === '') throw new Error(`ask: option ${index + 1} needs a label and a value.`)
+          if (seen.has(option.value)) throw new Error(`ask: two options have the value "${option.value}"; each value must be its own.`)
+          seen.add(option.value)
+          if (option.style !== undefined && !STYLES.includes(option.style)) throw new Error(`ask: option "${option.label}" has the style "${option.style}"; use default, primary or danger.`)
+          return { label: option.label.trim(), value: option.value, description: option.description?.trim() || null, style: option.style ?? 'default' }
+        })
+        const question = { prompt: prompt.trim(), help: help?.trim() || null, options: clean, allowCustom: allow_custom === true, dismissOnMoveOn: dismiss_on_move_on === true, urgent: urgent === true }
+        const asked = host.propose('question', question.prompt, { question })
+        return { askId: asked.id, status: 'waiting', note: 'Your owner sees the question now. Go on with work that does not depend on it, or end your Turn with one short line; you will be woken with the answer.' }
+      },
+    }),
+  ]
+}

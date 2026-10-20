@@ -48,7 +48,7 @@ async function file(id: string, path: string): Promise<string | null> {
 }
 
 const asks = async (id: string): Promise<ProposalView[]> => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
-  .flatMap((item) => (item.kind === 'question' && item.proposal.kind === 'tool-call' ? [item.proposal] : []))
+  .flatMap((item) => (item.kind === 'proposal' && item.proposal.kind === 'tool-call' ? [item.proposal] : []))
 const reviewerRequests = (id: string) => (requests.get(id) ?? []).filter((request) => request.system === REVIEW_POLICY)
 const pending = (request: GenerateOptions) => JSON.parse(JSON.stringify(request.messages[0]).match(/PENDING_ACTION\\n\\n(.*)"}\]/)![1]!.replaceAll('\\n', '\n').replaceAll('\\"', '"')) as { name: string; arguments: unknown }
 const reviews = async (id: string) => (await env.ROBOT.getByName(id).trajectory()).filter((event) => event.type === 'plugin:mr-robot/review').map((event) => (typeof event.data === 'string' ? JSON.parse(event.data) : event.data) as Record<string, unknown>)

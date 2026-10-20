@@ -20,7 +20,7 @@ const items: ChatItem[] = [
   { kind: 'reply', id: 'c', seq: 3, at, text: '✓ **Salesforce** → list pulled' },
   { kind: 'message', id: 'd', seq: 4, at, sender: me, text: 'Send it. Run this every week.', attachments: [], reaction: '👍' },
   { kind: 'task', id: 'e', seq: 5, at, action: 'created', taskId: 't-1', title: 'Overnight outbound' },
-  { kind: 'question', id: 'f', seq: 6, at, proposal },
+  { kind: 'proposal', id: 'f', seq: 6, at, proposal },
 ]
 
 describe('ChatView (robot-q4b2)', () => {
@@ -88,7 +88,7 @@ describe('ChatView (robot-q4b2)', () => {
     expect(onAnswer).toHaveBeenLastCalledWith(review, false)
 
     const decided: ProposalView = { ...review, status: 'approved', review: { ...review.review!, decision: { approved: ['m1', 'm3'], rejected: ['m2'] } } }
-    rerender(<ChatView items={[{ kind: 'question', id: 'q', seq: 1, at, proposal: decided }]} meId="m-1" working={false} canAnswer={true} now={at} />)
+    rerender(<ChatView items={[{ kind: 'proposal', id: 'q', seq: 1, at, proposal: decided }]} meId="m-1" working={false} canAnswer={true} now={at} />)
     expect(screen.getByText('Review: Replies to send · 2 approved, 1 rejected')).toBeTruthy()
   })
 

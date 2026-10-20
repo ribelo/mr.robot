@@ -75,8 +75,8 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
 
     const direct = await activeRobot([], false)
     await say(direct, 'hi', [{ text: 'hi' }])
-    // Conversation-level tools only (need_help needs no Grant); robot_reply works only with a handle another Robot sent.
-    expect(toolNames(direct)).toEqual(['conversation_search', 'my_capabilities', 'need_help', 'propose_grants', 'propose_member_file_edit', 'propose_review', 'react', 'robot_reply', 'say', 'set_identity', 'skill_library'])
+    // Conversation-level tools only (ask and say need no Grant); robot_reply works only with a handle another Robot sent.
+    expect(toolNames(direct)).toEqual(['ask', 'conversation_search', 'my_capabilities', 'propose_grants', 'propose_member_file_edit', 'propose_review', 'react', 'request_credential', 'robot_reply', 'say', 'set_identity', 'skill_library'])
   })
 
   it('has no shell, terminal or container tool at all', async () => {
@@ -92,8 +92,8 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
       { text: 'I asked for access.' },
     ])
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    const question = conversation.items.find((item) => item.kind === 'question')
-    if (question?.kind !== 'question') throw new Error('no grant question')
+    const question = conversation.items.find((item) => item.kind === 'proposal')
+    if (question?.kind !== 'proposal') throw new Error('no grant question')
     scripts.set(id, [{ text: 'Thanks.' }])
     await api<ProposalView>(ANNA, `/api/robots/${id}/proposals/${question.proposal.id}`, { body: { revision: question.proposal.revision, approve: true } })
     await settle(id)

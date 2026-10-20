@@ -65,10 +65,10 @@ The docs/ folder is never removed. The platform owns it.
 | Reads other Robots | yes, through the deputy tools | no |
 | Edits the skill library | yes | no, they propose |
 | Writes shared owner files | yes, memory_write_shared | no, they use propose_member_file_edit |
-| Calls need_help | no | yes |
-| Answers need_help | yes | no |
+| Is asked questions by other Robots | yes (robot_send with question) | no |
+| Has a recipient Grant to Mr. Robot | not needed | yes, from creation; the owner can remove it |
 
-A Robot other than Mr. Robot sends a work request to another Robot only with a recipient Grant. Without a recipient Grant, it can still call need_help. The reply to a request comes back in the sender's Conversation as a labelled message.
+A Robot other than Mr. Robot sends a work request to another Robot only with a recipient Grant. To put a question to its owner, it uses ask, which needs no Grant. The reply to a request comes back in the sender's Conversation as a labelled message.
 
 ## Skills
 

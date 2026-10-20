@@ -8,7 +8,7 @@ import type { Attachment, Sender } from '@mr-robot/protocol'
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     member: { kind: 'member'; memberId: string; name: string; attachments?: Attachment[]; clientId?: string; joined?: JoinedPart[] } & Delivered & ContextFormed
-    robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; avatarSeed: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string } & Delivered & ContextFormed
+    robot: { kind: 'robot'; robotId: string; name: string; avatarColor: string; avatarSeed: string; requestId?: string; replyTo?: string; threadId?: string; topic?: string; question?: true } & Delivered & ContextFormed
     task: { kind: 'task'; taskId: string; name: string; by: TaskRunBy } & ContextFormed
     channel: { kind: 'channel'; channel: string; from: string; joined?: JoinedPart[] } & Delivered & ContextFormed
     platform: { kind: 'platform'; summary: string } & Delivered & ContextFormed
@@ -58,6 +58,8 @@ export interface WakeupMessageInput {
   readonly requestId?: string
   readonly replyTo?: string
   readonly replyHandle?: string
+  /** The Robot message is a question, not work (v1.15, gb-l1x1). */
+  readonly question?: boolean
   readonly thread?: ThreadWake
   /** What the chat shows for a platform message; defaults to its first line. */
   readonly summary?: string
@@ -69,6 +71,8 @@ export interface WakeupMessageInput {
   readonly helpAnswer?: HelpAnswerWake
   /** The platform message is the owner's answer to a tool-call Ask (sk-ed7r). */
   readonly toolCallAnswer?: ToolCallAnswerLabel
+  /** The platform message is the owner's answer to a question or credential Ask (v1.15). */
+  readonly askAnswer?: AskAnswerLabel
   /** A Task's Wake-up: who started it, and the person's name for Run now. */
   readonly taskRun?: { readonly by: TaskRunBy; readonly who?: string }
   /** The Wake-up reached a running Turn as a steer. */
@@ -90,7 +94,27 @@ export function toolCallAnswerLabel(answer: ToolCallAnswerLabel): string {
     : `[Your owner rejected ${answer.tool} (${answer.askId})${answer.note === null ? '' : `: ${oneLine(answer.note)}`}]`
 }
 
+/** The owner's answer to a question Ask or a credential Ask (v1.15), as the label names it. */
+export type AskAnswerLabel =
+  | { readonly askId: string; readonly kind: 'option'; readonly label: string; readonly value: string }
+  | { readonly askId: string; readonly kind: 'custom' }
+  | { readonly askId: string; readonly kind: 'dismissed' }
+  | { readonly askId: string; readonly kind: 'credential-saved'; readonly entry: string }
+  | { readonly askId: string; readonly kind: 'credential-declined' }
+
+/** "[Your owner answered your question p-… : \"Yes, send it\" (value: send)]". */
+export function askAnswerLabel(answer: AskAnswerLabel): string {
+  switch (answer.kind) {
+    case 'option': return `[Your owner answered your question ${answer.askId}: "${oneLine(answer.label)}" (value: ${oneLine(answer.value)})]`
+    case 'custom': return `[Your owner answered your question ${answer.askId} in their own words]`
+    case 'dismissed': return `[Your owner dismissed your question ${answer.askId}]`
+    case 'credential-saved': return `[Your owner saved the login or secret you asked for (${answer.askId}): its name is ${answer.entry}]`
+    case 'credential-declined': return `[Your owner declined your request for a login or secret (${answer.askId})]`
+  }
+}
+
 function platformLabel(input: WakeupMessageInput): string {
+  if (input.askAnswer !== undefined) return askAnswerLabel(input.askAnswer)
   if (input.toolCallAnswer !== undefined) return toolCallAnswerLabel(input.toolCallAnswer)
   if (input.helpAnswer === undefined) return '[Mr. Robot platform]'
   // The owner answered once more after Mr. Robot did (sk-q86i).
@@ -170,7 +194,7 @@ function sourceMessage(input: WakeupMessageInput): UserMessage {
         `Message ${thread.count}; reply with thread_send.${thread.windowCount >= THREAD_PAUSE_AT ? ` ${THREAD_PAUSE_AT} messages are used: report to your owner before you send more.` : ''}]`,
       ].join(' ')
       const head = thread !== undefined ? threadHead : input.replyTo === undefined
-        ? `[Robot message from "${sender.name}" (${sender.robotId}), request ${input.requestId ?? '?'}${input.replyHandle === undefined ? '' : `; answer with robot_reply using handle ${input.replyHandle}`}]`
+        ? `[${input.question === true ? 'Question from' : 'Robot message from'} "${sender.name}" (${sender.robotId}), request ${input.requestId ?? '?'}${input.replyHandle === undefined ? '' : `; answer with robot_reply using handle ${input.replyHandle}`}]`
         : `[Reply from robot "${sender.name}" (${sender.robotId}) to your request ${input.replyTo}]`
       return createUserMessage({
         content: [{ type: 'text', text: `${head}\n${input.text}${files}` }],
@@ -179,6 +203,7 @@ function sourceMessage(input: WakeupMessageInput): UserMessage {
           ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
           ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
           ...(thread === undefined ? {} : { threadId: thread.id, topic: thread.topic }),
+          ...(input.question === true ? { question: true as const } : {}),
         },
       })
     }

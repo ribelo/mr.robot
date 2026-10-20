@@ -103,7 +103,7 @@ describe('a Subagent (ao-8s1d, ao-sbc9, ao-3umf, ao-w9lq)', () => {
     expect((await row(id)).fleetState).toBe('working')
     expect((await row(id)).subagents).toEqual([expect.objectContaining({ label: 'Read the pages' })])
     const offered = requests.get(sub(id))![0]!.tools!.map((tool) => tool.name)
-    for (const name of ['subagent', 'subagent_fork', 'send_message', 'interrupt_agent', 'list_agents', 'robot_send', 'robot_directory', 'propose_grants', 'propose_review', 'need_help', 'react', 'propose_member_file_edit']) expect(offered).not.toContain(name)
+    for (const name of ['subagent', 'subagent_fork', 'send_message', 'interrupt_agent', 'list_agents', 'robot_send', 'robot_directory', 'propose_grants', 'propose_review', 'ask', 'request_credential', 'say', 'react', 'propose_member_file_edit']) expect(offered).not.toContain(name)
     expect(offered).toContain('write')
     expect(offered).toContain('notify_owner')
     expect(textOf(requests.get(sub(id))![0])).toContain('Notify Anna when done')

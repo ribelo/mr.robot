@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: ask stores a question Ask and returns { askId, status: 'waiting' } without blocking the program (gb-b4wz, gb-htdw)
-- [ ] Workerd test: an answer wakes the Robot as a steer with the label and the option value, or the custom text (gb-1lfb)
-- [ ] Workerd test: a dismissal wakes once with the label; dismiss_on_move_on dismisses on the next owner message with the reason (gb-ewfe, gb-nr8s)
-- [ ] Workerd test: urgent pushes 'needs you' at once; a plain question follows the Ask notification path (gb-e5bs)
-- [ ] Workerd test: the Discord text form of a question (gb-viep)
-- [ ] Component test: the question Ask with options, custom text, danger style and Dismiss (gb-k88x)
+- [x] Workerd test: ask stores a question Ask and returns { askId, status: 'waiting' } without blocking the program (gb-b4wz, gb-htdw)
+- [x] Workerd test: an answer wakes the Robot as a steer with the label and the option value, or the custom text (gb-1lfb)
+- [x] Workerd test: a dismissal wakes once with the label; dismiss_on_move_on dismisses on the next owner message with the reason (gb-ewfe, gb-nr8s)
+- [x] Workerd test: urgent pushes 'needs you' at once; a plain question follows the Ask notification path (gb-e5bs)
+- [x] Workerd test: the Discord text form of a question (gb-viep)
+- [x] Component test: the question Ask with options, custom text, danger style and Dismiss (gb-k88x)

@@ -9,6 +9,7 @@ import { FOLLOW_THRESHOLD_PX } from './ChatScroll.tsx'
 import type { PendingSend } from './pending-sends.ts'
 import { robotTint } from './tint.ts'
 import { href } from '../route.ts'
+import type { AskReply } from './ask-reply.ts'
 
 export interface ChatViewProps {
   readonly items: readonly ChatItem[]
@@ -21,6 +22,8 @@ export interface ChatViewProps {
   readonly onAnswer?: (proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string, note?: string) => void
   /** The owner's text for a request for help, also after Mr. Robot answered it (sk-q86i). */
   readonly onHelp?: (proposal: ProposalView, text: string) => void
+  /** The owner's answer to a question or a credential request (v1.15). */
+  readonly onReply?: (proposal: ProposalView, reply: AskReply) => void
   readonly now?: number
   /** How much of the Robot's work to show (pl-6eir); Compact by default. */
   readonly workDetails?: WorkDetails
@@ -50,7 +53,7 @@ const ROW_GAP_PX = 8
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, onHelp, now, workDetails = 'compact', stream, robotId, highlight, scrollRef, following, pending = [], onRetry, robotColor }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, onHelp, onReply, now, workDetails = 'compact', stream, robotId, highlight, scrollRef, following, pending = [], onRetry, robotColor }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -78,7 +81,7 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
         </div>,
       )
     }
-    rows.push(<div key={item.id} data-item={item.id} className={highlight === item.id ? 'chat-item search-hit' : 'chat-item'}><Item item={item} meId={meId} robotColor={robotColor} canAnswer={canAnswer} level={workDetails} {...(robotId === undefined ? {} : { robotId })} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onHelp === undefined ? {} : { onHelp })} /></div>)
+    rows.push(<div key={item.id} data-item={item.id} className={highlight === item.id ? 'chat-item search-hit' : 'chat-item'}><Item item={item} meId={meId} robotColor={robotColor} canAnswer={canAnswer} level={workDetails} {...(robotId === undefined ? {} : { robotId })} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onHelp === undefined ? {} : { onHelp })} {...(onReply === undefined ? {} : { onReply })} /></div>)
   }
   for (const send of pending) rows.push(<PendingBubble key={`pending-${send.clientId}`} send={send} {...(onRetry === undefined ? {} : { onRetry })} />)
   const showThinking = workDetails === 'detailed' || workDetails === 'verbose'
@@ -152,7 +155,7 @@ function PendingBubble({ send, onRetry }: { send: PendingSend; onRetry?: (client
   )
 }
 
-function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotColor }: { robotColor: string | undefined; item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; onHelp?: ChatViewProps['onHelp']; level: WorkDetails; robotId?: string }) {
+function Item({ item, meId, canAnswer, onAnswer, onHelp, onReply, level, robotId, robotColor }: { robotColor: string | undefined; item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; onHelp?: ChatViewProps['onHelp']; onReply?: ChatViewProps['onReply']; level: WorkDetails; robotId?: string }) {
   switch (item.kind) {
     case 'message': {
       const own = item.sender.kind === 'member' && item.sender.memberId === meId
@@ -168,6 +171,7 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
           <div className={own ? 'bubble bubble-own' : 'bubble bubble-robot'} style={item.sender.kind === 'robot' ? robotTint(item.sender.avatarColor) : undefined}>
             {label === null ? null : <>{label} </>}
             {item.thread === undefined ? null : <span className="thread-tag muted">in Thread “{item.thread.topic}”</span>}
+            {item.question === true ? <span className="thread-tag muted">question</span> : null}
             <RichText text={item.text} />
             {item.attachments.length > 0 ? (
               <div className="attachments">{item.attachments.map((file) => robotId === undefined
@@ -196,11 +200,13 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
       return level === 'compact' || item.calls === undefined ? (item.tools.length === 0 ? null : <ActivityLine tools={item.tools} />) : <ToolCards calls={item.calls} level={level} />
     case 'thinking':
       return level === 'detailed' || level === 'verbose' ? <ThinkingRow text={item.text} level={level} /> : null
-    case 'question':
+    case 'proposal':
       // The ask itself is answered where the owner types (rb-dat4); the stream keeps one line of it.
       // An answered request for help stays whole, so the Conversation holds the exchange.
       // The owner may still answer after Mr. Robot did, from this card (sk-q86i).
       if (item.proposal.kind === 'help' && item.proposal.status !== 'open') return <QuestionCard proposal={item.proposal} canAnswer={canAnswer} {...(onHelp === undefined ? {} : { onHelp })} />
+      // A question the owner has answered keeps its answer in the Conversation (v1.15).
+      if ((item.proposal.kind === 'question' || item.proposal.kind === 'credential') && item.proposal.status !== 'open') return <QuestionCard proposal={item.proposal} canAnswer={false} />
       return <div className="chat-separator ask-line" data-status={item.proposal.status}>{`${askTitle(item.proposal)} · ${item.proposal.status === 'open' ? (canAnswer ? 'answer below' : 'waiting for the owner') : statusText(item.proposal)}`}</div>
     case 'working':
       return null
@@ -277,11 +283,13 @@ export function askTitle(proposal: ProposalView): string {
           : proposal.kind === 'review' ? `Review: ${proposal.review?.title ?? proposal.purpose}`
             : proposal.kind === 'help' ? (proposal.help?.urgent === true ? 'Asks for help (urgent)' : 'Asks for help')
             : proposal.kind === 'tool-call' ? `${proposal.toolCall?.robot ?? 'The Robot'} wants to use ${proposal.toolCall?.tool ?? 'a tool'}`
+            : proposal.kind === 'question' ? (proposal.question?.urgent === true ? `Urgent: ${proposal.question.prompt}` : proposal.question?.prompt ?? 'A question')
+            : proposal.kind === 'credential' ? `Asks for ${proposal.credential?.credential === 'secret' ? 'a secret' : 'a login'} for ${proposal.credential?.service ?? 'a service'}`
             : proposal.kind === 'thread' ? (proposal.thread?.phase === 'continue' ? 'Go on with the Thread?' : proposal.thread?.phase === 'invitation-out' ? 'Invite to a Thread' : 'Thread invitation')
               : 'Needs you'
 }
 
-export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, counter }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; onHelp?: (proposal: ProposalView, text: string) => void; counter?: string }) {
+export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, onReply, counter }: { proposal: ProposalView; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; onHelp?: (proposal: ProposalView, text: string) => void; onReply?: (proposal: ProposalView, reply: AskReply) => void; counter?: string }) {
   const title = askTitle(proposal)
   const grants = proposal.grants
   // Each item with its level (sk-746n); allow is the plain case.
@@ -297,7 +305,9 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, counter }:
   return (
     <div className="question" data-status={proposal.status}>
       <div className="question-title">{title}{counter === undefined ? null : <span className="ask-counter">{counter}</span>}</div>
-      {proposal.help === undefined && proposal.toolCall === undefined ? <div className="question-purpose">{proposal.purpose}</div> : null}
+      {proposal.help === undefined && proposal.toolCall === undefined && proposal.question === undefined && proposal.credential === undefined ? <div className="question-purpose">{proposal.purpose}</div> : null}
+      {proposal.question === undefined ? null : <QuestionAnswerPanel key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onReply === undefined ? {} : { onReply })} />}
+      {proposal.credential === undefined ? null : <CredentialForm key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onReply === undefined ? {} : { onReply })} />}
       {proposal.toolCall === undefined ? null : <ToolCallAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />}
       {proposal.help === undefined ? null : <HelpAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onHelp === undefined ? {} : { onHelp })} />}
       {lines.length > 0 ? (
@@ -307,7 +317,7 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, counter }:
       {proposal.review === undefined ? null : <ReviewItems key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} />}
       {proposal.skill === null ? null : <div className="question-purpose"><b>{proposal.skill.name}</b>: {proposal.skill.description}</div>}
       {proposal.thread !== undefined ? <ThreadAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} /> : null}
-      {proposal.help !== undefined || proposal.toolCall !== undefined ? null : proposal.thread !== undefined ? null : proposal.review !== undefined ? (proposal.status === 'open' && canAnswer ? null : <div className="question-status">{statusText(proposal)}</div>)
+      {proposal.help !== undefined || proposal.toolCall !== undefined || proposal.question !== undefined || proposal.credential !== undefined ? null : proposal.thread !== undefined ? null : proposal.review !== undefined ? (proposal.status === 'open' && canAnswer ? null : <div className="question-status">{statusText(proposal)}</div>)
       : proposal.status === 'open' && canAnswer ? (
         <div className="question-actions">
           <button type="button" className="button" onClick={() => onAnswer?.(proposal, false)}>Reject</button>
@@ -315,6 +325,86 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, counter }:
         </div>
       ) : <div className="question-status">{statusText(proposal)}</div>}
     </div>
+  )
+}
+
+/**
+ * A question Ask (v1.15, gb-k88x): the prompt and its help, one button per option (primary and danger styles, the description under its label),
+ * a text field when the Robot allows the owner's own words, and Dismiss. Answered, it says what was chosen.
+ */
+function QuestionAnswerPanel({ proposal, canAnswer, onReply }: { proposal: ProposalView; canAnswer: boolean; onReply?: (proposal: ProposalView, reply: AskReply) => void }) {
+  const question = proposal.question!
+  const open = proposal.status === 'open' && canAnswer
+  const [text, setText] = useState('')
+  const answer = question.answer
+  return (
+    <>
+      <div className="question-prompt">{question.prompt}</div>
+      {question.help === null ? null : <div className="question-purpose">{question.help}</div>}
+      {open ? (
+        <>
+          <div className="question-options">
+            {question.options.map((option) => (
+              <button key={option.value} type="button" className={option.style === 'primary' ? 'button button-primary question-option' : option.style === 'danger' ? 'button button-danger question-option' : 'button question-option'} onClick={() => onReply?.(proposal, { kind: 'option', value: option.value })}>
+                <span>{option.label}</span>
+                {option.description === null ? null : <small className="muted">{option.description}</small>}
+              </button>
+            ))}
+          </div>
+          {question.allowCustom ? (
+            <div className="question-custom">
+              <input value={text} placeholder="Or write your own answer" aria-label="Your own answer" onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && text.trim() !== '') onReply?.(proposal, { kind: 'custom', text: text.trim() }) }} />
+              <button type="button" className="button" disabled={text.trim() === ''} onClick={() => onReply?.(proposal, { kind: 'custom', text: text.trim() })}>Send</button>
+            </div>
+          ) : null}
+          <div className="question-actions"><button type="button" className="link" onClick={() => onReply?.(proposal, { kind: 'dismiss' })}>Dismiss</button></div>
+        </>
+      ) : answer === null ? <div className="question-status">{statusText(proposal)}</div> : (
+        <div className="question-status">{answer.kind === 'option' ? `You chose: ${answer.label}` : answer.kind === 'custom' ? `You answered: ${answer.text}` : answer.reason === 'moved-on' ? 'Dismissed: you moved on' : 'Dismissed'}</div>
+      )}
+    </>
+  )
+}
+
+/** "mBank online" → "mbank-online": a name the owner can keep or change (login names use letters, digits, ".", "_" and "-"). */
+export function entryNameFor(service: string): string {
+  return service.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
+}
+
+/**
+ * A credential Ask (v1.15, gb-1g9w): the Login entry form, or the secret form, pre-filled with what the Robot gave. Saving creates the entry
+ * under the owner, grants it to the Robot and wakes it; the password is sent once, to the Home. Decline refuses.
+ */
+function CredentialForm({ proposal, canAnswer, onReply }: { proposal: ProposalView; canAnswer: boolean; onReply?: (proposal: ProposalView, reply: AskReply) => void }) {
+  const ask = proposal.credential!
+  const login = ask.credential === 'login'
+  const open = proposal.status === 'open' && canAnswer
+  const [name, setName] = useState(entryNameFor(ask.service))
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [websites, setWebsites] = useState(ask.websites.join(', '))
+  const [notes, setNotes] = useState(ask.scope === null ? '' : `Allowed: ${ask.scope}`)
+  const [shared, setShared] = useState(false)
+  const ready = name.trim() !== '' && password !== ''
+  return (
+    <>
+      <div className="question-purpose"><b>{ask.service}</b>: {ask.why}</div>
+      {ask.scope === null ? null : <div className="question-purpose">For: {ask.scope}</div>}
+      {open ? (
+        <form className="credential-form" onSubmit={(event) => { event.preventDefault(); if (ready) onReply?.(proposal, { kind: 'save', entry: { name: name.trim(), username: login ? username.trim() : '', password, websites: login ? websites.split(/[,\n]/).map((site) => site.trim()).filter((site) => site !== '') : [], notes, allowRead: !login, shared } }) }}>
+          <label>Name<input value={name} aria-label="Entry name" onChange={(event) => setName(event.target.value)} /></label>
+          {login ? <label>Username<input value={username} autoComplete="off" aria-label="Username" onChange={(event) => setUsername(event.target.value)} /></label> : null}
+          <label>{login ? 'Password' : 'Value'}<input type="password" value={password} autoComplete="off" aria-label={login ? 'Password' : 'Value'} onChange={(event) => setPassword(event.target.value)} /></label>
+          {login ? <label>Websites<input value={websites} aria-label="Websites" onChange={(event) => setWebsites(event.target.value)} /></label> : null}
+          <label>Notes<input value={notes} aria-label="Notes" onChange={(event) => setNotes(event.target.value)} /></label>
+          <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Share with the Home</span></label>
+          <div className="question-actions">
+            <button type="button" className="button" onClick={() => onReply?.(proposal, { kind: 'decline' })}>Decline</button>
+            <button type="submit" className="button button-primary" disabled={!ready}>Save and give access</button>
+          </div>
+        </form>
+      ) : <div className="question-status">{ask.entry !== null ? `Saved as ${ask.entry} and given to the Robot` : ask.declined ? 'Declined' : statusText(proposal)}</div>}
+    </>
   )
 }
 

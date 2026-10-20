@@ -75,8 +75,8 @@ describe('memory as a plugin (v1.3 ticket 02)', () => {
   it("makes another Robot's USER.md edit an ask and Mr. Robot's direct, and tells the other Robots", async () => {
     const other = await robotWith()
     await turn(other, 'learn', [{ calls: [{ name: 'propose_member_file_edit', args: { file: 'USER.md', content: '# USER.md\nLikes tea.', purpose: 'tea' } }] }, { text: 'Proposed.' }])
-    const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'question')
-    expect(ask?.kind === 'question' && ask.proposal.kind).toBe('member-file')
+    const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'proposal')
+    expect(ask?.kind === 'proposal' && ask.proposal.kind).toBe('member-file')
     expect((await api<{ content: string }>(ANNA, '/api/me/files/USER.md')).body.content).not.toContain('Likes tea.')
     expect(JSON.stringify(requests.get(other)!.at(-1)!.tools)).not.toContain('memory_write_shared')
 

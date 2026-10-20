@@ -37,7 +37,7 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('robots', 'Robots: creation and setup interview, Persona files, settings and the Robot avatar (Another look), Mr. Robot versus other Robots, skills.', ROBOTS),
   doc('grants', 'Grant items and the levels allow, ask and deny; tool-call Asks; propose_grants; my_capabilities and the Owner line.', GRANTS),
   doc('tasks', 'Tasks: doers, the three timings, state and attempts, parents, the Task tools, what a Robot sees and whom it gives Tasks, limits, reminders for people.', TASKS),
-  doc('asks-and-help', 'Asks and their kinds; need_help, the 30-minute escalation to Mr. Robot, urgent requests.', ASKS_AND_HELP),
+  doc('asks-and-help', 'Asks and their kinds; ask (one question with options), request_credential, asking your chief, old help requests.', ASKS_AND_HELP),
   doc('memory-and-files', 'Memory files and whose they are, the first message of the context, the Workspace layout, the file tools.', MEMORY_AND_FILES),
   doc('connections', 'Connectors and Connections: Google, Slack, Discord as a bot and as you; connecting as you (sign-in window, Takeover, paste), Sign in again, sharing, grants, write access.', CONNECTIONS),
   doc('hosts', 'Hosts: the desktop app, pairing, the Hosts line with online state, host_read, host_write, host_run, the Host browser, offline Hosts.', HOSTS),
