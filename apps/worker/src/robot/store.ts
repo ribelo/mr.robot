@@ -8,7 +8,7 @@ import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import * as Schema from 'effect/Schema'
 import { HOST_FACETS, hostFacetKey, StoredPlace } from '../places/host-facet.ts'
-import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName } from './host-access.ts'
+import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName, unsharedMrRobotDirectory } from './host-access.ts'
 import { JobId } from '../places/job-id.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
@@ -189,7 +189,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 21
+const SCHEMA_VERSION = 22
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -263,6 +263,17 @@ function moveOffRemovedBrowsers(sql: SqlStorage): void {
   if (session !== undefined && isRemovedBrowserBackend(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(session.v)['backend'])) sql.exec("DELETE FROM kv WHERE k = 'browser-session'")
 }
 
+/** Mr. Robot's directory on the Hosts was every Member's Mr. Robot's (deep review P8): he gets one of his own. */
+function unshareMrRobotDirectory(sql: SqlStorage): void {
+  const config = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  const kept = sql.exec<{ v: string }>('SELECT v FROM kv WHERE k = ?', HOST_DIRECTORY).toArray()[0]
+  if (config === undefined || kept === undefined) return
+  const { id, kind } = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ id: Schema.String, kind: Schema.optional(Schema.String) })))(config.v)
+  if (kind !== 'mr-robot') return
+  const directory = unsharedMrRobotDirectory(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.String))(kept.v), id)
+  sql.exec('UPDATE kv SET v = ? WHERE k = ?', JSON.stringify(directory), HOST_DIRECTORY)
+}
+
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
 function addColumns(sql: SqlStorage, table: string, columns: readonly string[]): void {
   const present = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((column) => column.name))
@@ -270,6 +281,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Every Member's Mr. Robot had one directory on a shared Host (deep review P8): his own from now on.
+  22: [unshareMrRobotDirectory],
   // Two browsers (v1.16 ticket 08, ob-l24v): a Robot on Container Chrome follows the Home default.
   20: [moveOffRemovedBrowsers],
   // Jobs run in a place, the Box or a Host (v1.16 ticket 01, ob-rc3b): the Box's job table keeps its rows and learns where they ran.

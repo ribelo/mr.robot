@@ -267,6 +267,13 @@ export class Robot extends ProductionRobot {
     this.store.prepare()
   }
 
+  /** The Robot as the v1.16 upgrade left it before the deep review: this name kept for its directory on the Hosts (deep review P8). */
+  async legacyHostDirectoryForTest(name: string): Promise<void> {
+    this.store.set('host-directory', name)
+    this.store.sql.exec('UPDATE schema_version SET version = 21')
+    this.store.prepare()
+  }
+
   /** The config exactly as stored. */
   async storedConfigForTest(): Promise<Record<string, unknown>> {
     return JSON.parse(this.store.sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").one().v) as Record<string, unknown>

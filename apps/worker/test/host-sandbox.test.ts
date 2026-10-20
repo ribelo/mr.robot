@@ -6,7 +6,7 @@
  */
 import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Conversation, HostView, ProposalView, RobotPanel } from '@mr-robot/protocol'
+import type { Conversation, HostView, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost, hostCommands, hostDisk, hostFileCalls, hostRuns, ran } from './fake-host.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
@@ -330,5 +330,33 @@ describe('the mode and roots of a facet are forgotten with the facet', () => {
     await api(ANNA, `/api/hosts/${laptop.hostId}`, { method: 'DELETE' })
     await calls(id, [{ name: 'read', args: { on: 'Desk', file_path: 'a.txt' } }])
     expect(await stored()).toEqual([`${desk.hostId}:files`])
+  })
+})
+
+// Deep review P8: the directory's suffix was the start of the Robot's id, and every Mr. Robot's id starts with mr-robot-, so every Member's
+// Mr. Robot wrote into ~/mr-robot/mr-robot-mr-robot/ on a shared Host.
+describe("each Member's Mr. Robot on a shared Host", () => {
+  it('has a directory of his own, also the one who kept the shared name', async () => {
+    const BEN = 'ben@example.com'
+    const desk = await fakeHost('Desk')
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    const mrOf = async (member: string) => (await api<RobotSummary[]>(member, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    const directoryOf = async (member: string, upgraded: boolean): Promise<string> => {
+      const mr = await mrOf(member)
+      await api(member, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: {}, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
+      if (upgraded) await testRobot(mr).legacyHostDirectoryForTest('mr-robot-mr-robot')
+      scripts.set(mr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'pwd' } }] }, { text: 'Done.' }])
+      await api(member, `/api/robots/${mr}/messages`, { body: { text: 'go' } })
+      await settle(mr)
+      return hostRuns.at(-1)!.access.robot
+    }
+    const annas = await directoryOf(ANNA, true)
+    const bens = await directoryOf(BEN, false)
+    expect(hostRuns).toHaveLength(2)
+    expect(annas).toMatch(/^mr-robot-[0-9a-f]{8}$/)
+    expect(bens).toMatch(/^mr-robot-[0-9a-f]{8}$/)
+    expect(annas).not.toBe(bens)
   })
 })

@@ -100,10 +100,30 @@ export function hostIdsOf(items: readonly GrantItem[]): string[] {
 }
 
 /**
- * The name of a Robot's directory under mr-robot/ on a Host: its name as it was at first use, made safe for a file name, and the start of
+ * Eight hex digits that tell Robots apart in a directory name: FNV-1a (32 bits) over the whole id. The start of the id did not (deep review
+ * P8): every Mr. Robot's id starts with mr-robot-, so every Member's Mr. Robot had one directory on a shared Host.
+ */
+function robotIdHash(id: string): string {
+  let hash = 0x811c9dc5
+  for (let at = 0; at < id.length; at += 1) hash = Math.imul(hash ^ id.charCodeAt(at), 0x01000193)
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+/**
+ * The name of a Robot's directory under mr-robot/ on a Host: its name as it was at first use, made safe for a file name, and a hash of
  * its id so that two Robots with one name do not share a directory. The Robot keeps it, so a rename does not lose its files.
  */
 export function robotDirectoryName(name: string, id: string): string {
   const slug = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30).replace(/-+$/g, '')
-  return `${slug === '' ? 'robot' : slug}-${id.replace(/^r-/, '').slice(0, 8)}`
+  return `${slug === '' ? 'robot' : slug}-${robotIdHash(id)}`
+}
+
+/**
+ * The directory name a Mr. Robot keeps once his shared one is given up (deep review P8): a name chosen before v1.16's deep fix ends in
+ * -mr-robot, the start of his id, which every Member's Mr. Robot had; it gets the hash of his id in its place. Any other name is kept.
+ * The old directory stays on the Hosts.
+ */
+export function unsharedMrRobotDirectory(kept: string, id: string): string {
+  const shared = '-mr-robot'
+  return kept.endsWith(shared) ? `${kept.slice(0, -shared.length)}-${robotIdHash(id)}` : kept
 }
