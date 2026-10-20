@@ -5,22 +5,27 @@
 import { SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import { expect } from 'vitest'
-import { frame, HostError, HostRpcs, parseFrame, serveHost } from '@mr-robot/host-protocol'
+import { frame, globToRegExp, HostError, HostRpcs, parseFrame, serveHost, SKIPPED_DIRECTORIES, type HostAccess, type Sandbox, type SandboxReport } from '@mr-robot/host-protocol'
 import { api } from './api.ts'
 
 const ANNA = 'anna@example.com'
 
 export const ran: string[] = []
+/** Every command with the directory, mode and roots it reached the app with (v1.16 ticket 02), and every file call with its path and mode. */
+export const hostRuns: Array<{ command: string; cwd: string | undefined; access: HostAccess }> = []
+export const hostFileCalls: Array<{ rpc: string; path: string; access: HostAccess }> = []
 const open: WebSocket[] = []
 /** The fake host's disk (v1.15, copy): path → bytes; a path in `declaredSize` reports that size and holds nothing. */
 export const hostDisk = new Map<string, Uint8Array>()
 export const declaredSize = new Map<string, number>()
 /** Answers to commands, in order: the first that returns a result wins; every other command echoes. Cleared by the test. */
-export const hostCommands: Array<(command: string) => { stdout: string; stderr?: string; exitCode?: number } | undefined> = []
+export const hostCommands: Array<(command: string, access: HostAccess) => { stdout: string; stderr?: string; exitCode?: number; sandbox?: SandboxReport } | undefined> = []
+
+const skippedPath = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
 
 
 /** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). */
-export async function fakeHost(name = 'Desk') {
+export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {}) {
   const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform: 'linux' }) })
   const { code, approveUrl } = (await start.json()) as { code: string; approveUrl: string }
   expect(approveUrl).toBe(`https://mr-robot.test/#/pair/${code}`)
@@ -38,7 +43,8 @@ export async function fakeHost(name = 'Desk') {
   const closes: number[] = []
   socket.addEventListener('close', (event) => closes.push(event.code))
   const handlers = HostRpcs.toLayer({
-    Read: ({ path }) => {
+    Read: ({ path, access }) => {
+      hostFileCalls.push({ rpc: 'Read', path, access })
       if (path === '/root/secret') return Effect.fail(new HostError({ message: 'permission denied', code: 'EACCES' }))
       const bytes = hostDisk.get(path)
       if (bytes === undefined) return Effect.succeed({ path, size: 5, text: 'hello', base64: null })
@@ -48,7 +54,8 @@ export async function fakeHost(name = 'Desk') {
         return Effect.succeed({ path, size: bytes.length, text: null, base64: btoa(String.fromCharCode(...bytes)) })
       }
     },
-    Write: ({ path, text, base64 }) => Effect.sync(() => {
+    Write: ({ path, text, base64, access }) => Effect.sync(() => {
+      hostFileCalls.push({ rpc: 'Write', path, access })
       const bytes = base64 === undefined ? new TextEncoder().encode(text ?? '') : Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
       hostDisk.set(path, bytes)
       return { path, bytes: bytes.length }
@@ -70,11 +77,36 @@ export async function fakeHost(name = 'Desk') {
       hostDisk.set(path, next)
       return { path, bytes: bytes.length }
     }),
-    Run: ({ command }) => Effect.sync(() => {
-      ran.push(command)
-      const scripted = hostCommands.map((answer) => answer(command)).find((answer) => answer !== undefined)
-      return { stdout: scripted?.stdout ?? `ran: ${command}`, stderr: scripted?.stderr ?? '', exitCode: scripted?.exitCode ?? 0, timedOut: false }
+    Glob: ({ pattern, access }) => Effect.sync(() => {
+      hostFileCalls.push({ rpc: 'Glob', path: pattern, access })
+      const matcher = globToRegExp(pattern)
+      return { paths: [...hostDisk.keys()].filter((path) => !skippedPath(path) && matcher.test(path)).sort(), truncated: false }
     }),
+    Grep: ({ pattern, ignoreCase, glob, path, access }) => Effect.sync(() => {
+      hostFileCalls.push({ rpc: 'Grep', path: path ?? '', access })
+      const regex = new RegExp(pattern, ignoreCase ? 'i' : '')
+      const files = glob === undefined ? undefined : globToRegExp(glob)
+      const matches = [...hostDisk.entries()].filter(([file]) => !skippedPath(file) && (files === undefined || files.test(file)) && (path === undefined || file.startsWith(`${path}/`))).sort(([a], [b]) => (a < b ? -1 : 1))
+        .flatMap(([file, bytes]) => new TextDecoder().decode(bytes).split('\n').flatMap((line, index) => (regex.test(line) ? [{ path: file, line: index + 1, text: line }] : [])))
+      return { matches }
+    }),
+    Delete: ({ path, access }) => {
+      hostFileCalls.push({ rpc: 'Delete', path, access })
+      if (!hostDisk.delete(path)) return Effect.fail(new HostError({ message: `No file ${path}; nothing was deleted.`, code: 'ENOENT' }))
+      return Effect.succeed({ path })
+    },
+    Run: ({ command, cwd, access }) => {
+      ran.push(command)
+      hostRuns.push({ command, cwd, access })
+      // The app fails a confined command closed where it has no sandbox (ob-n72n).
+      if (access.mode !== 'full' && options.sandbox === 'none') return Effect.fail(new HostError({ message: 'This computer has no usable sandbox', code: 'SANDBOX_UNAVAILABLE' }))
+      const scripted = hostCommands.map((answer) => answer(command, access)).find((answer) => answer !== undefined)
+      const sandbox = scripted?.sandbox ?? (access.mode === 'full' ? { mode: access.mode, denied: false } : { mode: access.mode, denied: false, enforcement: options.sandbox === 'partial' ? 'partial' as const : 'full' as const })
+      return Effect.succeed({
+        kind: 'foreground' as const, cwd: cwd ?? `/home/anna/mr-robot/${access.robot}`, exitCode: scripted?.exitCode ?? 0, signal: null, timedOut: false, aborted: false, timeoutMs: 120_000,
+        stdout: { text: scripted?.stdout ?? `ran: ${command}`, truncated: false }, stderr: { text: scripted?.stderr ?? '', truncated: false }, sandbox,
+      })
+    },
     BrowserOpen: () => Effect.fail(new HostError({ message: 'no Chrome in the fake host' })),
     BrowserClose: () => Effect.void,
   })
@@ -84,7 +116,7 @@ export async function fakeHost(name = 'Desk') {
     if (parsed?.t === 'rpc') Effect.runFork(host.deliver(parsed.d))
   })
   Effect.runFork(host.server)
-  socket.send(frame({ t: 'hb', d: { version: '0.1.0', platform: 'linux', hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome' } } }))
+  socket.send(frame({ t: 'hb', d: { version: '0.1.0', platform: 'linux', hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full' } } }))
   await new Promise((resolve) => setTimeout(resolve, 100))
   return { hostId: paired.hostId, token: paired.token, socket, closes, connect }
 }

@@ -4,9 +4,11 @@
  * the filesystem backend of the place (files.ts) or to the jobs of the place (jobs.ts). A later ticket that gives a place new powers (a Host
  * through DSH, files without limit) changes its backend, not the tools.
  */
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { HostView } from '@mr-robot/protocol'
 import { COPY_CHUNK_BYTES, COPY_MAX_BYTES } from '@mr-robot/host-protocol'
 import type { WorkspaceHost } from '../agent/host.ts'
+import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
 import type { BoxBackend } from '../box/backend.ts'
 import { MEMBER_FILE_NAMES } from '../member/member.ts'
 import { isDocsPath } from '../docs/index.ts'
@@ -16,14 +18,14 @@ import type { HostCommandResult } from './host-runner.ts'
 import { Jobs, type JobEntry, type JobPlace, type RunResult } from './jobs.ts'
 import { BOX_PLACE, OWNED_ON_WORKSPACE, ownedPath, parseOn, placeName, WORKSPACE_PLACE, type Place, type PlaceFacet, type StoredPlace } from './place.ts'
 
-/** One Host as the Robot reaches it: the v1.2 RPCs, each failing as a Host call fails (offline, refused, an OS error). */
+/** One Host as the Robot reaches it: the Host RPCs, each failing as a Host call fails (offline, refused, an OS error). */
 export interface HostLink extends HostFileLink {
   readChunk(input: { path: string; offset: number; length: number }): Promise<{ readonly path: string; readonly size: number; readonly base64: string }>
   writeChunk(input: { path: string; offset: number; base64: string }): Promise<{ readonly path: string; readonly bytes: number }>
   /** The copy as a whole is one line in the Host's log. */
   recordCopy(detail: string, outcome: string): Promise<void>
-  /** One command in the Host's login shell, under the shell facet. */
-  run(command: string, cwd: string | undefined, timeoutMs: number): Promise<HostCommandResult>
+  /** One command through the Host's shell and sandbox, under the shell facet; `escalated` is a call the owner approved to run without the sandbox. */
+  run(command: string, cwd: string | undefined, timeoutMs: number, escalated: boolean): Promise<HostCommandResult>
 }
 
 export interface PlacesDeps {
@@ -37,8 +39,13 @@ export interface PlacesDeps {
   hosts(): Promise<readonly HostView[]>
   readonly box: BoxAccess
   link(host: HostView): HostLink
-  /** The jobs of a place. */
-  jobPlace(place: Exclude<Place, { kind: 'workspace' }>): JobPlace
+  /** The jobs of a place; `escalated` makes a Host command run without the sandbox. */
+  jobPlace(place: Exclude<Place, { kind: 'workspace' }>, escalated: boolean): JobPlace
+  /** The one-call Ask of a run with escalate (ob-ifak): the owner's approval runs the same call again, and only then is it approved. */
+  readonly escalation: {
+    approved(callId: string): boolean
+    ask(request: ToolCallRequest, exec: ToolRunContext): { readonly askId: string }
+  }
   readonly jobs: Jobs
 }
 
@@ -60,6 +67,9 @@ export interface RunInput {
   readonly cwd?: string
   readonly seconds: number
   readonly background: boolean
+  /** Run without the sandbox, once, after the owner approves (ob-ifak). Needs a reason. */
+  readonly escalate: boolean
+  readonly reason?: string
 }
 
 /** The largest file copy moves between the Workspace and the Box until files go straight to R2 (ticket 06). */
@@ -69,6 +79,11 @@ const ownedKey = (key: string): boolean => (MEMBER_FILE_NAMES as readonly string
 
 const noGrant = (on: string, what: string, grant: string): Error =>
   new Error(`on "${on}": you hold no grant on ${what} (${grant}). Your owner can give it: propose it with propose_grants.`)
+
+/** The arguments of a run as the tool takes them, to store the call an Ask asks about. */
+const runArguments = (input: RunInput): Record<string, unknown> => ({
+  on: input.on, command: input.command, ...(input.cwd === undefined ? {} : { cwd: input.cwd }), timeout_seconds: input.seconds, run_in_background: input.background, escalate: true, reason: input.reason,
+})
 
 export class Places {
   private readonly workspaceFiles: WorkspaceFiles
@@ -115,11 +130,23 @@ export class Places {
 
   // ---------------------------------------------------------------- run and jobs
 
-  async run(input: RunInput, signal?: AbortSignal): Promise<RunResult> {
+  async run(input: RunInput, exec: ToolRunContext): Promise<RunResult | WaitingResult> {
     const place = await this.resolve(input.on, 'shell', 'run')
     if (place.kind === 'workspace') throw new Error('run: the Workspace runs no commands')
     const cwd = input.cwd === undefined ? undefined : place.kind === 'box' ? boxPath(input.cwd) : input.cwd
-    return this.deps.jobs.run(this.deps.jobPlace(place), input.command, cwd, input.seconds, input.background, signal)
+    let escalated = false
+    if (input.escalate) {
+      if (place.kind !== 'host') throw new Error('run: escalate lifts the sandbox of a computer. Your Box has none to lift: it is yours.')
+      escalated = this.deps.escalation.approved(String(exec.callId))
+      if (!escalated) {
+        const reason = input.reason?.trim() ?? ''
+        if (reason === '') throw new Error('run: escalate needs a reason: your owner reads it before they approve the call.')
+        const items: GrantItem[] = [{ kind: 'host', name: `${place.id}:shell` }]
+        const { askId } = this.deps.escalation.ask({ tool: 'run', arguments: runArguments(input), reason, items }, exec)
+        return waitingResult(askId, 'run')
+      }
+    }
+    return this.deps.jobs.run(this.deps.jobPlace(place, escalated), input.command, cwd, input.seconds, input.background, exec.signal)
   }
 
   /** The place a job runs in must still be one the Robot may use; the ask gate asks about it by the same place. */

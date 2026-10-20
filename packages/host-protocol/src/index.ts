@@ -15,6 +15,7 @@ import * as RpcSerialization from 'effect/rpc/RpcSerialization'
 import * as RpcServer from 'effect/rpc/RpcServer'
 
 export * from './session-sign-in.ts'
+export * from './file-search.ts'
 
 /** A host-side failure: an OS error (code like ENOENT, EACCES), a timeout, or a missing capability. */
 export class HostError extends Schema.TaggedError<HostError>()('HostError', {
@@ -22,16 +23,38 @@ export class HostError extends Schema.TaggedError<HostError>()('HostError', {
   code: Schema.optional(Schema.String),
 }) {}
 
-/** Read a file the signed-in user can reach; text when it is UTF-8, else base64. */
+/**
+ * What a Robot may do on a Host (v1.16 ticket 02, ob-wh59): the mode and the write roots of the grant the call runs under, and the
+ * name of the Robot's own directory (~/mr-robot/<robot>/ on the Host). The Worker fills it from the grant; the Robot never chooses it.
+ * Reads are as wide as the OS user in every mode; the mode limits what a command or a file write changes.
+ */
+export const HostMode = Schema.Literals(['read-only', 'workspace-write', 'full'])
+export type HostMode = typeof HostMode.Type
+
+export const HostAccess = Schema.Struct({
+  /** The name of the Robot's directory under mr-robot/ in the OS user's home: its default cwd and a write root, created on first use. */
+  robot: Schema.String,
+  mode: HostMode,
+  /** More directories the Robot may write in workspace-write mode (absolute, or ~/ for the home directory). */
+  roots: Schema.Array(Schema.String),
+})
+export type HostAccess = typeof HostAccess.Type
+
+/** The code of the HostError a write outside the mode and roots fails with. */
+export const SANDBOX_DENIED = 'SANDBOX_DENIED'
+/** The code of the HostError a confined command fails with when this computer has no sandbox that can confine it (it fails closed). */
+export const SANDBOX_UNAVAILABLE = 'SANDBOX_UNAVAILABLE'
+
+/** Read a file the signed-in user can reach; text when it is UTF-8, else base64. A relative path is relative to the Robot's directory. */
 export const Read = Rpc.make('Read', {
-  payload: { path: Schema.String },
+  payload: { path: Schema.String, access: HostAccess },
   success: Schema.Struct({ path: Schema.String, size: Schema.Number, text: Schema.NullOr(Schema.String), base64: Schema.NullOr(Schema.String) }),
   error: HostError,
 })
 
 /** Write a file (creating its directories); text or base64. */
 export const Write = Rpc.make('Write', {
-  payload: { path: Schema.String, text: Schema.optional(Schema.String), base64: Schema.optional(Schema.String) },
+  payload: { path: Schema.String, text: Schema.optional(Schema.String), base64: Schema.optional(Schema.String), access: HostAccess },
   success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
   error: HostError,
 })
@@ -41,22 +64,75 @@ export const Write = Rpc.make('Write', {
  * model. A read at the end of the file returns an empty piece; `size` is the size of the whole file.
  */
 export const ReadChunk = Rpc.make('ReadChunk', {
-  payload: { path: Schema.String, offset: Schema.Number, length: Schema.Number },
+  payload: { path: Schema.String, offset: Schema.Number, length: Schema.Number, access: HostAccess },
   success: Schema.Struct({ path: Schema.String, size: Schema.Number, base64: Schema.String }),
   error: HostError,
 })
 
 /** Write one piece at an offset; the piece at offset 0 starts the file afresh (and creates its directories). */
 export const WriteChunk = Rpc.make('WriteChunk', {
-  payload: { path: Schema.String, offset: Schema.Number, base64: Schema.String },
+  payload: { path: Schema.String, offset: Schema.Number, base64: Schema.String, access: HostAccess },
   success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
   error: HostError,
 })
 
-/** Run a shell command as the signed-in user, in their login shell and environment (hs-i785). */
+/** List the files that match a glob, as the Host prints them (.git and node_modules skipped); relative paths start in the Robot's directory. */
+export const Glob = Rpc.make('Glob', {
+  payload: { pattern: Schema.String, access: HostAccess },
+  success: Schema.Struct({ paths: Schema.Array(Schema.String), truncated: Schema.Boolean }),
+  error: HostError,
+})
+
+/** Search the text files under a directory with a JavaScript regular expression (the Robot's directory when no path is given). */
+export const Grep = Rpc.make('Grep', {
+  payload: { pattern: Schema.String, ignoreCase: Schema.Boolean, glob: Schema.optional(Schema.String), path: Schema.optional(Schema.String), access: HostAccess },
+  success: Schema.Struct({ matches: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Number, text: Schema.String })) }),
+  error: HostError,
+})
+
+/** Delete one file; a write, so it obeys the mode and the roots. */
+export const Delete = Rpc.make('Delete', {
+  payload: { path: Schema.String, access: HostAccess },
+  success: Schema.Struct({ path: Schema.String }),
+  error: HostError,
+})
+
+/** What a command left on one output stream: the end of it (the Host keeps the rest in a file of its own), and whether it was cut. */
+export const CollectedOutput = Schema.Struct({ text: Schema.String, truncated: Schema.Boolean, spillPath: Schema.optional(Schema.String) })
+export type CollectedOutput = typeof CollectedOutput.Type
+
+/** What the sandbox did to a command (DSH's ShellSandboxInfo): the mode it ran under, whether a file effect was denied (and where), and how completely it was enforced. */
+export const SandboxReport = Schema.Struct({
+  mode: HostMode,
+  denied: Schema.Boolean,
+  /** The path of the denied file effect, when the Host could read it from the command's error output. */
+  deniedPath: Schema.optional(Schema.String),
+  enforcement: Schema.optional(Schema.Literals(['full', 'partial'])),
+})
+export type SandboxReport = typeof SandboxReport.Type
+
+/**
+ * Run a command through DSH's shell and sandbox (v1.16 ticket 02, ob-wsf7): bash with bwrap or Landlock on Linux and Seatbelt on macOS,
+ * as the signed-in user, in the Robot's directory unless told otherwise. The answer has DSH's foreground shape; a later ticket adds
+ * the promoted and background shapes beside it.
+ */
+export const RunOutcome = Schema.Struct({
+  kind: Schema.Literal('foreground'),
+  cwd: Schema.String,
+  exitCode: Schema.NullOr(Schema.Number),
+  signal: Schema.NullOr(Schema.String),
+  timedOut: Schema.Boolean,
+  aborted: Schema.Boolean,
+  timeoutMs: Schema.Number,
+  stdout: CollectedOutput,
+  stderr: CollectedOutput,
+  sandbox: Schema.optional(SandboxReport),
+})
+export type RunOutcome = typeof RunOutcome.Type
+
 export const Run = Rpc.make('Run', {
-  payload: { command: Schema.String, cwd: Schema.optional(Schema.String), timeoutMs: Schema.optional(Schema.Number) },
-  success: Schema.Struct({ stdout: Schema.String, stderr: Schema.String, exitCode: Schema.NullOr(Schema.Number), timedOut: Schema.Boolean }),
+  payload: { command: Schema.String, cwd: Schema.optional(Schema.String), timeoutMs: Schema.optional(Schema.Number), access: HostAccess },
+  success: RunOutcome,
   error: HostError,
 })
 
@@ -72,11 +148,15 @@ export const BrowserClose = Rpc.make('BrowserClose', {
   error: HostError,
 })
 
-export class HostRpcs extends RpcGroup.make(Read, Write, ReadChunk, WriteChunk, Run, BrowserOpen, BrowserClose) {}
+export class HostRpcs extends RpcGroup.make(Read, Write, ReadChunk, WriteChunk, Glob, Grep, Delete, Run, BrowserOpen, BrowserClose) {}
 
 /** The size of one piece of a copy, and the largest file copy moves between a Host and the Workspace (v1.15, gb-rvj5). */
 export const COPY_CHUNK_BYTES = 1024 * 1024
 export const COPY_MAX_BYTES = 100 * 1024 * 1024
+
+/** The sandbox state of a Host, as its heartbeat reports it. */
+export const Sandbox = Schema.Literals(['full', 'partial', 'none'])
+export type Sandbox = typeof Sandbox.Type
 
 /** What a Host reports every few seconds while connected (hs-7dlt). */
 export const Heartbeat = Schema.Struct({
@@ -88,6 +168,8 @@ export const Heartbeat = Schema.Struct({
     graphical: Schema.Boolean,
     /** The Chrome or Chromium the host browser uses, or null when none was found. */
     chrome: Schema.NullOr(Schema.String),
+    /** How completely this computer confines a command (v1.16, ob-n72n): full, partial (older kernel, Windows) or none (a confined command fails closed). */
+    sandbox: Sandbox,
   }),
 })
 export type Heartbeat = typeof Heartbeat.Type

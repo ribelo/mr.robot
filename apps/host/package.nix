@@ -34,7 +34,8 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src pnpmWorkspaces;
     inherit pnpm;
     fetcherVersion = 4;
-    hash = "sha256-BhM2on0VXe777h4pL3uLBh9CadSFX4blM0L4kafwJZw=";
+    # The dependencies changed in v1.16 ticket 02 (DSH's shell and sandbox): build once to get the new hash from the error.
+    hash = lib.fakeHash;
   };
 
   buildPhase = ''
@@ -47,10 +48,13 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     runHook preInstall
     mkdir -p $out/share/mr-robot-host
     cp apps/host/dist/main.cjs apps/host/dist/preload.cjs apps/host/dist/window.html $out/share/mr-robot-host/
+    # DSH's Landlock launcher (build.mjs copies it beside the bundle); the app points DSH at it.
+    cp apps/host/dist/landlock-run $out/share/mr-robot-host/
     # Autostart entries run the command from the user's profile, so they survive updates.
     makeWrapper ${pkgs.electron}/bin/electron $out/bin/mr-robot-host \
       --add-flags $out/share/mr-robot-host/main.cjs \
-      --set MR_ROBOT_HOST_EXEC mr-robot-host
+      --set MR_ROBOT_HOST_EXEC mr-robot-host \
+      --prefix PATH : ${lib.makeBinPath [ pkgs.bubblewrap pkgs.systemd ]}
     runHook postInstall
   '';
 

@@ -10,6 +10,7 @@ import { frame, HEARTBEAT_MS, parseFrame, serveHost, type HostNotification } fro
 import WebSocket from 'ws'
 import { findChrome, hasGraphicalSession, type HostChrome } from './chrome.ts'
 import { hostHandlers } from './handlers.ts'
+import type { HostShell } from './shell.ts'
 
 export type LinkState = 'unpaired' | 'pairing' | 'connecting' | 'online' | 'offline'
 
@@ -49,6 +50,7 @@ export class HostLink {
 
   constructor(
     private readonly target: { server: string; hostId: string; token: string; version: string },
+    private readonly shell: HostShell,
     private readonly chrome: HostChrome,
     private readonly events: LinkEvents,
   ) {}
@@ -72,7 +74,7 @@ export class HostLink {
   }
 
   private beat(): void {
-    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome() } } }))
+    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox } } }))
   }
 
   private connect(): void {
@@ -81,7 +83,7 @@ export class HostLink {
     const url = `${this.target.server.replace(/^http/, 'ws')}/api/host/connect`
     const socket = new WebSocket(url, { headers: { authorization: `Bearer ${this.target.token}`, 'x-host-id': this.target.hostId } })
     this.socket = socket
-    const handlers = hostHandlers(this.chrome, () => ({ hostId: this.target.hostId, token: this.target.token }), (count) => this.events.sessions(count))
+    const handlers = hostHandlers(this.shell, this.chrome, () => ({ hostId: this.target.hostId, token: this.target.token }), (count) => this.events.sessions(count))
     const host = serveHost(handlers, (text) => { if (socket.readyState === WebSocket.OPEN) socket.send(text) })
     socket.on('open', () => {
       this.retry = 1000

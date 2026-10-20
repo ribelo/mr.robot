@@ -1,14 +1,17 @@
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import { describe, expect, it } from 'vitest'
+import type { HostAccess } from '../src/index.ts'
 import { HostError, HostRpcs, makeHostClient, parseFrame, serveHost } from '../src/index.ts'
+
+const access: HostAccess = { robot: 'bot-1', mode: 'workspace-write', roots: [] }
 
 describe('the host protocol over a socket', () => {
   it('carries a typed call and a typed error both ways', async () => {
     const handlers = HostRpcs.toLayer({
       Read: ({ path }) => path === '/nope' ? Effect.fail(new HostError({ message: 'no such file', code: 'ENOENT' })) : Effect.succeed({ path, size: 2, text: 'hi', base64: null }),
       Write: ({ path, text }) => Effect.succeed({ path, bytes: (text ?? '').length }),
-      Run: ({ command }) => Effect.succeed({ stdout: command, stderr: '', exitCode: 0, timedOut: false }),
+      Run: ({ command, access }) => Effect.succeed({ kind: 'foreground' as const, cwd: `/home/u/mr-robot/${access.robot}`, exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 120_000, stdout: { text: command, truncated: false }, stderr: { text: '', truncated: false } }),
       BrowserOpen: () => Effect.succeed({ browser: 'chrome' }),
       BrowserClose: () => Effect.void,
     })
@@ -21,14 +24,14 @@ describe('the host protocol over a socket', () => {
       toClient = (text) => { const f = parseFrame(text); if (f?.t === 'rpc') Effect.runFork(side.deliver(f.d)) }
       yield* Effect.forkScoped(host.server)
       const client = yield* side.client
-      const read = yield* client.Read({ path: '/etc/hostname' })
-      const run = yield* client.Run({ command: 'echo ok' })
-      const missing = yield* Effect.exit(client.Read({ path: '/nope' }))
+      const read = yield* client.Read({ path: '/etc/hostname', access })
+      const run = yield* client.Run({ command: 'echo ok', access })
+      const missing = yield* Effect.exit(client.Read({ path: '/nope', access }))
       return { read, run, missing }
     })
     const { read, run, missing } = await Effect.runPromise(Effect.scoped(program))
     expect(read).toEqual({ path: '/etc/hostname', size: 2, text: 'hi', base64: null })
-    expect(run.stdout).toBe('echo ok')
+    expect(run).toMatchObject({ kind: 'foreground', cwd: '/home/u/mr-robot/bot-1', stdout: { text: 'echo ok' } })
     expect(Exit.isFailure(missing) && JSON.stringify(missing)).toContain('ENOENT')
   })
 })

@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { HostView } from '@mr-robot/protocol'
-import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, type Heartbeat, type HostNotification } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, type Heartbeat, type HostAccess, type HostNotification } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
 import { HOME_ID } from '../env.ts'
 
@@ -39,6 +39,10 @@ export interface HostEntry {
   readonly capabilities: HostView['capabilities']
   readonly users: readonly string[]
 }
+
+/** What a Robot is told when a command would run confined on a computer that cannot confine it (ob-n72n). */
+export const NO_SANDBOX = (host: string, mode: string): string =>
+  `${host} has no usable sandbox, so a command in ${mode} mode does not run there (it fails closed). Your owner can install bubblewrap on that computer (Linux) or give you the shell grant in full mode; or call run with escalate for one call.`
 
 export class HostOffline extends Error {
   override readonly name = 'HostOffline'
@@ -260,7 +264,7 @@ export class HostHub {
    * A Robot's call on one of this Member's hosts (hs-5ktw): the Robot must hold the grant for that
    * host and kind (Mr. Robot holds it unless his owner lowered it, sk-br7y); a shared host serves every Home member's robots.
    */
-  async authorize(id: string, robotId: string, grant: HostGrant): Promise<HostRow> {
+  async authorize(id: string, robotId: string, grant: HostGrant): Promise<{ row: HostRow; access: HostAccess }> {
     const row = this.row(id)
     if (row === undefined) throw new HostRefused('no such host')
     const robot = await this.env.ROBOT.getByName(robotId).hostAccess(id, grant)
@@ -268,7 +272,7 @@ export class HostHub {
     const reaches = robot.ownerId === this.ownerId() || row.sharing === 'home'
     if (!reaches || !robot.granted) throw new HostRefused(`${robot.name} has no ${grant} grant on the host "${row.name}". Ask your owner with propose_grants.`)
     if (row.online !== 1) throw new HostOffline(`the host "${row.name}" is offline (last seen ${row.last_seen === null ? 'never' : new Date(row.last_seen).toISOString().slice(0, 16).replace('T', ' ')} UTC)`)
-    return row
+    return { row, access: robot.access }
   }
 
   /** Which robot did what on a host, when, and how it ended (pl-vcy7). */
@@ -293,9 +297,9 @@ export class HostHub {
       .map((row) => ({ robotId: row.robot_id, robotName: row.robot_name, action: row.action, detail: row.detail, outcome: row.outcome, exitCode: row.exit_code, at: row.at }))
   }
 
-  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string; exitCode?: (value: A) => number | null }): Promise<A> {
+  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string; exitCode?: (value: A) => number | null }, escalated = false): Promise<A> {
     try {
-      const value = await this.runUnlogged(id, robotId, grant, call, timeoutMs)
+      const value = await this.runUnlogged(id, robotId, grant, call, timeoutMs, escalated)
       if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: log.exitCode?.(value) ?? null })
       return value
     } catch (error) {
@@ -304,10 +308,14 @@ export class HostHub {
     }
   }
 
-  private async runUnlogged<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client) => Effect.Effect<A, unknown>, timeoutMs: number): Promise<A> {
-    await this.authorize(id, robotId, grant)
+  private async runUnlogged<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs: number, escalated: boolean): Promise<A> {
+    const { row, access: granted } = await this.authorize(id, robotId, grant)
+    // An escalated call is one the owner approved to run without the sandbox, once (ob-ifak); it never changes the grant.
+    const access: HostAccess = escalated ? { ...granted, mode: 'full' } : granted
+    // A confined command on a computer that cannot confine fails closed here too; the app refuses it as well (ob-n72n).
+    if (grant === 'shell' && access.mode !== 'full' && this.sandboxOf(row) === 'none') throw new HostRefused(NO_SANDBOX(row.name, access.mode))
     const client = await this.client(id)
-    const exit = await Effect.runPromiseExit(call(client).pipe(Effect.timeout(timeoutMs)))
+    const exit = await Effect.runPromiseExit(call(client, access).pipe(Effect.timeout(timeoutMs)))
     if (Exit.isSuccess(exit)) return exit.value
     const failure = exit.cause.reasons.find((reason) => reason._tag === 'Fail') as { error?: { _tag?: string; message?: string; code?: string } } | undefined
     const error = failure?.error
@@ -317,9 +325,14 @@ export class HostHub {
     throw new Error(`the host call failed: ${String(error?.message ?? exit.cause)}`)
   }
 
+  /** What the last heartbeat said about the sandbox; unknown (an app from before v1.16) is not none. */
+  private sandboxOf(row: HostRow): Heartbeat['capabilities']['sandbox'] | undefined {
+    return row.heartbeat === null ? undefined : (JSON.parse(row.heartbeat) as Heartbeat).capabilities.sandbox
+  }
+
   /** Open a browser session on a host: the app connects its relay socket, then the Robot gets its end. */
   async openBrowser(id: string, robotId: string, robotName: string): Promise<string> {
-    const row = await this.authorize(id, robotId, 'browser')
+    const { row } = await this.authorize(id, robotId, 'browser')
     const session = `${id}:${crypto.randomUUID()}`
     const relayUrl = `${row.origin ?? ''}/api/host/relay?session=${encodeURIComponent(session)}`
     await this.run(id, robotId, 'browser', (client) => client.BrowserOpen({ session, relayUrl }), 60_000)

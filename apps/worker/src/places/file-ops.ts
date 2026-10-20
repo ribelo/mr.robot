@@ -1,7 +1,9 @@
 /**
- * The pure part of the file tools (v1.16 ticket 01): the same read window, edit, glob and shell quoting on every place.
+ * The pure part of the file tools (v1.16 ticket 01): the same read window, edit and glob on every place.
  * Nothing here knows a place; the backends in files.ts bring the bytes.
  */
+import { GREP_MAX_MATCHES } from '@mr-robot/host-protocol'
+
 
 /** The most lines one read returns, the longest line it shows and the most bytes of lines (as the DSH read tool did). */
 export const READ_LIMIT = 2000
@@ -49,49 +51,7 @@ export function replaceText(before: string, oldString: string, newString: string
   return replaceAll ? before.split(oldString).join(newString) : before.replace(oldString, () => newString)
 }
 
-/** A glob (* within a segment, ** across segments, ?) as a regular expression over a whole path. */
-export function globToRegExp(pattern: string): RegExp {
-  let source = ''
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index]!
-    if (char === '*') {
-      if (pattern[index + 1] === '*') {
-        source += pattern[index + 2] === '/' ? '(?:.*/)?' : '.*'
-        index += pattern[index + 2] === '/' ? 2 : 1
-      } else {
-        source += '[^/]*'
-      }
-    } else if (char === '?') {
-      source += '[^/]'
-    } else {
-      source += char.replace(/[.+^$()|[\]{}\\]/g, '\\$&')
-    }
-  }
-  return new RegExp(`^${source}$`)
-}
-
-/** The directory a glob starts in: the segments before the first wildcard. A pattern without a wildcard is its own start. */
-export function globBase(pattern: string): string {
-  const parts = pattern.split('/')
-  const fixed: string[] = []
-  for (const part of parts) {
-    if (/[*?]/.test(part)) break
-    fixed.push(part)
-  }
-  const base = fixed.join('/')
-  if (base === '') return pattern.startsWith('/') ? '/' : '.'
-  return base
-}
-
-/** One argument for a POSIX shell, in single quotes. */
-export function shellQuote(text: string): string {
-  return `'${text.replaceAll("'", "'\\''")}'`
-}
-
-/** Directories no listing of a Box or a Host shows: version control and installed packages are noise for a Robot. */
-export const SKIPPED_DIRECTORIES = ['.git', 'node_modules'] as const
-
-export const skipped = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
+export { globBase, globToRegExp, skipped, SKIPPED_DIRECTORIES } from '@mr-robot/host-protocol'
 
 export interface GrepMatch {
   readonly path: string
@@ -99,19 +59,7 @@ export interface GrepMatch {
   readonly text: string
 }
 
-export const MAX_GREP_MATCHES = 200
-
-/** The matches of `grep -rn` output: path:line:text. */
-export function parseGrepOutput(stdout: string): GrepMatch[] {
-  const matches: GrepMatch[] = []
-  for (const row of stdout.split('\n')) {
-    const found = /^(.*?):(\d+):(.*)$/.exec(row)
-    if (found === null) continue
-    matches.push({ path: found[1]!, line: Number(found[2]), text: found[3]!.slice(0, 300) })
-    if (matches.length >= MAX_GREP_MATCHES) break
-  }
-  return matches
-}
+export const MAX_GREP_MATCHES = GREP_MAX_MATCHES
 
 /** The matches of a regular expression in a text. */
 export function grepText(path: string, text: string, regex: RegExp, room: number): GrepMatch[] {

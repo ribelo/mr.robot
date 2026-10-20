@@ -1,14 +1,14 @@
 /**
  * A filesystem backend per place (v1.16 ticket 01): the file tools say what to do, a backend does it where the file is. The Workspace
  * is R2 with the owner's Member files and the product docs mounted read-only; the Box is its container's disk; a Host is its
- * computer, reached with the Host RPCs of v1.2 (Read, Write and, for what they lack, a command under the files facet).
+ * computer, reached with the Host's file RPCs (read, write, glob, grep, delete), done by the app in Node under the files facet.
  */
 import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { MEMBER_FILE_NAMES, type MemberFileName } from '../member/member.ts'
 import type { BoxBackend } from '../box/backend.ts'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { normalizePath } from '../workspace/workspace.ts'
-import { globBase, globToRegExp, grepText, MAX_GREP_MATCHES, parseGrepOutput, shellQuote, skipped, type GrepMatch } from './file-ops.ts'
+import { globToRegExp, grepText, MAX_GREP_MATCHES, skipped, type GrepMatch } from './file-ops.ts'
 import { OWNED_ON_WORKSPACE, ownedPath } from './place.ts'
 
 export const WORKSPACE_ROOT = '/workspace'
@@ -270,19 +270,18 @@ export class BoxFiles implements PlaceFiles {
 
 // ---------------------------------------------------------------- a Host
 
-/** What a Host backend needs of one Host: the v1.2 file RPCs and a command, all under the Robot's files facet and failing as the Host calls fail. */
+/** What a Host backend needs of one Host: the file RPCs, all under the Robot's files facet and failing as the Host calls fail. */
 export interface HostFileLink {
   readonly name: string
   read(path: string): Promise<{ readonly path: string; readonly size: number; readonly text: string | null; readonly base64: string | null }>
   write(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ readonly path: string; readonly bytes: number }>
-  /** A POSIX shell command for what the file RPCs lack (listing, searching, deleting). */
-  command(command: string, timeoutMs: number): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number | null; readonly timedOut: boolean }>
+  /** The files a glob matches, listed by the app in Node. */
+  glob(pattern: string): Promise<{ readonly paths: readonly string[]; readonly truncated: boolean }>
+  grep(input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }): Promise<{ readonly matches: readonly GrepMatch[] }>
+  remove(path: string): Promise<{ readonly path: string }>
 }
 
-const LISTING_LIMIT = 20_000
-const COMMAND_TIMEOUT_MS = 60_000
-
-/** A relative path on a Host is relative to the home directory; the Workspace's own names are not a Host's. */
+/** A relative path on a Host starts in the Robot's directory there; the Workspace's own names are not a Host's. */
 const refuseOwnedOnHost = (path: string): void => {
   if (!path.startsWith('/') && ownedPath(path)) throw new Error(OWNED_ON_WORKSPACE(path))
 }
@@ -307,26 +306,14 @@ export class HostFiles implements PlaceFiles {
 
   async removeFile(path: string): Promise<{ path: string }> {
     refuseOwnedOnHost(path)
-    const quoted = shellQuote(path)
-    const done = await this.link.command(`if [ -f ${quoted} ]; then rm -- ${quoted} && echo deleted; else echo missing; fi`, COMMAND_TIMEOUT_MS)
-    if (done.stdout.trim() !== 'deleted') throw new Error(done.stdout.trim() === 'missing' ? `No file ${path} on ${this.label}; nothing was deleted.` : `${path} was not deleted on ${this.label}: ${done.stderr.trim() || `exit ${done.exitCode}`}`)
-    return { path }
+    return this.link.remove(path)
   }
 
   async glob(pattern: string): Promise<string[]> {
-    const matcher = globToRegExp(pattern)
-    const base = shellQuote(globBase(pattern))
-    const listed = await this.link.command(`find ${base} \\( -name .git -o -name node_modules \\) -prune -o -type f -print 2>/dev/null | head -n ${LISTING_LIMIT}`, COMMAND_TIMEOUT_MS)
-    return listed.stdout.split('\n').map((line) => line.replace(/^\.\//, '')).filter((line) => line !== '' && matcher.test(line)).sort()
+    return [...(await this.link.glob(pattern)).paths]
   }
 
   async grep(input: GrepInput): Promise<GrepMatch[]> {
-    const files = input.glob === undefined ? undefined : globToRegExp(input.glob)
-    const base = shellQuote(input.path ?? '.')
-    const found = await this.link.command(
-      `grep -rInE ${input.ignoreCase ? '-i ' : ''}--exclude-dir=.git --exclude-dir=node_modules -e ${shellQuote(input.pattern)} -- ${base} 2>/dev/null | head -n ${MAX_GREP_MATCHES * 10}`,
-      COMMAND_TIMEOUT_MS,
-    )
-    return parseGrepOutput(found.stdout).map((match) => ({ ...match, path: match.path.replace(/^\.\//, '') })).filter((match) => files === undefined || files.test(match.path)).slice(0, MAX_GREP_MATCHES)
+    return [...(await this.link.grep({ pattern: input.pattern, ignoreCase: input.ignoreCase, ...(input.glob === undefined ? {} : { glob: input.glob }), ...(input.path === undefined ? {} : { path: input.path }) })).matches]
   }
 }

@@ -10,6 +10,7 @@ import { HostChrome } from './chrome.ts'
 import { ConfigFile, normalizeServer, type HostConfig } from './config.ts'
 import { HostLink, startPairing, waitForApproval, type LinkState } from './connection.ts'
 import { isSignInKind } from './sign-in.ts'
+import { HostShell } from './shell.ts'
 import { connectThroughSignIn } from './sign-in-window.ts'
 
 const VERSION = '0.1.0'
@@ -25,6 +26,8 @@ const configFile = ConfigFile.in(join(app.getPath('userData')))
 let config: HostConfig = configFile.read(hostname())
 const chrome = new HostChrome(join(app.getPath('userData'), 'chrome-profile'))
 let link: HostLink | undefined
+/** DSH's shell and sandbox for the Robots' commands, started with the app (what the sandbox can do here goes into every heartbeat). */
+let hostShell: HostShell | undefined
 let state: LinkState = 'unpaired'
 let detail: string | undefined
 let pairing: { code: string; approveUrl: string } | undefined
@@ -54,7 +57,7 @@ function changed(): void {
       { label: 'Open Mr. Robot', click: () => openWindow() },
       { label: 'This computer…', enabled: config.server !== null, click: () => openWindow('#/this-computer') },
       { type: 'separator' },
-      { label: 'Quit', click: () => { link?.stop(); app.quit() } },
+      { label: 'Quit', click: () => { link?.stop(); void hostShell?.dispose(); app.quit() } },
     ]))
   }
 }
@@ -117,7 +120,8 @@ function connect(): void {
     setState('unpaired')
     return
   }
-  link = new HostLink({ server: config.server, hostId: config.hostId, token: config.token, version: VERSION }, chrome, {
+  if (hostShell === undefined) return
+  link = new HostLink({ server: config.server, hostId: config.hostId, token: config.token, version: VERSION }, hostShell, chrome, {
     state: setState,
     paired: () => undefined,
     unpaired: () => {
@@ -246,8 +250,13 @@ void app.whenReady().then(() => {
   tray = new Tray(nativeImage.createFromDataURL(ICON))
   tray.on('click', () => openWindow())
   if (config.autostart) applyAutostart(true)
-  connect()
   changed()
+  // The Landlock launcher ships beside the bundle (build.mjs); DSH would look for it in node_modules.
+  void HostShell.start({ landlockLauncher: join(__dirname, 'landlock-run') }).then((started) => {
+    hostShell = started
+    connect()
+    changed()
+  })
   // At login it starts in the tray; otherwise (and on first start) the window opens.
   if (config.server === null || !process.argv.includes('--hidden')) openWindow()
 })

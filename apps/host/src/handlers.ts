@@ -1,20 +1,14 @@
 /**
- * What the host does for robots (hs-n34u, hs-i785): files and a shell as the signed-in user, and
+ * What the host does for robots (hs-n34u, hs-i785): files (files.ts) and a shell through DSH (shell.ts) as the signed-in user, and
  * browser sessions relayed between Mr. Robot and the host's Chrome (hs-mqwd).
  */
-import { spawn } from 'node:child_process'
-import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, isAbsolute, join } from 'node:path'
 import * as Effect from 'effect/Effect'
 import { HostError, HostRpcs } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import type { HostChrome } from './chrome.ts'
+import { HostDisk } from './files.ts'
+import type { HostShell } from './shell.ts'
 
-const MAX_READ = 10 * 1024 * 1024
-const MAX_OUTPUT = 1024 * 1024
-
-const resolve = (path: string) => (isAbsolute(path) ? path : join(homedir(), path.replace(/^~\/?/, '')))
 const fail = (error: unknown) => new HostError({ message: error instanceof Error ? error.message : String(error), ...(typeof (error as { code?: unknown }).code === 'string' ? { code: (error as { code: string }).code } : {}) })
 
 export interface Relay {
@@ -22,7 +16,7 @@ export interface Relay {
   readonly token: string
 }
 
-export function hostHandlers(chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void) {
+export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void, disk = new HostDisk()) {
   const sessions = new Map<string, { remote: WebSocket; local: WebSocket }>()
   const closeSession = (session: string) => {
     const found = sessions.get(session)
@@ -32,85 +26,15 @@ export function hostHandlers(chrome: HostChrome, relay: () => Relay, onSessions:
     onSessions(sessions.size)
   }
   return HostRpcs.toLayer({
-    Read: ({ path }) => Effect.tryPromise({
-      try: async () => {
-        const full = resolve(path)
-        const info = await stat(full)
-        if (info.size > MAX_READ) throw Object.assign(new Error(`${full} is ${info.size} bytes; files over 10 MB are not read`), { code: 'EFBIG' })
-        const body = await readFile(full)
-        try {
-          return { path: full, size: body.length, text: new TextDecoder('utf-8', { fatal: true }).decode(body), base64: null }
-        } catch {
-          return { path: full, size: body.length, text: null, base64: body.toString('base64') }
-        }
-      },
-      catch: fail,
-    }),
-    Write: ({ path, text, base64 }) => Effect.tryPromise({
-      try: async () => {
-        const full = resolve(path)
-        const body = base64 !== undefined ? Buffer.from(base64, 'base64') : Buffer.from(text ?? '', 'utf8')
-        await mkdir(dirname(full), { recursive: true })
-        await writeFile(full, body)
-        return { path: full, bytes: body.length }
-      },
-      catch: fail,
-    }),
+    Read: ({ path, access }) => Effect.tryPromise({ try: () => disk.read(access, path), catch: fail }),
+    Write: ({ path, text, base64, access }) => Effect.tryPromise({ try: () => disk.write(access, path, { text, base64 }), catch: fail }),
     // A file in pieces (v1.15, copy): the piece at offset 0 truncates, later ones write at their offset.
-    ReadChunk: ({ path, offset, length }) => Effect.tryPromise({
-      try: async () => {
-        const full = resolve(path)
-        const info = await stat(full)
-        const handle = await open(full, 'r')
-        try {
-          const wanted = Math.max(0, Math.min(length, info.size - offset))
-          const buffer = Buffer.alloc(wanted)
-          const { bytesRead } = await handle.read(buffer, 0, wanted, offset)
-          return { path: full, size: info.size, base64: buffer.subarray(0, bytesRead).toString('base64') }
-        } finally {
-          await handle.close()
-        }
-      },
-      catch: fail,
-    }),
-    WriteChunk: ({ path, offset, base64 }) => Effect.tryPromise({
-      try: async () => {
-        const full = resolve(path)
-        const body = Buffer.from(base64, 'base64')
-        if (offset === 0) {
-          await mkdir(dirname(full), { recursive: true })
-          await writeFile(full, body)
-        } else {
-          const handle = await open(full, 'r+')
-          try {
-            await handle.write(body, 0, body.length, offset)
-          } finally {
-            await handle.close()
-          }
-        }
-        return { path: full, bytes: body.length }
-      },
-      catch: fail,
-    }),
-    Run: ({ command, cwd, timeoutMs }) => Effect.tryPromise({
-      try: () => new Promise((done, reject) => {
-        // The user's login shell, so their PATH and environment apply (Leash included).
-        const shell = process.env.SHELL || '/bin/sh'
-        const child = spawn(shell, ['-lc', command], { cwd: cwd === undefined ? homedir() : resolve(cwd), env: process.env })
-        let stdout = ''
-        let stderr = ''
-        let timedOut = false
-        child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < MAX_OUTPUT) stdout += chunk.toString() })
-        child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < MAX_OUTPUT) stderr += chunk.toString() })
-        const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, Math.min(timeoutMs ?? 120_000, 600_000))
-        child.on('error', (error) => { clearTimeout(timer); reject(error) })
-        child.on('close', (code) => {
-          clearTimeout(timer)
-          done({ stdout: stdout.slice(0, MAX_OUTPUT), stderr: stderr.slice(0, MAX_OUTPUT), exitCode: code, timedOut })
-        })
-      }),
-      catch: fail,
-    }) as Effect.Effect<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean }, HostError>,
+    ReadChunk: ({ path, offset, length, access }) => Effect.tryPromise({ try: () => disk.readChunk(access, path, offset, length), catch: fail }),
+    WriteChunk: ({ path, offset, base64, access }) => Effect.tryPromise({ try: () => disk.writeChunk(access, path, offset, base64), catch: fail }),
+    Glob: ({ pattern, access }) => Effect.tryPromise({ try: () => disk.glob(access, pattern), catch: fail }),
+    Grep: ({ pattern, ignoreCase, glob, path, access }) => Effect.tryPromise({ try: () => disk.grep(access, { pattern, ignoreCase, glob, path }), catch: fail }),
+    Delete: ({ path, access }) => Effect.tryPromise({ try: () => disk.remove(access, path), catch: fail }),
+    Run: ({ command, cwd, timeoutMs, access }) => Effect.tryPromise({ try: () => shell.run({ command, cwd, timeoutMs, access }), catch: fail }),
     BrowserOpen: ({ session, relayUrl }) => Effect.tryPromise({
       try: async () => {
         const endpoint = await chrome.devtools()

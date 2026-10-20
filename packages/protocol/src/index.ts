@@ -303,6 +303,35 @@ export const WorkspaceFileContent = Schema.Struct({
 })
 export type WorkspaceFileContent = typeof WorkspaceFileContent.Type
 
+/** How completely a Host confines a command (v1.16 ticket 02, ob-n72n): full, partial (an older kernel, Windows) or none (a confined command fails closed). */
+export const HostSandbox = Schema.Literals(['full', 'partial', 'none'])
+export type HostSandbox = typeof HostSandbox.Type
+
+/**
+ * What a Host grant lets a Robot change (v1.16 ticket 02, ob-wh59): read-only, workspace-write (its own directory on the Host and the
+ * roots listed) or full. Reads are as wide as the OS user in every mode. The same words as the Host protocol's HostMode.
+ */
+export const HostGrantMode = Schema.Literals(['read-only', 'workspace-write', 'full'])
+export type HostGrantMode = typeof HostGrantMode.Type
+export const HOST_GRANT_MODES: readonly HostGrantMode[] = ['read-only', 'workspace-write', 'full']
+
+export const HostGrantAccess = Schema.Struct({
+  mode: HostGrantMode,
+  /** Directories besides the Robot's own that workspace-write may change: absolute, or ~/ for the home directory of the Host's OS user. */
+  roots: Schema.Array(Schema.String),
+})
+export type HostGrantAccess = typeof HostGrantAccess.Type
+
+/** What a grant that names no mode means: workspace-write with the Robot's directory as the only root. */
+export const DEFAULT_HOST_GRANT_ACCESS: HostGrantAccess = { mode: 'workspace-write', roots: [] }
+
+/** A root as a person types it: a home path (~, ~/x) or an absolute one (/x, C:\x). Anything else is not a place on a Host. */
+export const isHostRoot = (root: string): boolean => /^(~([\\/].*)?|\/.*|[A-Za-z]:[\\/].*)$/.test(root)
+
+/** The access of every Host facet of a Robot, by facet item name ("<hostId>:files"); a facet it does not list has the default. */
+export const HostAccessByFacet = Schema.Record(Schema.String, HostGrantAccess)
+export type HostAccessByFacet = typeof HostAccessByFacet.Type
+
 /** A Host: a computer running the Mr. Robot app, paired to a Member (v1.2, hs-ro43). */
 export const HostView = Schema.Struct({
   id: Schema.String,
@@ -314,7 +343,7 @@ export const HostView = Schema.Struct({
   online: Schema.Boolean,
   lastSeen: Schema.NullOr(Schema.Number),
   version: Schema.NullOr(Schema.String),
-  capabilities: Schema.NullOr(Schema.Struct({ graphical: Schema.Boolean, chrome: Schema.NullOr(Schema.String) })),
+  capabilities: Schema.NullOr(Schema.Struct({ graphical: Schema.Boolean, chrome: Schema.NullOr(Schema.String), sandbox: Schema.optional(HostSandbox) })),
   /** The caller paired it (may share and unpair it). */
   mine: Schema.Boolean,
   /** Robots using it right now (its browser). */
@@ -450,6 +479,8 @@ export const RobotSettings = Schema.Struct({
   homeReviewer: Schema.NullOr(ModelChoice),
   /** The routes its Subagents may run on: the subagents grant's list, empty by default (ao-2z4n). */
   subagentModels: Schema.Array(SubagentModel),
+  /** v1.16 (ob-wh59): the mode and write roots of its Host files and shell grants. Absent: every facet has the default. */
+  hostAccess: Schema.optional(HostAccessByFacet),
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -510,6 +541,8 @@ export const SettingsPatch = Schema.Struct({
   requiresHosts: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
+  /** Replaces the whole map of Host facet access. */
+  hostAccess: Schema.optional(HostAccessByFacet),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 

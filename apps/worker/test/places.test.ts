@@ -53,11 +53,11 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
     const desk = await fakeHost()
     const id = await robotWith({ tools: { files: 'allow', box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow', [`${desk.hostId}:shell`]: 'allow' } })
     boxScripts.set(id, (command) => (command === 'pwd' ? { stdout: '/workspace\n' } : undefined))
-    hostCommands.push(
-      (command) => (command.startsWith('find ') ? { stdout: 'docs/a.md\ndocs/b.txt\nREADME.md\n' } : undefined),
-      (command) => (command.startsWith('grep ') ? { stdout: './docs/a.md:2:beta\n./notes/z.md:9:beta again\n' } : undefined),
-      (command) => (command.startsWith('if [ -f ') ? { stdout: 'deleted\n' } : undefined),
-    )
+    const text = (content: string) => new TextEncoder().encode(content)
+    hostDisk.set('docs/a.md', text('alpha\nbeta\n'))
+    hostDisk.set('docs/b.txt', text('nothing\n'))
+    hostDisk.set('README.md', text('readme\n'))
+    hostDisk.set('notes/z.md', text('one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nbeta again\n'))
     const results = await calls(id, [
       // The Workspace
       { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'alpha\nbeta\n' } },
@@ -105,11 +105,11 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
     expect(json(hWrite)).toMatchObject({ on: 'Desk', written: '/home/anna/h.txt', bytes: 9 })
     expect(hRead).toContain('1: host text')
     expect(json(hEdit)).toMatchObject({ on: 'Desk', edited: '/home/anna/h.txt' })
-    expect(new TextDecoder().decode(hostDisk.get('/home/anna/h.txt'))).toBe('host words')
     expect(JSON.parse(hGlob!)).toEqual(['docs/a.md'])
     expect(JSON.parse(hGrep!)).toEqual([{ path: 'docs/a.md', line: 2, text: 'beta' }])
     expect(json(hRun)).toMatchObject({ kind: 'foreground', stdout: 'ran: uptime', exitCode: 0 })
     expect(json(hDelete)).toEqual({ deleted: '/home/anna/h.txt' })
+    expect(hostDisk.has('/home/anna/h.txt')).toBe(false)
     expect(json(c1)).toMatchObject({ from: { on: 'workspace', path: '/workspace/notes/a.md' }, to: { on: 'Desk', path: '/home/anna/copy.md' }, bytes: 12 })
     expect(new TextDecoder().decode(hostDisk.get('/home/anna/copy.md'))).toBe('alpha\ngamma\n')
     expect(json(c2)).toMatchObject({ to: { on: 'workspace', path: '/workspace/inbox/copy.md' }, bytes: 12 })
