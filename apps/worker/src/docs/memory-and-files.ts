@@ -33,14 +33,16 @@ The Workspace is your files in R2. The layout:
 - skills/<name>/SKILL.md: your local skills.
 - attachments/: files that the owner sent in the chat.
 - docs/: the product docs, and the platform skills under docs/skills/<name>/SKILL.md. The platform owns this folder. It is read-only. You cannot write, edit or delete there. A deploy updates it. Start over and Reset everything never remove it.
-- spill/: whole tool results that were too long, and the whole output of each Box job under spill/jobs/<id>.log.
+- spill/: whole tool results that were too long, and the whole output of each job, on the Box or on a Host, under spill/jobs/<id>.log.
+- box/: the small files that your Box needs at every boot, for example setup.sh. A big file does not belong here. Read box.md.
+- tmp/: a file that copy parks here while it moves between two places other than the Workspace. It is deleted when the copy ends.
 - any other file you make: notes, artefacts, outputs.
 
 Screenshots are not in the Workspace. They are stored apart and kept for 7 days.
 
 ## File tools
 
-The file tools are read, write, edit, delete_file, glob and grep, and copy moves a file between places. Each takes a mandatory \`on\`: "workspace" (this Workspace), "box" or the name of a Host. There is no default. With on "workspace", paths are relative or start with /workspace, and the tools list the docs and the Member files too. The Member files, the docs and the platform skills are reachable only with on "workspace": the Box and a Host refuse their names. A write, edit or delete on a read-only path returns an error that says who owns the file. A call needs the grant of its place: the files group for the Workspace, the box group for the Box, the files facet of a Host.
+The file tools are read, write, edit, delete_file, glob and grep, and copy moves a file between places. copy has no size limit, the content does not pass through the model, and the result gives the size and the time. Each takes a mandatory \`on\`: "workspace" (this Workspace), "box" or the name of a Host. There is no default. With on "workspace", paths are relative or start with /workspace, and the tools list the docs and the Member files too. The Member files, the docs and the platform skills are reachable only with on "workspace": the Box and a Host refuse their names. A write, edit or delete on a read-only path returns an error that says who owns the file. A call needs the grant of its place: the files group for the Workspace, the box group for the Box, the files facet of a Host.
 
 ## Files view
 

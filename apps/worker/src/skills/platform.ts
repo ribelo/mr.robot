@@ -2,11 +2,12 @@
  * Platform skills (v1.15 ticket 12, gb-n6by): harness knowledge that every Robot may need and no Home library can hold, because the
  * library is per Home and granted per Robot. They ship with the Worker like the product docs, at docs/skills/<name>/SKILL.md, read-only,
  * with no Grant, and a deploy is the only thing that changes them. The skill tool loads one by name; the catalog lists them one line each.
- * A skill about a tool group shows only to a Robot that holds the group (gb-ekkf).
+ * A skill about a tool group shows only to a Robot that holds the group (gb-ekkf). The skill box shows with the box grant, and the skill
+ * hosts with any facet of a Host (v1.16 ticket 10, ob-vw9d, ob-ivby).
  */
 
 /** When a platform skill is listed: always, or only for a Robot that holds what it is about. */
-export type PlatformSkillAudience = 'everyone' | 'subagents' | 'browser' | 'channels' | 'surfaces'
+export type PlatformSkillAudience = 'everyone' | 'subagents' | 'browser' | 'channels' | 'surfaces' | 'box' | 'hosts'
 
 export interface PlatformSkill {
   readonly name: string
@@ -217,10 +218,82 @@ Read this before you write a message that goes out in your owner's name: an e-ma
 - Do not sign with your own name. Do not say you are an AI in a message that your owner sends in their own name, unless the person asks.
 - Save what you learn about your owner's style in MEMORY.md, so that the next draft starts closer.
 `),
+  skill('box', 'The Box: three layers, big files with copy and ws, setup.sh, jobs.', 'box', `
+# Box
+
+Read this before you use the Box for more than one short command: a script, a big file or a long job.
+
+## Three layers
+
+- The Workspace is in R2. It keeps what must last: results, data, notes. Nothing else lasts.
+- The folder box/ in the Workspace is small. The Box gets a copy of it at every boot, and the files you changed under /workspace/box go back to it when your Turn ends or the Box stops. A file over 20 MB does not go back.
+- The rest of the Box disk is scratch. It is empty after the Box stops. Copy a result that you need again to the Workspace before your Turn ends.
+
+## Big files
+
+- Keep a big file in the Workspace, never in box/. Every boot copies all of box/, so a big file there makes each boot slower.
+- Fetch the file where you need it. To move it, call copy with from set to the Workspace and to set to the Box. In a command, run \`ws get inbox/video.mp4\` and the file comes from R2 straight to the disk.
+- Send a result back the same way: copy, or \`ws put out.mp4 results/out.mp4\` at the end of the script. Use ws when a script needs a file in the middle of a run. Use copy when you only move a file.
+- Neither has a size limit, and the file does not pass through you. Never read a big file and write it again.
+
+## Set up once
+
+- Read box.md before you install anything. It lists the tools and versions in the image and what the image lacks, so you do not guess or probe.
+- For a package that the image lacks, write box/setup.sh (pip3 install, npm install). It runs at every boot, so keep it short and safe to run twice.
+- The uv and Bun caches are in box/.cache/. A second boot does not download the same packages again.
+
+## Jobs
+
+- A command that may run more than two minutes: start it with run_in_background. A command that is still going at its time limit becomes a job by itself.
+- Tell your owner what you started, and end your Turn. You wake when the job ends, with its id, its exit code and the end of its output. The whole log is in spill/jobs/<id>.log.
+- Do not poll. Use job_output with wait only when you need the result now.
+- The Box stays up while a job runs. If the Box stops or restarts under it, the job is lost and you wake with it as failed. Start it again, and write its progress to box/ so that it can continue.
+- Stop a job that you do not need any more with job_kill. Running time costs money.
+`),
+  skill('hosts', 'Hosts: when to use one, your directory, modes and denials, jobs, offline.', 'hosts', `
+# Hosts
+
+Read this before you use a Host: a computer that belongs to your owner.
+
+## When a Host is the right place
+
+- Use the Box for work that needs only a computer: scripts, data, conversion. The Box is yours. A Host is your owner's.
+- Use a Host only when the work needs something that exists there: your owner's files, its environment (its programs, its display, its network) or its connection (a home address, a VPN).
+- The Hosts line in your runtime section gives each Host's state, its shell and its sandbox. Read it. Do not run a command to find out whether a Host is online.
+- Write commands for the shell the line names: bash, or pwsh on Windows.
+
+## Your directory
+
+- You have your own directory on each Host: ~/mr-robot/<you>/ (on Windows %USERPROFILE%\\mr-robot\\<you>\\). It is made on first use. It is the default directory of run and the start of a relative path.
+- Work and keep your files there. Reads reach everything that your owner's OS user can read, in every mode. Do not read outside your directory unless the task needs it.
+- Move a file with copy, not with read and write. copy has no size limit and the file does not pass through you.
+
+## Modes and denials
+
+- The grant has a mode. read-only: you change nothing. workspace-write: you change your directory and the roots your owner listed (a command may also change /tmp). full: you change anything that the OS user can, with no sandbox.
+- When the sandbox denies a write, the result names the path. First change the command: write inside your directory.
+- When the work truly needs that path, call run again with the same command, escalate set to true and a reason in one sentence. Your owner gets one Ask and reads your reason. You wake with the result or the refusal. An approval covers that one call. Never split a command to get past the sandbox.
+- A Host with no usable sandbox refuses a command in read-only or workspace-write mode and says why. Tell your owner. Do not look for a way around it.
+
+## Jobs
+
+- run on a Host works as on the Box: it waits up to its time limit, then goes on as a job. Use run_in_background for a long command. End your Turn and wake when it ends.
+- A job lives in the app on the Host. If the app restarts, or the Host is away for more than five minutes, the job is lost. Write the command so that you can run it again.
+
+## A Host that is offline
+
+- A call fails with a host offline error. Tell your owner. Do not retry in a loop.
+- Your owner can set that you do not run while any of your Hosts is offline. Then a recurring Task of yours does not start and your owner hears once. A scheduled Task waits for the Host. Your owner's messages still reach you.
+
+## A shared Host
+
+- A shared Host serves the Robots of every Member, all as the same OS user. Your directory is not private from them.
+- Write nothing there that your owner wants private.
+`),
 ]
 
 /** The platform skills this Robot is shown now. `has` says which of the things they are about the Robot holds. */
-export function platformSkillsFor(has: { readonly subagents: boolean; readonly browser: boolean; readonly channels: boolean; readonly surfaces: boolean }): PlatformSkill[] {
+export function platformSkillsFor(has: { readonly subagents: boolean; readonly browser: boolean; readonly channels: boolean; readonly surfaces: boolean; readonly box: boolean; readonly hosts: boolean }): PlatformSkill[] {
   return PLATFORM_SKILLS.filter((entry) => entry.audience === 'everyone' || has[entry.audience])
 }
 

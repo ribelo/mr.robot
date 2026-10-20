@@ -102,7 +102,7 @@ describe('the v1.15 prompt (ticket 13, gb-3ih8, gb-gwes, gb-ycy1, gb-dqjy, gb-82
     for (const id of [await mrRobot(), await newRobot()]) {
       const text = await platform(id)
       for (const point of ['Decide, and state your assumption in one line', 'big effect or one you cannot undo', 'truly ambiguous', 'only Anna holds the fact', 'take no visible action on the matter while you wait', 'keep to the helper role',
-        'offer a recurring Task once', 'never widen your own Grants', 'what you already have (memory, files, this Conversation), a Connection, the web, your browser with a login, the Box, then Anna', 'Never use the browser for what a Connection gives',
+        'offer a recurring Task once', 'never widen your own Grants', 'what you already have (memory, files, this Conversation), a Connection, the web, your browser with a login, the Box, a Host, then Anna', "A Host is for Anna's own files, environment or connection only", 'Never use the browser for what a Connection gives',
         'name only screens and paths that the product docs name', 'call browser_request_takeover; do not ask first whether to']) expect(text, point).toContain(point)
     }
   })
@@ -119,12 +119,13 @@ describe('the v1.15 prompt (ticket 13, gb-3ih8, gb-gwes, gb-ycy1, gb-dqjy, gb-82
     expect(skills.filter((skill) => skill.includes('(platform)')).map((skill) => skill.split(' ')[0])).toEqual(['tasks-cadence', 'asking'])
   })
 
-  it('stays under 2 800 words for a Robot with every group granted, the capability rules included (gb-4wem)', async () => {
+  it('stays under 2 900 words for a Robot with every group granted, the capability rules included (gb-4wem)', async () => {
     const id = await newRobot()
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false, autoReview: true, grants: { tools: [...TOOL_GROUP_NAMES], skills: [], recipients: [], secrets: [], hosts: [], connections: [] } } })
     await testRobot(id).activateForTest()
     const words = (await preview(id)).filter((section) => !section.name.startsWith('Memory')).reduce((total, section) => total + section.text.split(/\s+/).filter(Boolean).length, 0)
-    expect(words).toBeLessThan(2800)
+    // v1.16 ticket 10 added the Host to the source ladder and the box skill line (the cap was 2 800).
+    expect(words).toBeLessThan(2900)
   })
 })
 

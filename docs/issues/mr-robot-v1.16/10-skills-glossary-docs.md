@@ -6,5 +6,5 @@
 
 **Status:** ready-for-agent
 
-- [ ] Workerd test: the two skills in the index by grant; the ladder text (ob-vw9d, ob-ivby, ob-f7q7)
-- [ ] GLOSSARY.md updated; a grep of docs/ and apps/worker/src/docs for Container Chrome, host_run, box_run returns nothing but history (ob-2eyd, ob-3m3e)
+- [x] Workerd test: the two skills in the index by grant; the ladder text (ob-vw9d, ob-ivby, ob-f7q7)
+- [x] GLOSSARY.md updated; a grep of docs/ and apps/worker/src/docs for Container Chrome, host_run, box_run returns nothing but history (ob-2eyd, ob-3m3e)

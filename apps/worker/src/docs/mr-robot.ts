@@ -51,7 +51,7 @@ A Robot works in code mode by default. It writes a program that calls its tools,
 
 ## Limits of the product
 
-- A Robot has no shell on the platform. A Host can give a shell on a granted computer.
+- A Robot has a shell only in a Box, when the owner grants one (read box.md), or on a Host (read hosts.md).
 - A Robot prepares a payment but does not pay. Paying stays with the owner.
 - A Robot cannot create helper Robots. Only Mr. Robot creates Robots.
 

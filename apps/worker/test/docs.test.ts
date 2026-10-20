@@ -116,8 +116,7 @@ describe('the product docs (v1.11 ticket 02)', () => {
     const id = await activeRobot()
     for (const path of DOC_PATHS) {
       const text = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=${path}`)).body.text ?? ''
-      // docs/box.md carries the image's generated tool list (v1.16 ticket 07), so it may run past the two-page limit.
-      expect(text.split(/\s+/).length, path).toBeLessThan(path === 'docs/box.md' ? 1100 : 900)
+      expect(text.split(/\s+/).length, path).toBeLessThan(900)
     }
   })
 })

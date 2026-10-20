@@ -2078,13 +2078,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Connections of a kind this Robot holds a grant for, with the write grant marked (cn-xezx). */
   /**
    * Which platform skills this Robot is shown (v1.15 ticket 12, gb-ekkf): the ones about subagents and the browser follow their tool group; channels, a
-   * Discord channel of its own or a chat Connection it may use; writing-as-owner, any surface it can write on in its owner's name (a chat Channel or a Connection).
+   * Discord channel of its own or a chat Connection it may use; writing-as-owner, any surface it can write on in its owner's name (a chat Channel or a Connection);
+   * box, the box grant; hosts, any facet of a Host (v1.16 ticket 10).
    */
-  private platformSkillAudience(granted: ReadonlySet<string>): { subagents: boolean; browser: boolean; channels: boolean; surfaces: boolean } {
+  private platformSkillAudience(granted: ReadonlySet<string>): { subagents: boolean; browser: boolean; channels: boolean; surfaces: boolean; box: boolean; hosts: boolean } {
     const config = this.store.requireConfig()
     const held = this.knownConnections.filter((connection) => this.store.mayUse('connection', connection.id))
     const channels = (config.discordChannel ?? '') !== '' || held.some((connection) => connection.kind === 'slack' || connection.kind === 'discord' || connection.kind === 'discord-user')
-    return { subagents: granted.has('subagents'), browser: granted.has('browser'), channels, surfaces: channels || held.length > 0 }
+    return { subagents: granted.has('subagents'), browser: granted.has('browser'), channels, surfaces: channels || held.length > 0, box: granted.has('box'), hosts: usableNames(this.store.effectiveGrants().hosts).length > 0 }
   }
 
   private grantedConnections(kind: ConnectorKind): GrantedConnection[] {
