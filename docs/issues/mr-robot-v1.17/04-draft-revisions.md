@@ -9,3 +9,7 @@
 - [x] Workerd test: draft_revise appends a revision and the view carries both versions; sends-on-its-own raises the grant and approves; lowering restores ask (dp-5ixt, dp-o3st, dp-ef0p, dp-fjh7)
 - [x] Component test: the revision diff (dp-o3st)
 - [x] The asking skill and the prompt name when to draft and what gmail_draft is (dp-41yj)
+
+## Closing note
+
+The prompt bound enforced is 2 900 words, not the 2 800 of the v1.15 spec: v1.16 ticket 10 raised it when it added the Host to the source ladder and the box skill line (the test "stays under 2 900 words" in apps/worker/test/platform-prompt.test.ts). Measured for a Robot with every group granted, as that test counts it: 2 852 words before v1.17, 2 895 after. The prompt carries the draft rule as one line in how-you-work: "A message speaking for {owner} to someone outside goes as a draft first (draft: true), unless {owner} gave its exact words." The full rules (when to draft, draft_revise, discarded drafts, gmail_draft) are in the asking skill.
