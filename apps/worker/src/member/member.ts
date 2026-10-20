@@ -871,6 +871,11 @@ export class Member extends DurableObject<Env> {
     return Promise.all(rows.map((row) => this.sharedView(row, origin)))
   }
 
+  /** A shared Page was renamed (dp-e0rp): the profile lists it under the new title. */
+  async renameSharedPage(robotId: string, path: string, title: string): Promise<void> {
+    this.ctx.storage.sql.exec('UPDATE shared_page SET title = ? WHERE robot_id = ? AND path = ?', title, robotId, path)
+  }
+
   /** Stop sharing (dp-hf7v): the row goes, and the link answers not found from now on. */
   async stopSharing(robotId: string, path: string): Promise<boolean> {
     return this.ctx.storage.sql.exec('DELETE FROM shared_page WHERE robot_id = ? AND path = ?', robotId, path).rowsWritten > 0

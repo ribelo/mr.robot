@@ -89,6 +89,9 @@ import { draftText } from '../agent/draft.ts'
 import { PAGE_TITLES, PAGES_DIRECTORY, pageExcerpt, pageFormat, pageTitle, renamedPage, type PageFormat } from '../pages/page.ts'
 import { pageDocument } from '../pages/page-html.ts'
 import { printPdf } from '../pages/page-pdf.ts'
+
+/** Pages larger than this are listed by their file name: their text is not read for a title. */
+const PAGE_READ_BYTES = 1024 * 1024
 import { dismissedTrailer, QUIET_STEER_MS, quietSteerNote, SAFETY_NET_STEPS, safetyNetNote, SAY_MAX_ATTACHMENTS, SAY_RECORD, sayOf, SCREEN_PREFIX, type SayRecord } from '../agent/say.ts'
 import type { SayHost } from '../agent/tools/say.ts'
 import { Say } from '../plugins/say.ts'
@@ -3430,10 +3433,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.set(PAGE_TITLES, { ...known, ...Object.fromEntries(pages.map((page) => [page.path, page.title])) })
   }
 
-  /** The Robot's Pages, newest first (dp-lxw4). */
+  /** The Robot's Pages, newest first (dp-lxw4). A file too large to read for its title is listed by its name. */
   async pages(): Promise<PageView[]> {
     const entries = (await this.run(this.workspace.list(PAGES_DIRECTORY))).filter((entry) => pageFormat(entry.path) !== undefined)
-    const pages = (await Promise.all(entries.map((entry) => this.pageView(entry.path)))).flatMap((found) => (found === undefined ? [] : [found.view]))
+    const pages = (await Promise.all(entries.map(async (entry): Promise<PageView | undefined> => entry.size > PAGE_READ_BYTES
+      ? { path: entry.path, title: pageTitle(entry.path, ''), format: pageFormat(entry.path)!, excerpt: '', size: entry.size, updatedAt: entry.uploaded }
+      : (await this.pageView(entry.path))?.view))).flatMap((found) => (found === undefined ? [] : [found]))
     this.rememberPageTitles(pages, true)
     return pages.sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path))
   }
@@ -3452,6 +3457,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const { page } = await this.pageContent(path)
     this.rememberPageTitles([page], false)
     const config = this.store.requireConfig()
+    // A shared Page is listed under its title in the owner's profile.
+    await this.env.MEMBER.getByName(config.ownerId).renameSharedPage(config.id, path, page.title).catch((error: unknown) => console.warn('shared page title not changed', error))
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${by} renamed the Page ${path} to "${page.title}".`, Date.now())
     await this.changed()
     return page

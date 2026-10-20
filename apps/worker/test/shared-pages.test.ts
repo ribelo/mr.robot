@@ -79,6 +79,9 @@ describe('shared Pages (dp-hf7v, dp-jl3d, dp-zq16, dp-62di, dp-p5yn)', () => {
     expect((await api<SharedPageView[]>(ANNA, '/api/me/shared-pages')).body.map((entry) => entry.path).sort()).toEqual(['pages/report.md', 'pages/site.html'])
     expect((await api<SharedPageView[]>(BEN, '/api/me/shared-pages')).body).toEqual([])
     expect((await api<{ shared: SharedPageView | null }>(ANNA, `/api/robots/${id}/page/share?path=pages/site.html`)).body.shared?.url).toBe(site.url)
+    // A rename shows in the profile's list too.
+    await api(ANNA, `/api/robots/${id}/page/rename`, { body: { path: 'pages/site.html', title: 'Budget 2027' } })
+    expect((await api<SharedPageView[]>(ANNA, '/api/me/shared-pages')).body.find((entry) => entry.path === 'pages/site.html')?.title).toBe('Budget 2027')
     expect((await api(ANNA, `/api/robots/${id}/page/share`, { method: 'DELETE', body: { path: 'pages/report.md' } })).status).toBe(200)
     expect((await open(report.url)).status).toBe(404)
     expect((await open(`${report.url}/pdf`)).status).toBe(404)
