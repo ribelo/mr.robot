@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] Workerd test: presign scoped to the prefix, refused outside it and after the Box stopped; copy workspace↔host through the stub's presigned flow; host↔host staged and cleaned; size in the Trajectory (ob-qshq, ob-qr7v, ob-7hp3, ob-o6aw)
-- [ ] Workerd test: ws commands against the Box stub (ob-fgyk, ob-63nt)
-- [ ] Staging: a 2 GB file Host → Workspace → Box and ws get inside a run (ob-d3rt, ob-fgyk)
-- [ ] Alchemy plan test: the R2 API token resource (ob-qshq)
+- [x] Workerd test: presign scoped to the prefix, refused outside it and after the Box stopped; copy workspace↔host through the stub's presigned flow; host↔host staged and cleaned; size in the Trajectory (ob-qshq, ob-qr7v, ob-7hp3, ob-o6aw)
+- [x] Workerd test: ws commands against the Box stub (ob-fgyk, ob-63nt): the stub Box runs the real ws program (`infra/computer/ws-core.ts`) against the real presign endpoint. The image also built once with docker, and `ws` ran in it.
+- [ ] Staging: a 2 GB file Host → Workspace → Box and ws get inside a run (ob-d3rt, ob-fgyk) (not run in this session: needs a deploy, the R2 API token, the Access bypass on /api/files/presign and a real Host app)
+- [x] Alchemy plan test: the R2 API token resource (ob-qshq)

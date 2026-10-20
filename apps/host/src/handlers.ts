@@ -3,13 +3,14 @@
  * browser sessions relayed between Mr. Robot and the host's Chrome (hs-mqwd).
  */
 import { spawn } from 'node:child_process'
-import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
 import * as Effect from 'effect/Effect'
-import { HostError, HostRpcs } from '@mr-robot/host-protocol'
+import { downloadFile, HostError, HostRpcs, uploadFile, type CopyIo } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import type { HostChrome } from './chrome.ts'
+import { fileSize, nodeCopyIo, sourceFile, targetFile } from './copy.ts'
 
 const MAX_READ = 10 * 1024 * 1024
 const MAX_OUTPUT = 1024 * 1024
@@ -22,7 +23,7 @@ export interface Relay {
   readonly token: string
 }
 
-export function hostHandlers(chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void) {
+export function hostHandlers(chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void, copyIo: CopyIo = nodeCopyIo) {
   const sessions = new Map<string, { remote: WebSocket; local: WebSocket }>()
   const closeSession = (session: string) => {
     const found = sessions.get(session)
@@ -56,39 +57,25 @@ export function hostHandlers(chrome: HostChrome, relay: () => Relay, onSessions:
       },
       catch: fail,
     }),
-    // A file in pieces (v1.15, copy): the piece at offset 0 truncates, later ones write at their offset.
-    ReadChunk: ({ path, offset, length }) => Effect.tryPromise({
+    // Copy (v1.16): the file goes to and from R2 over presigned URLs, in parts, retried (copy.ts, the protocol's copy engine).
+    CopyStat: ({ path }) => Effect.tryPromise({
       try: async () => {
         const full = resolve(path)
-        const info = await stat(full)
-        const handle = await open(full, 'r')
-        try {
-          const wanted = Math.max(0, Math.min(length, info.size - offset))
-          const buffer = Buffer.alloc(wanted)
-          const { bytesRead } = await handle.read(buffer, 0, wanted, offset)
-          return { path: full, size: info.size, base64: buffer.subarray(0, bytesRead).toString('base64') }
-        } finally {
-          await handle.close()
-        }
+        return { path: full, size: await fileSize(full) }
       },
       catch: fail,
     }),
-    WriteChunk: ({ path, offset, base64 }) => Effect.tryPromise({
+    Upload: ({ path, size, parts }) => Effect.tryPromise({
       try: async () => {
         const full = resolve(path)
-        const body = Buffer.from(base64, 'base64')
-        if (offset === 0) {
-          await mkdir(dirname(full), { recursive: true })
-          await writeFile(full, body)
-        } else {
-          const handle = await open(full, 'r+')
-          try {
-            await handle.write(body, 0, body.length, offset)
-          } finally {
-            await handle.close()
-          }
-        }
-        return { path: full, bytes: body.length }
+        return { path: full, size, etags: await uploadFile(sourceFile(full), size, parts, copyIo) }
+      },
+      catch: fail,
+    }),
+    Download: ({ path, url, size, partBytes }) => Effect.tryPromise({
+      try: async () => {
+        const full = resolve(path)
+        return { path: full, bytes: await downloadFile(targetFile(full), { url, size, partBytes }, copyIo) }
       },
       catch: fail,
     }),

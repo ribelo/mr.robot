@@ -45,6 +45,9 @@ export const Edge = Effect.gen(function* () {
       MEMBER: Cloudflare.DurableObject<Member>('Member', { className: 'Member' }),
       HOME: Cloudflare.DurableObject<Home>('Home', { className: 'Home' }),
       FILES: files,
+      // The Files bucket's S3 credentials (v1.16 ticket 06): Alchemy creates an R2 API token scoped to this bucket and the Worker holds it as a
+      // secret. It signs the presigned URLs a Host app and ws use for one key under a Robot's prefix, and the control calls of a multipart upload.
+      FILES_S3: Cloudflare.R2.S3Credentials(files, { access: 'read-write' }),
       BROWSER: Cloudflare.Browser('BROWSER'),
       // A Robot's Box (v1.14 ticket 10, the Computer until v1.15): one container per Robot on the image of infra/computer/Dockerfile,
       // which the deploy builds and pushes (Docker). The binding, the class and the directory keep their v1.14 names:
@@ -109,5 +112,19 @@ export const HostChannel = Effect.gen(function* () {
     name: 'Mr. Robot host channel',
     domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/api/host`)),
     policies: [{ name: 'Host token checked by the Worker', decision: 'bypass', include: ['everyone'] }],
+  })
+})
+
+/**
+ * The Box's door to its Workspace (v1.16 ticket 06): /api/files/presign is outside the Access login (a bypass application on that path) because
+ * ws in the container has no Access identity; the Worker checks the Box token there, and the token reaches one Robot's prefix while its Box is up.
+ */
+export const BoxChannel = Effect.gen(function* () {
+  const edge = yield* Edge
+  return yield* Cloudflare.Access.Application('BoxChannel', {
+    type: 'self_hosted',
+    name: 'Mr. Robot Box files',
+    domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/api/files/presign`)),
+    policies: [{ name: 'Box token checked by the Worker', decision: 'bypass', include: ['everyone'] }],
   })
 })

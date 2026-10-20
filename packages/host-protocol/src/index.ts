@@ -14,6 +14,7 @@ import * as RpcGroup from 'effect/rpc/RpcGroup'
 import * as RpcSerialization from 'effect/rpc/RpcSerialization'
 import * as RpcServer from 'effect/rpc/RpcServer'
 
+export * from './copy-engine.ts'
 export * from './session-sign-in.ts'
 
 /** A host-side failure: an OS error (code like ENOENT, EACCES), a timeout, or a missing capability. */
@@ -37,18 +38,29 @@ export const Write = Rpc.make('Write', {
 })
 
 /**
- * One piece of a file (v1.15, gb-iw01): copy moves a file in pieces so that no frame holds it whole and no piece passes through the
- * model. A read at the end of the file returns an empty piece; `size` is the size of the whole file.
+ * Copy (v1.16 ticket 06): a file moves between the Host app and R2 through presigned URLs the Worker minted; the Worker and the Member
+ * Durable Object only coordinate. The app first reports the size of the file, so that the Worker can plan the parts.
  */
-export const ReadChunk = Rpc.make('ReadChunk', {
-  payload: { path: Schema.String, offset: Schema.Number, length: Schema.Number },
-  success: Schema.Struct({ path: Schema.String, size: Schema.Number, base64: Schema.String }),
+export const CopyStat = Rpc.make('CopyStat', {
+  payload: { path: Schema.String },
+  success: Schema.Struct({ path: Schema.String, size: Schema.Number }),
   error: HostError,
 })
 
-/** Write one piece at an offset; the piece at offset 0 starts the file afresh (and creates its directories). */
-export const WriteChunk = Rpc.make('WriteChunk', {
-  payload: { path: Schema.String, offset: Schema.Number, base64: Schema.String },
+/** One part of an upload: the bytes from `offset` for `length`, put to `url`. A file that fits in one part is one PUT; a larger one is a multipart upload. */
+export const UploadPart = Schema.Struct({ number: Schema.Number, url: Schema.String, offset: Schema.Number, length: Schema.Number })
+export type UploadPart = typeof UploadPart.Type
+
+/** Put a file to R2 part by part, each part retried; the ETag of each part comes back for the Worker to complete the upload. */
+export const Upload = Rpc.make('Upload', {
+  payload: { path: Schema.String, size: Schema.Number, parts: Schema.Array(UploadPart) },
+  success: Schema.Struct({ path: Schema.String, size: Schema.Number, etags: Schema.Array(Schema.Struct({ number: Schema.Number, etag: Schema.String })) }),
+  error: HostError,
+})
+
+/** Fetch an object from R2 in ranges of `partBytes` into a file (creating its directories); the file appears only when all of it arrived. */
+export const Download = Rpc.make('Download', {
+  payload: { path: Schema.String, url: Schema.String, size: Schema.Number, partBytes: Schema.Number },
   success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
   error: HostError,
 })
@@ -72,11 +84,7 @@ export const BrowserClose = Rpc.make('BrowserClose', {
   error: HostError,
 })
 
-export class HostRpcs extends RpcGroup.make(Read, Write, ReadChunk, WriteChunk, Run, BrowserOpen, BrowserClose) {}
-
-/** The size of one piece of a copy, and the largest file copy moves between a Host and the Workspace (v1.15, gb-rvj5). */
-export const COPY_CHUNK_BYTES = 1024 * 1024
-export const COPY_MAX_BYTES = 100 * 1024 * 1024
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Run, BrowserOpen, BrowserClose) {}
 
 /** What a Host reports every few seconds while connected (hs-7dlt). */
 export const Heartbeat = Schema.Struct({

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 import { useOfflineCloudflare } from './offline-cloudflare.ts'
-import { Edge, Files, GoogleCallback, HookChannel, HostChannel } from './stack.ts'
+import { BoxChannel, Edge, Files, GoogleCallback, HookChannel, HostChannel } from './stack.ts'
 
 useOfflineCloudflare()
 
@@ -20,6 +20,7 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     yield* Files
     const edge = yield* Edge
     yield* HostChannel
+    yield* BoxChannel
     yield* HookChannel
     yield* GoogleCallback
     return { url: edge.url }
@@ -34,6 +35,10 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     Edge: 'Cloudflare.Worker',
     'Edge/Access': 'Cloudflare.Access.Application',
     HostChannel: 'Cloudflare.Access.Application',
+    BoxChannel: 'Cloudflare.Access.Application',
+    // The Files bucket's R2 API token (v1.16 ticket 06, ob-qshq): Cloudflare.R2.S3Credentials on the Edge Worker creates it, scoped to the bucket,
+    // and the Worker holds its S3 credentials as the secret FILES_S3 (a secret_text binding whose value only exists after the token does).
+    EdgeToken: 'Cloudflare.ApiToken.AccountApiToken',
     HookChannel: 'Cloudflare.Access.Application',
     GoogleCallback: 'Cloudflare.Access.Application',
     // The Robots' computer: built by the deploy from the Dockerfile in the repository (ao-h1wn).

@@ -7,7 +7,8 @@ A Robot with the box grant has a Box: a container in Cloudflare with Python 3.11
 The Box has no tools of its own. The tools of every place take a mandatory \`on\`; the Box is on "box". There is no default.
 - run with on "box": run a bash command in /workspace on the Box. It waits in the foreground up to timeout_seconds (default 120, maximum 1800) and returns stdout, stderr and the exit code. A command that is still going then is not killed: it goes on as a job (read Jobs below). A long output arrives cut, with the path of the whole output under spill/ in the Workspace.
 - read, write, edit, glob, grep and delete_file with on "box": work on files of the Box.
-- copy moves a file between the Box and the Workspace, up to 32 MB for now. Name both ends: from: { on, path } and to: { on, path }.
+- copy moves a file between the Box and the Workspace, of any size. Name both ends: from: { on, path } and to: { on, path }. The file goes straight between the Box and R2; it does not pass through you or through the Worker. A copy between the Box and a Host, or between two Hosts, parks the file in the Workspace under tmp/ and deletes it when the copy ends.
+- ws is a program on the Box for a script: \`ws ls [path]\`, \`ws get <path> [dest]\`, \`ws put <file> <path>\` and \`ws rm <path>\`. Its paths in the Workspace are relative to it (for example inbox/video.mp4). Use it inside a command to fetch a file when the command needs it. It works while the Box is up and stops working when the Box stops.
 - job_list, job_output and job_kill: manage jobs. They work the same for a job on the Box and a job on a Host.
 
 The paths are on the Box, under its /workspace. This is not the /workspace of on "workspace": that one is the Robot's Workspace. The owner's files, the product docs and the platform skills are in the Workspace only; the Box refuses their names.

@@ -38,6 +38,7 @@
     "@deepseek-ai/schemastery": "3.18.5",
     "@mr-robot/host-protocol": "workspace:*",
     "@mr-robot/protocol": "workspace:*",
+    "aws4fetch": "1.0.20",
     "effect": "4.0.1",
     "jose": "^6.2.12",
     "sucrase": "3.35.1"

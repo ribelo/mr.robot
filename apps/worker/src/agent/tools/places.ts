@@ -157,7 +157,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       }),
       tool<{ from: CopyEnd; to: CopyEnd }>({
         name: 'copy',
-        description: `Copy one file from one place to another, as it is (binary too); the content does not pass through you, so use this, not read and write, for reports, datasets, images and anything large. Both ends name their place; copy overwrites the target. Between the Workspace and a computer, up to 100 MB; between the Workspace and the Box, up to 32 MB; between two computers, or the Box and a computer, copy to the Workspace first. A file copied into your Workspace under box/ is on your Box at its next boot. ${filePlaces(reach)} Returns both paths, the size and the time. ${PATH_RULES}`,
+        description: `Copy one file from one place to another, as it is (binary too); the content does not pass through you, so use this, not read and write, for reports, datasets, images and anything large. Both ends name their place; copy overwrites the target. There is no size limit: a file goes straight between R2 and the computer or the Box. Between two computers, or the Box and a computer, the file is parked in your Workspace under tmp/ and deleted when the copy ends. A file copied into your Workspace under box/ is on your Box at its next boot. ${filePlaces(reach)} Returns both paths, the size and the time. ${PATH_RULES}`,
         parameters: { properties: { from: endSchema('The file to copy'), to: endSchema('Where the copy goes') }, required: ['from', 'to'] },
         execute: async ({ from, to }) => host.copy(end(from, 'from'), end(to, 'to')),
       }),

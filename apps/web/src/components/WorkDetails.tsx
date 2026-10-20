@@ -41,6 +41,16 @@ function copyLine(args: Record<string, unknown>): string | undefined {
   return from === undefined || to === undefined ? undefined : `${from} → ${to}`
 }
 
+/** What a copy moved and how long it took ("2.1 GB in 41 s"), from its result, for the card's title; nothing when the result has none. */
+function copyTook(result: string): string {
+  try {
+    const took = (JSON.parse(result) as Record<string, unknown>)['took']
+    return typeof took === 'string' ? ` · ${took}` : ''
+  } catch {
+    return ''
+  }
+}
+
 /** A tool call's one-line title, as the DSH cards phrase it: the tool and its main argument. */
 function title(call: ToolCallView): string {
   let args: Record<string, unknown> = {}
@@ -48,7 +58,7 @@ function title(call: ToolCallView): string {
   const main = call.name === 'copy' ? copyLine(args) : placed(args, args['file_path'] ?? args['path'] ?? args['url'] ?? args['pattern'] ?? args['query'] ?? args['command'] ?? args['queries'] ?? args['name'] ?? args['to'])
   const label = call.name === 'run_code' ? 'Code program' : call.name.replace(/_/g, ' ')
   const detail = main === undefined ? '' : ` ${Array.isArray(main) ? main.join(', ') : String(main)}`
-  return `${label}${detail.length > 80 ? detail.slice(0, 80) + '…' : detail}${call.error ? ' (failed)' : ''}`
+  return `${label}${detail.length > 80 ? detail.slice(0, 80) + '…' : detail}${call.name === 'copy' && !call.error ? copyTook(call.result) : ''}${call.error ? ' (failed)' : ''}`
 }
 
 function ToolCard({ call, initiallyOpen }: { call: ToolCallView; initiallyOpen: boolean }) {
