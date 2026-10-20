@@ -6,6 +6,6 @@
 
 **Status:** ready-for-agent
 
-- [ ] Workerd test: the backend union, the migration of Robots and the Home default, old usage rows kept (ob-ltsr, ob-l24v, ob-0c3o)
-- [ ] Component test: the picker with two choices (ob-myzd)
-- [ ] Alchemy plan test: the Chrome container and its credentials gone (ob-ltsr)
+- [x] Workerd test: the backend union, the migration of Robots and the Home default, old usage rows kept (ob-ltsr, ob-l24v, ob-0c3o) (apps/worker/test/two-browsers.test.ts; the block message in browser-backends.test.ts, ob-myzd)
+- [x] Component test: the picker with two choices (ob-myzd) (apps/web/test/browser-picker.test.tsx)
+- [x] Alchemy plan test: the Chrome container and its credentials gone (ob-ltsr) (infra/stack.test.ts; the credentials are Home settings, not plan resources, and the Workerd test shows them deleted)

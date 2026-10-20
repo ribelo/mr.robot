@@ -36,7 +36,6 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     HostChannel: 'Cloudflare.Access.Application',
     HookChannel: 'Cloudflare.Access.Application',
     GoogleCallback: 'Cloudflare.Access.Application',
-    ChromeContainer: 'Cloudflare.Container',
     // The Robots' computer: built by the deploy from the Dockerfile in the repository (ao-h1wn).
     ComputerContainer: 'Cloudflare.Container',
   })
@@ -45,10 +44,13 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
   const bindings = plan.resources.Edge.bindings.flatMap((b: any) => b.data.bindings ?? [])
     .filter((b: any) => typeof b.type === 'string' && typeof b.name === 'string')
     .map((b: any) => `${b.type}:${b.name}`).sort()
+  // Two browsers (v1.16 ticket 08, ob-ltsr): Browser Rendering and the Hosts. The Chrome container and its image are gone.
+  expect(plan.resources).not.toHaveProperty('ChromeContainer')
+  expect(existsSync(join(dirname(fileURLToPath(import.meta.url)), 'chrome'))).toBe(false)
+  expect(bindings.filter((binding: string) => binding.endsWith(':CHROME'))).toEqual([])
   expect(bindings).toEqual(expect.arrayContaining([
     'ai:AI',
     'browser:BROWSER',
-    'durable_object_namespace:CHROME',
     'durable_object_namespace:COMPUTER',
     'durable_object_namespace:HOME',
     'durable_object_namespace:MEMBER',

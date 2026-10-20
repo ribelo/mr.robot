@@ -9,6 +9,7 @@ import { ConversationIndex } from '../agent/conversation-search.ts'
 import type { StoredPlace } from '../places/place.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
+import { isRemovedBrowserBackend } from '../browser/removed-backends.ts'
 import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
 import { costBreakdown, type CostBreakdown, type UsageSource } from '@mr-robot/protocol'
 import { emptyGrants, GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
@@ -71,6 +72,8 @@ export interface RobotConfig {
   /** Auto review (v1.14 ticket 08): off when absent; the reviewer route, or null for the Home default. */
   readonly autoReview?: boolean
   readonly reviewer?: ModelChoice | null
+  /** v1.16 (ob-5nvd): Tasks wait for, or fail on, an offline Host the Robot holds a facet on; off when absent. */
+  readonly requiresHosts?: boolean
   readonly notifications: NotificationSettings
   /** The Robot's own monthly spend limit, or the Home's (ux-q8ve). */
   readonly spendLimit: RobotSpendLimit
@@ -183,7 +186,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 20
+const SCHEMA_VERSION = 21
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -242,6 +245,21 @@ function renameComputerToBox(sql: SqlStorage): void {
   }
 }
 
+/**
+ * A Robot on a removed browser backend follows the Home default (v1.16 ticket 08, ob-l24v), which is Browser Rendering after the
+ * Home's own migration. A session left open on the removed backend is forgotten: nothing runs there any more. Usage rows keep their
+ * backend names as history (ob-0c3o).
+ */
+function moveOffRemovedBrowsers(sql: SqlStorage): void {
+  const row = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  if (row !== undefined) {
+    const config = JSON.parse(row.v) as { readonly browserBackend?: unknown }
+    if (isRemovedBrowserBackend(config.browserBackend)) sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, browserBackend: null }))
+  }
+  const session = sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = 'browser-session'").toArray()[0]
+  if (session !== undefined && isRemovedBrowserBackend((JSON.parse(session.v) as { readonly backend?: unknown }).backend)) sql.exec("DELETE FROM kv WHERE k = 'browser-session'")
+}
+
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
 function addColumns(sql: SqlStorage, table: string, columns: readonly string[]): void {
   const present = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((column) => column.name))
@@ -249,8 +267,10 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Two browsers (v1.16 ticket 08, ob-l24v): a Robot on Container Chrome follows the Home default.
+  20: [moveOffRemovedBrowsers],
   // Jobs run in a place, the Box or a Host (v1.16 ticket 01, ob-rc3b): the Box's job table keeps its rows and learns where they ran.
-  20: [
+  21: [
     (sql) => {
       const has = (table: string) => sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).toArray().length > 0
       // A store opened again at an older version has both tables: the one step 19 just made is empty, the renamed one is the Robot's.
@@ -980,6 +1000,7 @@ function proposalFromSql(row: ProposalSql): ProposalRow {
     ...toolCallOf(payload),
     ...questionOf(payload),
     ...credentialOf(payload),
+    ...(payload['requiresHosts'] === true ? { requiresHosts: true } : {}),
     createdAt: row.created_at,
     answeredAt: row.answered_at,
   }

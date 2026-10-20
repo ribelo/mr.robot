@@ -248,7 +248,7 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/admin/browser-probe', (c) => Effect.gen(function* () {
     yield* admin(c)
     const input = yield* decodeBody(c.request, Schema.Struct({ backend: BrowserBackend, url: Schema.String, waitMs: Schema.optional(Schema.Number) }))
-    return yield* call(() => probe(c.env, input.backend, input.url, { vpn: () => home(c.env).vpnConfig(), proxy: () => home(c.env).proxyConfig() }, input.waitMs))
+    return yield* call(() => probe(c.env, input.backend, input.url, input.waitMs))
   }))
   // ------------------------------------------------------------ Hosts (v1.2)
   .on('GET', '/api/hosts', (c) => call(() => home(c.env).hostsFor(c.member.id)))
@@ -353,23 +353,11 @@ export const api = new Router<ApiContext>()
     if (!(await member.hostList()).some((host) => host.id === id)) throw Object.assign(new Error('no such computer of yours'), { status: 404 })
     return member.hostActions(id)
   }))
-  .on('PUT', '/api/admin/proxy', (c) => Effect.gen(function* () {
-    yield* admin(c)
-    const { url } = yield* decodeBody(c.request, Schema.Struct({ url: Schema.NullOr(Schema.String) }))
-    yield* call(() => home(c.env).setProxyConfig(url)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
-    return { ok: true, configured: url !== null && url.trim() !== '' }
-  }))
   .on('PUT', '/api/admin/exa', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { key } = yield* decodeBody(c.request, Schema.Struct({ key: Schema.NullOr(Schema.String) }))
     yield* call(() => home(c.env).setExaKey(key))
     return { ok: true, configured: key !== null && key.trim() !== '' }
-  }))
-  .on('PUT', '/api/admin/vpn', (c) => Effect.gen(function* () {
-    yield* admin(c)
-    const { config } = yield* decodeBody(c.request, Schema.Struct({ config: Schema.NullOr(Schema.String) }))
-    yield* call(() => home(c.env).setVpnConfig(config))
-    return { ok: true, configured: config !== null && config.trim() !== '' }
   }))
   .on('POST', '/api/admin/models/refresh', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).refreshCatalogs(c.member.id)))))
   .on('GET', '/api/skills/:name', (c, { name }) => Effect.gen(function* () {

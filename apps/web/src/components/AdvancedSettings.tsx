@@ -63,6 +63,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       idleCompaction: draft.idleCompaction,
       idleCompactionFloorTokens: draft.idleCompactionFloorTokens,
       autoReview: draft.autoReview,
+      requiresHosts: draft.requiresHosts === true,
       reviewer: draft.reviewer,
       subagentModels: draft.subagentModels,
       grants: draft.grants,
@@ -140,6 +141,9 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       )}
       <h2>Hosts</h2>
       <div className="muted">Computers that run the Mr. Robot app: yours and the ones shared with the Home. Grant files, shell and browser of each computer on their own.</div>
+      <label className="check"><input type="checkbox" checked={draft.requiresHosts === true} onChange={(event) => setDraft({ ...draft, requiresHosts: event.target.checked })} />
+        <span>Do not run while any of my Hosts is offline<small>The Hosts are the ones you granted this Robot a facet on. A recurring Task that finds one offline fails, naming it, and you hear once per outage. A scheduled Task waits for the Host and runs when it returns, if its deadline allows. Your messages always reach the Robot.</small></span>
+      </label>
       {hostItems.length === 0 ? <div className="muted">No computers yet: install the Mr. Robot app on one and pair it (your name → Hosts).</div> : hostsOf(hostItems).map((host) => (
         <section key={host.id} className="host-grants" aria-label={host.name}>
           <h3 className="panel-section">{hostHeading(host)}</h3>

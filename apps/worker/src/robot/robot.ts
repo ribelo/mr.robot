@@ -89,8 +89,7 @@ import { Say } from '../plugins/say.ts'
 import { PwaChannel } from '../channels/pwa.ts'
 import { rememberIdempotencyKey, WebhookChannel, webhookText } from '../channels/webhook.ts'
 import { DiscordChannel } from '../channels/discord.ts'
-import { backendLabel, browserCost, driverFor, hostIdOf, isHostBackend } from '../browser/backends.ts'
-import { containerOpenStages } from '../browser/driver.ts'
+import { backendLabel, browserCost, driverFor, hostIdOf, isHostBackend, otherBrowser } from '../browser/backends.ts'
 import { mount, type Mount } from '../plugins/define.ts'
 import { Memory, sharedFileEdit, type MemoryHost, type SharedFile } from '../plugins/memory.ts'
 import { renderBaseline, type MemoryChange, type MemoryFile } from '../agent/memory.ts'
@@ -187,7 +186,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Calls the platform runs because their owner approved them (sk-ed7r): they pass the ask gate once. */
   private readonly approvedCalls = new Set<string>()
   /** backend|host pairs that showed a block page in the running Turn. */
-  private readonly blockedThisTurn = new Set<string>()
+  private readonly blockedThisTurn = new Map<string, string>()
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
 
   private readonly runtime: DurableRuntime<RobotState | RobotPlatform>
@@ -429,6 +428,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config !== undefined && config.status !== 'deleted') this.quietSteer(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.expireCapture(Date.now()).catch((error: unknown) => console.warn('sign-in not ended', error))
     if (config !== undefined && config.status !== 'deleted') await this.program(Programs.fireTasks(Date.now())).catch((error: unknown) => console.warn('due Tasks not fetched', error))
+    if (config !== undefined && config.status !== 'deleted') await this.program(Programs.releaseParked(Date.now())).catch((error: unknown) => console.warn('parked Tasks not released', error))
     // Due Tasks start at once; housekeeping below must not delay their Turns.
     if (this.store.pendingWakeups() > 0) this.drain()
     if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
@@ -497,6 +497,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const verb = card.action === 'done' ? 'marked done' : card.action
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Task ${verb} by ${card.by}: ${card.title}`, Date.now(), card)
     await this.changed()
+  }
+
+  /** A Host this Robot's owner reaches came online (v1.16 ticket 05, ob-e271): the scheduled Tasks that waited for it run now. */
+  async hostOnline(): Promise<void> {
+    const config = this.store.config()
+    if (config === undefined || config.status === 'deleted') return
+    await this.program(Programs.releaseParked(Date.now()))
+    if (this.store.pendingWakeups() > 0) this.drain()
+    await this.rearm()
   }
 
   /** The Home planned this Robot's earliest due Task (mc-s1aa): the alarm comes then. */
@@ -2053,20 +2062,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The driver for a browser backend (rb-wgtd); tests substitute a stub browser. */
   protected browserDriver(backend: BrowserBackend): BrowserDriver {
     return driverFor(backend, this.env, {
-      id: this.store.requireConfig().id,
-      vpnConfig: () => this.home().vpnConfig(),
-      proxyConfig: () => this.home().proxyConfig(),
-      hostBrowser: {
-        open: async (hostId) => {
-          const owner = await this.hostOwnerStub(hostId)
-          const session = await this.hostCall(() => owner.hostBrowserOpen(hostId, this.store.requireConfig().id, this.store.requireConfig().identity.name))
-          const response = await owner.fetch(new Request(`https://member/host/relay?session=${encodeURIComponent(session)}&side=robot`, { headers: { Upgrade: 'websocket' } }))
-          if (response.webSocket === null) throw new Error(`the host browser relay refused (${response.status})`)
-          return { socket: response.webSocket, session }
-        },
-        close: async (hostId, session) => {
-          await (await this.hostOwnerStub(hostId)).hostBrowserClose(hostId, this.store.requireConfig().id, session)
-        },
+      open: async (hostId) => {
+        const owner = await this.hostOwnerStub(hostId)
+        const session = await this.hostCall(() => owner.hostBrowserOpen(hostId, this.store.requireConfig().id, this.store.requireConfig().identity.name))
+        const response = await owner.fetch(new Request(`https://member/host/relay?session=${encodeURIComponent(session)}&side=robot`, { headers: { Upgrade: 'websocket' } }))
+        if (response.webSocket === null) throw new Error(`the host browser relay refused (${response.status})`)
+        return { socket: response.webSocket, session }
+      },
+      close: async (hostId, session) => {
+        await (await this.hostOwnerStub(hostId)).hostBrowserClose(hostId, this.store.requireConfig().id, session)
       },
     })
   }
@@ -2182,7 +2186,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A new session with the saved cookies and storage (they follow the Robot across backends), back on the page it was on.
     const reopened = await this.browserDriver(backend).open(this.store.get<BrowserState>('browser-state') ?? null)
     stage('backend')
-    if (this.openTiming !== undefined) for (const [key, value] of Object.entries(containerOpenStages)) this.openTiming.stages[`backend.${key}`] = value
     this.store.set('browser-session', { backend, since: Date.now() } satisfies BrowserSession)
     const url = watch?.url ?? takeover?.url ?? this.store.get<string>('browser-url')
     if (url?.startsWith('http') === true) {
@@ -2331,7 +2334,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (observation.url.startsWith('http')) this.store.set('browser-url', observation.url)
     await this.loadSecretMasks()
     // The backend is named so a block page says which browser was blocked (rb-kank).
-    return { ...observation, text: this.mask(observation.text), backend: backendLabel(this.sessionBackend(), this.knownHosts) }
+    return { ...observation, text: this.mask(observation.text), backend: backendLabel(this.sessionBackend(), this.knownHosts), otherBrowser: otherBrowser(this.sessionBackend()) }
   }
 
   /**

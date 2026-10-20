@@ -12,7 +12,7 @@ const ANNA = 'anna@example.com'
 
 export const ran: string[] = []
 const open: WebSocket[] = []
-/** The fake host's disk (v1.15, host_copy): path → bytes; a path in `declaredSize` reports that size and holds nothing. */
+/** The fake host's disk (v1.15, copy): path → bytes; a path in `declaredSize` reports that size and holds nothing. */
 export const hostDisk = new Map<string, Uint8Array>()
 export const declaredSize = new Map<string, number>()
 /** Answers to commands, in order: the first that returns a result wins; every other command echoes. Cleared by the test. */

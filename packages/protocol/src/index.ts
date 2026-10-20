@@ -366,8 +366,8 @@ export const LoginInput = Schema.Struct({
   shared: Schema.Boolean,
 })
 
-/** Where a Robot's Chrome runs (rb-wgtd). */
-export const BrowserBackend = Schema.Union([Schema.Literals(['browser-run', 'container', 'container-vpn', 'container-proxy']), Schema.TemplateLiteral(['host:', Schema.String])])
+/** Where a Robot's Chrome runs (rb-wgtd, ob-myzd): Browser Rendering, or the Chrome of a Host. */
+export const BrowserBackend = Schema.Union([Schema.Literal('browser-run'), Schema.TemplateLiteral(['host:', Schema.String])])
 export type BrowserBackend = typeof BrowserBackend.Type
 
 /** A backend as the settings show it: whether this Home can use it and why not. */
@@ -444,6 +444,8 @@ export const RobotSettings = Schema.Struct({
   autoReview: Schema.Boolean,
   /** The reviewer's route; null follows the Home default (ao-6m9i). */
   reviewer: Schema.NullOr(ModelChoice),
+  /** v1.16 (ob-5nvd): no Task runs while a Host the Robot holds a facet on is offline. Absent: off. */
+  requiresHosts: Schema.optional(Schema.Boolean),
   /** What the Home default is now; null: the Robot's own model. */
   homeReviewer: Schema.NullOr(ModelChoice),
   /** The routes its Subagents may run on: the subagents grant's list, empty by default (ao-2z4n). */
@@ -479,6 +481,7 @@ export const DeputySettingsPatch = Schema.Struct({
   idleCompaction: Schema.optional(Schema.Boolean),
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
   autoReview: Schema.optional(Schema.Boolean),
+  requiresHosts: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
 })
@@ -504,6 +507,7 @@ export const SettingsPatch = Schema.Struct({
   idleCompaction: Schema.optional(Schema.Boolean),
   idleCompactionFloorTokens: Schema.optional(Schema.Number),
   autoReview: Schema.optional(Schema.Boolean),
+  requiresHosts: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
 })
@@ -874,6 +878,8 @@ export const ProposalView = Schema.Struct({
   question: Schema.optional(QuestionAsk),
   /** Credential Ask: what the Robot asked for and, once answered, the entry saved or the refusal. */
   credential: Schema.optional(CredentialAsk),
+  /** Setup only (v1.16, ob-kvw3): the Robot also proposes the setting "do not run while any of my Hosts is offline". */
+  requiresHosts: Schema.optional(Schema.Boolean),
 })
 export type ProposalView = typeof ProposalView.Type
 
@@ -1211,8 +1217,8 @@ export const UsageView = Schema.Struct({
   costUsd: Schema.Number,
   /** The monthly spend limit in effect (ux-en86). */
   limit: EffectiveSpendLimit,
-  /** Browser time this month per backend (rb-y50l); its cost is included in costUsd. */
-  browser: Schema.optional(Schema.Array(Schema.Struct({ backend: BrowserBackend, minutes: Schema.Number, costUsd: Schema.Number }))),
+  /** Browser time this month per backend name (rb-y50l); its cost is included in costUsd. The name is a string: rows of removed backends stay as history (ob-0c3o). */
+  browser: Schema.optional(Schema.Array(Schema.Struct({ backend: Schema.String, minutes: Schema.Number, costUsd: Schema.Number }))),
   /** Paid services this month (Exa); their cost is included in costUsd (rb-pb26). */
   services: Schema.optional(Schema.Array(Schema.Struct({ service: Schema.String, calls: Schema.Number, costUsd: Schema.Number }))),
   /** This month's cost by source; its total is costUsd (ao-zbld). */
@@ -1416,20 +1422,6 @@ export const HomeSettingsSaved = Schema.Struct({
 })
 export type HomeSettingsSaved = typeof HomeSettingsSaved.Type
 
-/**
- * The public part of the Home's Proton VPN WireGuard configuration (ux-t4wi): where the VPN goes.
- * The keys stay in the sealed configuration and never appear here (ux-a3ec).
- */
-export const VpnSummary = Schema.Struct({
-  /** The [Peer] Endpoint as host:port. */
-  endpoint: Schema.String,
-  /** The server name from Proton's comment line, like "PL#45"; absent when the configuration has none. */
-  serverName: Schema.optional(Schema.String),
-  /** ISO 3166-1 alpha-2 code of the exit country, when the server name carries it ("PL" from "PL#45"). */
-  country: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Z]{2}$/))),
-})
-export type VpnSummary = typeof VpnSummary.Type
-
 export const AdminView = Schema.Struct({
   fleet: Schema.Array(FleetRow),
   /** Robots whose Routines have not yet become Tasks (v1.13 ticket 05): reached again at the Home's next start. */
@@ -1442,19 +1434,16 @@ export const AdminView = Schema.Struct({
   modelLists: Schema.optional(Schema.Array(Schema.Struct({ provider: Schema.String, count: Schema.Number, fetchedAt: Schema.NullOr(Schema.Number), error: Schema.NullOr(Schema.String) }))),
   settings: HomeSettingsView,
   browserBackends: Schema.optional(Schema.Array(BrowserBackendOption)),
-  /** The Home's stored Proton VPN WireGuard configuration (rb-rb1x), as its public summary; absent when none is stored. */
-  vpnSummary: Schema.optional(VpnSummary),
   /** Whether the Home has an Exa API key (rb-x8i3); the key is never sent. */
   exaConfigured: Schema.optional(Schema.Boolean),
   /** Every Host of the Home (hs-w8vi). */
   hosts: Schema.optional(Schema.Array(HostView)),
   /** Every Thread of the Home (ch-5ngu). */
   threads: Schema.optional(Schema.Array(AdminThread)),
-  proxyConfigured: Schema.optional(Schema.Boolean),
 })
 export type AdminView = typeof AdminView.Type
 
-/** An admin secret setting changed: whether one is stored now (VPN, Exa, proxy). */
+/** An admin secret setting changed: whether one is stored now (Exa). */
 export const ConfiguredResult = Schema.Struct({ ok: Schema.Boolean, configured: Schema.Boolean })
 export type ConfiguredResult = typeof ConfiguredResult.Type
 

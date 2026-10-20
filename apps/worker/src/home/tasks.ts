@@ -460,6 +460,12 @@ export interface DueTask {
   readonly instructions: string
 }
 
+/** A due occurrence handed to the Robot's alarm: a recurring Task, or a scheduled one with its deadline (v1.16 ticket 05). */
+export interface DueOccurrence extends DueTask {
+  readonly recurring: boolean
+  readonly deadline: number | null
+}
+
 /**
  * The Robot's alarm asks for its due Tasks (mc-s1aa, mc-s2bb). Handing a Task out is handling its occurrence:
  * a scheduled Task fires once; a recurring one moves to its next occurrence after now, so occurrences missed
@@ -472,7 +478,10 @@ export const takeDue = (robotId: string, now = Date.now()) => Effect.gen(functio
     const timing = task.timing.kind === 'recurring' ? advanced(task.timing, now) : task.timing
     yield* saveTask({ ...task, timing, wakeAt: timing.kind === 'recurring' ? wakeAt(timing, 'open') : null, updatedAt: now })
   }
-  return { tasks: rows.map((task): DueTask => ({ id: task.id, title: task.title, instructions: task.instructions })), nextDue: yield* nextDueOf(robotId) }
+  return { tasks: rows.map((task): DueOccurrence => ({
+      id: task.id, title: task.title, instructions: task.instructions,
+      recurring: task.timing.kind === 'recurring', deadline: task.timing.kind === 'recurring' ? null : task.timing.deadline,
+    })), nextDue: yield* nextDueOf(robotId) }
 })
 
 /** Record one attempt; only the newest ATTEMPTS_KEPT of the Task stay (mc-t4dd). @returns its id. */

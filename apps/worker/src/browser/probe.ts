@@ -20,9 +20,9 @@ export interface ProbeResult {
   readonly ms: number
 }
 
-export async function probe(env: Env, backend: BrowserBackend, url: string, configs: { vpn: () => Promise<string | null>; proxy: () => Promise<string | null> }, waitMs = 2500): Promise<ProbeResult> {
+export async function probe(env: Env, backend: BrowserBackend, url: string, waitMs = 2500): Promise<ProbeResult> {
   const started = Date.now()
-  const driver = driverFor(backend, env, { id: `probe-${crypto.randomUUID().slice(0, 8)}`, vpnConfig: configs.vpn, proxyConfig: configs.proxy, hostBrowser: { open: async () => { throw new Error('the probe runs cloud backends only') }, close: async () => undefined } })
+  const driver = driverFor(backend, env, { open: async () => { throw new Error('the probe runs Browser Run only') }, close: async () => undefined })
   let page: Awaited<ReturnType<typeof driver.open>> | undefined
   try {
     page = await driver.open(null)

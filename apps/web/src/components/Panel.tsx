@@ -118,7 +118,8 @@ export function ageText(ms: number): string {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 60 * 24 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / (60 * 24))} d ago`
 }
 
-const BACKEND_LABELS: Record<string, string> = { 'browser-run': 'Browser Run', container: 'Container Chrome', 'container-vpn': 'Container Chrome via VPN' }
+/** Names for the usage rows. Rows of the removed Container Chrome backends stay in the history under their old names (ob-0c3o). */
+const BACKEND_LABELS: Record<string, string> = { 'browser-run': 'Browser Run', container: 'Container Chrome, removed', 'container-vpn': 'Container Chrome via VPN, removed', 'container-proxy': 'Container Chrome via proxy, removed' }
 
 function formatTokens(count: number): string {
   return count >= 1_000_000 ? `${(count / 1_000_000).toFixed(1)}M` : count >= 1000 ? `${Math.round(count / 1000)}k` : String(count)

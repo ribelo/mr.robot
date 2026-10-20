@@ -24,6 +24,7 @@ import type { Sender, Attachment } from '@mr-robot/protocol'
 import { causedByOwner, deliveryOf, robotMessageDelivery } from './delivery.ts'
 import { SubagentStore } from './subagent-store.ts'
 import { JOB_CHECK_MS } from '../places/jobs.ts'
+import { afterReturn, gateTask, heldHosts, outageNotice, type KnownHost, type TaskGate } from './hosts-gate.ts'
 import { DEFAULT_IDLE_FLOOR_TOKENS, idleSettings, type IdleStep } from './idle.ts'
 
 export const MAX_CHAIN_HOPS = 8
@@ -371,6 +372,7 @@ export const settingsWith = (defaults: HomeDefaults) => Effect.gen(function* () 
     homeSpendLimit: home,
     ...idleSettings(current),
     autoReview: current.autoReview === true,
+    requiresHosts: current.requiresHosts === true,
     reviewer: current.reviewer ?? null,
     homeReviewer: defaults.defaultReviewer,
     subagentModels: store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? [],
@@ -450,6 +452,7 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(idleBefore.idleCompaction !== idleAfter.idleCompaction, `switched idle compaction ${idleAfter.idleCompaction ? 'on' : 'off'}.`)
   note(idleBefore.idleCompactionFloorTokens !== idleAfter.idleCompactionFloorTokens, `changed the idle compaction floor to ${idleAfter.idleCompactionFloorTokens} tokens.`)
   note((before.autoReview === true) !== (after.autoReview === true), `switched Auto review ${after.autoReview === true ? 'on' : 'off'}.`)
+  note((before.requiresHosts === true) !== (after.requiresHosts === true), `switched "do not run while any of my Hosts is offline" ${after.requiresHosts === true ? 'on' : 'off'}.`)
   note(JSON.stringify(before.reviewer ?? null) !== JSON.stringify(after.reviewer ?? null), after.reviewer == null ? 'set the reviewer to the Home default.' : `set the reviewer to ${after.reviewer.model} (${after.reviewer.provider}), thinking ${after.reviewer.effort}.`)
   return notes
 }
@@ -490,6 +493,7 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
       ...(patch.idleCompaction === undefined ? {} : { idleCompaction: patch.idleCompaction }),
       ...(patch.idleCompactionFloorTokens === undefined ? {} : { idleCompactionFloorTokens: Math.max(0, Math.round(patch.idleCompactionFloorTokens)) }),
       ...(patch.autoReview === undefined ? {} : { autoReview: patch.autoReview }),
+      ...(patch.requiresHosts === undefined ? {} : { requiresHosts: patch.requiresHosts }),
       ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))
@@ -517,6 +521,7 @@ export function proposalView(row: ProposalRow): ProposalView {
     id: row.id, kind: row.kind, revision: row.revision, status: row.status, purpose: row.purpose, grants: row.grants, file: row.file, skill: row.skill,
     ...(row.review === undefined ? {} : { review: row.review }), ...(row.thread === undefined ? {} : { thread: row.thread }), ...(row.help === undefined ? {} : { help: row.help }), ...(row.toolCall === undefined ? {} : { toolCall: row.toolCall }),
     ...(row.question === undefined ? {} : { question: row.question }), ...(row.credential === undefined ? {} : { credential: row.credential }),
+    ...(row.requiresHosts === true ? { requiresHosts: true } : {}),
   }
 }
 
@@ -576,7 +581,7 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
       const grants = overlayGrants(store.grants(), setupGrants(proposal.grants ?? emptyGrants))
       store.transaction(() => {
         store.setGrants(grants)
-        store.updateConfig(() => ({ status: 'active' }))
+        store.updateConfig(() => ({ status: 'active', ...(proposal.requiresHosts === true ? { requiresHosts: true } : {}) }))
       })
       return
     }
@@ -961,10 +966,112 @@ export const fireTasks = (now: number) => Effect.gen(function* () {
   const answer = yield* promise(() => home.dueTasks(current.id))
   for (const task of answer.tasks) {
     if (store.taskQueued(task.id)) yield* promise(() => home.taskSkipped(task.id, current.id, 'The previous run had not finished.'))
-    else store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
+    else yield* startOrHold(task, now)
   }
   if (answer.nextDue === null) store.delete(NEXT_DUE)
   else store.set(NEXT_DUE, answer.nextDue)
+})
+
+// ------------------------------------------------------------------ a Robot that waits for its Hosts (v1.16 ticket 05)
+
+/** The kv key of the scheduled Tasks held back until a Host of the Robot comes back (ob-e271). */
+export const PARKED_TASKS = 'parked-tasks'
+/** The kv key of the Hosts whose outage the owner was told of already (ob-qgpy). */
+const HOST_OUTAGES = 'host-outages'
+/** While a Task is parked the alarm looks again at least this often, in case the Host's online event was lost. */
+export const PARK_RECHECK_MS = 5 * 60_000
+
+interface ParkedTask {
+  readonly id: string
+  readonly title: string
+  readonly instructions: string
+  readonly deadline: number | null
+}
+
+/** The Hosts the Robot's owner reaches and whether each is online; null when the Home cannot say. */
+const knownHosts = (ownerId: string) => Effect.gen(function* () {
+  const platform = yield* RobotPlatform
+  const hosts = yield* promise(() => platform.env.HOME.getByName(HOME_ID).hostsFor(ownerId).catch(() => null))
+  return hosts === null ? null : hosts.map((host): KnownHost => ({ id: host.id, name: host.name, online: host.online }))
+})
+
+/**
+ * The Hosts the Robot holds a facet on, as they are now; a Host that returned leaves the list of reported outages.
+ * Null when the setting is off, or when the Home cannot say: then nothing is held back, so a missing answer never stops the Robot.
+ */
+const hostsNow = Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  if (current.requiresHosts !== true) return null
+  const known = yield* knownHosts(current.ownerId)
+  if (known === null) return null
+  const reported = store.get<readonly string[]>(HOST_OUTAGES) ?? []
+  const left = afterReturn(reported, known)
+  if (left.length !== reported.length) store.set(HOST_OUTAGES, left)
+  return heldHosts(store.effectiveGrants().hosts, known)
+})
+
+/** What a due Task does now (hosts-gate.ts). */
+const gateOf = (task: ParkedTask & { readonly recurring: boolean }, now: number) => Effect.map(hostsNow, (held): TaskGate => (held === null ? { kind: 'run' } : gateTask({ requiresHosts: true, task, held, now })))
+
+/** The Attempt ends as failed with the Host named, no Turn runs; the owner hears once per Host outage (ob-qgpy). */
+const failWithoutTurn = (task: ParkedTask, gate: Extract<TaskGate, { kind: 'fail' }>) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  const home = platform.env.HOME.getByName(HOME_ID)
+  const started = yield* promise(() => home.attemptStarted(task.id, current.id))
+  if (started !== null) yield* promise(() => home.attemptFinished(started.attemptId, 'failed', gate.line))
+  const { fresh, reported } = outageNotice(gate.offline, store.get<readonly string[]>(HOST_OUTAGES) ?? [])
+  if (fresh.length === 0) return
+  store.set(HOST_OUTAGES, reported)
+  yield* platform.notifyMembers('needs you', `did not run the Task "${task.title}": ${gate.line} Start the Mr. Robot app on that computer.`)
+})
+
+/** One due Task: it starts a Turn, ends failed, or waits for its Host. */
+const startOrHold = (task: ParkedTask & { readonly recurring: boolean }, now: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const gate = yield* gateOf(task, now)
+  switch (gate.kind) {
+    case 'run':
+      store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
+      return
+    case 'fail':
+      return yield* failWithoutTurn(task, gate)
+    case 'park': {
+      const parked = store.get<readonly ParkedTask[]>(PARKED_TASKS) ?? []
+      store.set(PARKED_TASKS, [...parked.filter((other) => other.id !== task.id), { id: task.id, title: task.title, instructions: task.instructions, deadline: task.deadline }])
+    }
+  }
+})
+
+/**
+ * A Host came back, or the alarm looks again: each parked Task runs when every Host of the Robot is online and its deadline
+ * has not passed, fails when the deadline passed, and otherwise waits on (ob-e271). Also clears the outages of Hosts that returned.
+ */
+export const releaseParked = (now: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const parked = store.get<readonly ParkedTask[]>(PARKED_TASKS) ?? []
+  // With nothing parked the outage list still follows the Hosts, so the next outage is told again.
+  if (parked.length === 0) {
+    if ((store.get<readonly string[]>(HOST_OUTAGES) ?? []).length > 0) yield* hostsNow
+    return
+  }
+  const waiting: ParkedTask[] = []
+  const current = yield* config
+  const home = (yield* RobotPlatform).env.HOME.getByName(HOME_ID)
+  for (const task of parked) {
+    // A cancelled, finished or reassigned Task gets no Turn.
+    if (!(yield* promise(() => home.taskStillOpenFor(task.id, current.id)))) continue
+    const gate = yield* gateOf({ ...task, recurring: false }, now)
+    // Released after its deadline it fails, as the deadline alarm would have failed it.
+    if (gate.kind === 'run' && task.deadline !== null && now >= task.deadline) yield* failWithoutTurn(task, { kind: 'fail', line: 'The deadline passed before the Task could run.', offline: [] })
+    else if (gate.kind === 'park') waiting.push(task)
+    else if (gate.kind === 'fail') yield* failWithoutTurn(task, gate)
+    else if (!store.taskQueued(task.id)) store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
+  }
+  if (waiting.length === 0) store.delete(PARKED_TASKS)
+  else store.set(PARKED_TASKS, waiting)
 })
 
 /** The next alarm: a heartbeat while work runs, the earliest Task, outbox retry, screen check or screenshot sweep. */
@@ -979,6 +1086,9 @@ export const rearm = Effect.gen(function* () {
   const sweep = store.get<number>('screens-sweep-next')
   const resume = store.get<number>('chain-resume-at')
   const taskDue = store.get<number>(NEXT_DUE)
+  // A scheduled Task waits for its Host until its deadline; the alarm also looks again now and then (v1.16 ticket 05).
+  const parkedTasks = store.get<readonly ParkedTask[]>(PARKED_TASKS) ?? []
+  const parkedDeadline = parkedTasks.flatMap((task) => (task.deadline === null ? [] : [task.deadline]))
   // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
   const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
   const idle = store.get<readonly IdleStep[]>(IDLE_PLAN)?.[0]?.at
@@ -994,6 +1104,8 @@ export const rearm = Effect.gen(function* () {
     ...(quiet === undefined ? [] : [quiet]),
     ...(idle === undefined || !runnable ? [] : [idle]),
     ...(taskDue === undefined ? [] : [taskDue]),
+    ...(parkedTasks.length === 0 ? [] : [Date.now() + PARK_RECHECK_MS]),
+    ...parkedDeadline,
     ...(signInEnds === undefined ? [] : [signInEnds]),
     ...(resume === undefined ? [] : [resume]),
     // Running Subagents keep the heartbeat too: after a restart the alarm resumes them (ao-ij3i).
