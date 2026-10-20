@@ -51,13 +51,14 @@ const skippedPath = skipped
 
 
 /** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). Its notifications (notify frames) are kept in `notices`. */
-export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell; legacy?: boolean } = {}) {
+export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell; legacy?: boolean; owner?: string } = {}) {
+  const owner = options.owner ?? ANNA
   const platform = options.platform ?? 'linux'
   const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform }) })
   const { code, approveUrl } = (await start.json()) as { code: string; approveUrl: string }
   expect(approveUrl).toBe(`https://mr-robot.test/#/pair/${code}`)
-  expect((await api<{ name: string }>(ANNA, `/api/hosts/pair/${code}`)).body.name).toBe(name)
-  await api(ANNA, `/api/hosts/pair/${code}`, { body: {} })
+  expect((await api<{ name: string }>(owner, `/api/hosts/pair/${code}`)).body.name).toBe(name)
+  await api(owner, `/api/hosts/pair/${code}`, { body: {} })
   const paired = (await (await SELF.fetch(`https://mr-robot.test/api/host/pair/poll?code=${code}`)).json()) as { status: string; hostId: string; token: string }
   expect(paired.status).toBe('paired')
   // The token is handed over once.

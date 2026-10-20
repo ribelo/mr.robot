@@ -109,7 +109,8 @@ import { BOX_CACHE_FOLDER, BOX_CACHE_KEY, inBoxCache, restoreBoxCache, saveBoxCa
 import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRuns } from '../places/host-runner.ts'
 import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
-import { SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
+import { AmbiguousPlace, SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
+import { withDistinctNames } from '../places/host-names.ts'
 import { parseJobId, type JobId } from '../places/job-id.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
 import { HOST_ACCESS, hostAccessOf, hostIdsOf, hostsInOrder } from './host-access.ts'
@@ -2094,8 +2095,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       try {
         return [{ kind: 'host', name: hostFacetKey((await this.places().hostNamed(name)).id, facet) }]
       } catch (error) {
-        // Only a computer that is not there is the tool's own refusal; a lookup that failed leaves the call unchecked, so it fails closed.
-        if (error instanceof UnknownPlace) return []
+        // Only a computer that is not there, or a name more than one has, is the tool's own refusal; a lookup that failed leaves the call unchecked, so it fails closed.
+        if (error instanceof UnknownPlace || error instanceof AmbiguousPlace) return []
         throw error
       }
     }
@@ -2592,9 +2593,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async refreshReach(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
-    ;[this.knownHosts, this.knownConnections, this.pluginsOn, this.knownOrigin] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled(), this.home().appOrigin()])
+    const [hosts, connections, pluginsOn, origin] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled(), this.home().appOrigin()])
+    // The Robot calls its Hosts by names no two share (deep review P14b): the Hosts line, my_capabilities, the tool descriptions, the browser.
+    ;[this.knownHosts, this.knownConnections, this.pluginsOn, this.knownOrigin] = [withDistinctNames(hosts), connections, pluginsOn, origin]
     const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), config.kind === 'mr-robot' ? this.home().skills(config.ownerId) : Promise.resolve([])])
-    this.knownCatalog = catalog
+    this.knownCatalog = catalog.hosts === undefined ? catalog : { ...catalog, hosts: withDistinctNames(catalog.hosts) }
     // An unpaired Host's grant rows, mode and roots are not kept; a Host shared no more keeps them for its return (deep review P13).
     const unreached = this.store.keptHostIds().filter((id) => !this.knownHosts.some((host) => host.id === id))
     if (unreached.length > 0) {

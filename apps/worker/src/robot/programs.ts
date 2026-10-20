@@ -25,6 +25,7 @@ import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 import { causedByOwner, deliveryOf, robotMessageDelivery } from './delivery.ts'
 import { SubagentStore } from './subagent-store.ts'
+import { withDistinctNames } from '../places/host-names.ts'
 import { JOB_CHECK_MS } from '../places/jobs.ts'
 import { afterReturn, gateTask, heldHosts, outageNotice, taskHostFacets, type KnownHost, type TaskGate } from './hosts-gate.ts'
 import { DEFAULT_IDLE_FLOOR_TOKENS, idleSettings, type IdleStep } from './idle.ts'
@@ -1025,7 +1026,8 @@ const unpark = (store: RobotStore, task: ParkedTask): boolean => {
 const knownHosts = (ownerId: string) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const hosts = yield* promise(() => platform.env.HOME.getByName(HOME_ID).hostsFor(ownerId).catch(() => null))
-  return hosts === null ? null : hosts.map((host): KnownHost => ({ id: host.id, name: host.name, online: host.online }))
+  // Named as the Robot calls them, so a failed Task names the Host it waited for (deep review P14b).
+  return hosts === null ? null : withDistinctNames(hosts).map((host): KnownHost => ({ id: host.id, name: host.name, online: host.online }))
 })
 
 /**

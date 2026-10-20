@@ -13,10 +13,11 @@ import type { WorkspaceHost } from '../agent/host.ts'
 import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
 import type { BoxBackend } from '../box/backend.ts'
 import { runWs, type CopyPermits } from './copy-permit.ts'
-import { ApprovedHostsChanged, BadCall, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
+import { AmbiguousPlace, ApprovedHostsChanged, BadCall, casesHandled, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
 import { shellQuote } from './file-ops.ts'
 import { BoxFiles, boxPath, BOX_ROOT, HostFiles, STAGING_DIRECTORY, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
 import { hostFacetKey, hostIdOfPlace } from './host-facet.ts'
+import { lookUpHost } from './host-names.ts'
 import type { JobId } from './job-id.ts'
 import type { Transfers } from './transfers.ts'
 import { Jobs, type JobEntry, type JobPlace, type JobOutputView, type KillView, type RunResult } from './jobs.ts'
@@ -161,7 +162,7 @@ export class Places {
   /**
    * The place a call names, with the level the Robot holds it at (allow or ask: a call to a place at ask waits for the owner, see waiting).
    * While in setup the Robot reaches its Workspace and nothing else.
-   * @throws NoGrant, UnknownPlace or WrongPlace.
+   * @throws NoGrant, UnknownPlace, AmbiguousPlace or WrongPlace.
    */
   private async resolve(on: string, facet: PlaceFacet, tool: string): Promise<Granted> {
     const name = parseOn(on, tool)
@@ -176,15 +177,23 @@ export class Places {
     return granted({ kind: 'host', host }, { kind: 'host', name: hostFacetKey(host.id, facet) }, this.deps.hostLevel(host.id, facet), () => noGrant(name, `the ${facet} of ${host.name}`, `the grant "${host.name} · ${facet}"`))
   }
 
-  /** A Host the Robot names, by name or id, among those its owner reaches. @throws UnknownPlace when there is none; a failed lookup is the Home's own error. */
+  /**
+   * A Host the Robot names, by id or by the name it calls the Host (host-names.ts: two Hosts of one name go by their owners' names), among
+   * those its owner reaches; it comes back under that name.
+   * @throws UnknownPlace when there is none, AmbiguousPlace when the name is the own name of more than one; a failed lookup is the Home's own error.
+   */
   async hostNamed(name: string): Promise<HostView> {
-    const hosts = await this.deps.hosts()
-    const found = hosts.find((host) => host.id === name) ?? hosts.find((host) => host.name.toLowerCase() === name.toLowerCase())
-    if (found === undefined) {
-      const known = hosts.map((host) => host.name)
-      throw new UnknownPlace({ on: name, known, message: `on "${name}": there is no such place. Use workspace, box or one of your owner's computers: ${known.length === 0 ? 'none are paired' : known.join(', ')}.` })
+    const found = lookUpHost(await this.deps.hosts(), name)
+    switch (found.kind) {
+      case 'found':
+        return found.host
+      case 'shared':
+        throw new AmbiguousPlace({ on: name, names: found.names, message: `on "${name}": more than one of your owner's computers has this name. Name the one you mean: ${found.names.map((known) => `"${known}"`).join(', ')}.` })
+      case 'unknown':
+        throw new UnknownPlace({ on: name, known: found.names, message: `on "${name}": there is no such place. Use workspace, box or one of your owner's computers: ${found.names.length === 0 ? 'none are paired' : found.names.join(', ')}.` })
+      default:
+        return casesHandled(found)
     }
-    return found
   }
 
   /** The place a call to run or a job tool names. */

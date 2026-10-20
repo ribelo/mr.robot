@@ -226,6 +226,36 @@ describe('the Hosts an Ask names (deep review P14)', () => {
   })
 })
 
+describe('two Hosts of one name (deep review P14b)', () => {
+  it("names each by its owner, refuses the shared name with the names to use, and reaches the one a call names", async () => {
+    const BEN = 'ben@example.com'
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    const bens = await fakeHost('Desk', { owner: BEN })
+    await api(BEN, `/api/hosts/${bens.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    const annas = await fakeHost('desk')
+    const laptop = await fakeHost('Laptop')
+    const id = await robotWith(bens, { files: 'allow' })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${bens.hostId}:files`]: 'allow', [`${laptop.hostId}:files`]: 'allow', [`${annas.hostId}:shell`]: 'allow' } } } })
+    const platform = (await api<{ sections: Array<{ name: string; text: string }> }>(ANNA, `/api/robots/${id}/prompt`)).body.sections.find((section) => section.name === 'Platform')!.text
+    const hostsLine = platform.split('\n').find((line) => line.startsWith('- Hosts: '))!
+    expect(hostsLine.slice('- Hosts: '.length, -1).split('; ').sort()).toEqual(['Desk (Ben) · online · Ben\'s · bash on linux · sandbox full', 'Laptop · online · bash on linux · sandbox full', 'desk (Anna) · online · bash on linux · sandbox full'])
+    const [shared, ben, anna] = await calls(id, [
+      { name: 'write', args: { on: 'DESK', file_path: 'a.txt', content: 'a' } },
+      { name: 'write', args: { on: 'desk (ben)', file_path: 'b.txt', content: 'b' } },
+      { name: 'write', args: { on: 'Desk (Anna)', file_path: 'c.txt', content: 'c' } },
+    ])
+    expect(shared).toContain('more than one of your owner\'s computers has this name')
+    expect(shared).toMatch(/"Desk \(Ben\)"/)
+    expect(shared).toMatch(/"desk \(Anna\)"/)
+    expect(ben).toContain('"bytes": 1')
+    expect(anna).toContain('the grant "desk (Anna) · files"')
+    expect(hostFileCalls.map((call) => [call.rpc, call.path])).toEqual([['Write', 'b.txt']])
+    const write = requests.get(id)!.at(-1)!.tools!.find((definition) => definition.name === 'write')!
+    expect(write.description).toMatch(/computers by name \((Desk \(Ben\), Laptop|Laptop, Desk \(Ben\))\)/)
+  })
+})
+
 describe('a computer without a sandbox (ob-n72n, ob-he20)', () => {
   it('shows its sandbox state, fails a confined command closed without sending it, and runs full', async () => {
     const bare = await fakeHost('Nas', { sandbox: 'none' })
