@@ -83,6 +83,7 @@ import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.t
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelFile, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
 import { answerByNumbers, questionText } from '../agent/tools/ask.ts'
+import { draftText } from '../agent/draft.ts'
 import { dismissedTrailer, QUIET_STEER_MS, quietSteerNote, SAFETY_NET_STEPS, safetyNetNote, SAY_MAX_ATTACHMENTS, SAY_RECORD, sayOf, SCREEN_PREFIX, type SayRecord } from '../agent/say.ts'
 import type { SayHost } from '../agent/tools/say.ts'
 import { Say } from '../plugins/say.ts'
@@ -1353,7 +1354,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const unconfined = request.arguments['escalate'] === true
     const reason = unconfined ? `This runs without the sandbox, once. ${request.reason}` : request.reason
     const proposal = this.propose('tool-call', `${request.tool}${unconfined ? ' without the sandbox' : ''}: ${request.reason}`, {
-      toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason, items: request.items, hosts: hostsInOrder(request.uses) },
+      toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason, items: request.items, hosts: hostsInOrder(request.uses), ...(request.draft === undefined ? {} : { draft: request.draft }) },
     }, hostIdsOf(request.items))
     return { askId: proposal.id }
   }
@@ -2654,7 +2655,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A question reads as a question wherever it is read, a Channel without buttons included (gb-viep); a credential request links into the app (gb-atqq).
     const body = kind === 'question' ? questionText(proposalView(row).question!)
       : kind === 'credential' ? `asks you for ${proposalView(row).credential!.credential === 'login' ? 'a login' : 'a secret'} for ${proposalView(row).credential!.service}: ${proposalView(row).credential!.why}. Open the Conversation to fill it in${this.appLink()}.`
-      : kind === 'help' ? `asks for help: ${purpose}` : kind === 'tool-call' ? `wants to use ${purpose}` : `${purpose}: waiting for your answer.`
+      : kind === 'help' ? `asks for help: ${purpose}`
+      // A draft reads as the message it would send, with a link into the app where it is sent (dp-1tk6).
+      : kind === 'tool-call' ? (proposalView(row).toolCall?.draft != null ? `${draftText(proposalView(row).toolCall!.draft!)}\nOpen the Conversation to send or discard it${this.appLink()}.` : `wants to use ${purpose}`)
+      : `${purpose}: waiting for your answer.`
     this.ctx.waitUntil(this.notifyMembers('needs you', body, { hosts }).catch(() => 0))
     return proposalView(row)
   }
@@ -2683,6 +2687,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    */
   answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string, choice: { readonly value?: string; readonly values?: readonly string[]; readonly text?: string } = {}): Promise<AnswerResult> {
     return this.program(Programs.answer(proposalId, revision, approve, approved, scope, { ...(note === undefined ? {} : { note }), ...choice }))
+  }
+
+  /** The owner's edit of a draft before Send (v1.17, dp-qbt7): the stored call's body and subject. */
+  editDraft(proposalId: string, revision: number, body: string, subject?: string): Promise<AnswerResult> {
+    return this.program(Programs.reviseDraft(proposalId, revision, body, subject, 'owner'))
   }
 
   /** "Always allow this" on a tool-call Ask (v1.17, dp-u9z9): its items go to allow for this Robot, then the stored call is approved. */

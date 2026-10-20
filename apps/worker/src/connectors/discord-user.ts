@@ -258,6 +258,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     {
       name: 'discord_send_message_as_user',
       write: true,
+      draft: { medium: 'chat', recipients: [{ argument: 'channelId', label: 'Channel' }, { argument: 'userId', label: 'To user' }], body: 'text' },
       description: "Send a message as the account to a channel or a direct message, or to a person by userId (opens the direct message with them). It appears as written by the account's owner.",
       parameters: { properties: { channelId: CHANNEL_ID, userId: { type: 'string', description: 'Instead of channelId: a person\'s user id' }, text: { type: 'string', description: 'Message text' } }, required: ['text'] },
       action: (args) => 'send to ' + (str(args, 'channelId') === '' ? 'user ' + str(args, 'userId') : str(args, 'channelId')),
@@ -271,6 +272,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     {
       name: 'discord_reply_as_user',
       write: true,
+      draft: { medium: 'chat', recipients: [{ argument: 'channelId', label: 'Channel' }, { argument: 'messageId', label: 'In reply to message' }], body: 'text' },
       description: 'Reply as the account to a message in its channel (Discord shows it as a reply).',
       parameters: { properties: { channelId: CHANNEL_ID, messageId: MESSAGE_ID, text: { type: 'string', description: 'Message text' } }, required: ['channelId', 'messageId', 'text'] },
       action: (args) => 'reply to ' + str(args, 'messageId'),

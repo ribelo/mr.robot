@@ -220,7 +220,7 @@ describe('tool-call Ask (sk-hx8j)', () => {
   const ask: ProposalView = {
     id: 'p-call', kind: 'tool-call', revision: 1, status: 'open', purpose: 'gmail_send: Tell Ben the meeting moved', grants: null, file: null, skill: null,
     toolCall: {
-      robot: 'Inbox', tool: 'gmail_send', reason: 'Tell Ben the meeting moved', note: null, alwaysAllow: null,
+      robot: 'Inbox', tool: 'gmail_send', reason: 'Tell Ben the meeting moved', note: null, alwaysAllow: null, draft: null,
       arguments: [{ name: 'to', value: 'ben@example.com' }, { name: 'token', value: '[secret:gmail]' }, { name: 'body', value: long }],
     },
   }
@@ -262,7 +262,7 @@ describe('tool-call Ask (sk-hx8j)', () => {
 describe('Always allow this (dp-u9z9, dp-kcds)', () => {
   const write: ProposalView = {
     id: 'p-write', kind: 'tool-call', revision: 1, status: 'open', purpose: 'write: Keep the list', grants: null, file: null, skill: null,
-    toolCall: { robot: 'Inbox', tool: 'write', reason: 'Keep the list', note: null, alwaysAllow: [{ kind: 'tool', name: 'files' }], arguments: [{ name: 'file_path', value: 'notes/a.md' }] },
+    toolCall: { robot: 'Inbox', tool: 'write', reason: 'Keep the list', note: null, alwaysAllow: [{ kind: 'tool', name: 'files' }], draft: null, arguments: [{ name: 'file_path', value: 'notes/a.md' }] },
   }
 
   it('asks for a confirmation that says what changes, then answers with always-allow', () => {

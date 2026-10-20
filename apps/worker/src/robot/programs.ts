@@ -730,6 +730,22 @@ export const alwaysAllow = (proposalId: string, revision: number, by: string) =>
 })
 
 /**
+ * A new version of an open draft (v1.17): the owner's edit in the card (dp-qbt7) or the Robot's draft_revise (dp-5ixt). The stored call's
+ * body and subject change, the version joins the history, and the revision moves on, so Send sends exactly the version on the card.
+ */
+export const reviseDraft = (proposalId: string, revision: number, body: string, subject: string | undefined, by: 'owner' | 'robot') => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const pending = store.proposal(proposalId)
+  if (pending === undefined || pending.kind !== 'tool-call') return { ok: false, reason: 'not-found' } as AnswerResult
+  if (pending.toolCall?.draft == null) return yield* invalid('this Ask is not a draft')
+  const revised = store.reviseDraft(proposalId, revision, body, subject, by, Date.now())
+  if (revised === undefined) return { ok: false, reason: 'stale' } as AnswerResult
+  yield* platform.changed()
+  return { ok: true, proposal: proposalView(revised) } as AnswerResult
+})
+
+/**
  * The owner's answer to a tool-call Ask (sk-ed7r, sk-fx6q): one answer per Ask, compare-and-swap like every
  * other. Approval wakes the Robot, whose Turn runs the stored call once and gets its result; rejection wakes it
  * with the owner's reason. Nothing is remembered: the next call of the tool asks again.
@@ -747,7 +763,7 @@ const answerToolCall = (pending: ProposalRow, revision: number, approve: boolean
     kind: 'platform',
     sender: { kind: 'platform' },
     text: approve
-      ? (text === '' ? '' : `Your owner's note: ${text}`)
+      ? [answered.toolCall?.draft?.revisions.at(-1)?.by === 'owner' ? 'Your owner edited the message before it went; what went is the stored call as they left it.' : '', text === '' ? '' : `Your owner's note: ${text}`].filter((line) => line !== '').join('\n')
       : `The call did not run.${text === '' ? ' Your owner gave no reason.' : ''} Do not repeat it unless your owner asks; tell them in one line what you do instead.`,
     payload: { byOwner: true, summary: `${approve ? 'Approved' : 'Rejected'}: ${tool}`, toolCallAnswer: wakeup },
   })

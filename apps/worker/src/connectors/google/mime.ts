@@ -34,7 +34,10 @@ export interface OutgoingMail {
   readonly cc?: readonly string[]
   readonly bcc?: readonly string[]
   readonly subject: string
+  /** The plain-text part. */
   readonly body: string
+  /** An HTML part beside the text (v1.17, dp-ky1h): the message goes as multipart/alternative. */
+  readonly html?: string
   readonly inReplyTo?: string
   readonly references?: string
   readonly attachments?: ReadonlyArray<{ readonly name: string; readonly contentType: string; readonly bytes: Uint8Array }>
@@ -52,7 +55,18 @@ export function buildMime(mail: OutgoingMail, boundary = `mr-robot-${crypto.rand
     ...(mail.references === undefined ? [] : [`References: ${mail.references}`]),
     'MIME-Version: 1.0',
   ]
-  const text = ['Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrapped(encoder.encode(mail.body))]
+  const plain = ['Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrapped(encoder.encode(mail.body))]
+  const alternative = `${boundary}-alt`
+  // Text and HTML of the same message: the reader's client shows the last part it can render (RFC 2046, 5.1.4).
+  const text = mail.html === undefined ? plain : [
+    `Content-Type: multipart/alternative; boundary="${alternative}"`,
+    '',
+    `--${alternative}`,
+    ...plain,
+    `--${alternative}`,
+    'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrapped(encoder.encode(mail.html)),
+    `--${alternative}--`,
+  ]
   const files = mail.attachments ?? []
   const message = files.length === 0
     ? [...headers, ...text].join('\r\n')

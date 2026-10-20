@@ -839,6 +839,35 @@ export type HelpRequestView = typeof HelpRequestView.Type
  * Robot's name, the tool, its arguments and the Robot's reason; approval runs this stored call once.
  * Argument values are JSON text (a string argument as itself), secrets masked in views.
  */
+/** One version of a draft (v1.17, dp-o3st): the Robot's first text, a draft_revise, or the owner's edit. */
+export const DraftRevision = Schema.Struct({
+  seq: Schema.Number,
+  body: Schema.String,
+  subject: Schema.NullOr(Schema.String),
+  at: Schema.Number,
+  by: Schema.Literals(['robot', 'owner']),
+})
+export type DraftRevision = typeof DraftRevision.Type
+
+/**
+ * A tool-call Ask of a send tool as the message it would send (v1.17, dp-si4p): who gets it, the subject (null when the tool has none, an
+ * e-mail reply takes its thread's), the body in Markdown and the Workspace files sent with it. `revisions` is empty until it is first changed;
+ * then it holds every version, the first one included.
+ */
+export const DraftView = Schema.Struct({
+  medium: Schema.Literals(['email', 'chat']),
+  recipients: Schema.Array(Schema.Struct({ label: Schema.String, value: Schema.String })),
+  subject: Schema.NullOr(Schema.String),
+  body: Schema.String,
+  attachments: Schema.Array(Schema.String),
+  revisions: Schema.Array(DraftRevision),
+})
+export type DraftView = typeof DraftView.Type
+
+/** The owner's edit of a draft before Send (v1.17, dp-qbt7): compare-and-swap on the revision the card shows. */
+export const DraftEdit = Schema.Struct({ revision: Schema.Number, body: Schema.String, subject: Schema.optional(Schema.String) })
+export type DraftEdit = typeof DraftEdit.Type
+
 export const ToolCallAsk = Schema.Struct({
   robot: Schema.String,
   tool: Schema.String,
@@ -851,6 +880,8 @@ export const ToolCallAsk = Schema.Struct({
    * offered: an Auto review denial (dp-kcds), a call that lifts the sandbox, or an Ask stored without its items.
    */
   alwaysAllow: Schema.NullOr(Schema.Array(GrantItemRef)),
+  /** A send tool's call as the message it would send (v1.17, dp-si4p); null for any other tool and for an Ask stored before v1.17 (dp-f0pp). */
+  draft: Schema.NullOr(DraftView),
 })
 export type ToolCallAsk = typeof ToolCallAsk.Type
 

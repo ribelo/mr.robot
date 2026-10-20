@@ -8,6 +8,7 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import {
   AlwaysAllowAnswer,
+  DraftEdit,
   LoginInput,
   ConnectionPaste,
   CredentialSave,
@@ -597,6 +598,14 @@ export const api = new Router<ApiContext>()
     const answer = yield* decodeBody(c.request, ProposalAnswer)
     const result = yield* call((): Promise<AnswerResult> => robot(c, id).answer(proposal, answer.revision, answer.approve, answer.approved, answer.scope, answer.note, { ...(answer.value === undefined ? {} : { value: answer.value }), ...(answer.values === undefined ? {} : { values: answer.values }), ...(answer.text === undefined ? {} : { text: answer.text }) }))
     if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : result.reason === 'not-yours' ? forbidden('only the owner answers this Ask') : notFound('no such proposal'))
+    return result.proposal
+  }))
+  // The owner edits a draft in its card before Send (v1.17, dp-qbt7); the answer is the Ask at its new revision.
+  .on('PATCH', '/api/robots/:id/proposals/:proposal/draft', (c, { id, proposal }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const edit = yield* decodeBody(c.request, DraftEdit)
+    const result = yield* call((): Promise<AnswerResult> => robot(c, id).editDraft(proposal, edit.revision, edit.body, edit.subject))
+    if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : notFound('no such Ask'))
     return result.proposal
   }))
   // "Always allow this" (v1.17, dp-u9z9): the Ask's items at ask go to allow for the Robot, then the stored call runs.

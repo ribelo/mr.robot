@@ -18,6 +18,7 @@ import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import { tool } from '../agent/tools/define.ts'
 import { withCallItems, type GrantItem } from '../agent/ask-gate.ts'
+import { DRAFT_PARAMETER, DRAFT_PARAMETER_SCHEMA, withDraft, type DraftShape } from '../agent/draft.ts'
 import type { ConnectionMeta } from '../member/connections.ts'
 
 /** A connection granted to this Robot, as its tools see it; no secrets. */
@@ -227,6 +228,8 @@ export interface ConnectorToolSpec<A> {
   readonly external?: true
   /** Which service of the account the tool needs (Google: gmail, calendar, …). */
   readonly service?: string
+  /** A send tool (v1.17, dp-si4p): where its message is among the arguments. It takes draft: true, and its Ask is shown as the message. */
+  readonly draft?: DraftShape
   /** One line naming what the call did, for the failure header and the trajectory. */
   readonly action: (args: A) => string
   /** Refuse arguments the service would misread, before any secret is resolved or request sent (ts-3d3n). */
@@ -244,13 +247,14 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
   const accounts = eligible(host, spec)
   if (accounts.length === 0) return undefined
   const several = accounts.length > 1
+  const own = spec.draft === undefined ? spec.parameters.properties : { ...spec.parameters.properties, [DRAFT_PARAMETER]: DRAFT_PARAMETER_SCHEMA }
   const properties = several
-    ? { account: { type: 'string', enum: accounts.map((account) => account.label), description: `Which account to act on: ${accounts.map((account) => `${account.label} = ${account.account}${account.isDefault ? ' (default)' : ''}`).join('; ')}.` }, ...spec.parameters.properties }
-    : spec.parameters.properties
+    ? { account: { type: 'string', enum: accounts.map((account) => account.label), description: `Which account to act on: ${accounts.map((account) => `${account.label} = ${account.account}${account.isDefault ? ' (default)' : ''}`).join('; ')}.` }, ...own }
+    : own
   const only = accounts[0]!
   // The grant items a call uses (sk-hx8j): the Connection it acts on, and its write grant for a write tool.
   const itemsOf = (account: GrantedConnection): GrantItem[] => [{ kind: 'connection', name: account.id }, ...(spec.write === true ? [{ kind: 'connection' as const, name: `${account.id}:write` }] : [])]
-  return withCallItems(tool<A & { account?: string }>({
+  const definition = withCallItems(tool<A & { account?: string }>({
     name: spec.name,
     ...(spec.external === true ? { external: true as const } : {}),
     description: `${spec.description}${several ? '' : ` Acts on ${only.label === only.account ? only.label : `${only.label} (${only.account})`}.`}`,
@@ -277,6 +281,7 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
       return picked instanceof ConnectorRefused ? [] : itemsOf(picked)
     },
   })
+  return spec.draft === undefined ? definition : withDraft(definition, spec.draft)
 }
 
 /**

@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: a send Ask is typed as a draft; Send delivers the edited body and subject to the connector stub; Discard rejects with the reason; draft: true at allow; the Gmail stub receives HTML and text parts; the Discord form; a dismissed draft wakes the Robot; old Asks render (dp-si4p, dp-wd2q, dp-qbt7, dp-yhn7, dp-ky1h, dp-1tk6, dp-gsf8, dp-f0pp)
-- [ ] Component test: the draft card with edit, Send and Discard (dp-si4p, dp-qbt7)
+- [x] Workerd test: a send Ask is typed as a draft; Send delivers the edited body and subject to the connector stub; Discard rejects with the reason; draft: true at allow; the Gmail stub receives HTML and text parts; the Discord form; a dismissed draft wakes the Robot; old Asks render (dp-si4p, dp-wd2q, dp-qbt7, dp-yhn7, dp-ky1h, dp-1tk6, dp-gsf8, dp-f0pp)
+- [x] Component test: the draft card with edit, Send and Discard (dp-si4p, dp-qbt7)

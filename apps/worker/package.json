@@ -39,6 +39,8 @@
     "aws4fetch": "1.0.20",
     "effect": "4.0.1",
     "jose": "^6.2.12",
+    "micromark": "4.0.3",
+    "micromark-extension-gfm": "3.0.0",
     "sucrase": "3.35.1"
   },
   "devDependencies": {

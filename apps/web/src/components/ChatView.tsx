@@ -10,6 +10,7 @@ import type { PendingSend } from './pending-sends.ts'
 import { robotTint } from './tint.ts'
 import { href } from '../route.ts'
 import type { AskReply } from './ask-reply.ts'
+import { DraftCard } from './DraftCard.tsx'
 
 export interface ChatViewProps {
   readonly items: readonly ChatItem[]
@@ -207,6 +208,8 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, onReply, level, robotId
       if (item.proposal.kind === 'help' && item.proposal.status !== 'open') return <QuestionCard proposal={item.proposal} canAnswer={canAnswer} {...(onHelp === undefined ? {} : { onHelp })} />
       // A question the owner has answered keeps its answer in the Conversation (v1.15).
       if ((item.proposal.kind === 'question' || item.proposal.kind === 'credential') && item.proposal.status !== 'open') return <QuestionCard proposal={item.proposal} canAnswer={false} />
+      // A sent or discarded draft stays readable as the message it was (v1.17).
+      if (item.proposal.toolCall?.draft != null && item.proposal.status !== 'open') return <QuestionCard proposal={item.proposal} canAnswer={false} />
       return <div className="chat-separator ask-line" data-status={item.proposal.status}>{`${askTitle(item.proposal)} · ${item.proposal.status === 'open' ? (canAnswer ? 'answer below' : 'waiting for the owner') : statusText(item.proposal)}`}</div>
     case 'working':
       return null
@@ -282,6 +285,7 @@ export function askTitle(proposal: ProposalView): string {
         : proposal.kind === 'skill' ? 'Proposes a skill for the library'
           : proposal.kind === 'review' ? `Review: ${proposal.review?.title ?? proposal.purpose}`
             : proposal.kind === 'help' ? (proposal.help?.urgent === true ? 'Asks for help (urgent)' : 'Asks for help')
+            : proposal.kind === 'tool-call' && proposal.toolCall?.draft != null ? `${proposal.toolCall.robot} wrote ${proposal.toolCall.draft.medium === 'email' ? 'an e-mail' : 'a message'} for you to check`
             : proposal.kind === 'tool-call' ? `${proposal.toolCall?.robot ?? 'The Robot'} wants to use ${proposal.toolCall?.tool ?? 'a tool'}`
             : proposal.kind === 'question' ? (proposal.question?.urgent === true ? `Urgent: ${proposal.question.prompt}` : proposal.question?.prompt ?? 'A question')
             : proposal.kind === 'credential' ? `Asks for ${proposal.credential?.credential === 'secret' ? 'a secret' : 'a login'} for ${proposal.credential?.service ?? 'a service'}`
@@ -309,7 +313,8 @@ export function QuestionCard({ proposal, canAnswer, onAnswer, onHelp, onReply, c
       {proposal.help === undefined && proposal.toolCall === undefined && proposal.question === undefined && proposal.credential === undefined ? <div className="question-purpose">{proposal.purpose}</div> : null}
       {proposal.question === undefined ? null : <QuestionAnswerPanel key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onReply === undefined ? {} : { onReply })} />}
       {proposal.credential === undefined ? null : <CredentialForm key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onReply === undefined ? {} : { onReply })} />}
-      {proposal.toolCall === undefined ? null : <ToolCallAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onReply === undefined ? {} : { onReply })} />}
+      {proposal.toolCall?.draft == null ? null : <DraftCard key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onReply === undefined ? {} : { onReply })} />}
+      {proposal.toolCall === undefined || proposal.toolCall.draft !== null ? null : <ToolCallAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onReply === undefined ? {} : { onReply })} />}
       {proposal.help === undefined ? null : <HelpAnswer key={`${proposal.id}:${proposal.revision}`} proposal={proposal} canAnswer={canAnswer} {...(onHelp === undefined ? {} : { onHelp })} />}
       {lines.length > 0 ? (
         <ul className="grant-list">{lines.map(([kind, name]) => <li key={`${kind}-${name}`}><span className="grant-kind">{kind}</span> {name}</li>)}</ul>

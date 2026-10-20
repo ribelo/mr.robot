@@ -10,6 +10,7 @@ import * as Schema from 'effect/Schema'
 import { HOST_FACETS, hostFacetKey, splitHostFacet, StoredPlace } from '../places/host-facet.ts'
 import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName, unsharedMrRobotDirectory } from './host-access.ts'
 import { JobId } from '../places/job-id.ts'
+import { appendRevision, draftView, parseDraftRevisions, parseDraftShape, revisedArguments, type DraftShape } from '../agent/draft.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
 import { isRemovedBrowserBackend } from '../browser/removed-backends.ts'
@@ -737,6 +738,27 @@ export class RobotStore {
     return cursor.rowsWritten === 1 ? this.proposal(id) : undefined
   }
 
+  /**
+   * A new version of an open draft (v1.17, dp-qbt7, dp-5ixt): the stored call's body and subject are replaced, the version joins the history,
+   * and the revision moves on, so an answer to the version before fails the compare-and-swap.
+   * @returns the Ask, or undefined when it is not an open draft at this revision.
+   */
+  reviseDraft(id: string, revision: number, body: string, subject: string | undefined, by: 'robot' | 'owner', now: number): ProposalRow | undefined {
+    return this.transaction(() => {
+      const row = this.proposal(id)
+      const call = row === undefined ? undefined : storedToolCall(row.payload)
+      if (row === undefined || row.kind !== 'tool-call' || row.status !== 'open' || row.revision !== revision || call?.draft === undefined) return undefined
+      const shape = call.draft
+      const next = revisedArguments(shape, call.arguments, body, subject)
+      const revisions = appendRevision(shape, call.arguments, parseDraftRevisions(row.payload['draftRevisions']), row.createdAt, { body, subject: shape.subject === undefined ? null : String(next[shape.subject] ?? ''), at: now, by })
+      this.sql.exec(
+        "UPDATE proposal SET revision = revision + 1, payload = json_set(payload, '$.toolCall.arguments', json(?), '$.draftRevisions', json(?)) WHERE id = ?",
+        JSON.stringify(next), JSON.stringify(revisions), id,
+      )
+      return this.proposal(id)
+    })
+  }
+
   // ------------------------------------------------------------ Jobs (v1.15 ticket 07, v1.16 ticket 01)
 
   addJob(id: JobId, place: StoredPlace, placeName: string | null, command: string, now: number): void {
@@ -1047,6 +1069,8 @@ export interface StoredToolCall {
   readonly hosts: readonly string[]
   /** The items at ask that made the call wait, as stored (unknown before they were parsed). */
   readonly items?: unknown
+  /** A send tool's message shape (v1.17): the Ask is shown as a draft; absent on any other tool and before v1.17. */
+  readonly draft?: DraftShape
 }
 
 const isGrantKind = Schema.is(GrantKindSchema)
@@ -1056,7 +1080,9 @@ export function storedToolCall(payload: Record<string, unknown>): StoredToolCall
   if (call === undefined || typeof call.tool !== 'string') return undefined
   // An Ask stored without its Hosts pins none: a replay that names a Host is then refused, never sent to whichever Host has the name now.
   const hosts = Array.isArray(call.hosts) ? call.hosts.filter((host): host is string => typeof host === 'string') : []
-  return { ...call, hosts }
+  const { draft: storedDraft, ...rest } = call as typeof call & { readonly draft?: unknown }
+  const draft = parseDraftShape(storedDraft)
+  return { ...rest, hosts, ...(draft === undefined ? {} : { draft }) }
 }
 
 function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk } | Record<string, never> {
@@ -1071,6 +1097,7 @@ function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk }
       reason: call.reason,
       note: typeof note === 'string' && note.trim() !== '' ? note : null,
       alwaysAllow: alwaysAllowItems(call),
+      draft: call.draft === undefined ? null : draftView(call.draft, call.arguments, parseDraftRevisions(payload['draftRevisions'])),
     },
   }
 }

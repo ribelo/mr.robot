@@ -7,6 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import { ConnectorRefused, request, type ConnectorHost, type ConnectorToolSpec } from '../connector.ts'
 import { google, query } from './api.ts'
+import { emailHtml } from '../../platform/markdown-html.ts'
 import { attachmentsOf, buildMime, fromBase64Url, header, messageText, safeName, type MessagePart } from './mime.ts'
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me'
@@ -93,6 +94,11 @@ function contentTypeOf(path: string): string {
 const list = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : typeof value === 'string' && value.trim() !== '' ? value.split(',').map((item) => item.trim()) : [])
 
 type Args = Record<string, unknown>
+
+const MARKDOWN_BODY = 'Message text in Markdown (headings, bold, lists, links); recipients get it as HTML with a plain-text copy'
+
+/** An e-mail body written in Markdown (v1.17, dp-ky1h): the HTML part rendered from it, the Markdown itself as the plain-text part. */
+const markdownBody = (markdown: string): { readonly body: string; readonly html: string } => ({ body: markdown, html: emailHtml(markdown) })
 const str = (args: Args, key: string): string => (typeof args[key] === 'string' ? (args[key] as string) : '')
 
 export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec<never>> {
@@ -158,12 +164,13 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_send',
       service: 'gmail',
       write: true,
-      description: 'Send an e-mail now: to, cc, bcc, subject, body, optional Workspace files as attachments. Prefer gmail_draft when the owner should check it first.',
-      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, bcc: { type: 'array', items: { type: 'string' }, description: 'Bcc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: 'Message text, plain text' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['to', 'subject', 'body'], emptyAllowed: ['subject', 'body'] },
+      description: 'Send an e-mail: to, cc, bcc, subject, body in Markdown (it goes as HTML with a plain-text copy), optional Workspace files as attachments. With draft: true your owner checks it on a card first. gmail_draft instead leaves a draft in the mailbox.',
+      parameters: { properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'Cc e-mail addresses' }, bcc: { type: 'array', items: { type: 'string' }, description: 'Bcc e-mail addresses' }, subject: { type: 'string', description: 'Subject line' }, body: { type: 'string', description: MARKDOWN_BODY }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['to', 'subject', 'body'], emptyAllowed: ['subject', 'body'] },
+      draft: { medium: 'email', recipients: [{ argument: 'to', label: 'To' }, { argument: 'cc', label: 'Cc' }, { argument: 'bcc', label: 'Bcc' }], subject: 'subject', body: 'body', attachments: 'attachments' },
       action: (args) => `send "${str(args, 'subject')}" to ${list(args['to']).join(', ')}`,
       run: (args, use) => Effect.gen(function* () {
         const files = yield* filesOf(host, list(args['attachments']))
-        const sent = yield* google(host, use, { method: 'POST', url: `${GMAIL}/messages/send`, json: { raw: buildMime({ to: list(args['to']), cc: list(args['cc']), bcc: list(args['bcc']), subject: str(args, 'subject'), body: str(args, 'body'), attachments: files }) } }, Sent)
+        const sent = yield* google(host, use, { method: 'POST', url: `${GMAIL}/messages/send`, json: { raw: buildMime({ to: list(args['to']), cc: list(args['cc']), bcc: list(args['bcc']), subject: str(args, 'subject'), ...markdownBody(str(args, 'body')), attachments: files }) } }, Sent)
         return { sent: true, messageId: sent.id, threadId: sent.threadId ?? null }
       }),
     },
@@ -171,8 +178,9 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_reply',
       service: 'gmail',
       write: true,
-      description: 'Reply in the thread of a message, to its sender (or to everyone with replyAll); optional Workspace files as attachments.',
-      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, body: { type: 'string', description: 'Message text, plain text' }, replyAll: { type: 'boolean', description: 'Answer everyone on the message, not only the sender' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['messageId', 'body'], emptyAllowed: ['body'] },
+      description: 'Reply in the thread of a message, to its sender (or to everyone with replyAll), with a body in Markdown; optional Workspace files as attachments.',
+      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, body: { type: 'string', description: MARKDOWN_BODY }, replyAll: { type: 'boolean', description: 'Answer everyone on the message, not only the sender' }, attachments: { type: 'array', items: { type: 'string' }, description: 'Workspace file paths to attach' } }, required: ['messageId', 'body'], emptyAllowed: ['body'] },
+      draft: { medium: 'email', recipients: [{ argument: 'messageId', label: 'In reply to message' }], body: 'body', attachments: 'attachments' },
       action: (args) => `reply to message ${str(args, 'messageId')}${args['replyAll'] === true ? ' (all)' : ''}`,
       run: (args, use, account) => Effect.gen(function* () {
         const original = yield* getMessage(host, use, str(args, 'messageId'), 'metadata')
@@ -182,7 +190,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
         const subject = header(payload, 'Subject') ?? ''
         const id = header(payload, 'Message-ID')
         const files = yield* filesOf(host, list(args['attachments']))
-        const raw = buildMime({ to: [from], cc: others, subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`, body: str(args, 'body'), attachments: files, ...(id === undefined ? {} : { inReplyTo: id, references: [header(payload, 'References'), id].filter(Boolean).join(' ') }) })
+        const raw = buildMime({ to: [from], cc: others, subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`, ...markdownBody(str(args, 'body')), attachments: files, ...(id === undefined ? {} : { inReplyTo: id, references: [header(payload, 'References'), id].filter(Boolean).join(' ') }) })
         const sent = yield* google(host, use, { method: 'POST', url: `${GMAIL}/messages/send`, json: { raw, threadId: original.threadId } }, Sent)
         return { sent: true, to: [from, ...others], messageId: sent.id, threadId: original.threadId }
       }),
@@ -191,8 +199,9 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'gmail_forward',
       service: 'gmail',
       write: true,
-      description: 'Forward a message with its text and attachments to new recipients, with an optional note above it.',
-      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, note: { type: 'string', description: 'Text to put above the forwarded message' } }, required: ['messageId', 'to'] },
+      description: 'Forward a message with its text and attachments to new recipients, with an optional note in Markdown above it.',
+      parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, to: { type: 'array', items: { type: 'string' }, description: 'Recipient e-mail addresses' }, note: { type: 'string', description: 'Text to put above the forwarded message, in Markdown' } }, required: ['messageId', 'to'] },
+      draft: { medium: 'email', recipients: [{ argument: 'to', label: 'To' }, { argument: 'messageId', label: 'Forwarding message' }], body: 'note' },
       action: (args) => `forward message ${str(args, 'messageId')} to ${list(args['to']).join(', ')}`,
       run: (args, use) => Effect.gen(function* () {
         const original = yield* getMessage(host, use, str(args, 'messageId'), 'full')
@@ -203,7 +212,10 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
         ))
         const quoted = ['---------- Forwarded message ---------', `From: ${header(payload, 'From') ?? ''}`, `Date: ${header(payload, 'Date') ?? ''}`, `Subject: ${header(payload, 'Subject') ?? ''}`, `To: ${header(payload, 'To') ?? ''}`, '', messageText(payload)].join('\n')
         const subject = header(payload, 'Subject') ?? ''
-        const sent = yield* google(host, use, { method: 'POST', url: `${GMAIL}/messages/send`, json: { raw: buildMime({ to: list(args['to']), subject: /^fwd?:/i.test(subject) ? subject : `Fwd: ${subject}`, body: `${str(args, 'note')}\n\n${quoted}`.trim(), attachments: files }) } }, Sent)
+        const note = str(args, 'note').trim()
+        // The quoted message stays text in both parts; the note above it is Markdown.
+        const html = note === '' ? undefined : emailHtml(note, quoted)
+        const sent = yield* google(host, use, { method: 'POST', url: `${GMAIL}/messages/send`, json: { raw: buildMime({ to: list(args['to']), subject: /^fwd?:/i.test(subject) ? subject : `Fwd: ${subject}`, body: `${note}\n\n${quoted}`.trim(), ...(html === undefined ? {} : { html }), attachments: files }) } }, Sent)
         return { sent: true, messageId: sent.id, attachments: files.length }
       }),
     },

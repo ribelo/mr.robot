@@ -7,6 +7,7 @@
  */
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { GrantKind, GrantLevel } from '@mr-robot/protocol'
+import { DRAFT_PARAMETER, draftOf, type DraftShape } from './draft.ts'
 
 /** One grant item: a tool group, a skill, a recipient, a login, a Host facet or a Connection (with :write). */
 export interface GrantItem {
@@ -71,6 +72,8 @@ export interface ToolCallRequest {
    * on, and a replay that resolves to other Hosts is refused (deep review P14).
    */
   readonly uses: readonly GrantItem[]
+  /** A send tool's message shape (v1.17, dp-si4p): the Ask is shown as a draft. */
+  readonly draft?: DraftShape
 }
 
 /** What the reviewer decided about one call (Auto review, v1.14 ticket 08). */
@@ -145,14 +148,19 @@ function argsOf(value: unknown): Record<string, unknown> {
 export function gateTool(definition: ToolDefinition, items: ToolItems, host: AskGateHost): ToolDefinition {
   const asks = items.possible.some((item) => host.level(item) === 'ask')
   const reviewed = host.reviewing?.() === true && host.review !== undefined
-  if (!asks && !reviewed) return definition
+  // A send tool is always gated: draft: true shows the message to the owner first, whatever its level (dp-yhn7).
+  const draft = draftOf(definition)
+  if (!asks && !reviewed && draft === undefined) return definition
   // Only a tool that may ask its owner takes the reason the owner reads; a reviewed call is explained by the reviewer.
   const own = ownsReason(definition) || !asks
   const inner = (args: unknown): Record<string, unknown> => {
-    if (own) return argsOf(args)
-    const { [REASON_PARAMETER]: _reason, ...rest } = argsOf(args)
+    const { [DRAFT_PARAMETER]: _draft, ...given } = argsOf(args)
+    const plain = draft === undefined ? argsOf(args) : given
+    if (own) return plain
+    const { [REASON_PARAMETER]: _reason, ...rest } = plain
     return rest
   }
+  const wantsDraft = (args: unknown): boolean => draft !== undefined && argsOf(args)[DRAFT_PARAMETER] === true
   const output = definition.output
   const presentationMeta = output.presentationMeta
   const isConcurrencySafe = definition.isConcurrencySafe
@@ -176,6 +184,12 @@ export function gateTool(definition: ToolDefinition, items: ToolItems, host: Ask
       if (host.approved(String(exec.callId))) return definition.execute(given, exec)
       const used = await items.used(given)
       const asking = used.filter((item) => host.level(item) === 'ask')
+      if (asking.length === 0 && wantsDraft(args)) {
+        // The Robot may send on its own and chose to show the message first: the owner's Send runs it (dp-yhn7).
+        const reason = argsOf(args)[REASON_PARAMETER]
+        const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : 'A draft for you to check before it goes.', items: [], uses: used, ...(draft === undefined ? {} : { draft }) }, exec)
+        return waitingResult(askId, definition.name)
+      }
       if (asking.length === 0) {
         // Items at ask keep asking; a call at allow is reviewed first when Auto review is on (ao-wkpt).
         if (!reviewed) return definition.execute(given, exec)
@@ -184,13 +198,13 @@ export function gateTool(definition: ToolDefinition, items: ToolItems, host: Ask
         })
         if (outcome.decision === 'allow') return definition.execute(given, exec)
         // A denial is never final: the owner decides, with the reviewer's reason (ao-gf33).
-        const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: `Auto review denied this call: ${outcome.reason}`, items: used, uses: used }, exec)
+        const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: `Auto review denied this call: ${outcome.reason}`, items: used, uses: used, ...(draft === undefined ? {} : { draft }) }, exec)
         return waitingResult(askId, definition.name)
       }
       const reason = argsOf(args)[REASON_PARAMETER]
       if (typeof reason !== 'string' || reason.trim() === '') throw new Error(`${definition.name}: parameter "${REASON_PARAMETER}" is required: your owner approves each call of this tool and reads why you need it.`)
       if (items.asksAtExecution === true) return definition.execute(given, exec)
-      const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: reason.trim(), items: asking, uses: used }, exec)
+      const { askId } = host.askToolCall({ tool: definition.name, arguments: given, reason: reason.trim(), items: asking, uses: used, ...(draft === undefined ? {} : { draft }) }, exec)
       return waitingResult(askId, definition.name)
     },
   } as ToolDefinition

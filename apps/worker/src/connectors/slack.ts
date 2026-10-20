@@ -271,6 +271,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
       name: 'slack_send_message',
       service: 'slack',
       write: true,
+      draft: { medium: 'chat', recipients: [{ argument: 'channel', label: 'Channel' }, { argument: 'threadTs', label: 'In thread' }], body: 'text' },
       description: 'Send a message to a channel or a direct message, or reply in a thread by giving threadTs.',
       parameters: { properties: { channel: { type: 'string', description: 'Slack channel id (from slack_list_user_channels)' }, text: { type: 'string', description: 'Message text' }, threadTs: { type: 'string', description: 'Timestamp (ts) of the thread\'s first message' } }, required: ['channel', 'text'] },
       action: (args) => (str(args, 'threadTs') === '' ? 'send to ' : 'reply in ') + str(args, 'channel'),
