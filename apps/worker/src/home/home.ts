@@ -30,14 +30,13 @@ import type {
   Sharing,
   SkillView,
   BrowserBackend,
-  VpnSummary,
 } from '@mr-robot/protocol'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/durable.ts'
 import { backendOptions } from '../browser/backends.ts'
-import { summarizeWireguard } from '../browser/wireguard-config.ts'
+import { isRemovedBrowserBackend } from '../browser/removed-backends.ts'
 import { MR_ROBOT_ONLY_GROUPS, TOOL_GROUPS } from '../agent/catalog.ts'
 import { connectionView, HomePlugins } from './plugins.ts'
 import { connectorOn, connectorPlugin, CONNECTOR_TITLES, disabledToolGroups } from '../plugins/catalog.ts'
@@ -637,48 +636,13 @@ const adminView = (adminId: string) => Effect.gen(function* () {
     modelLists: yield* catalogStatus,
     settings: { ...current, models: yield* models(adminId) },
     browserBackends: yield* browserBackends,
-    ...(yield* Effect.map(vpnSummary, (summary) => (summary === undefined ? {} : { vpnSummary: summary }))),
     exaConfigured: (yield* setting<string>('exa-key')) !== undefined,
-    proxyConfigured: (yield* setting<string>('proxy-config')) !== undefined,
     hosts: yield* allHosts,
     threads: yield* adminThreads,
   } as AdminView
 })
 
 // ------------------------------------------------------------------ settings catalog (robot-vqtw)
-
-/** The Home's Proton VPN WireGuard configuration (rb-rb1x), sealed; never shown back or logged. */
-const vpnConfig = Effect.gen(function* () {
-  const platform = yield* HomePlatform
-  const sealed = yield* setting<string>('vpn-config')
-  return sealed === undefined ? null : yield* platform.secrets.open(sealed)
-})
-
-/**
- * Store a pasted configuration (ux-t4wi, ux-a3ec): the whole text sealed, and beside it the public
- * summary (endpoint, server name, country) parsed from it. Nothing else of the text is kept in the clear.
- */
-const setVpnConfig = (config: string | null) => Effect.gen(function* () {
-  const sql = yield* Sql
-  const platform = yield* HomePlatform
-  if (config === null || config.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k IN ('vpn-config', 'vpn-summary')")
-  const parsed = summarizeWireguard(config)
-  if (!parsed.ok) return yield* invalid(parsed.reason)
-  yield* putSetting('vpn-config', yield* platform.secrets.seal(config.trim()))
-  yield* putSetting('vpn-summary', parsed.summary)
-})
-
-/** The public summary of the stored configuration; one stored before v1.12 gets its summary on first read. */
-const vpnSummary = Effect.gen(function* () {
-  const stored = yield* setting<VpnSummary>('vpn-summary')
-  if (stored !== undefined) return stored
-  const config = yield* vpnConfig
-  if (config === null) return undefined
-  const parsed = summarizeWireguard(config)
-  if (!parsed.ok) return undefined
-  yield* putSetting('vpn-summary', parsed.summary)
-  return parsed.summary
-})
 
 /** The Home's Exa API key (rb-x8i3), sealed; never shown back. */
 const exaKey = Effect.gen(function* () {
@@ -692,23 +656,6 @@ const setExaKey = (key: string | null) => Effect.gen(function* () {
   const platform = yield* HomePlatform
   if (key === null || key.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'exa-key'")
   yield* putSetting('exa-key', yield* platform.secrets.seal(key.trim()))
-})
-
-/** The proxy address for "Container Chrome via proxy" (v1.2 ticket 05, hs-naw6), sealed. */
-const proxyConfig = Effect.gen(function* () {
-  const platform = yield* HomePlatform
-  const sealed = yield* setting<string>('proxy-config')
-  return sealed === undefined ? null : yield* platform.secrets.open(sealed)
-})
-
-const setProxyConfig = (url: string | null) => Effect.gen(function* () {
-  const sql = yield* Sql
-  const platform = yield* HomePlatform
-  if (url === null || url.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'proxy-config'")
-  let parsed: URL
-  try { parsed = new URL(url.trim()) } catch { return yield* invalid('a proxy address looks like http://user:password@host:port or socks5://user:password@host:port') }
-  if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol) || parsed.port === '') return yield* invalid('a proxy address looks like http://user:password@host:port or socks5://user:password@host:port')
-  yield* putSetting('proxy-config', yield* platform.secrets.seal(url.trim()))
 })
 
 // ------------------------------------------------------------------ Hosts (v1.2): index, sharing, pairing
@@ -789,11 +736,10 @@ const pollPairing = (code: string) => Effect.gen(function* () {
   return { status: 'paired' as const, hostId: row.host_id, token: row.token }
 })
 
-/** Browser backends this Home can run, with the host browsers this Member reaches. */
+/** Browser backends a Member can choose: Browser Rendering, and the host browsers this Member reaches. */
 const browserBackendsFor = (memberId: string | null) => Effect.gen(function* () {
-  const platform = yield* HomePlatform
   const hosts = memberId === null ? [] : yield* hostsFor(memberId)
-  return backendOptions(platform.env, { vpn: (yield* setting<string>('vpn-config')) !== undefined, proxy: (yield* setting<string>('proxy-config')) !== undefined }, hosts)
+  return backendOptions(hosts)
 })
 
 const browserBackends = browserBackendsFor(null)
@@ -1385,6 +1331,7 @@ export class Home extends DurableObject<Env> {
     try { sql.exec('ALTER TABLE member ADD COLUMN avatar TEXT') } catch { /* added before */ }
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     this.migrateSpendLimits()
+    this.migrateBrowserBackends()
     sql.exec(`CREATE TABLE IF NOT EXISTS skill (
       name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
       owner_id TEXT, updated_at INTEGER NOT NULL
@@ -1650,7 +1597,6 @@ export class Home extends DurableObject<Env> {
   unavailableModels(memberId: string): Promise<ModelOption[]> { return this.run(unavailableModels(memberId)) }
   modelList(): Promise<ModelOption[]> { return this.run(modelList) }
   offeredModelList(): Promise<ModelOption[]> { return this.run(offeredModelList) }
-  vpnConfig(): Promise<string | null> { return this.run(vpnConfig) }
   /** The Exa plugin's key (its detail page), or the key saved before plugins had settings. */
   async exaKey(): Promise<string | null> { return (await this.pluginsOf.settings('exa')).secrets['apiKey'] ?? await this.run(exaKey) }
 
@@ -1686,8 +1632,6 @@ export class Home extends DurableObject<Env> {
     await Promise.all(robots.filter((robot) => (memberId === null || robot.owner_id === memberId) && robot.id !== exceptRobot)
       .map((robot) => this.env.ROBOT.getByName(robot.id).memoryChanged(path, by).catch(() => undefined)))
   }
-  proxyConfig(): Promise<string | null> { return this.run(proxyConfig) }
-  setProxyConfig(url: string | null): Promise<void> { return this.run(setProxyConfig(url)) }
   hostChanged(entry: HostEntry | { id: string; removed: true }): Promise<void> { return this.run(hostChanged(entry)) }
   hostsFor(memberId: string): Promise<HostView[]> { return this.run(hostsFor(memberId)) }
   hostOwner(id: string): Promise<string | null> { return this.run(hostOwner(id)) }
@@ -1699,7 +1643,6 @@ export class Home extends DurableObject<Env> {
     await this.run(setExaKey(key))
     await this.pluginsOf.setSecret('exa', 'apiKey', key === null || key.trim() === '' ? null : key.trim())
   }
-  setVpnConfig(config: string | null): Promise<void> { return this.run(setVpnConfig(config)) }
   credentialShared(memberId: string, provider: ProviderId, shared: boolean): Promise<void> { return this.run(credentialShared(memberId, provider, shared)) }
   providerCredential(memberId: string, provider: ProviderId): Promise<(ProviderCredential & { owner: string }) | null> { return this.run(providerCredential(memberId, provider)) }
   accountCredential(memberId: string, entryOwner: string, account: string): Promise<ProviderCredential | null> { return this.run(accountCredential(memberId, entryOwner, account)) }
@@ -1766,6 +1709,19 @@ export class Home extends DurableObject<Env> {
         sql.exec('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(legacyHomeSpendLimit(JSON.parse(row.v))))
         sql.exec('DELETE FROM setting WHERE k = ?', legacy)
       }
+    })
+  }
+
+  /**
+   * The v1.16 migration for two browsers (ob-l24v, ob-ltsr): a default browser backend that was removed is dropped, so the Home
+   * default is Browser Rendering again; the sealed VPN and proxy settings and the VPN summary go. With none left it does nothing.
+   */
+  protected migrateBrowserBackends(): void {
+    const sql = this.ctx.storage.sql
+    this.ctx.storage.transactionSync(() => {
+      const stored = sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'defaultBrowserBackend'").toArray()[0]
+      if (stored !== undefined && isRemovedBrowserBackend(JSON.parse(stored.v))) sql.exec("DELETE FROM setting WHERE k = 'defaultBrowserBackend'")
+      sql.exec("DELETE FROM setting WHERE k IN ('vpn-config', 'vpn-summary', 'proxy-config')")
     })
   }
 

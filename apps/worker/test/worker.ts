@@ -61,6 +61,18 @@ export class Home extends ProductionHome {
     this.migrateSpendLimits()
   }
 
+  /** The Home as v1.15 left it: a removed default browser backend, a VPN configuration and a proxy address, migrated as at start (v1.16 ticket 08). */
+  async legacyBrowserForTest(defaultBackend: string): Promise<void> {
+    const sql = this.ctx.storage.sql
+    sql.exec("INSERT OR REPLACE INTO setting (k, v) VALUES ('defaultBrowserBackend', ?), ('vpn-config', '\"sealed\"'), ('vpn-summary', '{\"endpoint\":\"1.2.3.4:51820\"}'), ('proxy-config', '\"sealed\"')", JSON.stringify(defaultBackend))
+    this.migrateBrowserBackends()
+  }
+
+  /** The Home's settings keys, as stored. */
+  async settingKeysForTest(): Promise<string[]> {
+    return this.ctx.storage.sql.exec<{ k: string }>('SELECT k FROM setting ORDER BY k').toArray().map((row) => row.k)
+  }
+
   protected override connectorFetch(): typeof globalThis.fetch {
     return connectorFixtures.fetch
   }
@@ -226,6 +238,27 @@ export class Robot extends ProductionRobot {
     this.store.sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, spendLimitUsd }))
     this.store.sql.exec('UPDATE schema_version SET version = 8')
     this.store.prepare()
+  }
+
+  /** The Robot as v1.15 left it on a removed browser backend: its choice, a session left open there and browser time spent there (v1.16 ticket 08). */
+  async legacyBrowserForTest(backend: string): Promise<void> {
+    const sql = this.store.sql
+    const config = this.store.requireConfig()
+    sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, browserBackend: backend }))
+    this.store.set('browser-session', { backend, since: Date.now() })
+    this.store.addBrowserUsage('2026-09', backend, 600_000, 0.018)
+    sql.exec('UPDATE schema_version SET version = 19')
+    this.store.prepare()
+  }
+
+  /** The browser time rows of a month, as stored. */
+  async browserUsageForTest(month: string): Promise<Array<{ backend: string; ms: number; costUsd: number }>> {
+    return this.store.browserUsage(month)
+  }
+
+  /** Whether a browser session is recorded as open. */
+  async browserSessionForTest(): Promise<unknown> {
+    return this.store.get('browser-session') ?? null
   }
 
   /** The config exactly as stored. */

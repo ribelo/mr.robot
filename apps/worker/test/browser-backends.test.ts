@@ -39,7 +39,7 @@ describe('browser backends (rb-wgtd, rb-ybt4, rb-bcui, rb-y50l, rb-kank)', () =>
     const id = await browsingRobot()
     const catalog = (await api<SettingsCatalog>(ANNA, `/api/robots/${id}/catalog`)).body
     expect(catalog.defaultBrowserBackend).toBe('browser-run')
-    expect(catalog.browserBackends?.map((option) => [option.id, option.available])).toEqual([['browser-run', true], ['container', false], ['container-vpn', false], ['container-proxy', false]])
+    expect(catalog.browserBackends?.map((option) => [option.id, option.available])).toEqual([['browser-run', true]])
 
     await say(id, 'log in', [
       { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] },
@@ -47,10 +47,10 @@ describe('browser backends (rb-wgtd, rb-ybt4, rb-bcui, rb-y50l, rb-kank)', () =>
       { calls: [{ name: 'browser_act', args: { action: 'click', index: 2 } }] },
       { text: 'Done.' },
     ])
-    const saved = (await api<{ browserBackend: string | null }>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { browserBackend: 'container' } })).body
-    expect(saved.browserBackend).toBe('container')
+    const saved = (await api<{ browserBackend: string | null }>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { browserBackend: 'host:desk' } })).body
+    expect(saved.browserBackend).toBe('host:desk')
     await say(id, 'check the cart', [{ calls: [{ name: 'browser_open', args: { url: 'https://shop.test/' } }] }, { text: 'Still signed in.' }])
-    expect(backendLog).toEqual(['browser-run', 'container'])
+    expect(backendLog).toEqual(['browser-run', 'host:desk'])
     expect(toolResults(id).at(-1)).toContain('Hello, signed-in customer')
   })
 
@@ -70,6 +70,22 @@ describe('browser backends (rb-wgtd, rb-ybt4, rb-bcui, rb-y50l, rb-kank)', () =>
     ])
     const [first, second] = toolResults(id)
     expect(first).toContain('This page blocks your browser (Browser Run)')
+    expect(first).toContain('suggest a Host browser in this Robot\'s Advanced settings')
     expect(second).toContain('already blocked the Browser Run browser')
+    expect(second).toContain('suggest a Host browser in this Robot\'s Advanced settings')
+  })
+
+  it('a block on a Host browser suggests Browser Run (ob-myzd)', async () => {
+    const id = await browsingRobot()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { browserBackend: 'host:desk' } })
+    await say(id, 'open allegro', [
+      { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/blocked' } }] },
+      { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/blocked' } }] },
+      { text: 'Blocked.' },
+    ])
+    const [first, second] = toolResults(id)
+    expect(first).toContain('This page blocks your browser (Host browser: desk)')
+    expect(first).toContain('suggest Browser Run in this Robot\'s Advanced settings')
+    expect(second).toContain('suggest Browser Run in this Robot\'s Advanced settings')
   })
 })

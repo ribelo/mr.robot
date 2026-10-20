@@ -17,7 +17,7 @@ export interface BrowsingShape {
   /** Save a screenshot outside the Workspace as the Robot's screen; the name identifies it. */
   saveScreen(png: Uint8Array): Effect.Effect<{ name: string }>
   /** Sites that blocked this browser backend during the current Turn (rb-kank). */
-  readonly blockedThisTurn: Set<string>
+  readonly blockedThisTurn: Map<string, string>
 }
 
 export class Browsing extends Context.Service<Browsing, BrowsingShape>()('mr-robot/Browsing') {}
@@ -37,12 +37,12 @@ export const open = (url: string) => Effect.gen(function* () {
   const browsing = yield* Browsing
   const page = yield* browsing.page()
   const host = new URL(url).hostname
-  const before = [...browsing.blockedThisTurn].find((key) => key.endsWith(`|${host}`))
+  const before = [...browsing.blockedThisTurn].find(([key]) => key.endsWith(`|${host}`))
   // A block page is reported, not retried: no loop of reopening a site that refuses this browser.
-  if (before !== undefined) return yield* invalid(`${host} already blocked the ${before.split('|')[0]} browser in this Turn. Do not retry: tell your owner and suggest another browser backend in this Robot's Advanced settings.`)
+  if (before !== undefined) return yield* invalid(`${host} already blocked the ${before[0].split('|')[0]} browser in this Turn. Do not retry: tell your owner and suggest ${before[1]} in this Robot's Advanced settings.`)
   yield* attempt(() => page.goto(url))
   const observation = yield* browsing.observed(page)
-  if (observation.blocked === true) browsing.blockedThisTurn.add(`${observation.backend ?? 'browser'}|${host}`)
+  if (observation.blocked === true) browsing.blockedThisTurn.set(`${observation.backend ?? 'browser'}|${host}`, observation.otherBrowser ?? 'the other browser')
   return observation
 })
 

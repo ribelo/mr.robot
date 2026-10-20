@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAtomRefresh } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import { spendLimitText, type AdminView, type GrantLevels, type ModelChoice, type VpnSummary } from '@mr-robot/protocol'
+import { spendLimitText, type AdminView, type GrantLevels, type ModelChoice } from '@mr-robot/protocol'
 import * as Option from 'effect/Option'
 import { adminAtom, homeMemoryAtom, keys, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
@@ -115,12 +115,8 @@ function AdminPage({ view }: { view: AdminView }) {
       )}
       <h2>Home memory</h2>
       <AtomView atom={homeMemoryAtom}>{(file) => <HomeMemory initial={file.content} />}</AtomView>
-      <h2>Proxy</h2>
-      <ProxyConfig configured={view.proxyConfigured === true} onSave={(url) => run((api) => api.setProxy(url), url === null ? 'Removed.' : undefined)} />
       <h2>Exa</h2>
       <ExaKey configured={view.exaConfigured === true} onSave={(key) => run((api) => api.setExaKey(key), key === null ? 'Removed.' : undefined)} />
-      <h2>Proton VPN</h2>
-      <VpnConfig summary={view.vpnSummary} onSave={(config) => run((api) => api.setVpnConfig(config), config === null ? 'Removed.' : undefined)} />
 
       <h2>Model lists</h2>
       <div className="muted">Each Provider's own list of models, fetched with a connected key or subscription and refreshed daily. Robots choose from these.</div>
@@ -252,38 +248,6 @@ function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (i
   )
 }
 
-/** "Poland (PL)" for a country code; the code alone where the browser has no name for it. */
-const countryName = (code: string) => {
-  const name = new Intl.DisplayNames(['en'], { type: 'region' }).of(code)
-  return name === undefined || name === code ? code : `${name} (${code})`
-}
-
-/**
- * The Home's Proton VPN WireGuard configuration (rb-rb1x): write-only; robots on "Container Chrome via VPN" use it.
- * Once stored, the card shows its public summary: endpoint, server name and country (ux-t4wi); never a key (ux-a3ec).
- */
-function VpnConfig({ summary, onSave }: { summary: VpnSummary | undefined; onSave: (config: string | null) => Promise<boolean> }) {
-  const [config, setConfig] = useState('')
-  const configured = summary !== undefined
-  return (
-    <div className="form">
-      {summary === undefined ? null : (
-        <table className="grid" aria-label="Stored VPN"><tbody>
-          <tr><td>Endpoint</td><td>{summary.endpoint}</td></tr>
-          {summary.serverName === undefined ? null : <tr><td>Server</td><td>{summary.serverName}</td></tr>}
-          {summary.country === undefined ? null : <tr><td>Country</td><td>{countryName(summary.country)}</td></tr>}
-        </tbody></table>
-      )}
-      <p className="muted">{configured ? 'A WireGuard configuration is stored. Paste a new one to replace it.' : 'Paste the WireGuard configuration of a Proton VPN server in Poland (Proton account → Downloads → WireGuard configuration). It is stored encrypted and never shown again.'}</p>
-      <textarea aria-label="WireGuard configuration" rows={6} value={config} placeholder={'[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nEndpoint = …'} onChange={(event) => setConfig(event.target.value)} />
-      <div className="question-actions">
-        {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
-        <SaveButton disabled={config.trim() === ''} onSave={async () => { const saved = await onSave(config); if (saved) setConfig(''); return saved }} />
-      </div>
-    </div>
-  )
-}
-
 /** The Home library (rb-5ku3): every global skill opens in an editor; create and delete. */
 function SkillLibrary({ view, onMessage }: { view: AdminView; onMessage: (message: string | undefined) => void }) {
   const command = useCommand()
@@ -345,21 +309,6 @@ function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: str
         <input type="password" aria-label="Exa API key" value={key} placeholder="Exa API key" onChange={(event) => setKey(event.target.value)} />
         {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
         <SaveButton disabled={key.trim() === ''} onSave={async () => { const saved = await onSave(key); if (saved) setKey(''); return saved }} />
-      </div>
-    </div>
-  )
-}
-
-/** The proxy address for "Container Chrome via proxy" (v1.2 ticket 05): write-only. */
-function ProxyConfig({ configured, onSave }: { configured: boolean; onSave: (url: string | null) => Promise<boolean> }) {
-  const [url, setUrl] = useState('')
-  return (
-    <div className="form">
-      <p className="muted">{configured ? 'A proxy address is stored; "Container Chrome via proxy" is available.' : 'A proxy address (for example from a residential proxy provider) makes "Container Chrome via proxy" available. Format: http://user:password@host:port or socks5://user:password@host:port. Stored encrypted.'}</p>
-      <div className="form inline">
-        <input type="password" aria-label="Proxy address" value={url} placeholder="http://user:password@host:port" onChange={(event) => setUrl(event.target.value)} />
-        {configured && <button type="button" className="button" onClick={() => void onSave(null)}>Remove</button>}
-        <SaveButton disabled={url.trim() === ''} onSave={async () => { const saved = await onSave(url); if (saved) setUrl(''); return saved }} />
       </div>
     </div>
   )

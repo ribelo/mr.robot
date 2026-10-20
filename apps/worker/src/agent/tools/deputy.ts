@@ -158,7 +158,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
           compactionInstruction: { type: 'string', description: 'What to keep when the Conversation is compacted' },
           discordChannel: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'Discord channel id; null removes it' },
           discordProactive: { type: 'boolean', description: "Also send the Robot's own messages to its Discord channel" },
-          browserBackend: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'browser-run, container, container-vpn, container-proxy, host:<id>' },
+          browserBackend: { oneOf: [{ type: 'string' }, { type: 'null' }], description: 'browser-run, host:<id>' },
           notifications: { type: 'object', properties: { enabled: { type: 'boolean' }, channels: { type: 'array', items: { type: 'string' } } }, description: 'Notifications on or off, and the channels they go to' },
           wakeOnScreenNotifications: { type: 'boolean', description: 'Keep the browser open and wake the Robot when a page shows a notification' },
           cacheWarming: { type: 'boolean', description: "Refresh the model's prompt cache while the Robot is idle, so the next message is cheap" },

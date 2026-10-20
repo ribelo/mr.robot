@@ -112,13 +112,10 @@ export class RenderingDriver implements BrowserDriver {
 }
 
 /** A new tab with the Robot's cookies, storage and notification capture. */
-export async function preparedPage(browser: Browser, state: BrowserState | null, mark: (name: string) => void = () => undefined): Promise<Page> {
+export async function preparedPage(browser: Browser, state: BrowserState | null): Promise<Page> {
   const page = await browser.newPage()
-  mark('page.new')
   await page.setViewport({ width: 1280, height: 800 })
-  mark('page.viewport')
   await page.evaluateOnNewDocument(NOTIFICATION_CAPTURE)
-  mark('page.capture')
   if (state !== null) {
     if (state.cookies.length > 0) {
       // One CDP call for all cookies: puppeteer's setCookie costs a round trip each, seconds over a relay (pl-n2vs).
@@ -136,7 +133,6 @@ export async function preparedPage(browser: Browser, state: BrowserState | null,
         await session.detach().catch(() => undefined)
       }
     }
-    mark(`page.cookies(${state.cookies.length})`)
     await page.evaluateOnNewDocument(`(() => {
       const saved = (${JSON.stringify(state.storage)})[location.origin]
       if (saved === undefined || sessionStorage.getItem('__mr_restored') === '1') return
@@ -156,17 +152,7 @@ export async function rearmed(page: Page): Promise<void> {
   await page.evaluate(NOTIFICATION_CAPTURE).catch(() => undefined)
 }
 
-/** The Chrome container's DevTools, as a puppeteer transport over the Worker's WebSocket. */
-async function containerBrowser(stub: ChromeStub): Promise<Browser> {
-  const version = (await (await stub.fetch('http://localhost/json/version')).json()) as { webSocketDebuggerUrl: string }
-  const path = new URL(version.webSocketDebuggerUrl).pathname
-  const response = await stub.fetch(new Request(`http://localhost${path}`, { headers: { Upgrade: 'websocket' } }))
-  const socket = response.webSocket
-  if (socket === null) throw new Error(`the browser container refused DevTools (${response.status})`)
-  return socketBrowser(socket)
-}
-
-/** A browser-level DevTools WebSocket as a puppeteer Browser (containers, host relays). */
+/** A browser-level DevTools WebSocket as a puppeteer Browser (the Host browser's relay). */
 export async function socketBrowser(socket: WebSocket): Promise<Browser> {
   socket.accept()
   const transport: { send(message: string): void; close(): void; onmessage?: (message: string) => void; onclose?: () => void } = {
@@ -176,64 +162,6 @@ export async function socketBrowser(socket: WebSocket): Promise<Browser> {
   socket.addEventListener('message', (event) => transport.onmessage?.(typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)))
   socket.addEventListener('close', () => transport.onclose?.())
   return (await puppeteer.connect({ transport } as never)) as unknown as Browser
-}
-
-type ChromeStub = { fetch(input: RequestInfo, init?: RequestInit): Promise<Response>; begin(envVars: Record<string, string>): Promise<void>; running(): Promise<boolean>; end(): Promise<void> }
-
-/**
- * Container Chrome (rb-wn96): one container per Robot and backend; its session id is the
- * container's name, so a session left running is reattached by name. Closing stops the container.
- */
-/** Where the last container open spent its time, in ms from its start (pl-n2vs). */
-export const containerOpenStages: Record<string, number> = {}
-
-/** Leave a warm container with one blank tab: no page keeps loading or holding state between uses. */
-async function closeTabs(browser: Browser): Promise<void> {
-  const pages = await browser.pages().catch(() => [])
-  const blank = await browser.newPage().catch(() => undefined)
-  for (const page of pages) if (page !== blank) await page.close().catch(() => undefined)
-}
-
-export class ContainerDriver implements BrowserDriver {
-  constructor(
-    private readonly chrome: { getByName(name: string): ChromeStub },
-    private readonly name: string,
-    private readonly startEnv: () => Promise<Record<string, string>>,
-  ) {}
-
-  async open(state: BrowserState | null): Promise<BrowserPage> {
-    const t0 = Date.now()
-    const mark = (name: string) => { containerOpenStages[name] = Date.now() - t0 }
-    for (const key of Object.keys(containerOpenStages)) delete containerOpenStages[key]
-    const stub = this.chrome.getByName(this.name)
-    // A container still running from the last open is reused: no boot, no VPN handshake (pl-n2vs).
-    const warm = await stub.running()
-    mark(warm ? 'running-check(warm)' : 'running-check(cold)')
-    if (!warm) await stub.begin(await this.startEnv())
-    mark('container')
-    const browser = await containerBrowser(stub)
-    mark('devtools')
-    const page = await preparedPage(browser, state, mark)
-    mark('page')
-    // Closing closes the tab only; the container sleeps by itself after a few idle minutes (ChromeContainer.sleepAfter).
-    return new RenderingPage(browser, page, state?.storage ?? {}, { id: this.name, close: () => closeTabs(browser) })
-  }
-
-  async attach(sessionId: string): Promise<BrowserPage | undefined> {
-    if (sessionId !== this.name) return undefined
-    const stub = this.chrome.getByName(sessionId)
-    try {
-      if (!(await stub.running())) return undefined
-      const browser = await containerBrowser(stub)
-      const pages = await browser.pages()
-      const page = pages.filter((candidate) => candidate.url() !== 'about:blank').at(-1) ?? pages.at(-1)
-      if (page === undefined) return undefined
-      await rearmed(page)
-      return new RenderingPage(browser, page, {}, { id: sessionId, close: () => closeTabs(browser) })
-    } catch {
-      return undefined
-    }
-  }
 }
 
 /**

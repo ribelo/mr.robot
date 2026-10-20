@@ -29,6 +29,8 @@ export interface Observation {
   readonly blocked?: boolean
   /** The backend that saw the page, for the block report. */
   readonly backend?: string
+  /** What to suggest instead when the page blocks this browser: Browser Run, or a Host browser (ob-myzd). */
+  readonly otherBrowser?: string
 }
 
 export const MAX_TEXT = 6_000
@@ -124,7 +126,7 @@ export function renderObservation(observation: Observation): string {
   const lines = [
     `URL: ${observation.url}`,
     `Title: ${observation.title}`,
-    observation.blocked === true ? `This page blocks your browser (${observation.backend ?? 'this backend'}). Do not retry or work around it: tell your owner the site blocked the ${observation.backend ?? 'current'} browser and suggest switching this Robot's browser backend in Advanced settings.` : '',
+    observation.blocked === true ? `This page blocks your browser (${observation.backend ?? 'this backend'}). Do not retry or work around it: tell your owner the site blocked the ${observation.backend ?? 'current'} browser and suggest ${observation.otherBrowser ?? 'the other browser'} in this Robot's Advanced settings.` : '',
     observation.challenge === null ? '' : `A ${observation.challenge} CAPTCHA is on this page. Solve an ordinary one yourself (click its checkbox, take a screenshot to read an image puzzle); if it needs your owner, call browser_request_takeover.`,
     `Scroll: ${observation.canScrollUp ? 'more above' : 'top'}, ${observation.canScrollDown ? 'more below' : 'bottom'}`,
     '',
