@@ -6,18 +6,20 @@ A Robot is a persistent worker owned by one Member. It is not a chat session. On
 
 - The owner's messages, from the app or from a Channel that knows the owner, reach a working Robot at its next step (a steer). Mr. Robot's messages to the Robots he directs do the same. A steer can change what the Robot does; the Robot then says so.
 - Everything else (Tasks, webhooks, other Robots, Threads, platform notes) waits for a Turn of its own (a follow-up).
-- Ctrl+Enter in the composer sends a follow-up on purpose. Follow-ups from one sender that wait together arrive as one Turn. A Task always has its own Turn.
+- Ctrl+Enter sends a follow-up on purpose. Follow-ups from one sender that wait together arrive as one Turn.
+
+A Robot speaks only with say. Each say is one message, with files or screenshots attached. Text without say stays in the Trajectory.
 
 ## Creating a Robot
 
-A Member creates a Robot with New robot. The dialog asks only for the model. Mr. Robot can also create Robots for the owner. The new Robot is in setup. In setup, the Robot defines itself:
+A Member or Mr. Robot creates a Robot with New robot. The new Robot is in setup. In setup, the Robot defines itself:
 
 1. It interviews the owner: what it is for, what it watches, how often, how the owner wants to hear from it.
 2. It calls set_identity with a name, a title, a description and an avatar colour.
 3. It writes its own Persona files. Nobody approves them.
 4. It calls setup_complete with one summary of the Grants it needs and why.
 
-The owner approves only the Grants. After approval, the Robot is active. During setup the Robot can only ask and propose. It does not act on the world.
+The owner approves only the Grants. Then the Robot is active. During setup it can only ask and propose.
 
 ## Persona files
 
@@ -72,5 +74,5 @@ A Robot other than Mr. Robot sends a work request to another Robot only with a r
 
 ## Skills
 
-A skill is a set of instructions in a SKILL.md file. A global skill is in the Home library. A Robot reads the global skills granted to it. It cannot edit them. A local skill is in the Robot's Workspace under skills/. The Robot edits it freely. A Robot can propose a local skill for the library. The owner approves it.
+A skill is a set of instructions in a SKILL.md file. A global skill is in the Home library. A Robot reads the global skills granted to it. It cannot edit them. A local skill is in the Robot's Workspace under skills/. The Robot edits it freely and can propose it for the library. A platform skill ships with the Worker under docs/skills/; every Robot reads it with no Grant.
 `

@@ -32,7 +32,8 @@ The Workspace is your files in R2. The layout:
 - memory/: daily notes.
 - skills/<name>/SKILL.md: your local skills.
 - attachments/: files that the owner sent in the chat.
-- docs/: the product docs. The platform owns this folder. It is read-only. You cannot write, edit or delete there. A deploy updates it. Start over and Reset everything never remove it.
+- docs/: the product docs, and the platform skills under docs/skills/<name>/SKILL.md. The platform owns this folder. It is read-only. You cannot write, edit or delete there. A deploy updates it. Start over and Reset everything never remove it.
+- spill/: whole tool results that were too long, and the whole output of each Box job under spill/jobs/<id>.log.
 - any other file you make: notes, artefacts, outputs.
 
 Screenshots are not in the Workspace. They are stored apart and kept for 7 days.

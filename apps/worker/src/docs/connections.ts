@@ -52,6 +52,10 @@ As a bot: one bot belongs to the Home. The Member invites it to a Discord server
 
 As you: the Member connects their own Discord account. Robots read the servers the Member is on: servers, channels, messages, threads, search and people. They read through Discord's REST API, so a Discord message does not wake a Robot through this Connection. The write tools (send, reply, react, mark read) need the Connection write grant. The connect form says: "Discord forbids automating a user account and may close it. You take that risk." The Member takes that risk knowingly.
 
+## Instructions
+
+The owner of a Connection can write instructions for it in Connections, for example "Sign as Anna. Never write to the board list.". Every Robot that holds the Connection at allow or ask reads them in the runtime section of its prompt. Mr. Robot sets them with connection_instructions_set.
+
 ## Skills for Connections
 
 Each Connector has a SKILL.md in the Home library. The skill comes with the Connection grant.

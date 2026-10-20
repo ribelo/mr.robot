@@ -18,7 +18,7 @@ A Host belongs to the Member who paired it. It is private or shared with the Hom
 
 A Host offers three facets. Each is a separate grant item for a Robot:
 - browser: the Host browser, which is Chrome installed on that computer. Read browser.md.
-- files: host_read and host_write. They read and write files on the Host.
+- files: host_read, host_write and host_copy. host_read and host_write read and write files on the Host through the model. host_copy copies one file, up to 100 MB and binary too, between the Host and your Workspace in either direction; the content does not pass through the model. A file copied into box/ is on your Box at its next boot.
 - shell: host_run. It runs a shell command on the Host.
 
 These are the Host tools. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one.

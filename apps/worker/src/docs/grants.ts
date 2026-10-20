@@ -46,6 +46,8 @@ The owner can also change levels in the Advanced settings of the Robot. Each ite
 ## Defaults
 
 - A new Robot ends setup with allow on what the owner approved. It gets ask on files, web and exa. It gets deny on Connections with write, Hosts, logins and exa-agent.
+- Every Robot is created with allow on messaging and a recipient Grant to its owner's Mr. Robot, its chief. The owner can remove them like any other item.
+- say, ask, request_credential, react and set_identity need no Grant: every active Robot has them.
 - Mr. Robot has allow on every item, also on a new plugin. The owner can lower any item.
 
 ## See your own levels
