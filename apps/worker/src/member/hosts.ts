@@ -232,7 +232,7 @@ export class HostHub {
       // Another run of the app than the jobs started under: it restarted, and its jobs went with it.
       if (typeof parsed.d.instance === 'string') await this.loseJobs(id, (name) => `the Mr. Robot app on ${name} was restarted while it ran`, parsed.d.instance)
     } else if (parsed?.t === 'job') {
-      await this.jobEnded(parsed.d)
+      await this.jobEnded(id, parsed.d)
     } else if (parsed?.t === 'rpc') {
       const link = this.clients.get(id)
       if (link !== undefined) await Effect.runPromise(link.deliver(parsed.d))
@@ -324,13 +324,18 @@ export class HostHub {
     }
   }
 
-  /** The app says a job ended with nobody waiting for it: the Robot that owns it closes it and wakes. */
-  private async jobEnded(ended: JobEnded): Promise<void> {
+  /**
+   * The app on `hostId` says a job ended with nobody waiting for it: the Robot that owns it closes it and wakes. Only a job this Host
+   * was asked to run counts; a frame naming any other job (another Host's, a Box job, a Robot that never ran here) is dropped. A frame
+   * that comes before the job was remembered is dropped too, and the Robot's alarm finds the ended job by asking the app.
+   */
+  private async jobEnded(hostId: string, ended: JobEnded): Promise<void> {
     const ref = splitRef(ended.job)
     if (ref === undefined) return
-    const hostId = this.ctx.storage.sql.exec<{ host_id: string }>('SELECT host_id FROM host_job WHERE robot_id = ? AND job_id = ?', ref.robotId, ref.jobId).toArray()[0]?.host_id
-    if (hostId !== undefined) this.forgetJob(hostId, ref.robotId, ref.jobId)
-    await this.env.ROBOT.getByName(ref.robotId).hostJobEnded(ref.jobId, { state: ended.state, exitCode: ended.exitCode, signal: ended.signal }).catch((error: unknown) => console.warn('ended job not told', error))
+    const tracked = this.ctx.storage.sql.exec('SELECT 1 FROM host_job WHERE host_id = ? AND robot_id = ? AND job_id = ?', hostId, ref.robotId, ref.jobId).toArray().length > 0
+    if (!tracked) return
+    this.forgetJob(hostId, ref.robotId, ref.jobId)
+    await this.env.ROBOT.getByName(ref.robotId).hostJobEnded(hostId, ref.jobId, { state: ended.state, exitCode: ended.exitCode, signal: ended.signal }).catch((error: unknown) => console.warn('ended job not told', error))
   }
 
   /** The jobs of one Robot that the app holds, named as the Robot named them. */

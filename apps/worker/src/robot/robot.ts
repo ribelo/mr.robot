@@ -106,7 +106,7 @@ import { parseS3Credentials, s3ObjectStore, type ObjectStore } from '../workspac
 import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, newBoxToken, type BoxToken } from '../box/token.ts'
 import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRuns } from '../places/host-runner.ts'
-import { hostFacetKey, hostIdOfPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
+import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
 import { SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
 import { parseJobId, type JobId } from '../places/job-id.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
@@ -758,10 +758,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The pending calls of the Robot's Host jobs (HostRunner); lost with the isolate, after which the Host is asked. */
   private readonly hostRuns = new HostRuns()
 
-  /** For the Member of a Host: a job of this Robot ended there with nobody waiting for it (the job frame, ob-ku5j). */
-  async hostJobEnded(jobId: string, ended: { state: 'completed' | 'killed' | 'failed'; exitCode: number | null; signal: string | null }): Promise<void> {
+  /** For the Member of a Host: a job of this Robot ended on `hostId` with nobody waiting for it (the job frame, ob-ku5j). */
+  async hostJobEnded(hostId: string, jobId: string, ended: { state: 'completed' | 'killed' | 'failed'; exitCode: number | null; signal: string | null }): Promise<void> {
     const id = parseJobId(jobId)
-    if (id !== undefined) await this.jobs().hostEnded(id, ended)
+    if (id !== undefined) await this.jobs().hostEnded(hostPlace(hostId), id, ended)
   }
 
   /** For the Member of a Host: these jobs of this Robot are gone, because the app restarted or the Host stayed away (ob-cgn1). */

@@ -8,7 +8,9 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Me } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
+import { frame } from '@mr-robot/host-protocol'
 import { closeHosts, fakeHost, heldCommands, hostJobCalls, hostJobs, hostRuns } from './fake-host.ts'
+import { holdBoxJob } from './stub-box.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 import type { Member as TestMember } from './worker.ts'
 
@@ -191,6 +193,37 @@ describe('a finished job wakes the Robot (ob-ku5j)', () => {
     scripts.set(id, [{ text: '' }])
     desk.finish('sleep 30 && echo ok', { stdout: 'ok\n' })
     await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${promoted!.jobId} finished: exit 0]`), { timeout: 10_000 })
+  })
+})
+
+describe('a job frame speaks only for a job of its own Host (v1.16 deep P3)', () => {
+  it('a frame from another Host, or about a Box job, closes nothing; the Host that runs the job still closes it', async () => {
+    const desk = await fakeHost()
+    // Paired by the same Member; the Robot holds no grant on it.
+    const nas = await fakeHost('Nas')
+    const id = await robotOn(desk)
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { box: 'allow', files: 'allow' }, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
+    const deskJob = await startJob(id, 'make all')
+    holdBoxJob(id, 'python3 train.py')
+    const [boxStarted] = await say(id, [{ calls: [{ name: 'run', args: { on: 'box', command: 'python3 train.py', run_in_background: true } }] }, { text: '' }])
+    const boxJob = boxStarted!.jobId as string
+    expect(boxJob).toMatch(/^j-/)
+    const forged = (job: string) => frame({ t: 'job', d: { job: `${id}:${job}`, state: 'completed', exitCode: 0, signal: null } })
+    nas.socket.send(forged(deskJob))
+    nas.socket.send(forged(boxJob))
+    desk.socket.send(forged(boxJob))
+    scripts.set(id, [{ text: '' }])
+    // Desk's own frame for its job comes after the forged ones and is the only one that counts.
+    desk.finish('make all', { exitCode: 3 })
+    await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${deskJob} finished: exit 3]`), { timeout: 10_000 })
+    await settle(id)
+    const woken = requests.get(id)!.flatMap((request) => request.messages.filter((message) => message.role === 'user').map((message) => JSON.stringify(message)))
+    expect(woken.some((text) => text.includes('[Box job ') || text.includes('[Nas job '))).toBe(false)
+    const [list] = await say(id, [{ calls: [jobList] }, { text: '' }])
+    expect(list!.jobs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: boxJob, place: 'box', status: 'running' }),
+      expect.objectContaining({ id: deskJob, place: 'Desk', status: 'completed', exitCode: 3 }),
+    ]))
   })
 })
 

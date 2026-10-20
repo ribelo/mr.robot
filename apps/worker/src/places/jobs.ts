@@ -312,11 +312,14 @@ export class Jobs {
     }
   }
 
-  /** A Host says a job of its own ended (the job frame, ob-ku5j): it is closed and the Robot is woken, once. */
-  async hostEnded(id: JobId, ended: { readonly state: 'completed' | 'killed' | 'failed'; readonly exitCode: number | null; readonly signal: string | null }): Promise<void> {
+  /**
+   * The Host `place` says a job of its own ended (the job frame, ob-ku5j): it is closed and the Robot is woken, once. A Host speaks only
+   * for the jobs that run on it: a frame about a job of another place changes nothing.
+   */
+  async hostEnded(place: StoredPlace, id: JobId, ended: { readonly state: 'completed' | 'killed' | 'failed'; readonly exitCode: number | null; readonly signal: string | null }): Promise<void> {
     const job = this.store.job(id)
     // A run waiting for it in this isolate closes it itself.
-    if (job === undefined || job.status !== 'running' || this.waiting.has(id)) return
+    if (job === undefined || job.place !== place || job.status !== 'running' || this.waiting.has(id)) return
     if (job.foreground) this.store.promoteJob(id)
     const stopped = ended.state === 'completed' ? undefined : ended.signal === null ? `it was ${ended.state}` : `it was stopped by signal ${ended.signal}`
     await this.finish(job, ended.state === 'completed' ? ended.exitCode : null, this.placeOf(job).runner(), stopped)
