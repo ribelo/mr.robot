@@ -2,9 +2,11 @@
  * The Host app's side of copy (v1.16 ticket 06): real files and the real `fetch` for the copy engine of the protocol package.
  */
 import { randomBytes } from 'node:crypto'
-import { open, stat } from 'node:fs/promises'
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { CopyFailed, type CopyIo, type HostAccess, type SourceFile, type TargetFile } from '@mr-robot/host-protocol'
 import type { FileChange, FileChanges } from './file-change.ts'
+import { filesBelow } from './files.ts'
 
 export const nodeCopyIo: CopyIo = {
   fetch: (url, init) => fetch(url, init),
@@ -50,6 +52,9 @@ interface OpenDownload {
 }
 
 const failure = (message: string, code: string): Error => Object.assign(new Error(message), { code })
+
+/** The name of a copy's part file: the target's name, eight hex digits of its own, and this ending (HostDownloads.begin). */
+const PART_FILE = /\.[0-9a-f]{8}\.mr-robot-part$/
 
 /**
  * The downloads this run of the app has in flight (deep review P12), by the Worker's id of the copy. Each copy writes a part file of its
@@ -112,6 +117,33 @@ export class HostDownloads {
     download.state = { _tag: 'Writing' }
     download.access = access
     return download
+  }
+
+  /**
+   * Remove the part files that an earlier run of the app left in the Robots' directories when it stopped mid-copy (a crash, a power cut),
+   * and spare those of the copies this one has in flight: a part file of this run is known here before it is made. Each removal runs in
+   * the sandbox of the Robot whose directory holds the file, so a link swapped in on the way leads nowhere; on a computer with no sandbox
+   * the files stay. Part files beside targets in other write roots are not looked for.
+   */
+  async removeLeftovers(): Promise<void> {
+    const robots = join(this.changes.home, 'mr-robot')
+    let base: string
+    try {
+      // A link at ~/mr-robot is not followed (access.ts refuses it).
+      if (!(await lstat(robots)).isDirectory()) return
+      base = await realpath(robots)
+    } catch {
+      return
+    }
+    for (const entry of await readdir(base, { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isDirectory()) continue
+      const access: HostAccess = { robot: entry.name, mode: 'workspace-write', roots: [] }
+      for await (const below of filesBelow(join(base, entry.name))) {
+        const path = join(base, entry.name, below)
+        if (!PART_FILE.test(path) || [...this.open.values()].some((download) => download.partial === path)) continue
+        await this.changes.change(access, { _tag: 'Remove', path, missing: 'ignore' }).catch(() => undefined)
+      }
+    }
   }
 
   /** No window came for the copy: its part file goes, unless a window took it up in the meantime. */

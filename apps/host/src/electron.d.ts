@@ -15,12 +15,14 @@ declare module 'electron' {
     getLoginItemSettings(): { openAtLogin: boolean }
     dock?: { hide(): void }
     setBadgeCount(count: number): boolean
+    /** Windows: the id its notifications are shown under. */
+    setAppUserModelId(id: string): void
   }
   export class Notification {
     constructor(options: { title: string; body: string; silent?: boolean })
     static isSupported(): boolean
     show(): void
-    on(event: 'click', listener: () => void): void
+    on(event: 'click' | 'close', listener: () => void): void
   }
   export class BrowserWindow {
     constructor(options: Record<string, unknown>)

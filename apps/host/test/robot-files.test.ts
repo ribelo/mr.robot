@@ -178,13 +178,10 @@ describe('write roots the sandbox cannot hold', () => {
     // What a Robot granted ~/project (or ~/mr-robot) can do: put a link where the inner root (or its own directory) was. The link stays
     // when the owner drops the outer root.
     const inner = join(home, 'project', 'inner')
-    const linkedDirectory = join(home, 'mr-robot', 'linked')
     await symlink(victim, inner)
-    await symlink(victim, linkedDirectory)
     const cases = [
       { grant: access({ roots: ['~/project', '~/project/inner'] }), link: inner },
       { grant: access({ roots: ['~/project/inner'] }), link: inner },
-      { grant: access({ robot: 'linked' }), link: linkedDirectory },
     ]
     for (const { grant, link } of cases) {
       const write = await failure('Write', { path: join(link, 'x.txt'), text: 'no', access: grant })
@@ -206,6 +203,46 @@ describe('write roots the sandbox cannot hold', () => {
     await expect(stat(join(robotDir(), 'nested.txt'))).rejects.toThrow()
     const written = await call('Write', { path: join(home, 'outer', 'inner', 'ok.txt'), text: 'ok', access: access({ roots: [join(home, 'outer', 'inner'), '~/side'] }) })
     expect(await readFile(written.path, 'utf8')).toBe('ok')
+  })
+})
+
+// Deep review P17: the app makes a Robot's directory itself, outside the sandbox, so a link on the way to it (~/mr-robot, or the
+// directory) would have it made where the link points. Such a link is refused for every call, in every mode, before anything is made.
+describe('a Robot directory reached through a link', () => {
+  it('is refused for reads, changes and commands in every mode, and nothing appears where the link points', async () => {
+    const victim = join(home, 'linked-victim')
+    await mkdir(victim, { recursive: true })
+    const linkedDirectory = join(home, 'mr-robot', 'linked')
+    await mkdir(join(home, 'mr-robot'), { recursive: true })
+    await symlink(victim, linkedDirectory)
+    const linkedHome = await mkdtemp(join(homedir(), '.mr-robot-host-linked-'))
+    const robots = join(linkedHome, 'mr-robot')
+    await symlink(victim, robots)
+    const elsewhere = await connected(linkedHome, r2)
+    try {
+      const cases = [
+        { on: host, robot: 'linked', link: linkedDirectory },
+        { on: elsewhere, robot: 'bot', link: robots },
+      ]
+      for (const { on, robot, link } of cases) {
+        for (const mode of ['read-only', 'workspace-write', 'full'] as const) {
+          const grant = access({ robot, mode })
+          for (const [name, payload] of [
+            ['Read', { path: join(home, 'outside-note.txt') }],
+            ['Glob', { pattern: '*' }],
+            ['Write', { path: 'x.txt', text: 'no' }],
+            ['Run', { command: 'echo no > y.txt', background: false, job: jobName(robot) }],
+          ] as const) {
+            const refused = await Effect.runPromise(Effect.flip(on.rpc[name]!({ ...payload, access: grant }))) as { message: string }
+            expect(refused.message).toContain(`${link} is a symbolic link`)
+          }
+        }
+      }
+      expect(await readdir(victim)).toEqual([])
+    } finally {
+      await elsewhere.close()
+      await rm(linkedHome, { recursive: true, force: true })
+    }
   })
 })
 

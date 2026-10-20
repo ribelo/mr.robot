@@ -23,7 +23,8 @@ import { errorCode } from './error-code.ts'
 import { assertConfinableRoots, ensureRobotDirectory, expandPath, madeExtraRoots } from './access.ts'
 import { runFileChange, type ChangePlace, type FileChange, type FileChanges } from './file-change.ts'
 import { HostJobs } from './jobs.ts'
-import { aclRunnerWorks, findInstalledPwsh7, startRunnersAsNode, withoutElectronSwitch } from './windows.ts'
+import { startRunnersAsNode } from './run-as-node.ts'
+import { aclRunnerWorks, findInstalledPwsh7 } from './windows.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
@@ -165,8 +166,8 @@ async function sandboxWritable(ctx: Context, root: string): Promise<string[]> {
 
 /** The path of the denied file effect, from the error output of the command (the bash, coreutils and PowerShell dialects). */
 export function deniedPath(stderr: string): string | undefined {
-  // PowerShell names the path in quotes: "Set-Content: Access to the path 'C:\x\y.txt' is denied."
-  const powershell = /Access to the path '([^']+)' is denied/i.exec(stderr)
+  // PowerShell names the path in quotes: "Set-Content: Access to the path 'C:\x\y.txt' is denied." The path may hold a quote itself.
+  const powershell = /Access to the path '(.+)' is denied/i.exec(stderr)
   if (powershell !== null) return powershell[1]
   for (const line of stderr.split('\n')) {
     const found = /^(.*): (?:Read-only file system|Permission denied|Operation not permitted|Access is denied)\.?$/i.exec(line.trim())
@@ -238,8 +239,7 @@ export class HostShell implements FileChanges {
     const kind: Shell = process.platform === 'win32' ? 'pwsh' : 'bash'
     const ctx = new Context()
     await ctx.plugin(Subprocess)
-    // SAFETY: windows.ts needs only the runner-path hook of subprocess-local, which DSH does not export as a type.
-    if (kind === 'pwsh') startRunnersAsNode(ctx.subprocess as never)
+    startRunnersAsNode(ctx.subprocess)
     const path = await loginPath()
     await ctx.plugin(manyRootsSandbox(path))
     await ctx.plugin(PolicyService)
@@ -255,7 +255,9 @@ export class HostShell implements FileChanges {
     // bash is always there, and the probe below runs through it.
     if (kind === 'bash') await ctx.plugin(Bash, {})
     const probeRoot = join(home, 'mr-robot')
-    await mkdir(probeRoot, { recursive: true })
+    // Not recursive, and an existing entry is left as it is: a link at ~/mr-robot is not followed to make anything where it points. The
+    // Robots' calls refuse such a link (access.ts, ensureRobotDirectory).
+    await mkdir(probeRoot).catch((error: unknown) => { if (errorCode(error) !== 'EEXIST') throw error })
     const sandbox = await probeSandbox(ctx, kind, probeRoot, path)
     const shell = new HostShell(ctx, home, path, sandbox, kind, await sandboxWritable(ctx, probeRoot))
     await shell.recheck()
@@ -287,12 +289,13 @@ export class HostShell implements FileChanges {
   }
 
   /**
-   * Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy of its mode and roots. The roots
-   * are checked before anything is made, on every call, since links can appear between calls (access.ts, assertConfinableRoots).
+   * Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy of its mode and roots. The way to
+   * the directory and the roots are checked before anything is made, on every call, since links can appear between calls (access.ts,
+   * ensureRobotDirectory and assertConfinableRoots).
    */
   private async place(access: HostAccess): Promise<ChangePlace> {
-    await assertConfinableRoots(this.home, access, this.writable)
     const directory = await ensureRobotDirectory(this.home, access)
+    await assertConfinableRoots(this.home, access, this.writable)
     const extraRoots = await madeExtraRoots(this.home, access)
     const policy: RootedExecutionPolicy = { mode: SANDBOX_MODE[access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }
     return { home: this.home, access, directory, policy }
@@ -322,7 +325,7 @@ export class HostShell implements FileChanges {
     try {
       // No deadline of its own: the command lives until it ends or is stopped, and the call bounds only its own wait.
       const spec = this.ctx.shell.resolve({
-        command: this.kind === 'pwsh' ? withoutElectronSwitch(input.command) : input.command,
+        command: input.command,
         workdir: cwd,
         timeoutMs,
         onExpiry: 'none',

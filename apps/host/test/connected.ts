@@ -14,6 +14,8 @@ export async function connected(home: string, copyIo?: CopyIo, options: { readon
   const shell = await HostShell.start({ home, ...shellOptions })
   // The downloads in flight outlive a connection, as in the app's link.
   const downloads = new HostDownloads(shell, downloadIdleMs)
+  // What an earlier run left mid-copy goes when the app starts, as in the app's link.
+  await downloads.removeLeftovers()
   // The job frames the app would send to the Worker.
   const ended: JobEnded[] = []
   shell.onJobEnded((job) => ended.push(job))
@@ -42,6 +44,7 @@ export async function connected(home: string, copyIo?: CopyIo, options: { readon
       return current.rpc
     },
     shell,
+    downloads,
     ended,
     sandbox: shell.sandbox,
     /** The connection drops: the app interrupts its server, as HostLink does on a close; a call still pending gets no answer. */

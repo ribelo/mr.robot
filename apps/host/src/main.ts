@@ -21,6 +21,8 @@ const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9h
 // Settings live in ~/.config/mr-robot-host (Linux), ~/Library/Application Support/mr-robot-host (macOS) or %APPDATA%\\mr-robot-host (Windows).
 app.setName('Mr. Robot host')
 app.setPath('userData', join(app.getPath('appData'), 'mr-robot-host'))
+// Windows shows a notification only for an app with an id; it is the installer's appId (electron-builder.yml).
+if (process.platform === 'win32') app.setAppUserModelId('ai.mr-robot.host')
 if (!app.requestSingleInstanceLock()) app.quit()
 
 const configFile = ConfigFile.in(join(app.getPath('userData')))
@@ -38,9 +40,13 @@ let tray: Tray | undefined
 let window: BrowserWindow | undefined
 /** Robots with something unread for this Member (pl-mhyg): set by the page, raised by notifications. */
 let unread = 0
+/** Why the shell did not start, when it did not: robots can then do nothing here, and the page and the tray say so. */
+let startProblem: string | undefined
+/** The notifications on screen: one that is not held here may be collected, and its click then does nothing. */
+const shown = new Set<Notification>()
 
 function snapshot() {
-  return { ...config, token: undefined, state, detail, code: pairing?.code, approveUrl: pairing?.approveUrl, sessions, shell: hostShell?.kind, shellProblem: hostShell?.problem, shellInstallUrl: hostShell?.problem === undefined ? undefined : PWSH_INSTALL_URL }
+  return { ...config, token: undefined, state, detail, code: pairing?.code, approveUrl: pairing?.approveUrl, sessions, shell: hostShell?.kind, shellProblem: hostShell?.problem ?? startProblem, shellInstallUrl: hostShell?.problem === undefined ? undefined : PWSH_INSTALL_URL }
 }
 
 function changed(): void {
@@ -55,6 +61,7 @@ function changed(): void {
       { label: `${config.name}: ${state}`, enabled: false },
       // Windows without PowerShell 7 (v1.16 ticket 04): the way to fix it is one click away.
       ...(hostShell?.problem === undefined ? [] : [{ label: 'PowerShell 7 is missing: robots cannot run commands. Install it…', click: () => { void shell.openExternal(PWSH_INSTALL_URL) } }]),
+      ...(startProblem === undefined ? [] : [{ label: 'Robots cannot use this computer: the app did not start its shell.', click: () => openWindow('#/this-computer') }]),
       ...(sessions > 0 ? [{ label: `${sessions} robot browser session(s)`, enabled: false }] : []),
       { type: 'separator' },
       { label: 'Open Mr. Robot', click: () => openWindow() },
@@ -136,9 +143,11 @@ function connect(): void {
     sessions: (count) => { sessions = count; changed() },
     notify: (notification) => {
       if (Notification.isSupported()) {
-        const shown = new Notification({ title: notification.title, body: notification.body })
-        shown.on('click', () => openWindow(notification.url.replace(/^\//, '')))
-        shown.show()
+        const note = new Notification({ title: notification.title, body: notification.body })
+        shown.add(note)
+        note.on('click', () => { shown.delete(note); openWindow(notification.url.replace(/^\//, '')) })
+        note.on('close', () => shown.delete(note))
+        note.show()
       }
       unread += 1
       changed()
@@ -197,8 +206,9 @@ ipcMain.handle('save', (event, change: { server?: string; name?: string; autosta
     }
   }
   if (change.name !== undefined && change.name.trim() === '') return { error: 'Give this computer a name.' }
-  // A different server means a new pairing there (hs-0cr2).
+  // A different server means a new pairing there (hs-0cr2), and the end of this one.
   const moved = server !== config.server
+  if (moved) link?.unpair()
   config = { ...config, server, ...(change.name === undefined ? {} : { name: change.name.trim() }), ...(change.autostart === undefined ? {} : { autostart: change.autostart }), ...(moved ? { hostId: null, token: null } : {}) }
   configFile.write(config)
   if (change.autostart !== undefined) applyAutostart(change.autostart)
@@ -243,7 +253,7 @@ ipcMain.handle('pair', async (event) => {
 ipcMain.handle('unpair', async (event) => {
   if (!trusted(event)) return { error: 'not allowed' }
   pairingCancelled = true
-  link?.stop()
+  link?.unpair()
   link = undefined
   config = { ...config, hostId: null, token: null }
   configFile.write(config)
@@ -269,6 +279,11 @@ void app.whenReady().then(() => {
       if (started.problem === undefined) return
       void started.recheck().then(changed)
     }, 10_000)
+  }, (error: unknown) => {
+    // Without the shell nothing a Robot asks can run here: the app does not connect, and says why.
+    startProblem = `The app could not start its shell, so robots cannot use this computer: ${error instanceof Error ? error.message : String(error)}. Quit the app and start it again.`
+    console.error('mr-robot-host: the shell did not start', error)
+    setState('offline', 'Not connected: the app could not start its shell.')
   })
   // At login it starts in the tray; otherwise (and on first start) the window opens.
   if (config.server === null || !process.argv.includes('--hidden')) openWindow()

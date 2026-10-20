@@ -2,8 +2,8 @@
  * The Host app copies a file over presigned URLs (v1.16 ticket 06): the real handlers over real files, driven through the Host protocol the way
  * the Worker drives them, client and server joined in process. R2 is a map behind the `fetch` the handlers are given.
  */
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
@@ -201,5 +201,45 @@ describe('a copy the Worker gave up on', () => {
     expect(refused.message).toContain('Copy the file again')
     expect(await readdir(join(dir, 'idle'))).toEqual([])
     await close()
+  })
+})
+
+// Deep review P17: an app that stopped mid-copy (a crash) leaves the copy's part file; the next start removes it.
+describe('part files an earlier run of the app left', () => {
+  it('are removed from the Robots\' directories when the app starts, and a copy of this run keeps its own', async () => {
+    // In the home directory: the removal runs in the sandbox, which treats /tmp apart.
+    const home = await mkdtemp(join(homedir(), '.mr-robot-host-leftovers-'))
+    try {
+      const robot = join(home, 'mr-robot', 'bot')
+      await mkdir(join(robot, 'deep'), { recursive: true })
+      await mkdir(join(home, 'mr-robot', 'other'), { recursive: true })
+      await writeFile(join(robot, 'deep', 'film.mp4.0123abcd.mr-robot-part'), 'half')
+      await writeFile(join(home, 'mr-robot', 'other', 'data.csv.89abcdef.mr-robot-part'), 'half')
+      // Files of the Robot's own whose names only look alike stay.
+      await writeFile(join(robot, 'notes.mr-robot-part'), 'mine')
+      await writeFile(join(robot, 'film.mp4.0123abcd.mr-robot-part.txt'), 'mine')
+      const { io, objects } = r2()
+      const bytes = bytesOf(200_000, 19)
+      objects.set('https://r2.test/obj', bytes)
+      const host = await connected(home, io)
+      try {
+        expect((await readdir(join(robot, 'deep')))).toEqual([])
+        expect(await readdir(join(home, 'mr-robot', 'other'))).toEqual([])
+        expect((await readdir(robot)).sort()).toEqual(['deep', 'film.mp4.0123abcd.mr-robot-part.txt', 'notes.mr-robot-part'])
+        // A copy half-way when the removal runs again (a new link of the same run) keeps its part file, and ends whole.
+        const window = (from: number, until: number) => ({ copy: 'c-8', path: 'kept.bin', url: 'https://r2.test/obj', size: bytes.length, partBytes: 100_000, from, until, access: access() })
+        const inFlight = async () => (await readdir(robot)).filter((name) => /^kept\.bin\.[0-9a-f]{8}\.mr-robot-part$/.test(name))
+        await Effect.runPromise(host.rpc['Download']!(window(0, 100_000)))
+        expect(await inFlight()).toHaveLength(1)
+        await host.downloads.removeLeftovers()
+        expect(await inFlight()).toHaveLength(1)
+        await Effect.runPromise(host.rpc['Download']!(window(100_000, bytes.length)))
+        expect(new Uint8Array(await readFile(join(robot, 'kept.bin')))).toEqual(bytes)
+      } finally {
+        await host.close()
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 })

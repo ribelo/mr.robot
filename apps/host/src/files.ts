@@ -22,8 +22,11 @@ export interface FileMatch {
 /** A failure with an OS-style code (ENOENT, EISDIR, EFBIG) that the Worker shows after the message. */
 const failure = (message: string, code: string): Error => Object.assign(new Error(message), { code })
 
-/** The files below a directory, depth first, as paths relative to it with / between the parts; the SKIPPED_DIRECTORIES are not entered. */
-async function* filesBelow(directory: string, prefix = ''): AsyncGenerator<string> {
+/**
+ * The files below a directory, depth first, as paths relative to it with / between the parts; the SKIPPED_DIRECTORIES are not entered,
+ * and no symbolic link is followed or listed.
+ */
+export async function* filesBelow(directory: string, prefix = ''): AsyncGenerator<string> {
   let entries
   try {
     entries = await readdir(directory, { withFileTypes: true })

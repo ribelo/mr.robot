@@ -19,9 +19,19 @@ export function expandPath(home: string, base: string, path: string): string {
   return isAbsolute(path) ? resolve(path) : resolve(base, path)
 }
 
-/** The Robot's directory, made on first use, and where it is. */
+/** A Robot's directory that a symbolic link leads to: the app neither makes nor uses it (deep review P17). */
+export class LinkedRobotDirectory extends Data.TaggedError('LinkedRobotDirectory')<{ readonly message: string }> {}
+
+/**
+ * The Robot's directory, made on first use, and where it is. A symbolic link on the way from the home directory (~/mr-robot, or the
+ * Robot's directory itself) is refused before anything is made: the app makes the directory outside the sandbox, so it would make it
+ * where the link points.
+ * @throws LinkedRobotDirectory naming the link.
+ */
 export async function ensureRobotDirectory(home: string, access: HostAccess): Promise<string> {
   const directory = robotDirectory(home, access.robot)
+  const link = await linkOnTheWay(home, directory)
+  if (link !== undefined) throw new LinkedRobotDirectory({ message: `Nothing is read, changed or run for you on this computer: ${link} is a symbolic link on the way to your directory ${directory}, and the app does not follow it. Ask your owner to remove the link.` })
   await mkdir(directory, { recursive: true })
   return directory
 }

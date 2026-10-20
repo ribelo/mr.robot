@@ -159,6 +159,13 @@ export class HostJobs {
     return this.ctx.jobs.kill(this.entry(ref).id, undefined, 'stopped by the Robot')
   }
 
+  /** Stop every job that still runs: this computer is no longer paired, so none of them can report anywhere (deep review P17). */
+  stopAll(): void {
+    for (const entry of this.byRef.values()) {
+      if (entry.finishedAt === null) this.ctx.jobs.kill(entry.id, undefined, 'this computer was unpaired')
+    }
+  }
+
   /** The jobs of one Robot (their names start with its id and a colon). */
   list(robot: string): JobInfo[] {
     return [...this.byRef.values()].filter((entry) => entry.ref.startsWith(`${robot}:`)).map((entry) => ({

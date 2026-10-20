@@ -27,7 +27,7 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
   version = "0.1.0";
   inherit src;
 
-  nativeBuildInputs = [ pkgs.nodejs_24 pnpm pkgs.pnpmConfigHook pkgs.makeWrapper pkgs.copyDesktopItems ];
+  nativeBuildInputs = [ pkgs.nodejs_24 pnpm pkgs.pnpmConfigHook pkgs.makeWrapper pkgs.copyDesktopItems pkgs.patchelf ];
 
   pnpmWorkspaces = [ "@mr-robot/host..." ];
   pnpmDeps = pkgs.fetchPnpmDeps {
@@ -46,13 +46,25 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
     mkdir -p $out/share/mr-robot-host
-    cp apps/host/dist/main.cjs apps/host/dist/preload.cjs apps/host/dist/window.html $out/share/mr-robot-host/
+    cp apps/host/dist/main.cjs apps/host/dist/preload.cjs apps/host/dist/window.html apps/host/dist/shell-check.cjs $out/share/mr-robot-host/
     # DSH's Landlock launcher (build.mjs copies it beside the bundle); the app points DSH at it.
     cp apps/host/dist/landlock-run $out/share/mr-robot-host/
+    # DSH's process runner and koffi, which start every command in a systemd scope of its own (build.mjs).
+    cp -r apps/host/dist/runners apps/host/dist/node_modules $out/share/mr-robot-host/
+    # koffi's prebuilt binary needs libstdc++, which Electron does not load (Node does); the musl build is of no use here.
+    rm -rf $out/share/mr-robot-host/node_modules/@koromix/*/musl_*
+    for binary in $out/share/mr-robot-host/node_modules/@koromix/*/*/koffi.node; do
+      patchelf --add-rpath ${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]} "$binary"
+    done
     # Autostart entries run the command from the user's profile, so they survive updates.
     makeWrapper ${pkgs.electron}/bin/electron $out/bin/mr-robot-host \
       --add-flags $out/share/mr-robot-host/main.cjs \
       --set MR_ROBOT_HOST_EXEC mr-robot-host \
+      --prefix PATH : ${lib.makeBinPath [ pkgs.bubblewrap pkgs.systemd ]}
+    # The shell check of the installed app (src/shell-check.ts), with the app's program as Node.
+    makeWrapper ${pkgs.electron}/bin/electron $out/bin/mr-robot-host-shell-check \
+      --add-flags $out/share/mr-robot-host/shell-check.cjs \
+      --set ELECTRON_RUN_AS_NODE 1 \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bubblewrap pkgs.systemd ]}
     runHook postInstall
   '';

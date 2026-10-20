@@ -1,7 +1,7 @@
 /**
  * The host's link to Mr. Robot (hs-ebba, hs-7dlt): device pairing, then one outbound WebSocket that
  * carries the RPC calls and a heartbeat with version, platform and capabilities. It reconnects with
- * a growing pause; close code 4001 means the host was unpaired.
+ * a growing pause; close code 4001 means the host was unpaired, and then the jobs it runs for Robots stop.
  */
 import { hostname, platform } from 'node:os'
 import * as Effect from 'effect/Effect'
@@ -60,6 +60,8 @@ export class HostLink {
     private readonly events: LinkEvents,
   ) {
     this.downloads = new HostDownloads(shell)
+    // What an earlier run of the app left mid-copy goes; the copies of this link are spared (copy.ts).
+    void this.downloads.removeLeftovers()
     shell.onJobEnded((ended) => {
       if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(frame({ t: 'job', d: ended }))
       else this.unsent.push(ended)
@@ -77,6 +79,16 @@ export class HostLink {
     this.stopped = true
     this.cleanup()
     this.socket?.close(1000)
+  }
+
+  /**
+   * End the link because this computer is no longer paired here (unpaired from the page or the profile, its token refused, or moved to
+   * another server): every job it runs for Robots stops too, since none of them can report anywhere now.
+   */
+  unpair(): void {
+    this.stop()
+    this.unsent.length = 0
+    this.shell.jobs.stopAll()
   }
 
   private cleanup(): void {
@@ -114,14 +126,14 @@ export class HostLink {
     socket.on('unexpected-response', (_request, response) => {
       // 401: the token is no longer valid (unpaired from the profile while this app was off).
       if (response.statusCode === 401) {
-        this.stopped = true
+        this.unpair()
         this.events.unpaired()
       }
     })
     socket.on('close', (code) => {
       this.cleanup()
       if (code === 4001) {
-        this.stopped = true
+        this.unpair()
         this.events.unpaired()
         return
       }
