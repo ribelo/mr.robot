@@ -297,7 +297,7 @@ describe('list, search and delete', () => {
     const all = await call('Grep', { pattern: 'needle', ignoreCase: true, path: 'find', access: access() })
     expect(all.matches).toEqual([{ path: 'find/two.md', line: 1, text: 'needle again' }, { path: 'find/one.txt', line: 2, text: 'Needle here' }].sort((a, b) => (a.path < b.path ? -1 : 1)))
     expect((await call('Grep', { pattern: 'needle', ignoreCase: false, path: 'find', access: access() })).matches).toEqual([{ path: 'find/two.md', line: 1, text: 'needle again' }])
-    expect((await call('Grep', { pattern: 'needle', ignoreCase: true, glob: 'find/*.txt', path: 'find', access: access() })).matches.map((match) => match.path)).toEqual(['find/one.txt'])
+    expect((await call('Grep', { pattern: 'needle', ignoreCase: true, glob: 'find/*.txt', path: 'find', access: access() })).matches.map((match: { path: string }) => match.path)).toEqual(['find/one.txt'])
     expect(all.truncated).toBe(false)
   })
 

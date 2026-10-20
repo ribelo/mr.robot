@@ -9,7 +9,7 @@ import { HostShell } from '../src/shell.ts'
 
 type Rpc = Record<string, (payload: unknown) => Effect.Effect<any, any>>
 
-export async function connected(home: string, copyIo?: CopyIo, options: { readonly sandboxChain?: Parameters<typeof HostShell.start>[0]['sandboxChain']; readonly downloadIdleMs?: number } = {}) {
+export async function connected(home: string, copyIo?: CopyIo, options: { readonly sandboxChain?: NonNullable<Parameters<typeof HostShell.start>[0]>['sandboxChain']; readonly downloadIdleMs?: number } = {}) {
   const { downloadIdleMs, ...shellOptions } = options
   const shell = await HostShell.start({ home, ...shellOptions })
   // The downloads in flight outlive a connection, as in the app's link.

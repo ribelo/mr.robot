@@ -6,9 +6,15 @@ import { frame, HostError, HostRpcs, makeHostClient, parseFrame, parseHeartbeat,
 
 const access: HostAccess = { robot: 'bot-1', mode: 'workspace-write', roots: [] }
 
+/** A call these tests do not make. */
+const unused = () => Effect.fail(new HostError({ message: 'not used in this test' }))
+/** Every handler of the group, each refusing; a test replaces the ones it calls. */
+const refusing = { Read: unused, Write: unused, CopyStat: unused, Upload: unused, Download: unused, Glob: unused, Grep: unused, Delete: unused, Run: unused, JobList: unused, JobOutput: unused, JobKill: unused, BrowserOpen: unused, BrowserClose: unused }
+
 describe('the host protocol over a socket', () => {
   it('carries a typed call and a typed error both ways', async () => {
     const handlers = HostRpcs.toLayer({
+      ...refusing,
       Read: ({ path }) => path === '/nope' ? Effect.fail(new HostError({ message: 'no such file', code: 'ENOENT' })) : Effect.succeed({ path, size: 2, text: 'hi', base64: null }),
       Write: ({ path, text }) => Effect.succeed({ path, bytes: (text ?? '').length }),
       Run: ({ command, access }) => Effect.succeed({ kind: 'foreground' as const, cwd: `/home/u/mr-robot/${access.robot}`, exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 120_000, stdout: { text: command, truncated: false }, stderr: { text: '', truncated: false } }),
@@ -40,13 +46,14 @@ describe('the host protocol over a socket', () => {
 
   it('carries the three shapes of a command\'s answer, and a job frame', async () => {
     const handlers = HostRpcs.toLayer({
+      ...refusing,
       Run: ({ background, job }) => Effect.succeed(background
         ? { kind: 'background' as const, cwd: '/w', timeoutMs: 1000, jobId: job }
         : { kind: 'promoted' as const, cwd: '/w', timeoutMs: 1000, jobId: job, output: 'so far' }),
       JobList: () => Effect.succeed({ jobs: [{ job: 'r:j-1', command: 'make', state: 'running' as const, exitCode: null, signal: null, startedAt: 1, finishedAt: null }] }),
       JobOutput: ({ offset }) => Effect.succeed({ text: 'x', bytes: 1, size: offset + 1 }),
       JobKill: () => Effect.succeed({ outcome: 'already-finished' as const }),
-    } as never)
+    })
     const program = Effect.gen(function* () {
       let toClient: (text: string) => void = () => undefined
       let toServer: (text: string) => void = () => undefined

@@ -46,6 +46,7 @@ function target() {
       written.bytes = grown
     },
     finish: async () => { written.finished = true },
+    release: async () => undefined,
     abandon: async () => { written.abandoned = true },
   }
   return { written, sink }
