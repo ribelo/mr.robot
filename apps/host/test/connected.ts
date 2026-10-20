@@ -2,7 +2,6 @@
 import * as Effect from 'effect/Effect'
 import * as Scope from 'effect/Scope'
 import { makeHostClient, parseFrame, serveHost, type CopyIo, type HostAccess, type JobEnded } from '@mr-robot/host-protocol'
-import { HostDisk } from '../src/files.ts'
 import { hostHandlers } from '../src/handlers.ts'
 import { HostShell } from '../src/shell.ts'
 
@@ -15,7 +14,7 @@ export async function connected(home: string, copyIo?: CopyIo) {
   shell.onJobEnded((job) => ended.push(job))
   const chrome = { devtools: async () => { throw new Error('no Chrome here') } } as never
   let toClient: (text: string) => void = () => undefined
-  const server = serveHost(hostHandlers(shell, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, new HostDisk(home), copyIo), (text) => toClient(text))
+  const server = serveHost(hostHandlers(shell, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, copyIo), (text) => toClient(text))
   const client = makeHostClient((text) => {
     const parsed = parseFrame(text)
     if (parsed?.t === 'rpc') Effect.runFork(server.deliver(parsed.d))

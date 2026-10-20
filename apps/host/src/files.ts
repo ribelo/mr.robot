@@ -1,13 +1,15 @@
 /**
- * The files of this computer for a Robot (v1.2, v1.16 ticket 02): read, write, list, search and delete in Node, so file tools work the
- * same on every OS and do not depend on a shell. Relative paths start in the Robot's directory; reads are as wide as the OS user;
- * every write obeys the grant's mode and roots (access.ts).
+ * The files of this computer for a Robot (v1.2, v1.16 ticket 02): read, list and search in Node, write and delete through a small Node
+ * program of the app's own, so file tools work the same on every OS and do not depend on a shell. Relative paths start in the Robot's directory; reads are as wide as the OS user;
+ * every change runs in the sandbox under the grant's mode and roots (file-change.ts), after a first check of the path (access.ts).
  */
-import { lstat, readdir, readFile, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, type HostAccess } from '@mr-robot/host-protocol'
-import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, removeWithin, writeWithin } from './access.ts'
+import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
+import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, resolvedPath } from './access.ts'
+import { targetFile } from './copy.ts'
+import { errorCode } from './error-code.ts'
+import type { FileChanges } from './file-change.ts'
 
 const MAX_READ = 10 * 1024 * 1024
 /** The most files a listing returns, and the most a search looks into. */
@@ -44,7 +46,11 @@ async function* filesBelow(directory: string, prefix = ''): AsyncGenerator<strin
 const shown = (base: string, below: string): string => (base === '.' ? below : base.endsWith('/') ? `${base}${below}` : `${base}/${below}`)
 
 export class HostDisk {
-  constructor(private readonly home: string = homedir()) {}
+  private readonly home: string
+
+  constructor(private readonly changes: FileChanges) {
+    this.home = changes.home
+  }
 
   private async full(access: HostAccess, path: string): Promise<string> {
     return expandPath(this.home, await ensureRobotDirectory(this.home, access), path)
@@ -65,7 +71,8 @@ export class HostDisk {
   async write(access: HostAccess, path: string, input: { text?: string | undefined; base64?: string | undefined }): Promise<{ path: string; bytes: number }> {
     const full = await this.full(access, path)
     const body = input.base64 !== undefined ? Buffer.from(input.base64, 'base64') : Buffer.from(input.text ?? '', 'utf8')
-    await writeWithin(this.home, access, full, body)
+    await assertMayWrite(this.home, access, full)
+    await this.changes.change(access, { _tag: 'Write', path: full, offset: 0, truncate: true }, body)
     return { path: full, bytes: body.length }
   }
 
@@ -74,9 +81,16 @@ export class HostDisk {
     return this.full(access, path)
   }
 
-  /** A file to write as a copy's target: its real path (symbolic links resolved), after the mode and roots allowed a write there. */
-  async writable(access: HostAccess, path: string): Promise<string> {
-    return assertMayWrite(this.home, access, await this.full(access, path))
+  /**
+   * A file to write as a copy's target, where the mode and roots may allow it: the path with its links followed, as a write follows them
+   * (the part file is moved onto the file a link names, not onto the link). The part file and the move run in the sandbox, which refuses
+   * them when the links lead out of the roots.
+   */
+  async target(access: HostAccess, path: string, options: { readonly resume: boolean }): Promise<{ readonly path: string; readonly file: TargetFile }> {
+    const full = await this.full(access, path)
+    await assertMayWrite(this.home, access, full)
+    const real = await resolvedPath(full)
+    return { path: real, file: targetFile(real, options, (change, body) => this.changes.change(access, change, body)) }
   }
 
   async glob(access: HostAccess, pattern: string): Promise<{ paths: string[]; truncated: boolean }> {
@@ -126,11 +140,13 @@ export class HostDisk {
   async remove(access: HostAccess, path: string): Promise<{ path: string }> {
     const full = await this.full(access, path)
     await assertMayRemove(this.home, access, full)
-    const info = await lstat(full).catch(() => undefined)
-    if (info === undefined) throw failure(`No file ${full}; nothing was deleted.`, 'ENOENT')
-    if (!info.isFile() && !info.isSymbolicLink()) throw failure(`${full} is not a file; only files are deleted.`, 'EISDIR')
-    // The unlink acts on the resolved directory the check saw.
-    if (!(await removeWithin(this.home, access, full))) throw failure(`No file ${full}; nothing was deleted.`, 'ENOENT')
+    try {
+      await this.changes.change(access, { _tag: 'Remove', path: full, missing: 'fail' })
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') throw failure(`No file ${full}; nothing was deleted.`, 'ENOENT')
+      if (errorCode(error) === 'EISDIR') throw failure(`${full} is not a file; only files are deleted.`, 'EISDIR')
+      throw error
+    }
     return { path: full }
   }
 }

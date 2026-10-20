@@ -30,7 +30,7 @@ The write tools follow the same mode and roots as run, except for /tmp.
 
 When the mode denies a write, the result names the path. To get more, call the same tool (run, write, edit, delete_file, or copy to a Host) again with escalate set to true and a reason. The owner gets one Ask. If the owner approves, the call runs once without the sandbox and you wake with the result. The grant does not change.
 
-The app reports its sandbox as full, partial (some file changes are not confined, as on Windows) or none, and the Hosts page shows it. On macOS and Windows the sandbox confines one folder, so a command in workspace-write mode fails closed when the grant lists extra roots. A Host with no usable sandbox refuses a command in read-only or workspace-write mode and says why; full mode runs. Without PowerShell 7 on Windows no command runs.
+The app reports its sandbox as full, partial (some file changes are not confined, as on Windows) or none, and the Hosts page shows it. On macOS and Windows the sandbox confines one folder, so a command or a write in workspace-write mode fails closed when the grant lists extra roots. A Host with no usable sandbox refuses a command or a write in read-only or workspace-write mode and says why; full mode runs. Without PowerShell 7 on Windows no command runs.
 
 ## Safety
 

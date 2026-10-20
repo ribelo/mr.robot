@@ -20,7 +20,8 @@ import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import { RUN_MAX_WAIT_SECONDS, SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
 import { errorCode } from './error-code.ts'
-import { ensureRobotDirectory, expandPath, writeRoots } from './access.ts'
+import { ensureRobotDirectory, expandPath, madeExtraRoots } from './access.ts'
+import { runFileChange, type ChangePlace, type FileChange, type FileChanges } from './file-change.ts'
 import { HostJobs } from './jobs.ts'
 import { aclRunnerWorks, findInstalledPwsh7, startRunnersAsNode, withoutElectronSwitch } from './windows.ts'
 
@@ -34,11 +35,12 @@ const HOST_MODE: Readonly<Record<SandboxMode, HostMode>> = { 'read-only': 'read-
 
 /** A policy that also carries the extra write roots of a grant. */
 type RootedPolicy = SandboxPolicy & { readonly extraRoots?: readonly string[] }
+type RootedExecutionPolicy = SandboxExecutionPolicy & { readonly extraRoots?: readonly string[] }
 
 /**
  * DSH's sandbox-local confines one write root. A grant has several, so this provider adds the others to the argv of the runner it
  * selected: bwrap binds them, Landlock grants them read-write. A runner that cannot take them (Seatbelt, the Windows token) fails the
- * call closed instead of running it with fewer roots than the grant names.
+ * call closed instead of running it with fewer roots than the grant names. Commands and file changes both go through it.
  */
 class ManyRootsSandbox extends LocalSandboxProvider {
   override async confine(argv: readonly string[], policy: RootedPolicy, signal?: AbortSignal) {
@@ -47,10 +49,10 @@ class ManyRootsSandbox extends LocalSandboxProvider {
     if (extra.length === 0) return confined
     const runner = confined.argv[0] ?? ''
     const grants = runner.endsWith('bwrap') ? extra.flatMap((root) => ['--bind', root, root]) : runner.endsWith('landlock-run') ? extra.flatMap((root) => ['--rw', root]) : undefined
-    if (grants === undefined) throw Object.assign(new Error('This computer\'s sandbox confines one directory, so a grant with more write roots cannot run commands here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
+    if (grants === undefined) throw Object.assign(new Error('This computer\'s sandbox confines one directory, so a grant with more write roots cannot run commands or change files here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
     const separator = confined.argv.indexOf('--')
     // Without the separator the grants cannot be put where the runner reads them: run nothing rather than run with fewer roots.
-    if (separator < 0) throw Object.assign(new Error('This computer\'s sandbox runner has an argument list this app cannot add write roots to, so a grant with more write roots cannot run commands here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
+    if (separator < 0) throw Object.assign(new Error('This computer\'s sandbox runner has an argument list this app cannot add write roots to, so a grant with more write roots cannot run commands or change files here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
     return { ...confined, argv: [...confined.argv.slice(0, separator), ...grants, ...confined.argv.slice(separator)] }
   }
 }
@@ -128,7 +130,7 @@ export interface RunInput {
 /** What a job that is still running has printed so far, for the answer that tells the Robot it goes on. */
 const printedSoFar = (out: string, err: string): string => (err === '' ? out : `${out}\n[stderr]\n${err}`)
 
-export class HostShell {
+export class HostShell implements FileChanges {
   /** Which run of the app this is: new at every start. The heartbeat carries it so that the Worker can tell a restart from a lost connection. */
   readonly instance = crypto.randomUUID()
   /** The jobs of this run of the app; they outlive the connection to the Worker. */
@@ -141,7 +143,8 @@ export class HostShell {
 
   private constructor(
     private readonly ctx: Context,
-    private readonly home: string,
+    /** The OS user's home directory, where the Robots' directories are. */
+    readonly home: string,
     private readonly path: string | undefined,
     /** How completely this computer confines a command, found when the app started. */
     readonly sandbox: SandboxState,
@@ -205,6 +208,22 @@ export class HostShell {
     this.problem = undefined
   }
 
+  /** Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy of its mode and roots. */
+  private async place(access: HostAccess): Promise<ChangePlace> {
+    const directory = await ensureRobotDirectory(this.home, access)
+    const extraRoots = await madeExtraRoots(this.home, access)
+    const policy: RootedExecutionPolicy = { mode: SANDBOX_MODE[access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }
+    return { home: this.home, access, directory, policy }
+  }
+
+  /**
+   * One change of a file, in the sandbox of the grant's mode and roots, as a command would run (file-change.ts). It needs no shell, so it
+   * works on Windows without PowerShell 7 too.
+   */
+  async change(access: HostAccess, change: FileChange, body?: Uint8Array): Promise<void> {
+    await runFileChange(this.ctx, await this.place(access), change, body)
+  }
+
   /**
    * One command in the Robot's directory (or the cwd it names), under the mode and roots of its grant. It runs as a job: the call
    * waits for it up to its limit and answers with the result (foreground), answers at once when asked for a job (background), and
@@ -213,11 +232,9 @@ export class HostShell {
   async run(input: RunInput): Promise<RunOutcome> {
     await this.recheck()
     if (this.problem !== undefined) throw new Error(this.problem)
-    const directory = await ensureRobotDirectory(this.home, input.access)
+    const { directory, policy } = await this.place(input.access)
     const cwd = input.cwd === undefined ? directory : expandPath(this.home, directory, input.cwd)
     if (!(await stat(cwd).then((info) => info.isDirectory(), () => false))) throw Object.assign(new Error(`${cwd} is not a directory on this computer`), { code: 'ENOENT' })
-    const extraRoots = writeRoots(this.home, input.access).slice(1)
-    const policy: SandboxExecutionPolicy & { extraRoots?: readonly string[] } = { mode: SANDBOX_MODE[input.access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }
     const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
     let started: ShellExecution
     try {

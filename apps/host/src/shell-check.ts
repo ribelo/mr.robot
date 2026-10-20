@@ -1,6 +1,7 @@
 /**
  * A check of the Host's shell on a real machine (v1.16 ticket 02, ob-wsf7, ob-xj2y): node dist/shell-check.cjs. It runs a command
- * confined to a Robot directory, a write outside it, a write in an extra root and a full-access write, and prints what the sandbox did.
+ * confined to a Robot directory, a write outside it, a write in an extra root and a full-access write, then a file change of the file
+ * tools in the Robot directory and outside it, and prints what the sandbox did.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -31,6 +32,17 @@ async function main(): Promise<void> {
   await run('write under read-only:      ', 'echo hi > note2.txt', { ...confined, mode: 'read-only' })
   await run('read outside (any mode):    ', 'ls /etc | head -n 1', { ...confined, mode: 'read-only' })
   await run('write with full access:     ', `echo hi > ${outside}/y.txt && echo wrote`, { ...confined, mode: 'full' })
+  // A file tool's change runs in the same sandbox (file-change.ts); outside the roots the kernel refuses it.
+  const change = async (label: string, path: string) => {
+    try {
+      await shell.change(confined, { _tag: 'Write', path, offset: 0, truncate: true }, new TextEncoder().encode('hi'))
+      console.log(label, 'written')
+    } catch (error) {
+      console.log(label, 'FAILED:', error instanceof Error ? error.message : String(error), errorCode(error))
+    }
+  }
+  await change('file change in the Robot dir:', join(home, 'mr-robot', 'check', 'file.txt'))
+  await change('file change outside the roots:', join(outside, 'file.txt'))
   await shell.dispose()
   for (const directory of [home, outside, extra]) await rm(directory, { recursive: true, force: true })
 }

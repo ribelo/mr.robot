@@ -1,9 +1,9 @@
 /**
  * The Host app's side of copy (v1.16 ticket 06): real files and the real `fetch` for the copy engine of the protocol package.
  */
-import { mkdir, open, rename, rm, stat } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { open, stat } from 'node:fs/promises'
 import { CopyFailed, type CopyIo, type SourceFile, type TargetFile } from '@mr-robot/host-protocol'
+import type { FileChange } from './file-change.ts'
 
 export const nodeCopyIo: CopyIo = {
   fetch: (url, init) => fetch(url, init),
@@ -36,33 +36,24 @@ export function sourceFile(full: string): SourceFile {
 
 /**
  * A file written beside its place under a temporary name, and moved there when it is whole; nothing half-copied is ever at the path. A
- * download that comes in windows `resume`s the temporary file after the first.
+ * download that comes in windows `resume`s the temporary file after the first. Every write, the move and the clean-up are changes made
+ * through `change`, so they run in the sandbox of the grant (file-change.ts): a link planted at the temporary name leads nowhere.
  */
-export function targetFile(full: string, options: { readonly resume: boolean }): TargetFile {
+export function targetFile(full: string, options: { readonly resume: boolean }, change: (change: FileChange, body?: Uint8Array) => Promise<void>): TargetFile {
   const partial = `${full}.mr-robot-part`
-  let handle: Awaited<ReturnType<typeof open>> | undefined
-  const opened = async () => {
-    if (handle === undefined) {
-      await mkdir(dirname(full), { recursive: true })
-      handle = await open(partial, options.resume ? 'r+' : 'w')
-    }
-    return handle
+  // The first write of a fresh download starts the temporary file anew; every later one, and every one of a resumed download, adds to it.
+  let started = options.resume
+  const write = async (offset: number, bytes: Uint8Array) => {
+    await change({ _tag: 'Write', path: partial, offset, truncate: !started }, bytes)
+    started = true
   }
   return {
-    write: async (offset, bytes) => { await (await opened()).write(bytes, 0, bytes.length, offset) },
+    write,
     finish: async () => {
-      await (await opened()).close()
-      handle = undefined
-      await rename(partial, full)
+      if (!started) await write(0, new Uint8Array())
+      await change({ _tag: 'Rename', from: partial, to: full })
     },
-    release: async () => {
-      await handle?.close()
-      handle = undefined
-    },
-    abandon: async () => {
-      await handle?.close().catch(() => undefined)
-      handle = undefined
-      await rm(partial, { force: true })
-    },
+    release: async () => undefined,
+    abandon: () => change({ _tag: 'Remove', path: partial, missing: 'ignore' }),
   }
 }
