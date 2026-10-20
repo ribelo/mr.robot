@@ -9,6 +9,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 import { useOfflineCloudflare } from './offline-cloudflare.ts'
+import { BOX_IMAGE_INPUTS } from '../apps/worker/src/docs/box-tools.generated.ts'
+import { boxContextHash } from './box-context.ts'
 import { BoxChannel, Edge, Files, GoogleCallback, HookChannel, HostChannel } from './stack.ts'
 
 useOfflineCloudflare()
@@ -63,4 +65,9 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     'r2_bucket:FILES',
     'worker_loader:LOADER',
   ]))
+})
+
+it('describes in docs/box.md the image that the Dockerfile builds (Sa3)', () => {
+  // The tool list was made from an image built from these very files; if they changed since, run `node infra/box-tools.ts` again.
+  expect(BOX_IMAGE_INPUTS).toBe(boxContextHash())
 })

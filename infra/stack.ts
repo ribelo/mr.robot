@@ -49,6 +49,10 @@ export const Edge = Effect.gen(function* () {
       // secret. It signs the presigned URLs a Host app and ws use for one key under a Robot's prefix, and the control calls of a multipart upload.
       FILES_S3: Cloudflare.R2.S3Credentials(files, { access: 'read-write' }),
       BROWSER: Cloudflare.Browser('BROWSER'),
+      // The Chrome container of v1.15 (binding CHROME, class ChromeContainer) is gone with its binding. Alchemy tags the Worker with the Durable
+      // Object classes it hosts and compares them with the next deploy's bindings (Cloudflare/Workers/WorkerProvider.ts, deletedClassCandidates), so
+      // this deploy uploads the Worker with a deleted_classes migration for ChromeContainer; the container application is deleted after, in the
+      // delete phase for resources the stack no longer declares.
       // A Robot's Box (v1.14 ticket 10, the Computer until v1.15): one container per Robot on the image of infra/computer/Dockerfile,
       // which the deploy builds and pushes (Docker). The binding, the class and the directory keep their v1.14 names:
       // renaming a Durable Object class needs a migration, and the plan test asserts them.

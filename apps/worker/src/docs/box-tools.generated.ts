@@ -4,6 +4,9 @@ export type BoxTool =
   | { readonly kind: 'program'; readonly name: string; readonly command: string; readonly version: string }
   | { readonly kind: 'package'; readonly name: string; readonly version: string }
 
+/** A hash of the files the image was built from (infra/box-context.ts): the plan test compares it with the files as they are now. */
+export const BOX_IMAGE_INPUTS = '0c5a35afcb2c4c7e'
+
 export const BOX_TOOLS: readonly BoxTool[] = [
   { kind: 'program', name: 'ripgrep', command: 'rg', version: '13.0.0' },
   { kind: 'program', name: 'fd', command: 'fd', version: '8.3.1' },
