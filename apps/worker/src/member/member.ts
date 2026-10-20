@@ -63,8 +63,8 @@ export interface MemberPlatformShape {
   getAlarm(): Effect.Effect<number | null>
   setAlarm(at: number): Effect.Effect<void>
   send(vapid: { privateKeyHex: string; publicKey: string; subject: string }, device: DeviceSubscription, notification: PushNotification): Effect.Effect<void, PushGone | PushFailed>
-  /** Push to every device now (the DO's overridable delivery). */
-  deliverNow(notification: PushNotification): Effect.Effect<void>
+  /** Push to every device now (the DO's overridable delivery), and show it on the computers named, or on every computer when none is (ob-6jr5). */
+  deliverNow(notification: PushNotification, hosts: readonly string[]): Effect.Effect<void>
   /** Credential pool changes are read-modify-write across awaits: one at a time. */
   readonly poolLock: Semaphore.Semaphore
   /** One OAuth refresh at a time per Provider: the refresh token rotates. */
@@ -625,34 +625,34 @@ const deliver = (notification: PushNotification) => Effect.gen(function* () {
  * A Robot wants this Member to hear something. Inside the Member's quiet hours it waits
  * for their end (robot-bden); otherwise it goes to every device now.
  */
-const notify = (event: { robotId: string; robotName: string; kind: NotificationKind; body: string }) => push({
+const notify = (event: { robotId: string; robotName: string; kind: NotificationKind; body: string; hosts?: readonly string[] }) => push({
   kind: 'robot',
   title: event.kind === 'finished' ? event.robotName : `${event.robotName} ${event.kind === 'needs you' ? 'needs you' : 'is blocked'}`,
   body: event.body.slice(0, 400),
   url: `/#/r/${encodeURIComponent(event.robotId)}`,
   tag: `${event.robotId}-${event.kind}`,
   urgency: event.kind === 'finished' ? 'normal' : 'high',
-})
+}, event.hosts ?? [])
 
 /** The Home reminds this Member of a Task's moment (mc-s3cc): a push of its own, no Robot woken; quiet hours apply. */
 const remind = (task: { taskId: string; title: string; at: number }) => Effect.gen(function* () {
   const me = yield* profile
   const clock = new Intl.DateTimeFormat('en-GB', { timeZone: me.timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(task.at)
-  return yield* push({ kind: 'reminder', title: task.title.slice(0, 120), body: `${task.at < Date.now() ? 'Was due' : 'Due'} ${clock}`, url: '/#/mission', tag: `task-${task.taskId}`, urgency: 'high' })
+  return yield* push({ kind: 'reminder', title: task.title.slice(0, 120), body: `${task.at < Date.now() ? 'Was due' : 'Due'} ${clock}`, url: '/#/mission', tag: `task-${task.taskId}`, urgency: 'high' }, [])
 })
 
 /** Inside the Member's quiet hours a notification waits for their end (robot-bden); otherwise it goes to every device now. */
-const push = (notification: PushNotification) => Effect.gen(function* () {
+const push = (notification: PushNotification, hosts: readonly string[]) => Effect.gen(function* () {
   const until = yield* quietUntil(Date.now())
   if (until !== null) {
     const sql = yield* Sql
     const platform = yield* MemberPlatform
-    yield* sql.run('INSERT INTO pending_notification (deliver_at, notification) VALUES (?, ?)', until, JSON.stringify(notification))
+    yield* sql.run('INSERT INTO pending_notification (deliver_at, notification, hosts) VALUES (?, ?, ?)', until, JSON.stringify(notification), JSON.stringify(hosts))
     const alarm = yield* platform.getAlarm()
     if (alarm === null || alarm > until) yield* platform.setAlarm(until)
     return 'deferred' as const
   }
-  yield* (yield* MemberPlatform).deliverNow(notification)
+  yield* (yield* MemberPlatform).deliverNow(notification, hosts)
   return 'sent' as const
 })
 
@@ -660,9 +660,9 @@ const push = (notification: PushNotification) => Effect.gen(function* () {
 const deliverDue = (now: number) => Effect.gen(function* () {
   const sql = yield* Sql
   const platform = yield* MemberPlatform
-  for (const row of yield* sql.all<{ id: number; notification: string }>('SELECT id, notification FROM pending_notification WHERE deliver_at <= ? ORDER BY id', now)) {
+  for (const row of yield* sql.all<{ id: number; notification: string; hosts: string }>('SELECT id, notification, hosts FROM pending_notification WHERE deliver_at <= ? ORDER BY id', now)) {
     yield* sql.run('DELETE FROM pending_notification WHERE id = ?', row.id)
-    yield* platform.deliverNow(JSON.parse(row.notification) as PushNotification)
+    yield* platform.deliverNow(JSON.parse(row.notification) as PushNotification, JSON.parse(row.hosts) as string[])
   }
   const next = (yield* sql.first<{ at: number | null }>('SELECT MIN(deliver_at) AS at FROM pending_notification'))?.at ?? null
   if (next !== null) yield* platform.setAlarm(next)
@@ -704,6 +704,8 @@ export class Member extends DurableObject<Env> {
     sql.exec("DELETE FROM usage WHERE source = 'computer'")
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
+    // The computers a deferred notification names (ob-6jr5); a row from before has none, so every computer shows it.
+    if (!sql.exec<{ name: string }>('PRAGMA table_info(pending_notification)').toArray().some((column) => column.name === 'hosts')) sql.exec("ALTER TABLE pending_notification ADD COLUMN hosts TEXT NOT NULL DEFAULT '[]'")
     sql.exec(`CREATE TABLE IF NOT EXISTS credential (
       provider TEXT PRIMARY KEY, kind TEXT NOT NULL, sealed TEXT NOT NULL, shared INTEGER NOT NULL, expires INTEGER, updated_at INTEGER NOT NULL
     )`)
@@ -724,8 +726,8 @@ export class Member extends DurableObject<Env> {
       poolLock: Semaphore.makeUnsafe(1),
       refreshing: new Map(),
       // Devices by Web Push, and the desktop app over the host channel (pl-b5vp).
-      deliverNow: (notification) => Effect.promise(async () => {
-        try { this.hosts.notify({ title: notification.title, body: notification.body, url: notification.url, tag: notification.tag }) } catch (error) { console.warn('host notification failed', error) }
+      deliverNow: (notification, hosts) => Effect.promise(async () => {
+        try { this.hosts.notify({ title: notification.title, body: notification.body, url: notification.url, tag: notification.tag }, hosts) } catch (error) { console.warn('host notification failed', error) }
         await this.deliver(notification)
       }),
     }
@@ -833,7 +835,7 @@ export class Member extends DurableObject<Env> {
   addPushDevice(device: DeviceSubscription & { device?: string }): Promise<void> { return this.run(addPushDevice(device)) }
   removePushDevice(endpoint: string): Promise<void> { return this.run(removePushDevice(endpoint)) }
   pushDevices(): Promise<Array<{ endpoint: string; device: string; createdAt: number }>> { return this.run(pushDevices) }
-  notify(event: { robotId: string; robotName: string; kind: NotificationKind; body: string }): Promise<'sent' | 'deferred'> { return this.run(notify(event)) }
+  notify(event: { robotId: string; robotName: string; kind: NotificationKind; body: string; hosts?: readonly string[] }): Promise<'sent' | 'deferred'> { return this.run(notify(event)) }
   remind(task: { taskId: string; title: string; at: number }): Promise<'sent' | 'deferred'> { return this.run(remind(task)) }
 
   override async alarm(): Promise<void> {

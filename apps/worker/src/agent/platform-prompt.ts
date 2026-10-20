@@ -1,4 +1,4 @@
-import { hostHeading, hostsOf, levelSummary, ownerLine, type CapabilityItem, type RobotOwner } from '@mr-robot/protocol'
+import { hostLine, hostsOf, levelSummary, ownerLine, type CapabilityItem, type RobotOwner } from '@mr-robot/protocol'
 import type { RobotConfig } from '../robot/store.ts'
 import { docsIndex } from './docs-index.ts'
 import { JOIN_SEPARATOR } from './sources.ts'
@@ -246,7 +246,7 @@ const runtime: PlatformSection = {
     `- Owner: ${ownerLine(owner)}`,
     `- Time zone: ${config.timeZone}.`,
     `- Language: answer in the language ${owner.name} writes in; write files, notes and skills in English; USER.md may override this.`,
-    capabilities !== undefined && config.status !== 'setup' && hostsOf(capabilities).length > 0 && `- Hosts: ${hostsOf(capabilities).map(hostHeading).join('; ')}.`,
+    capabilities !== undefined && config.status !== 'setup' && hostsOf(capabilities).length > 0 && `- Hosts: ${hostsOf(capabilities).map(hostLine).join('; ')}.`,
     ...(config.status === 'setup' ? [] : (connectionInstructions ?? []).map((entry) => `- Instructions for ${entry.label}: ${entry.instructions}`)),
     capabilities !== undefined && config.status !== 'setup' && '- Your levels (call my_capabilities for what each item does):',
     capabilities !== undefined && config.status !== 'setup' && levelSummary(capabilities),

@@ -39,7 +39,7 @@ async function pairedHost(name: string) {
     socket = response.webSocket!
     socket.accept()
     open.push(socket)
-    socket.send(frame({ t: 'hb', d: { version: '0.1.0', platform: 'linux', hostname: name, capabilities: { graphical: false, chrome: null, sandbox: 'full' } } }))
+    socket.send(frame({ t: 'hb', d: { version: '0.1.0', platform: 'linux', hostname: name, capabilities: { graphical: false, chrome: null, sandbox: 'full', shell: 'bash' } } }))
     await pause(100)
   }
   await connect()

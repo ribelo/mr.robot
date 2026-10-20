@@ -166,6 +166,10 @@ export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Downl
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])
 export type Sandbox = typeof Sandbox.Type
 
+/** The shell a Robot's commands run in on a computer (v1.16, ob-vyyg): bash on Linux and macOS, pwsh on Windows. */
+export const ShellName = Schema.Literals(['bash', 'pwsh'])
+export type ShellName = typeof ShellName.Type
+
 /** What a Host reports every few seconds while connected (hs-7dlt). */
 export const Heartbeat = Schema.Struct({
   version: Schema.String,
@@ -178,6 +182,8 @@ export const Heartbeat = Schema.Struct({
     chrome: Schema.NullOr(Schema.String),
     /** How completely this computer confines a command (v1.16, ob-n72n): full, partial (older kernel, Windows) or none (a confined command fails closed). */
     sandbox: Sandbox,
+    /** The shell the Robot's commands run in here (v1.16, ob-vyyg). */
+    shell: ShellName,
   }),
 })
 export type Heartbeat = typeof Heartbeat.Type

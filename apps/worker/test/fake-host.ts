@@ -5,7 +5,7 @@
 import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type Sandbox, type SandboxReport } from '@mr-robot/host-protocol'
+import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type HostNotification, type Sandbox, type SandboxReport, type ShellName } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -29,9 +29,10 @@ export const hostCommands: Array<(command: string, access: HostAccess) => { stdo
 const skippedPath = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
 
 
-/** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). */
-export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {}) {
-  const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform: 'linux' }) })
+/** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). Its notifications (notify frames) are kept in `notices`. */
+export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: ShellName } = {}) {
+  const platform = options.platform ?? 'linux'
+  const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform }) })
   const { code, approveUrl } = (await start.json()) as { code: string; approveUrl: string }
   expect(approveUrl).toBe(`https://mr-robot.test/#/pair/${code}`)
   expect((await api<{ name: string }>(ANNA, `/api/hosts/pair/${code}`)).body.name).toBe(name)
@@ -122,14 +123,16 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {
     BrowserClose: () => Effect.void,
   })
   const host = serveHost(handlers, (text) => socket.send(text))
+  const notices: HostNotification[] = []
   socket.addEventListener('message', (event) => {
     const parsed = parseFrame(String(event.data))
     if (parsed?.t === 'rpc') Effect.runFork(host.deliver(parsed.d))
+    if (parsed?.t === 'notify') notices.push(parsed.d)
   })
   Effect.runFork(host.server)
-  socket.send(frame({ t: 'hb', d: { version: '0.1.0', platform: 'linux', hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full' } } }))
+  socket.send(frame({ t: 'hb', d: { version: '0.1.0', platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full', shell: options.shell ?? 'bash' } } }))
   await new Promise((resolve) => setTimeout(resolve, 100))
-  return { hostId: paired.hostId, token: paired.token, socket, closes, connect }
+  return { hostId: paired.hostId, token: paired.token, socket, closes, connect, notices }
 }
 
 /** Close the sockets of the fake hosts a test opened. */

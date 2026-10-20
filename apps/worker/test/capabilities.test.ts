@@ -228,7 +228,7 @@ describe('labels of plugin tools and Hosts (ux-5g3w, ux-q8o6, ux-qm6u, ux-ywxa, 
     // The prompt preview: the same labels and the Host state in the runtime section, and the rule not to probe a Host.
     const platform = (await api<{ sections: Array<{ name: string; text: string }> }>(ANNA, `/api/robots/${id}/prompt`)).body.sections.find((section) => section.name === 'Platform')!.text
     const runtime = platform.slice(platform.indexOf('## Runtime'))
-    expect(runtime).toContain('\n- Hosts: Desk · offline.\n')
+    expect(runtime).toContain('\n- Hosts: Desk · offline · linux.\n')
     expect(runtime).toContain('\nallow: tools web; connections Google · anna@gmail.test\nask: hosts Desk · files\n')
     const toolRules = platform.slice(platform.indexOf('## Tools'), platform.indexOf('## Tasks'))
     expect(toolRules).toContain('- Host online state is in the runtime section and in my_capabilities; never probe a Host with a command to find out.')

@@ -14,7 +14,7 @@ import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, type SandboxExecutionPo
 import Sandbox, { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
-import { SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type Sandbox as SandboxState, type SandboxReport } from '@mr-robot/host-protocol'
+import { SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type Sandbox as SandboxState, type SandboxReport, type ShellName } from '@mr-robot/host-protocol'
 import { ensureRobotDirectory, expandPath, writeRoots } from './access.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
@@ -112,6 +112,8 @@ export class HostShell {
     private readonly path: string | undefined,
     /** How completely this computer confines a command, found when the app started. */
     readonly sandbox: SandboxState,
+    /** The shell a Robot's command runs in here (ob-vyyg): bash; pwsh on Windows is the one place that changes it. */
+    readonly shell: ShellName,
   ) {}
 
   /** Compose DSH's layer and find out what the sandbox can do here (the heartbeat reports it, ob-n72n). */
@@ -131,7 +133,7 @@ export class HostShell {
       (confined) => confined.enforcement,
       () => 'none' as const,
     )
-    return new HostShell(ctx, home, await loginPath(), sandbox)
+    return new HostShell(ctx, home, await loginPath(), sandbox, 'bash')
   }
 
   /** One command in the Robot's directory (or the cwd it names), under the mode and roots of its grant. */

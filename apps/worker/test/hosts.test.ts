@@ -1,6 +1,6 @@
 import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { HostView, Me, RobotSummary } from '@mr-robot/protocol'
+import type { Conversation, HostView, Me, RobotSummary } from '@mr-robot/protocol'
 import { parseFrame } from '@mr-robot/host-protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost, hostDisk, ran } from './fake-host.ts'
@@ -56,7 +56,7 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
   it('pairs, shows online with its heartbeat, shares with the Home, and unpairs (hs-hend, hs-ro43, hs-0eka, hs-rwxw, hs-7dlt)', async () => {
     const host = await fakeHost()
     const mine = (await api<HostView[]>(ANNA, '/api/hosts')).body
-    expect(mine).toEqual([expect.objectContaining({ id: host.hostId, name: 'Desk', online: true, version: '0.1.0', mine: true, sharing: 'private', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: 'full' } })])
+    expect(mine).toEqual([expect.objectContaining({ id: host.hostId, name: 'Desk', online: true, version: '0.1.0', mine: true, sharing: 'private', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: 'full', shell: 'bash' } })])
     expect((await api<HostView[]>(BEN, '/api/hosts')).body).toEqual([])
     await api(ANNA, `/api/hosts/${host.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
     expect((await api<HostView[]>(BEN, '/api/hosts')).body).toEqual([expect.objectContaining({ id: host.hostId, mine: false, ownerName: expect.any(String) })])
@@ -87,12 +87,19 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     expect(JSON.stringify((await api(ANNA, `/api/robots/${shell}/trajectory`)).body)).toContain('leash --help')
   })
 
-  it("lets Mr. Robot use the host without a grant (hs-44cm); a private host refuses another Member's robot", async () => {
+  it("asks the owner before Mr. Robot runs on a new host (hs-44cm, ob-2k5x); a private host refuses another Member's robot", async () => {
     const host = await fakeHost()
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false } })
-    await say(ANNA, mr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'uptime' } }] }, { text: 'ok' }])
-    expect(toolResults(mr)[0]).toContain('ran: uptime')
+    await say(ANNA, mr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'uptime', reason: 'Check the load' } }] }, { text: 'ok' }])
+    expect(toolResults(mr)[0]).toContain('waiting for your owner')
+    expect(ran).not.toContain('uptime')
+    const conversation = (await api<Conversation>(ANNA, `/api/robots/${mr}/conversation`)).body
+    const ask = conversation.items.flatMap((item) => (item.kind === 'proposal' && item.proposal.kind === 'tool-call' && item.proposal.status === 'open' ? [item.proposal] : []))[0]!
+    scripts.set(mr, [{ text: 'It ran.' }])
+    expect((await api(ANNA, `/api/robots/${mr}/proposals/${ask.id}`, { body: { revision: ask.revision, approve: true } })).status).toBe(200)
+    await settle(mr)
+    expect(ran).toContain('uptime')
     const bens = await robotWith(BEN, [`${host.hostId}:shell`])
     expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, bens, { command: 'whoami' }))).toMatch(/no shell grant/)
   })

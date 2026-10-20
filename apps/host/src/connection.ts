@@ -74,7 +74,7 @@ export class HostLink {
   }
 
   private beat(): void {
-    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox } } }))
+    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox, shell: this.shell.shell } } }))
   }
 
   private connect(): void {

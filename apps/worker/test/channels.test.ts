@@ -16,7 +16,7 @@ const ANNA = 'anna@example.com'
 
 describe('Who receives an output (recipientsOf)', () => {
   const reply = { kind: 'reply', id: 'r1', robotId: 'r', robotName: 'R', text: 'x', attachments: [], route: null, unprompted: false } as const
-  const note = { kind: 'notification', id: 'n1', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [], replyCopy: false } as const
+  const note = { kind: 'notification', id: 'n1', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [], replyCopy: false, hosts: [] } as const
   const discord = { channel: 'discord', address: 'C-1', messageId: 'M-1' }
 
   it('sends every reply back to where the question came from', () => {

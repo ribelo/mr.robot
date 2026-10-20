@@ -8,7 +8,7 @@ The Member opens the app and enters the server address. The app signs in through
 
 A Host is online or offline. The app sends a heartbeat. When the heartbeat stops, the Host is offline.
 
-The runtime section of your prompt has a Hosts line with the state of each Host, for example "Desk · online". my_capabilities gives the same state for each facet. Read the state there. Do not run a command on a Host to find out whether it is online.
+The runtime section of your prompt has a Hosts line with each Host's state, shell and sandbox, for example "Desk · online". my_capabilities gives the same state for each facet. Do not run a command to find out whether a Host is online.
 
 ## Private or shared
 
@@ -21,7 +21,7 @@ A Host offers three facets. Each is a separate grant item for a Robot:
 - files: read, write, edit, glob, grep, delete_file and copy with on set to the name of the Host. read and write pass the content through the model. copy moves one file, of any size and binary too, between the Host and your Workspace in either direction, or between two Hosts (it is parked in your Workspace under tmp/ and deleted after); the content does not pass through the model, and the Host app and R2 exchange it directly in parts of 64 MB. A file copied into box/ is on your Box at its next boot. A relative path on a Host starts in your own directory there. See "Your directory and what you may change".
 - shell: run with on set to the name of the Host. It runs a bash command as the OS user, through the sandbox of the app. A command that is still going at its time limit goes on as a job, as on the Box (job_list, job_output and job_kill), for at most 600 seconds.
 
-The tools take a mandatory \`on\`: "workspace", "box" or the name of a Host. There is no default. A call to a Host that the Robot holds no facet on, or to a name that is no Host, is refused and names the grant. These are the Host tools. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one.
+The tools take a mandatory \`on\`: "workspace", "box" or the name of a Host. There is no default. A call to a Host that the Robot holds no facet on, or to a name that is no Host, is refused and names the grant. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one. New computers start his files and shell at ask.
 
 ## Your directory and what you may change
 
