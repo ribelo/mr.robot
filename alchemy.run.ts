@@ -1,7 +1,7 @@
 import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Effect from 'effect/Effect'
-import { Edge, Files, GoogleCallback, HookChannel, HostChannel } from './infra/stack.ts'
+import { BoxChannel, Edge, Files, GoogleCallback, HookChannel, HostChannel } from './infra/stack.ts'
 
 export default Alchemy.Stack(
   'MrRobot',
@@ -10,6 +10,7 @@ export default Alchemy.Stack(
     yield* Files
     const edge = yield* Edge
     yield* HostChannel
+    yield* BoxChannel
     yield* HookChannel
     yield* GoogleCallback
     return { url: edge.url }

@@ -68,51 +68,60 @@ const DOCS_PATHS = ALL_DOCS.map((entry) => entry.path)
 /** Stored entries without anything under docs/: the platform's docs come from the bundle only. */
 const stored = <T extends { path: string }>(entries: readonly T[]): T[] => entries.filter((entry) => !isDocsPath(entry.path))
 
+const memberName = (key: string): MemberFileName | undefined => MEMBER_FILE_NAMES.find((name) => name === key)
+
+/** The key of a path in the Workspace: relative, or under /workspace. */
+export function workspaceKey(path: string): string {
+  if (path.startsWith('/') && path !== WORKSPACE_ROOT && !path.startsWith(`${WORKSPACE_ROOT}/`)) throw new Error(`${path} is outside your Workspace (${WORKSPACE_ROOT})`)
+  const key = normalizePath(path.replace(/^\/workspace\/?/, ''))
+  if (key === undefined) throw new Error(/(^|[/\\])\.\.([/\\]|$)/.test(path) ? `${path} is outside your Workspace (${WORKSPACE_ROOT})` : `"${path}" is not a file path inside your Workspace`)
+  return key
+}
+
+/** The key of a path the Robot may write: not an owner's file and not under docs/. */
+export function writableWorkspaceKey(path: string): string {
+  const key = workspaceKey(path)
+  const member = memberName(key)
+  if (member !== undefined) throw new Error(READ_ONLY_MEMBER(member))
+  if (isDocsPath(key)) throw new Error(docsReadOnlyMessage(key))
+  return key
+}
+
+/** The bytes of a file the platform owns (an owner's file or a doc), which are text kept in the Worker and not in R2; undefined for any other key. */
+export async function ownedBytes(host: WorkspaceHost, key: string): Promise<Uint8Array | undefined> {
+  const member = memberName(key)
+  if (member !== undefined) return new TextEncoder().encode(await host.memberFile(member))
+  if (!isDocsPath(key)) return undefined
+  const doc = productDoc(key)
+  if (doc === undefined) throw new Error(`${WORKSPACE_ROOT}/${key} does not exist`)
+  return new TextEncoder().encode(doc.text)
+}
+
 export class WorkspaceFiles implements PlaceFiles {
   readonly label = 'your Workspace'
 
   constructor(private readonly host: WorkspaceHost) {}
 
   private memberName(key: string): MemberFileName | undefined {
-    return MEMBER_FILE_NAMES.find((name) => name === key)
+    return memberName(key)
   }
 
-  /** The key of a path in the Workspace: relative, or under /workspace. */
   key(path: string): string {
-    if (path.startsWith('/') && path !== WORKSPACE_ROOT && !path.startsWith(`${WORKSPACE_ROOT}/`)) throw new Error(`${path} is outside your Workspace (${WORKSPACE_ROOT})`)
-    const key = normalizePath(path.replace(/^\/workspace\/?/, ''))
-    if (key === undefined) throw new Error(/(^|[/\\])\.\.([/\\]|$)/.test(path) ? `${path} is outside your Workspace (${WORKSPACE_ROOT})` : `"${path}" is not a file path inside your Workspace`)
-    return key
+    return workspaceKey(path)
   }
 
   private writable(key: string): void {
-    const member = this.memberName(key)
-    if (member !== undefined) throw new Error(READ_ONLY_MEMBER(member))
-    if (isDocsPath(key)) throw new Error(docsReadOnlyMessage(key))
+    writableWorkspaceKey(key)
   }
 
-  /** The key of a path the Robot may write: not an owner's file and not under docs/. */
+  /** The key of a path the Robot may write. */
   writableKey(path: string): string {
-    const key = this.key(path)
-    this.writable(key)
-    return key
+    return writableWorkspaceKey(path)
   }
 
-  /** A file whole as bytes (a copy's source); the owner's files and the docs are text. */
-  async readFileBytes(key: string, maxBytes: number): Promise<Uint8Array> {
-    const member = this.memberName(key)
-    if (member !== undefined) return new TextEncoder().encode(await this.host.memberFile(member))
-    if (isDocsPath(key)) {
-      const doc = productDoc(key)
-      if (doc === undefined) throw new Error(`${WORKSPACE_ROOT}/${key} does not exist`)
-      return new TextEncoder().encode(doc.text)
-    }
-    const entry = await this.host.run(this.host.workspace.stat(key))
-    if (entry === undefined) throw new Error(`${WORKSPACE_ROOT}/${key} does not exist`)
-    if (entry.size > maxBytes) throw new Error(`${WORKSPACE_ROOT}/${key} is ${entry.size} bytes; this copy is limited to ${maxBytes / 1024 / 1024} MB for now.`)
-    const file = await this.host.run(this.host.workspace.read(key))
-    if (file === undefined) throw new Error(`${WORKSPACE_ROOT}/${key} does not exist`)
-    return new Uint8Array(file.body)
+  /** The bytes of a file the platform owns, or undefined when the key is an ordinary object of the Workspace. */
+  owned(key: string): Promise<Uint8Array | undefined> {
+    return ownedBytes(this.host, key)
   }
 
   async readFile(path: string): Promise<FileContent> {

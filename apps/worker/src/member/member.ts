@@ -3,6 +3,7 @@
  * PROACTIVE_PREFERENCES.md, mounted read-only into each of their Robots), and the
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
+import { copyTimeoutMs, type UploadPart } from '@mr-robot/host-protocol'
 import { HostHub, type HostEntry, type HostAction } from './hosts.ts'
 import { GoogleConsents } from './google-consent.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
@@ -946,8 +947,10 @@ export class Member extends DurableObject<Env> {
   hostRead(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Read({ path, access }), undefined, { action: 'read', detail: path }) }
   hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Write({ ...input, access }), undefined, { action: 'write', detail: input.path }) }
   /** One piece of a copy, under the Host's file Grant; the copy as a whole is logged once (recordHostCopy). */
-  hostReadChunk(id: string, robotId: string, input: { path: string; offset: number; length: number }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.ReadChunk({ ...input, access }), 60_000) }
-  hostWriteChunk(id: string, robotId: string, input: { path: string; offset: number; base64: string }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.WriteChunk({ ...input, access }), 60_000) }
+  hostCopySize(id: string, robotId: string, path: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.CopyStat({ path, access }), 60_000) }
+  // The Member DO only coordinates a copy: the bytes go between the Host app and R2 (v1.16 ticket 06).
+  hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Upload({ ...input, access }), copyTimeoutMs(input.size)) }
+  hostDownload(id: string, robotId: string, input: { path: string; url: string; size: number; partBytes: number }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Download({ ...input, access }), copyTimeoutMs(input.size)) }
   recordHostCopy(id: string, robotId: string, detail: string, outcome: string): void { this.hosts.recordCopy({ hostId: id, robotId, detail, outcome }) }
   /** A command under the shell grant's mode and roots; `escalated` is a call its owner approved to run without the sandbox, once (ob-ifak). */
   hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; escalated?: boolean }) {

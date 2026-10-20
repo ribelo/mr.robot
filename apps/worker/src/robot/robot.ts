@@ -99,6 +99,9 @@ import { Credentials } from '../plugins/credentials.ts'
 import { Exa } from '../plugins/exa.ts'
 import { Places as PlacesCapability } from '../plugins/places.ts'
 import { Places } from '../places/places.ts'
+import { carryOut, parseTransferRequest, PART_BYTES, Transfers } from '../places/transfers.ts'
+import { parseS3Credentials, s3ObjectStore, type ObjectStore } from '../workspace/object-store.ts'
+import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, newBoxToken, sameToken } from '../box/token.ts'
 import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRunner, HostRuns } from '../places/host-runner.ts'
 import type { Place, StoredPlace } from '../places/place.ts'
@@ -635,10 +638,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const now = Date.now()
     // A Box that is not up holds no job: what still ran in the old one is lost (gb-aafm).
     await this.jobs().loseAll('the Box was restarted').catch((error: unknown) => console.warn('jobs not closed', error))
-    this.store.set(BOX, { state: 'booting', since: now, lastCommandAt: now, baseline: {} } satisfies BoxState)
+    // The token ws uses is made before the Box starts and dies with this record (v1.16 ticket 06).
+    const token = newBoxToken(this.store.requireConfig().id)
+    this.store.set(BOX, { state: 'booting', since: now, lastCommandAt: now, baseline: {}, token } satisfies BoxState)
     await this.changed()
     try {
       await backend.start()
+      const encode = new TextEncoder()
+      await backend.write(BOX_TOKEN_PATH, encode.encode(token))
+      const origin = await this.home().appOrigin()
+      if (origin !== null) await backend.write(BOX_ORIGIN_PATH, encode.encode(origin))
       const ws = this.workspace
       const files = (await this.run(ws.list(BOX_FOLDER))).filter((entry) => entry.path.startsWith(`${BOX_FOLDER}/`))
       for (const entry of files) {
@@ -647,7 +656,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       }
       if (files.some((entry) => entry.path === `${BOX_FOLDER}/setup.sh`)) await backend.run('bash setup.sh', `${BOX_ROOT}/${BOX_FOLDER}`, 900)
       const baseline = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`))
-      this.store.set(BOX, { state: 'running', since: now, lastCommandAt: Date.now(), baseline } satisfies BoxState)
+      this.store.set(BOX, { state: 'running', since: now, lastCommandAt: Date.now(), baseline, token } satisfies BoxState)
       return backend
     } catch (error) {
       this.store.set(BOX, { state: 'off' } satisfies BoxState)
@@ -771,8 +780,44 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       jobPlace: (place, escalated) => place.kind === 'box' ? this.boxJobPlace() : this.hostJobPlace(place, escalated),
       escalation: { approved: (callId) => this.approvedCalls.has(callId), ask: (request, exec) => this.askGateHost().askToolCall(request, exec) },
       jobs: this.jobs(),
+      transfers: this.transfers(),
     })
     return this.placeService
+  }
+
+  /** The S3 side of the Files bucket (v1.16 ticket 06); tests give a recorded one. */
+  protected objectStore(): ObjectStore | undefined {
+    const credentials = parseS3Credentials(this.env.FILES_S3)
+    return credentials === undefined ? undefined : s3ObjectStore(credentials)
+  }
+
+  /** The size of a part of a multipart upload; tests make it small. */
+  protected partBytes(): number {
+    return PART_BYTES
+  }
+
+  /** The Workspace as presigned URLs, for Hosts and for ws (v1.16 ticket 06). */
+  private transferService: Transfers | undefined
+  private transfers(): Transfers {
+    this.transferService ??= new Transfers({ robotId: this.store.requireConfig().id, bucket: this.env.FILES, store: this.objectStore(), partBytes: this.partBytes() })
+    return this.transferService
+  }
+
+  /**
+   * The Box's door to its Workspace (v1.16 ticket 06, ob-63nt, ob-o6aw): ws calls it with the token written into the container at boot.
+   * The token is good while this Robot's record says the Box is booting or running and its container is up; after a stop there is no
+   * token, and the Workspace is out of reach again.
+   */
+  async boxTransfer(token: string, body: string): Promise<{ readonly status: number; readonly json: string }> {
+    const reply = (status: number, value: unknown) => ({ status, json: JSON.stringify(value) })
+    const box = this.boxState()
+    const invalid = reply(401, { error: 'this token is not valid: the Box it was written for is not running' })
+    if ((box.state !== 'booting' && box.state !== 'running') || box.token === undefined || !(await sameToken(token, box.token))) return invalid
+    if (box.state === 'running' && !(await this.boxBackend().running().catch(() => false))) return invalid
+    const request = parseTransferRequest(((): unknown => { try { return JSON.parse(body) } catch { return undefined } })())
+    if (typeof request === 'string') return reply(400, { error: request })
+    const result = await carryOut(this.transfers(), request)
+    return result.ok ? reply(200, result.value) : reply(result.status, { error: result.error })
   }
 
   /** The owner's Stop on one job in the panel; the Robot is told (gb-66kh). */
@@ -2139,8 +2184,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       glob: (pattern) => this.hostCall(async () => (await owner()).hostGlob(host.id, robotId, pattern)),
       grep: (input) => this.hostCall(async () => (await owner()).hostGrep(host.id, robotId, input)),
       remove: (path) => this.hostCall(async () => (await owner()).hostDelete(host.id, robotId, path)),
-      readChunk: (input) => this.hostCall(async () => (await owner()).hostReadChunk(host.id, robotId, input)),
-      writeChunk: (input) => this.hostCall(async () => (await owner()).hostWriteChunk(host.id, robotId, input)),
+      copySize: (path) => this.hostCall(async () => (await owner()).hostCopySize(host.id, robotId, path)),
+      upload: (input) => this.hostCall(async () => (await owner()).hostUpload(host.id, robotId, input)),
+      download: (input) => this.hostCall(async () => (await owner()).hostDownload(host.id, robotId, input)),
       recordCopy: async (detail, outcome) => (await owner()).recordHostCopy(host.id, robotId, detail, outcome),
       run: (command, cwd, timeoutMs, escalated) => this.hostCall(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, ...(escalated ? { escalated } : {}) })),
     }
@@ -3775,7 +3821,7 @@ const BOX_IDLE_MS = 10 * 60_000
 const BOX_SYNC_MAX_BYTES = 20 * 1024 * 1024
 type BoxState =
   | { readonly state: 'off' }
-  | { readonly state: 'booting' | 'running' | 'stopping'; readonly since: number; readonly lastCommandAt: number; readonly baseline: Readonly<Record<string, string>> }
+  | { readonly state: 'booting' | 'running' | 'stopping'; readonly since: number; readonly lastCommandAt: number; readonly baseline: Readonly<Record<string, string>>; readonly token?: string }
 
 /** Path, size and change time of each file: a changed stamp means the file changed. */
 function manifestOf(files: ReadonlyArray<{ path: string; size: number; mtime: number }>): Record<string, string> {

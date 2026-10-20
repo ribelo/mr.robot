@@ -3,9 +3,10 @@
  * browser sessions relayed between Mr. Robot and the host's Chrome (hs-mqwd).
  */
 import * as Effect from 'effect/Effect'
-import { HostError, HostRpcs } from '@mr-robot/host-protocol'
+import { downloadFile, HostError, HostRpcs, uploadFile, type CopyIo } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import type { HostChrome } from './chrome.ts'
+import { fileSize, nodeCopyIo, sourceFile, targetFile } from './copy.ts'
 import { HostDisk } from './files.ts'
 import type { HostShell } from './shell.ts'
 
@@ -16,7 +17,7 @@ export interface Relay {
   readonly token: string
 }
 
-export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void, disk = new HostDisk()) {
+export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => Relay, onSessions: (count: number) => void, disk = new HostDisk(), copyIo: CopyIo = nodeCopyIo) {
   const sessions = new Map<string, { remote: WebSocket; local: WebSocket }>()
   const closeSession = (session: string) => {
     const found = sessions.get(session)
@@ -28,9 +29,28 @@ export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => 
   return HostRpcs.toLayer({
     Read: ({ path, access }) => Effect.tryPromise({ try: () => disk.read(access, path), catch: fail }),
     Write: ({ path, text, base64, access }) => Effect.tryPromise({ try: () => disk.write(access, path, { text, base64 }), catch: fail }),
-    // A file in pieces (v1.15, copy): the piece at offset 0 truncates, later ones write at their offset.
-    ReadChunk: ({ path, offset, length, access }) => Effect.tryPromise({ try: () => disk.readChunk(access, path, offset, length), catch: fail }),
-    WriteChunk: ({ path, offset, base64, access }) => Effect.tryPromise({ try: () => disk.writeChunk(access, path, offset, base64), catch: fail }),
+    // Copy (v1.16): the file goes to and from R2 over presigned URLs, in parts, retried (copy.ts, the protocol's copy engine). A download writes, so it obeys the mode and roots.
+    CopyStat: ({ path, access }) => Effect.tryPromise({
+      try: async () => {
+        const full = await disk.readable(access, path)
+        return { path: full, size: await fileSize(full) }
+      },
+      catch: fail,
+    }),
+    Upload: ({ path, size, parts, access }) => Effect.tryPromise({
+      try: async () => {
+        const full = await disk.readable(access, path)
+        return { path: full, size, etags: await uploadFile(sourceFile(full), size, parts, copyIo) }
+      },
+      catch: fail,
+    }),
+    Download: ({ path, url, size, partBytes, access }) => Effect.tryPromise({
+      try: async () => {
+        const full = await disk.writable(access, path)
+        return { path: full, bytes: await downloadFile(targetFile(full), { url, size, partBytes }, copyIo) }
+      },
+      catch: fail,
+    }),
     Glob: ({ pattern, access }) => Effect.tryPromise({ try: () => disk.glob(access, pattern), catch: fail }),
     Grep: ({ pattern, ignoreCase, glob, path, access }) => Effect.tryPromise({ try: () => disk.grep(access, { pattern, ignoreCase, glob, path }), catch: fail }),
     Delete: ({ path, access }) => Effect.tryPromise({ try: () => disk.remove(access, path), catch: fail }),

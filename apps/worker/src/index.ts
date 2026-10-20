@@ -9,6 +9,7 @@ import { call, forbidden, json, notFound, respond, type ApiError } from './edge/
 import { hookChannel, isHookPath } from './edge/hooks.ts'
 import { GOOGLE_CALLBACK_PATH, googleCallback } from './edge/google-callback.ts'
 import { identityEmail } from './edge/identity.ts'
+import { bearerToken, robotOfToken } from './box/token.ts'
 import { HOME_ID, type Env } from './env.ts'
 import type { SignIn } from './home/home.ts'
 
@@ -18,6 +19,22 @@ export { Home } from './home/home.ts'
 export { ComputerContainer } from './box/container.ts'
 
 const WS_PATH = new URLPattern({ pathname: '/api/robots/:id/ws' })
+
+/** The Box's door to its Workspace (v1.16 ticket 06): ws in the container calls it with the token written at boot. */
+export const PRESIGN_PATH = '/api/files/presign'
+
+/**
+ * The Box channel: outside the Access login (a bypass application in infra/stack.ts) and open only to a token that names a Robot whose Box
+ * is up. The Robot checks the token; this function only finds the Robot.
+ */
+async function boxChannel(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
+  const token = bearerToken(request.headers.get('authorization'))
+  const robotId = token === undefined ? undefined : robotOfToken(token)
+  if (token === undefined || robotId === undefined) return json({ error: 'a Box token is required' }, 401)
+  const reply = await env.ROBOT.getByName(robotId).boxTransfer(token, await request.text())
+  return new Response(reply.json, { status: reply.status, headers: { 'content-type': 'application/json' } })
+}
 
 /**
  * The Host channel (v1.2): the desktop app is not a browser session, so these paths are outside
@@ -54,6 +71,12 @@ export default {
         const status = typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : 500
         if (status === 500) console.error('host channel failed', error)
         return json({ error: error instanceof Error ? error.message : String(error) }, status)
+      })
+    }
+    if (path === PRESIGN_PATH) {
+      return boxChannel(request, env).catch((error: unknown) => {
+        console.error('box channel failed', error)
+        return json({ error: 'the Workspace could not be reached' }, 500)
       })
     }
     // The webhook Channel is outside Access too; its key is the credential (v1.6 ticket 07).

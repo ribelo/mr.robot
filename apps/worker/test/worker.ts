@@ -4,6 +4,9 @@ import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { scriptedProviders, StubLlm } from './stub-llm.ts'
 import { StubDriver } from './stub-browser.ts'
 import { StubBox } from './stub-box.ts'
+import { fakeR2, testObjectStore } from './fake-r2.ts'
+import type { ObjectStore } from '../src/workspace/object-store.ts'
+import app from '../src/index.ts'
 import { QUIET_DUE } from '../src/robot/programs.ts'
 import type { BoxBackend } from '../src/box/backend.ts'
 import { FakeChannel } from './fake-channel.ts'
@@ -163,7 +166,19 @@ export class Robot extends ProductionRobot {
   }
 
   protected override boxBackend(): BoxBackend {
-    return new StubBox(this.store.requireConfig().id)
+    // The Box's network: its requests to the Worker's presign endpoint reach this very Worker, and presigned URLs reach R2 as the bucket plays it.
+    const r2 = fakeR2(this.env.FILES)
+    return new StubBox(this.store.requireConfig().id, (url, init) => new URL(url).pathname === '/api/files/presign' ? app.fetch!(new Request(url, init), this.env, this.ctx as unknown as ExecutionContext) as Promise<Response> : r2(url, init))
+  }
+
+  /** The signer is the real one; the control calls of a multipart upload are played by the bucket (no test makes a network request). */
+  protected override objectStore(): ObjectStore | undefined {
+    return testObjectStore(this.env.FILES)
+  }
+
+  /** The smallest part R2 takes, so that a few megabytes make a multipart upload. */
+  protected override partBytes(): number {
+    return 5 * 1024 * 1024
   }
 
   /** The Robot as a v1.14 deploy left it: a computer grant, its running time, cost rows, state and folder name (v1.15 ticket 06). */

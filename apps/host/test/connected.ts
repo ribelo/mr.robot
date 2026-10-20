@@ -1,18 +1,18 @@
 /** Client and server of the Host protocol joined in this process, over the real handlers of the Host app. */
 import * as Effect from 'effect/Effect'
 import * as Scope from 'effect/Scope'
-import { makeHostClient, parseFrame, serveHost, type HostAccess } from '@mr-robot/host-protocol'
+import { makeHostClient, parseFrame, serveHost, type CopyIo, type HostAccess } from '@mr-robot/host-protocol'
 import { HostDisk } from '../src/files.ts'
 import { hostHandlers } from '../src/handlers.ts'
 import { HostShell } from '../src/shell.ts'
 
 type Rpc = Record<string, (payload: unknown) => Effect.Effect<any, any>>
 
-export async function connected(home: string) {
+export async function connected(home: string, copyIo?: CopyIo) {
   const shell = await HostShell.start({ home })
   const chrome = { devtools: async () => { throw new Error('no Chrome here') } } as never
   let toClient: (text: string) => void = () => undefined
-  const server = serveHost(hostHandlers(shell, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, new HostDisk(home)), (text) => toClient(text))
+  const server = serveHost(hostHandlers(shell, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, new HostDisk(home), copyIo), (text) => toClient(text))
   const client = makeHostClient((text) => {
     const parsed = parseFrame(text)
     if (parsed?.t === 'rpc') Effect.runFork(server.deliver(parsed.d))

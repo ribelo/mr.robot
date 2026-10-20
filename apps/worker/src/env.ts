@@ -8,6 +8,8 @@ export interface Env {
   readonly MEMBER: DurableObjectNamespace<Member>
   readonly HOME: DurableObjectNamespace<Home>
   readonly FILES: R2Bucket
+  /** The Files bucket's S3 credentials as JSON (an R2 API token the Alchemy stack creates, held as a secret); presigned URLs are signed with them (v1.16 ticket 06). Absent in a local run. */
+  readonly FILES_S3?: string
   readonly BROWSER: Fetcher
   /** The Robots' Boxes (v1.14 ticket 10); absent until deployed. The binding and its class keep their v1.14 names: renaming a Durable Object class needs a migration. */
   readonly COMPUTER?: DurableObjectNamespace<import('./box/container.ts').ComputerContainer>

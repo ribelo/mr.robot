@@ -3,7 +3,7 @@
  * segment, a shell's single quotes end at the next single quote), not from the code.
  */
 import { describe, expect, it } from 'vitest'
-import { globBase, globToRegExp, readWindow, replaceText } from '../src/places/file-ops.ts'
+import { globBase, globToRegExp, readWindow, replaceText, shellQuote } from '../src/places/file-ops.ts'
 
 describe('glob', () => {
   const matches = (pattern: string, path: string) => globToRegExp(pattern).test(path)
@@ -33,6 +33,14 @@ describe('glob', () => {
   })
 })
 
+describe('shellQuote', () => {
+  it('wraps in single quotes and ends and restarts them around a single quote', () => {
+    expect(shellQuote('plain')).toBe("'plain'")
+    expect(shellQuote('a b; rm -rf /')).toBe("'a b; rm -rf /'")
+    expect(shellQuote("it's")).toBe("'it'\\''s'")
+    expect(shellQuote('$(id) `id`')).toBe("'$(id) `id`'")
+  })
+})
 
 describe('read window', () => {
   const text = Array.from({ length: 5 }, (_, index) => `line ${index + 1}`).join('\n') + '\n'

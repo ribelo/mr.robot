@@ -50,7 +50,7 @@ describe('writes obey the mode and the roots of the grant', () => {
 
   it('refuses every write in read-only, also in the Robot directory, and allows every write in full', async () => {
     expect((await failure('Write', { path: 'ro.txt', text: 'no', access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
-    expect((await failure('WriteChunk', { path: 'ro.bin', offset: 0, base64: 'AAAA', access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
+    expect((await failure('Download', { path: 'ro.bin', url: 'https://r2.test/x', size: 1, partBytes: 1, access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
     const anywhere = join(home, 'anywhere.txt')
     await call('Write', { path: anywhere, text: 'full', access: access({ mode: 'full' }) })
     expect(await readFile(anywhere, 'utf8')).toBe('full')

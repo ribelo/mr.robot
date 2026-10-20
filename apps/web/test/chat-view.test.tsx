@@ -152,6 +152,26 @@ describe('tool cards name the place of a call (v1.16 ticket 01)', () => {
   })
 })
 
+describe('a copy card shows what moved and for how long (v1.16 ticket 06, ob-7hp3)', () => {
+  it('puts the size and the time from the result after the title; a result without them, or a failed copy, shows none', () => {
+    const copy = (id: string, result: string, error = false) => ({ id, name: 'copy', args: '{"from": {"on": "Desk", "path": "/v.mp4"}, "to": {"on": "workspace", "path": "v.mp4"}}', result, error, inner: [] })
+    const items: ChatItem[] = [{
+      kind: 'activity', id: 'ac', seq: 1, at, tools: ['copy'],
+      calls: [
+        copy('c1', '{"bytes": 2147483648, "ms": 41000, "took": "2.0 GB in 41 s"}'),
+        copy('c2', '{"bytes": 5}'),
+        copy('c3', 'copy: the Host is offline', true),
+      ],
+    }]
+    const { container } = render(<ChatView items={items} meId="m-1" working={false} canAnswer={false} now={at} workDetails="detailed" />)
+    const titles = [...container.querySelectorAll('.tool-card')].map((card) => card.textContent ?? '')
+    expect(titles[0]).toContain('copy Desk: /v.mp4 → workspace: v.mp4 · 2.0 GB in 41 s')
+    expect(titles[1]).not.toContain('·')
+    expect(titles[2]).toContain('(failed)')
+    expect(titles[2]).not.toContain('·')
+  })
+})
+
 describe('Thread Asks and the Thread card (ch-vrl7, ch-hikl, ch-iy16)', () => {
   const invitation: ProposalView = {
     id: 'p-t', kind: 'thread', revision: 1, status: 'open', purpose: 'Ben\'s Mr. Robot wants to talk about "Dinner on Friday"', grants: null, file: null, skill: null,

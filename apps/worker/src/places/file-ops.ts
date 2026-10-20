@@ -53,6 +53,11 @@ export function replaceText(before: string, oldString: string, newString: string
 
 export { globBase, globToRegExp, skipped, SKIPPED_DIRECTORIES } from '@mr-robot/host-protocol'
 
+/** One argument for a POSIX shell, in single quotes (the Box's commands). */
+export function shellQuote(text: string): string {
+  return `'${text.replaceAll("'", "'\\''")}'`
+}
+
 export interface GrepMatch {
   readonly path: string
   readonly line: number

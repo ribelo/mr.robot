@@ -3,7 +3,7 @@
  * same on every OS and do not depend on a shell. Relative paths start in the Robot's directory; reads are as wide as the OS user;
  * every write obeys the grant's mode and roots (access.ts).
  */
-import { lstat, mkdir, open, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, SKIPPED_DIRECTORIES, type HostAccess } from '@mr-robot/host-protocol'
@@ -71,37 +71,16 @@ export class HostDisk {
     return { path: full, bytes: body.length }
   }
 
-  async readChunk(access: HostAccess, path: string, offset: number, length: number) {
-    const full = await this.full(access, path)
-    const info = await stat(full)
-    const handle = await open(full, 'r')
-    try {
-      const wanted = Math.max(0, Math.min(length, info.size - offset))
-      const buffer = Buffer.alloc(wanted)
-      const { bytesRead } = await handle.read(buffer, 0, wanted, offset)
-      return { path: full, size: info.size, base64: buffer.subarray(0, bytesRead).toString('base64') }
-    } finally {
-      await handle.close()
-    }
+  /** A file to read as a copy's source: the path as the app resolves it (reads are as wide as the OS user). */
+  readable(access: HostAccess, path: string): Promise<string> {
+    return this.full(access, path)
   }
 
-  /** One piece at an offset; the piece at offset 0 starts the file afresh and creates its directories. */
-  async writeChunk(access: HostAccess, path: string, offset: number, base64: string) {
+  /** A file to write as a copy's target: the path as the app resolves it, after the mode and roots allowed a write there. */
+  async writable(access: HostAccess, path: string): Promise<string> {
     const full = await this.full(access, path)
     await assertMayWrite(this.home, access, full)
-    const body = Buffer.from(base64, 'base64')
-    if (offset === 0) {
-      await mkdir(dirname(full), { recursive: true })
-      await writeFile(full, body)
-    } else {
-      const handle = await open(full, 'r+')
-      try {
-        await handle.write(body, 0, body.length, offset)
-      } finally {
-        await handle.close()
-      }
-    }
-    return { path: full, bytes: body.length }
+    return full
   }
 
   async glob(access: HostAccess, pattern: string) {
