@@ -757,7 +757,7 @@ export type HelpAnswerer = { readonly by: 'owner' | 'mr-robot'; readonly name: s
 export type HelpAnswerResult =
   | { readonly ok: true; readonly proposal: ProposalView }
   | { readonly ok: false; readonly reason: 'not-found' | 'empty' }
-  /** The Ask is of another kind: help_answer and the help route answer requests for help only (sk-iis1). */
+  /** The Ask is of another kind: the help route answers the help requests left open from before v1.15 only (sk-iis1). */
   | { readonly ok: false; readonly reason: 'not-help'; readonly kind: ProposalView['kind'] }
   /** A closed request takes no second answer; the owner alone may answer once more after Mr. Robot (sk-q86i). */
   | { readonly ok: false; readonly reason: 'closed'; readonly answeredBy: 'owner' | 'mr-robot' | 'none' }

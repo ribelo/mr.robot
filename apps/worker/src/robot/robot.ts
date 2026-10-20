@@ -2592,7 +2592,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   /**
-   * Answer a help Ask (need_help): the first answer closes it and wakes the Robot with a labelled reply.
+   * Answer a help Ask left open from before v1.15, when need_help existed: the first answer closes it and wakes the Robot with a labelled reply.
    * The owner's side calls this with their name; Mr. Robot's answer path calls it with 'mr-robot'.
    */
   answerHelp(requestId: string, text: string, answerer: HelpAnswerer): Promise<HelpAnswerResult> {
@@ -3096,8 +3096,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-
-  /** Requests for help that stayed open 30 minutes, or are urgent, go to the owner's Mr. Robot (sk-35i9, sk-myhb). */
 
   /** Deliver pending outbox rows; a lost RPC is retried on the alarm, the recipient dedupes. */
   private deliverOutbox(): Promise<void> {

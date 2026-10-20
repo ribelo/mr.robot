@@ -67,7 +67,7 @@ export interface WakeupMessageInput {
   readonly clientId?: string
   /** When the Robot woke and in which zone, for the time label every Wake-up carries; none leaves the label as it is. */
   readonly woke?: { readonly at: number; readonly timeZone: string }
-  /** The platform message is the answer to a need_help request. */
+  /** The platform message is the answer to a help request left open from before v1.15 (need_help is gone). */
   readonly helpAnswer?: HelpAnswerWake
   /** The platform message is the owner's answer to a tool-call Ask (sk-ed7r). */
   readonly toolCallAnswer?: ToolCallAnswerLabel
@@ -123,7 +123,7 @@ function platformLabel(input: WakeupMessageInput): string {
     : `[Answer to your request ${input.helpAnswer.requestId} from ${input.helpAnswer.from}]`
 }
 
-/** The answer to a Robot's need_help request: the request id and who answered ("Anna", "Mr. Robot"). */
+/** The answer to a help request left open from before v1.15: the request id and who answered ("Anna", "Mr. Robot" before v1.15). */
 export interface HelpAnswerWake {
   readonly requestId: string
   readonly from: string

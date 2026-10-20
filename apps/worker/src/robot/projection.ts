@@ -55,6 +55,7 @@ function taskAction(name: string, args: Record<string, unknown>): TaskAction | u
   }
 }
 
+// need_help stays for the logs written before v1.15.
 const QUESTION_TOOLS = new Set(['propose_grants', 'propose_member_file_edit', 'propose_skill', 'propose_review', 'request_takeover', 'setup_complete', 'need_help', 'ask', 'request_credential'])
 
 export interface ProjectionInput {
