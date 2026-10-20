@@ -36,6 +36,11 @@ export function loseBoxJobs(robotId: string): void {
 }
 export const boxJobIds = (robotId: string): string[] => [...jobs.keys()].filter((id) => id.startsWith(robotId + ':')).map((id) => id.slice(robotId.length + 1))
 
+/** Commands run in the foreground (setup.sh at boot) that wait until the test releases them: robot id → command. */
+const heldRuns = new Map<string, Set<string>>()
+export const holdBoxRun = (robotId: string, command: string): void => { heldRuns.set(robotId, (heldRuns.get(robotId) ?? new Set()).add(command)) }
+export const releaseBoxRun = (robotId: string, command: string): void => { heldRuns.get(robotId)?.delete(command) }
+
 const running = new Set<string>()
 let clock = 1
 
@@ -199,6 +204,7 @@ export class StubBox implements BoxBackend {
   async run(command: string, cwd: string, _seconds?: number, env?: Readonly<Record<string, string>>): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (!running.has(this.robotId)) throw new Error('the Box is not running')
     this.log(`run ${cwd}: ${command}`)
+    while (heldRuns.get(this.robotId)?.has(command) === true) await new Promise((resolve) => setTimeout(resolve, 10))
     const answer = (await this.builtin(command, cwd, env)) ?? boxScripts.get(this.robotId)?.(command, new StubDisk(this.disk()))
     return { stdout: answer?.stdout ?? `ran: ${command}`, stderr: answer?.stderr ?? '', exitCode: answer?.exitCode ?? 0 }
   }

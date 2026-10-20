@@ -719,8 +719,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.recordUsage('box', 0, 0, cost)
   }
 
-  /** Sync back, stop, bill (ao-joux, ao-9q18). */
+  /**
+   * Sync back, stop, bill (ao-joux, ao-9q18). A boot in flight ends first, failed or not, so the stop is the last word: the record and the
+   * container both end stopped (deep review P9b).
+   */
   async stopBox(): Promise<{ stopped: boolean }> {
+    await this.boxBoot?.catch(() => undefined)
     const current = this.boxState()
     if (current.state === 'off') return { stopped: false }
     const backend = this.boxBackend()

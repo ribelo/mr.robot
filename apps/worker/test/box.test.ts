@@ -8,7 +8,7 @@ import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { RobotPanel } from '@mr-robot/protocol'
 import { REVIEW_POLICY } from '../src/agent/auto-review.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { boxDisks, boxLog, boxScripts } from './stub-box.ts'
+import { boxDisks, boxLog, boxScripts, holdBoxRun, releaseBoxRun, StubBox } from './stub-box.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -102,6 +102,25 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     expect(boxLog.get(id)!.filter((entry) => entry.endsWith('bash setup.sh'))).toHaveLength(1)
     expect(JSON.parse(results(requests.get(id)![2]!).at(-1)!)).toMatchObject({ exitCode: 0 })
     expect(boxDisks.get(id)!.get('/workspace/copy.csv')).toBeDefined()
+  })
+
+  it('a Stop pressed while the Box boots waits for the boot, and the Box ends stopped (deep review P9b)', async () => {
+    const id = await robotWith({ box: 'allow', files: 'allow' })
+    await env.FILES.put(`robots/${id}/box/setup.sh`, 'pip3 install requests\n')
+    holdBoxRun(id, 'bash setup.sh')
+    scripts.set(id, [{ calls: [{ name: 'run', args: { on: 'box', command: 'echo hi' } }] }, { text: 'Done.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'run it' } })
+    await vi.waitFor(() => expect(boxLog.get(id)).toContain('run /workspace/box: bash setup.sh'), { timeout: 10_000 })
+    expect((await panel(id)).box?.state).toBe('booting')
+    const stop = api(ANNA, `/api/robots/${id}/box/stop`, { body: {} })
+    // The Stop has reached the Robot while setup.sh still runs.
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    releaseBoxRun(id, 'bash setup.sh')
+    expect((await stop).status).toBe(200)
+    await settle(id)
+    expect((await panel(id)).box?.state).toBe('off')
+    expect(boxLog.get(id)!.at(-1)).toBe('stop')
+    expect(await new StubBox(id).running()).toBe(false)
   })
 
   it('stops ten minutes after the last command, bills its time, and boots again on the next command', async () => {
