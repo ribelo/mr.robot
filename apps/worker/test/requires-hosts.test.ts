@@ -193,6 +193,40 @@ describe('A Robot that waits for its Hosts (v1.16 ticket 05)', () => {
     expect(await taskTurns(id)).toBe(0)
   })
 
+  it('a parked Task that was cancelled or reassigned gets no Turn when the Host returns (ob-e271)', async () => {
+    const desk = await pairedHost('Desk')
+    const id = await robotOn([desk.hostId], true)
+    await desk.drop()
+    const cancelled = await create({ title: 'Back up photos', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } })
+    const reassigned = await create({ title: 'Sync notes', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } })
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    await api(ANNA, `/api/tasks/${cancelled.id}/cancel`, { body: {} })
+    await api(ANNA, `/api/tasks/${reassigned.id}/assign`, { body: { assignee: { kind: 'nobody' } } })
+    await desk.back()
+    await pause(300)
+    await settle(id)
+    expect(await taskTurns(id)).toBe(0)
+    expect(await attempts(cancelled.id)).toEqual([])
+    expect(await attempts(reassigned.id)).toEqual([])
+  })
+
+  it('a parked Task released after its deadline fails instead of running (ob-e271)', async () => {
+    const desk = await pairedHost('Desk')
+    const id = await robotOn([desk.hostId], true)
+    await desk.drop()
+    const task = await create({ title: 'Back up photos', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000, deadline: Date.now() + 1500 } })
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    // The deadline passes and the Host's online event comes before the deadline alarm rings.
+    await pause(1600)
+    await desk.back()
+    await until(async () => (await attempts(task.id)).length === 1)
+    await settle(id)
+    expect(await taskTurns(id)).toBe(0)
+    expect(await attempts(task.id)).toEqual([expect.objectContaining({ outcome: 'failed', firstLine: expect.stringContaining('deadline') })])
+  })
+
   it('the owner\'s message wakes the Robot while a Host is offline (ob-amlz)', async () => {
     const desk = await pairedHost('Desk')
     const id = await robotOn([desk.hostId], true)

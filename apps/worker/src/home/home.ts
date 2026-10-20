@@ -1458,6 +1458,14 @@ export class Home extends DurableObject<Env> {
     })
   }
 
+  /** Whether the Task is still open and assigned to this Robot: a parked Wake-up of any other Task is dropped (v1.16 ticket 05). */
+  taskStillOpenFor(taskId: string, robotId: string): Promise<boolean> {
+    return this.run(Effect.gen(function* () {
+      const task = yield* Tasks.taskRow(taskId)
+      return task !== undefined && task.state === 'open' && task.assignee.kind === 'robot' && task.assignee.robotId === robotId
+    }))
+  }
+
   /** A Robot's alarm asks for its due Tasks; the Home hands them out and moves them on (mc-s1aa, mc-s2bb). */
   dueTasks(robotId: string): Promise<{ tasks: Tasks.DueOccurrence[]; nextDue: number | null }> { return this.run(Tasks.takeDue(robotId)) }
 

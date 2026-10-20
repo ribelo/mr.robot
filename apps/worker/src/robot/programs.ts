@@ -1058,9 +1058,15 @@ export const releaseParked = (now: number) => Effect.gen(function* () {
     return
   }
   const waiting: ParkedTask[] = []
+  const current = yield* config
+  const home = (yield* RobotPlatform).env.HOME.getByName(HOME_ID)
   for (const task of parked) {
+    // A cancelled, finished or reassigned Task gets no Turn.
+    if (!(yield* promise(() => home.taskStillOpenFor(task.id, current.id)))) continue
     const gate = yield* gateOf({ ...task, recurring: false }, now)
-    if (gate.kind === 'park') waiting.push(task)
+    // Released after its deadline it fails, as the deadline alarm would have failed it.
+    if (gate.kind === 'run' && task.deadline !== null && now >= task.deadline) yield* failWithoutTurn(task, { kind: 'fail', line: 'The deadline passed before the Task could run.', offline: [] })
+    else if (gate.kind === 'park') waiting.push(task)
     else if (gate.kind === 'fail') yield* failWithoutTurn(task, gate)
     else if (!store.taskQueued(task.id)) store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
   }
