@@ -10,6 +10,7 @@ import {
   AlwaysAllowAnswer,
   DraftEdit,
   PageRename,
+  PageShareInput,
   LoginInput,
   ConnectionPaste,
   CredentialSave,
@@ -177,6 +178,8 @@ export const api = new Router<ApiContext>()
     const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))
     return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system', mission: { ...DEFAULT_MISSION_PREFS, ...profile.mission }, acceptTasksFrom: [...(profile.acceptTasksFrom ?? [])] }
   }))
+  // Every Page the Member shares (v1.17, dp-zq16).
+  .on('GET', '/api/me/shared-pages', (c) => call(() => c.env.MEMBER.getByName(c.member.id).sharedPages(new URL(c.request.url).origin)))
   // The Member's own month by source across their Robots (ao-ef5t).
   .on('GET', '/api/me/costs', (c) => call(() => home(c.env).memberCosts(c.member.id)))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
@@ -573,6 +576,29 @@ export const api = new Router<ApiContext>()
     if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
     const { title, pdf } = yield* call(() => robot(c, id).pagePdf(path))
     return pdfResponse(title, pdf)
+  }))
+  // Shared Pages (v1.17 ticket 06): the owner alone shares and stops sharing; there is no Robot tool for it (dp-62di).
+  .on('GET', '/api/robots/:id/page/share', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    return { shared: yield* call(() => c.env.MEMBER.getByName(c.member.id).sharedPage(id, path, new URL(c.request.url).origin)) }
+  }))
+  .on('POST', '/api/robots/:id/page/share', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const input = yield* decodeBody(c.request, PageShareInput)
+    const path = normalizePath(input.path)
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    const { page } = yield* call(() => robot(c, id).pageContent(path))
+    return yield* call(() => c.env.MEMBER.getByName(c.member.id).sharePage(id, path, page.title, new URL(c.request.url).origin))
+  }))
+  .on('DELETE', '/api/robots/:id/page/share', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const input = yield* decodeBody(c.request, PageShareInput)
+    const path = normalizePath(input.path)
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    const stopped = yield* call(() => c.env.MEMBER.getByName(c.member.id).stopSharing(id, path))
+    return stopped ? { ok: true } : yield* Effect.fail(notFound('this Page is not shared'))
   }))
   .on('GET', '/api/robots/:id/webhook', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).webhook()))))
   .on('POST', '/api/robots/:id/webhook/regenerate', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).regenerateWebhook()))))

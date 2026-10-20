@@ -31,6 +31,17 @@ import { HOME_ID, type Env } from '../env.ts'
 import { makeVault, type VaultError, type VaultShape } from '../platform/vault.ts'
 import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
+import { mintShareToken, sharedPagePath, shareTokenHash } from '../pages/share-token.ts'
+import type { SharedPageView } from '@mr-robot/protocol'
+
+type SharedPageRow = {
+  readonly token_hash: string
+  readonly robot_id: string
+  readonly path: string
+  readonly title: string
+  readonly sealed_token: string
+  readonly created_at: number
+}
 
 export type MemberFileName = 'USER.md' | 'PROACTIVE_PREFERENCES.md' | 'memory/world.md'
 export const MEMBER_FILE_NAMES: readonly MemberFileName[] = ['USER.md', 'PROACTIVE_PREFERENCES.md', 'memory/world.md']
@@ -712,6 +723,8 @@ export class Member extends DurableObject<Env> {
     sql.exec("INSERT INTO usage (month, robot_id, source, input_tokens, output_tokens, cost_usd) SELECT month, robot_id, 'box', input_tokens, output_tokens, cost_usd FROM usage WHERE source = 'computer' ON CONFLICT (month, robot_id, source) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd")
     sql.exec("DELETE FROM usage WHERE source = 'computer'")
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
+    // Shared Pages (v1.17 ticket 06): one row per open share link; the token is sealed, a share is found by its hash, Stop sharing deletes the row.
+    sql.exec('CREATE TABLE IF NOT EXISTS shared_page (token_hash TEXT PRIMARY KEY, robot_id TEXT NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, sealed_token TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE (robot_id, path))')
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
     // The computers a deferred notification names (ob-6jr5); a row from before has none, so every computer shows it.
     if (!sql.exec<{ name: string }>('PRAGMA table_info(pending_notification)').toArray().some((column) => column.name === 'hosts')) sql.exec("ALTER TABLE pending_notification ADD COLUMN hosts TEXT NOT NULL DEFAULT '[]'")
@@ -823,6 +836,52 @@ export class Member extends DurableObject<Env> {
   orderGroups(ids: readonly string[]): Promise<RobotGroup[]> { return this.run(orderGroups(ids)) }
 
   /** Reset everything (pl-062x): memory files back to templates, usage and list preferences gone; credentials, logins and devices stay. */
+  // ---------------------------------------------------------------- shared Pages (v1.17 ticket 06)
+
+  private shareVault(): VaultShape {
+    return makeVault(this.env.DATA_KEY, 'shared-pages')
+  }
+
+  private async sharedView(row: SharedPageRow, origin: string): Promise<SharedPageView> {
+    const token = await Effect.runPromise(this.shareVault().open(row.sealed_token))
+    return { robotId: row.robot_id, path: row.path, title: row.title, url: origin + sharedPagePath(token), createdAt: row.created_at }
+  }
+
+  /** Share one Page of a Robot of this Member (dp-hf7v): the open link when there is one, else a new one. The owner's act only (dp-62di). */
+  async sharePage(robotId: string, path: string, title: string, origin: string): Promise<SharedPageView> {
+    const sql = this.ctx.storage.sql
+    const open = sql.exec<SharedPageRow>('SELECT * FROM shared_page WHERE robot_id = ? AND path = ?', robotId, path).toArray()[0]
+    if (open !== undefined) return this.sharedView(open, origin)
+    const id = (await this.profile()).id
+    const token = await mintShareToken(this.env.DATA_KEY, id)
+    const sealed = await Effect.runPromise(this.shareVault().seal(token))
+    sql.exec('INSERT INTO shared_page (token_hash, robot_id, path, title, sealed_token, created_at) VALUES (?, ?, ?, ?, ?, ?)', await shareTokenHash(token), robotId, path, title, sealed, Date.now())
+    return this.sharePage(robotId, path, title, origin)
+  }
+
+  /** The open share of one Page, or null. */
+  async sharedPage(robotId: string, path: string, origin: string): Promise<SharedPageView | null> {
+    const row = this.ctx.storage.sql.exec<SharedPageRow>('SELECT * FROM shared_page WHERE robot_id = ? AND path = ?', robotId, path).toArray()[0]
+    return row === undefined ? null : this.sharedView(row, origin)
+  }
+
+  /** Every shared Page of this Member, newest first (dp-zq16). */
+  async sharedPages(origin: string): Promise<SharedPageView[]> {
+    const rows = this.ctx.storage.sql.exec<SharedPageRow>('SELECT * FROM shared_page ORDER BY created_at DESC').toArray()
+    return Promise.all(rows.map((row) => this.sharedView(row, origin)))
+  }
+
+  /** Stop sharing (dp-hf7v): the row goes, and the link answers not found from now on. */
+  async stopSharing(robotId: string, path: string): Promise<boolean> {
+    return this.ctx.storage.sql.exec('DELETE FROM shared_page WHERE robot_id = ? AND path = ?', robotId, path).rowsWritten > 0
+  }
+
+  /** The Page a share link opens, or null when it was revoked (dp-jl3d). */
+  async sharedPageOf(token: string): Promise<{ readonly robotId: string; readonly path: string } | null> {
+    const row = this.ctx.storage.sql.exec<SharedPageRow>('SELECT * FROM shared_page WHERE token_hash = ?', await shareTokenHash(token)).toArray()[0]
+    return row === undefined ? null : { robotId: row.robot_id, path: row.path }
+  }
+
   async resetData(): Promise<void> {
     const sql = this.ctx.storage.sql
     sql.exec('DELETE FROM usage')

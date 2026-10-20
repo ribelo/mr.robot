@@ -37,7 +37,7 @@ export const Edge = Effect.gen(function* () {
     assets: {
       directory: './apps/web/dist',
       notFoundHandling: 'single-page-application',
-      runWorkerFirst: ['/api/*', '/hooks/*'],
+      runWorkerFirst: ['/api/*', '/hooks/*', '/p/*'],
     },
     access: {
       name: 'Mr. Robot',
@@ -97,6 +97,20 @@ export const HookChannel = Effect.gen(function* () {
     name: 'Mr. Robot webhooks',
     domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/hooks`)),
     policies: [{ name: 'Webhook key checked by the Worker', decision: 'bypass', include: ['everyone'] }],
+  })
+})
+
+/**
+ * Shared Pages (v1.17 ticket 06): /p/* is outside the Access login (a bypass application on that path), so a person with the link reads the
+ * Page without signing in; the Worker checks the token's signature and that its owner still shares it.
+ */
+export const SharedPages = Effect.gen(function* () {
+  const edge = yield* Edge
+  return yield* Cloudflare.Access.Application('SharedPages', {
+    type: 'self_hosted',
+    name: 'Mr. Robot shared Pages',
+    domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/p`)),
+    policies: [{ name: 'Share token checked by the Worker', decision: 'bypass', include: ['everyone'] }],
   })
 })
 

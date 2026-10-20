@@ -11,7 +11,7 @@ import { expect, it } from 'vitest'
 import { useOfflineCloudflare } from './offline-cloudflare.ts'
 import { BOX_IMAGE_INPUTS } from '../apps/worker/src/docs/box-tools.generated.ts'
 import { boxContextHash } from './box-context.ts'
-import { BoxChannel, Edge, Files, GoogleCallback, HookChannel, HostChannel } from './stack.ts'
+import { BoxChannel, Edge, Files, GoogleCallback, HookChannel, HostChannel, SharedPages } from './stack.ts'
 
 useOfflineCloudflare()
 
@@ -25,6 +25,7 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     yield* BoxChannel
     yield* HookChannel
     yield* GoogleCallback
+    yield* SharedPages
     return { url: edge.url }
   }))
   const plan: any = await Effect.runPromise(
@@ -43,6 +44,8 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     EdgeToken: 'Cloudflare.ApiToken.AccountApiToken',
     HookChannel: 'Cloudflare.Access.Application',
     GoogleCallback: 'Cloudflare.Access.Application',
+    // Shared Pages (v1.17 ticket 06): /p/* outside the Access login.
+    SharedPages: 'Cloudflare.Access.Application',
     // The Robots' computer: built by the deploy from the Dockerfile in the repository (ao-h1wn).
     ComputerContainer: 'Cloudflare.Container',
   })

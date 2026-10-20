@@ -4,8 +4,8 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** done (staging check open)
 
-- [ ] Workerd test: share mints a token; /p/:token serves without Access; revoke makes it 404; the shared HTML response carries the sandbox CSP; no Robot tool can share; the profile lists shares (dp-hf7v, dp-jl3d, dp-zq16, dp-62di, dp-p5yn)
-- [ ] Component test: the Share switch and the profile list (dp-hf7v, dp-zq16)
-- [ ] Staging: a shared link opened in a private window (dp-jl3d)
+- [x] Workerd test: share mints a token; /p/:token serves without Access; revoke makes it 404; the shared HTML response carries the sandbox CSP; no Robot tool can share; the profile lists shares (dp-hf7v, dp-jl3d, dp-zq16, dp-62di, dp-p5yn)
+- [x] Component test: the Share switch and the profile list (dp-hf7v, dp-zq16)
+- [ ] Staging: a shared link opened in a private window (dp-jl3d) — open: needs a deploy

@@ -1081,6 +1081,22 @@ export type PageView = typeof PageView.Type
 export const PageContent = Schema.Struct({ page: PageView, text: Schema.String })
 export type PageContent = typeof PageContent.Type
 
+/**
+ * A Page shared with a public link (v1.17, dp-hf7v, dp-zq16): which Robot and file, the title when it was shared, the link and since when.
+ * Only the owner makes one; a Robot has no tool that touches it (dp-62di).
+ */
+export const SharedPageView = Schema.Struct({
+  robotId: Schema.String,
+  path: Schema.String,
+  title: Schema.String,
+  url: Schema.String,
+  createdAt: Schema.Number,
+})
+export type SharedPageView = typeof SharedPageView.Type
+
+/** Share or stop sharing one Page. */
+export const PageShareInput = Schema.Struct({ path: Schema.String })
+
 /** Rename a Page (dp-e0rp): the new title, written into the file. */
 export const PageRename = Schema.Struct({ path: Schema.String, title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)) })
 export type PageRename = typeof PageRename.Type

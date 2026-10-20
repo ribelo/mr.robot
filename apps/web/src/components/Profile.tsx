@@ -6,7 +6,8 @@ import { Connections } from './Connections.tsx'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
-import type { AccountUsage, Me, ProviderView, ProvidersView, ThemeChoice } from '@mr-robot/protocol'
+import type { AccountUsage, Me, ProviderView, ProvidersView, RobotSummary, ThemeChoice } from '@mr-robot/protocol'
+import { SharedPages } from './PageShare.tsx'
 import { applyTheme } from '../theme/theme.ts'
 import { homeMembersAtom, keys, memberCostsAtom, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
 import { CostBreakdownView, costSummary } from './CostBreakdown.tsx'
@@ -29,7 +30,7 @@ const PROVIDERS = [
  * A Member's own settings (ux-ag0j): You, Appearance, Providers, Connections, Logins, Hosts, the Member
  * files, and the dangerous action last.
  */
-export function Profile({ me }: { me: Me }) {
+export function Profile({ me, robots = [] }: { me: Me; robots?: readonly RobotSummary[] }) {
   return (
     <div className="form">
       <You me={me} />
@@ -38,6 +39,7 @@ export function Profile({ me }: { me: Me }) {
       <Providers />
       <Connections />
       <Secrets />
+      <SharedPages robots={robots} />
       <Hosts />
       <MemberFiles />
       <ResetEverything me={me} />

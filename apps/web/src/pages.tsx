@@ -3,12 +3,13 @@ import { ThisComputer } from './components/ThisComputer.tsx'
 import { PairHost } from './components/Hosts.tsx'
 import { FilesView } from './components/FilesView.tsx'
 import { PageReader } from './components/PageReader.tsx'
+import { PageShare } from './components/PageShare.tsx'
 import { PluginDetail, PluginsPage } from './components/Plugins.tsx'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/reactivity'
 import * as Exit from 'effect/Exit'
-import type { Me, RobotSummary, Trajectory } from '@mr-robot/protocol'
+import type { Me, PageView, RobotSummary, Trajectory } from '@mr-robot/protocol'
 import { catalogAtom, keys, panelAtom, trajectoryAtom, useCommand } from './client/api-atoms.ts'
 import { exitFailure } from './client/api-failure.ts'
 import { robotFeedAtom } from './client/robot-feed.ts'
@@ -68,7 +69,7 @@ export function Pages({ route, me, robots }: { route: Route; me: Me; robots: rea
       return (
         <div className="page page-wide">
           <PageHead title={`${robot?.identity.name ?? 'Robot'} · Page`} back={{ page: 'robot', id: route.id, panel: true }} />
-          <PageReader robotId={route.id} path={route.path} canEdit={robot?.ownerId === me.id} />
+          <PageReader robotId={route.id} path={route.path} canEdit={robot?.ownerId === me.id} {...(robot?.ownerId === me.id ? { share: (page: PageView) => <PageShare robotId={route.id} page={page} /> } : {})} />
         </div>
       )
     }
@@ -76,7 +77,7 @@ export function Pages({ route, me, robots }: { route: Route; me: Me; robots: rea
     case 'profile': return (
       <div className="page">
         <PageHead title={me.name} back={{ page: 'home' }} />
-        <Profile me={me} />
+        <Profile me={me} robots={robots} />
       </div>
     )
     default: return <div className="empty-main"><Empty title="Nothing here" hint="This address does not lead to a page." /></div>

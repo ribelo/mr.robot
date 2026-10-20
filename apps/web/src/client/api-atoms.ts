@@ -30,6 +30,7 @@ export const keys = {
   plugins: 'plugins',
   connections: 'connections',
   tasks: 'tasks',
+  sharedPages: 'shared-pages',
 } as const
 
 type Read<A> = (api: MrRobotApi['Service']) => Effect.Effect<A, ApiFailure>
@@ -75,6 +76,12 @@ export const pageAtom = Atom.family((key: string) => {
   const [id = '', path = ''] = key.split('\n')
   return query((api) => api.page(id, path), [keys.files(id)])
 })
+/** The open share link of one Page (v1.17), keyed "<robot id>\n<path>". */
+export const pageShareAtom = Atom.family((key: string) => {
+  const [id = '', path = ''] = key.split('\n')
+  return query((api) => api.pageShare(id, path), [keys.sharedPages])
+})
+export const sharedPagesAtom = query((api) => api.sharedPages, [keys.sharedPages])
 export const memberFileAtom = Atom.family((name: string) => query((api) => api.memberFile(name), [keys.memberFiles]))
 export const homeMemoryAtom = query((api) => api.homeMemory, [keys.homeMemory])
 export const adminAtom = query((api) => api.admin, [keys.admin])

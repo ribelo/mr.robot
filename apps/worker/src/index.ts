@@ -1,12 +1,13 @@
 /**
  * The edge Worker: Access identity, the HTTP and WebSocket API, and routing to the
  * Durable Objects that own the data. Static PWA assets are served by the assets
- * binding before the Worker runs; only /api/* and /hooks/* reach this code.
+ * binding before the Worker runs; only /api/*, /hooks/* and /p/* (shared Pages) reach this code.
  */
 import * as Effect from 'effect/Effect'
 import { api, type ApiContext } from './edge/api.ts'
 import { call, forbidden, json, notFound, respond, type ApiError } from './edge/http.ts'
 import { hookChannel, isHookPath } from './edge/hooks.ts'
+import { isSharedPagePath, sharedPageChannel } from './edge/shared-pages.ts'
 import { GOOGLE_CALLBACK_PATH, googleCallback } from './edge/google-callback.ts'
 import { identityEmail } from './edge/identity.ts'
 import { signedBoxToken } from './box/token.ts'
@@ -82,6 +83,11 @@ export default {
     }
     // The webhook Channel is outside Access too; its key is the credential (v1.6 ticket 07).
     if (isHookPath(path)) return Effect.runPromise(hookChannel(request, env))
+    // A shared Page is outside Access too; its signed token is the credential, and only its owner made it (v1.17 ticket 06).
+    if (isSharedPagePath(path)) return sharedPageChannel(request, env).catch((error: unknown) => {
+      console.error('shared page failed', error)
+      return new Response('This page cannot be shown now.', { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } })
+    })
     // Google's callback is outside Access too; its one-time state is the credential (pa-4sr1).
     if (path === GOOGLE_CALLBACK_PATH && request.method === 'GET') return googleCallback(request, env)
     const program = Effect.gen(function* () {

@@ -13,7 +13,7 @@ import {
   AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberAvatar, MemberCosts, MemberView, SubagentView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
-  PageContent, PageView, SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
+  PageContent, PageView, SharedPageView, SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   type CredentialSave, type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
@@ -139,6 +139,11 @@ const make = Effect.gen(function* () {
     pages: (id: string) => get(Schema.Array(PageView), `/api/robots/${enc(id)}/pages`),
     page: (id: string, path: string) => get(PageContent, `/api/robots/${enc(id)}/page?path=${enc(path)}`),
     renamePage: (id: string, path: string, title: string) => request(PageView, 'POST', `/api/robots/${enc(id)}/page/rename`, { path, title }),
+    /** Shared Pages (v1.17): the open link of one Page, share it, stop sharing it, and every Page the person shares. */
+    pageShare: (id: string, path: string) => get(Schema.Struct({ shared: Schema.NullOr(SharedPageView) }), `/api/robots/${enc(id)}/page/share?path=${enc(path)}`),
+    sharePage: (id: string, path: string) => request(SharedPageView, 'POST', `/api/robots/${enc(id)}/page/share`, { path }),
+    stopSharing: (id: string, path: string) => send('DELETE', `/api/robots/${enc(id)}/page/share`, { path }),
+    sharedPages: get(Schema.Array(SharedPageView), '/api/me/shared-pages'),
 
     subscribePush: (subscription: PushSubscriptionJSON, device: string) => send('POST', '/api/push/subscriptions', { ...subscription, device }),
     unsubscribePush: (endpoint: string) => send('DELETE', '/api/push/subscriptions', { endpoint }),
