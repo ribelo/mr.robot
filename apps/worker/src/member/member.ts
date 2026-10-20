@@ -34,6 +34,12 @@ import { MEMBER_FILES } from '../workspace/templates.ts'
 import { mintShareToken, sharedPagePath, shareTokenHash } from '../pages/share-token.ts'
 import type { SharedPageView } from '@mr-robot/protocol'
 
+/** The render limits of Page PDFs (v1.17 review): a leaked share link cannot run up the bill. */
+export const PDF_RENDERS_PER_TOKEN_HOUR = 5
+export const PDF_RENDERS_PER_MEMBER_DAY = 50
+const HOUR_MS = 3_600_000
+const DAY_MS = 24 * HOUR_MS
+
 type SharedPageRow = {
   readonly token_hash: string
   readonly robot_id: string
@@ -724,6 +730,8 @@ export class Member extends DurableObject<Env> {
     sql.exec("DELETE FROM usage WHERE source = 'computer'")
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
     // Shared Pages (v1.17 ticket 06): one row per open share link; the token is sealed, a share is found by its hash, Stop sharing deletes the row.
+    // Each PDF that Browser Rendering prints for this Member's Pages (v1.17 review): the limits count them; a cached PDF is no render.
+    sql.exec('CREATE TABLE IF NOT EXISTS pdf_render (at INTEGER NOT NULL, token_hash TEXT)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_page (token_hash TEXT PRIMARY KEY, robot_id TEXT NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, sealed_token TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE (robot_id, path))')
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
     // The computers a deferred notification names (ob-6jr5); a row from before has none, so every computer shows it.
@@ -869,6 +877,19 @@ export class Member extends DurableObject<Env> {
   async sharedPages(origin: string): Promise<SharedPageView[]> {
     const rows = this.ctx.storage.sql.exec<SharedPageRow>('SELECT * FROM shared_page ORDER BY created_at DESC').toArray()
     return Promise.all(rows.map((row) => this.sharedView(row, origin)))
+  }
+
+  /**
+   * Take one PDF render, or refuse it (v1.17 review): at most PDF_RENDERS_PER_TOKEN_HOUR for one share link in an hour and PDF_RENDERS_PER_MEMBER_DAY
+   * for all of this Member's Pages in a day, the owner's own PDFs included. A refused render is not counted.
+   */
+  async takePdfRender(tokenHash: string | null, now: number): Promise<'taken' | 'link-limit' | 'member-limit'> {
+    const sql = this.ctx.storage.sql
+    sql.exec('DELETE FROM pdf_render WHERE at <= ?', now - DAY_MS)
+    if (sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM pdf_render').one().n >= PDF_RENDERS_PER_MEMBER_DAY) return 'member-limit'
+    if (tokenHash !== null && sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM pdf_render WHERE token_hash = ? AND at > ?', tokenHash, now - HOUR_MS).one().n >= PDF_RENDERS_PER_TOKEN_HOUR) return 'link-limit'
+    sql.exec('INSERT INTO pdf_render (at, token_hash) VALUES (?, ?)', now, tokenHash)
+    return 'taken'
   }
 
   /** A shared Page was renamed (dp-e0rp): the profile lists it under the new title. */

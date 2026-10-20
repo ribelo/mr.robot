@@ -6,11 +6,11 @@
  *
  * - /p/<token>: a Markdown Page rendered on the server; an HTML Page in a frame under a header with its title and the PDF link.
  * - /p/<token>/content: an HTML Page itself, under a Content-Security-Policy sandbox.
- * - /p/<token>/pdf: the Page printed by Browser Rendering.
+ * - /p/<token>/pdf: the Page printed by Browser Rendering, once per content version, within the render and spend limits (429 and 503 otherwise).
  */
 import { escapeHtml } from '../platform/markdown-html.ts'
 import { HTML_PAGE_CSP, MARKDOWN_PAGE_CSP } from '../pages/page-html.ts'
-import { signedShareToken } from '../pages/share-token.ts'
+import { shareTokenHash, signedShareToken } from '../pages/share-token.ts'
 import type { Env } from '../env.ts'
 import { pdfResponse } from './api.ts'
 
@@ -23,7 +23,9 @@ const SANDBOX = 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandb
 
 const COMMON: Record<string, string> = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow', 'cache-control': 'no-store' }
 
-const notFound = (): Response => new Response('This page is not shared, or no longer.', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8', ...COMMON } })
+const text = (message: string, status: number): Response => new Response(message, { status, headers: { 'content-type': 'text/plain; charset=utf-8', ...COMMON } })
+
+const notFound = (): Response => text('This page is not shared, or no longer.', 404)
 
 const html = (body: string, policy: string): Response => new Response(body, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': policy, ...COMMON } })
 
@@ -46,10 +48,17 @@ export async function sharedPageChannel(request: Request, env: Env): Promise<Res
   const robot = env.ROBOT.getByName(shared.robotId)
   try {
     if (part === 'pdf') {
-      const { title, pdf } = await robot.pagePdf(shared.path)
-      const response = pdfResponse(title, pdf)
-      for (const [name, value] of Object.entries(COMMON)) response.headers.set(name, value)
-      return response
+      const printed = await robot.pagePdf(shared.path, { tokenHash: await shareTokenHash(signed.token) })
+      switch (printed.kind) {
+        case 'pdf': {
+          const response = pdfResponse(printed.title, printed.pdf)
+          for (const [name, value] of Object.entries(COMMON)) response.headers.set(name, value)
+          return response
+        }
+        case 'limited': return text(printed.message, 429)
+        // Over the Robot's spend limit: no PDF, and the Page itself still serves.
+        case 'unavailable': return text('PDF unavailable.', 503)
+      }
     }
     const page = await robot.pageHtml(shared.path)
     if (part === 'content') return page.format === 'html' ? html(page.html, SANDBOX + '; ' + HTML_PAGE_CSP) : notFound()

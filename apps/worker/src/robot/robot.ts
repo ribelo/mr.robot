@@ -89,7 +89,13 @@ import { draftText } from '../agent/draft.ts'
 import { PAGE_TITLES, PAGES_DIRECTORY, pageExcerpt, pageFormat, pageTitle, renamedPage, type PageFormat } from '../pages/page.ts'
 import { pageDocument } from '../pages/page-html.ts'
 import { printPdf } from '../pages/page-pdf.ts'
-import { cachedDocument, deletePageCache, storeDocument, versionOf, type PageDocument } from '../pages/page-cache.ts'
+import { cachedDocument, cachedPdf, deletePageCache, storeDocument, storePdf, versionOf, type PageDocument } from '../pages/page-cache.ts'
+
+/** A Page's PDF, or why there is none now: a render limit (dp-239c, v1.17 review), or the Robot's spend limit. */
+export type PagePdf =
+  | { readonly kind: 'pdf'; readonly title: string; readonly pdf: Uint8Array }
+  | { readonly kind: 'limited'; readonly message: string }
+  | { readonly kind: 'unavailable' }
 
 /** Pages larger than this are listed by their file name: their text is not read for a title. */
 const PAGE_READ_BYTES = 1024 * 1024
@@ -3495,10 +3501,33 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return document
   }
 
-  /** The Page as a PDF, printed by Browser Rendering (dp-239c). */
-  async pagePdf(path: string): Promise<{ readonly title: string; readonly pdf: Uint8Array }> {
-    const { title, html } = await this.pageHtml(path)
-    return { title, pdf: await printPdf(this.env.BROWSER, html) }
+  /**
+   * The Page as a PDF (dp-239c), printed by Browser Rendering at most once per content version (v1.17 review): a cached PDF is served as it is.
+   * A render needs the Robot under its spend limit, and a turn within the Member's render limits (per share link, per day); its browser time is
+   * the Robot's cost under the source browser.
+   */
+  async pagePdf(path: string, share?: { readonly tokenHash: string }): Promise<PagePdf> {
+    const config = this.store.requireConfig()
+    const document = await this.pageHtml(path)
+    const cached = await cachedPdf(this.env.FILES, config.id, path, document.version)
+    if (cached !== undefined) return { kind: 'pdf', title: document.title, pdf: cached }
+    if (await this.checkLimits()) return { kind: 'unavailable' }
+    const taken = await this.env.MEMBER.getByName(config.ownerId).takePdfRender(share?.tokenHash ?? null, Date.now())
+    if (taken !== 'taken') return { kind: 'limited', message: taken === 'link-limit' ? 'This Page was printed to PDF too often in the last hour; try again later.' : 'The PDFs of these Pages were printed too often today; try again tomorrow.' }
+    const started = Date.now()
+    const pdf = await this.printPdf(document.html).finally(async () => {
+      const ms = Date.now() - started
+      const cost = browserCost('browser-run', ms)
+      this.store.addBrowserUsage(currentMonth(), 'browser-run', ms, cost)
+      await this.recordUsage('browser', 0, 0, cost)
+    })
+    await storePdf(this.env.FILES, config.id, path, document.version, pdf).catch((error: unknown) => console.warn('PDF not cached', error))
+    return { kind: 'pdf', title: document.title, pdf }
+  }
+
+  /** Print an HTML document to PDF: the Browser Rendering seam (tests print without it). */
+  protected printPdf(html: string): Promise<Uint8Array> {
+    return printPdf(this.env.BROWSER, html)
   }
 
   /** One file for the editor; binary and large files are read-only (rb-q5eb). */

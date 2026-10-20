@@ -58,10 +58,10 @@ import { memberAvatarObject } from '../home/home.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import { modelRefusal } from '../robot/model-choice.ts'
-import type { AnswerResult, HelpAnswerResult, SessionCaptureStart } from '../robot/robot.ts'
+import type { AnswerResult, HelpAnswerResult, PagePdf, SessionCaptureStart } from '../robot/robot.ts'
 import { parseTimeZone } from '../robot/time-zone.ts'
 import { parseJobId } from '../places/job-id.ts'
-import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
+import { ApiError, badRequest, call, conflict, decodeBody, forbidden, notFound, Router } from './http.ts'
 import { actsAsPerson, pluginByName } from '../plugins/catalog.ts'
 import { connectPastedValues, sharingRefusal } from '../member/connect-pasted.ts'
 import { isSignInKind } from '@mr-robot/host-protocol'
@@ -574,8 +574,12 @@ export const api = new Router<ApiContext>()
     yield* reach(c, id)
     const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
     if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
-    const { title, pdf } = yield* call(() => robot(c, id).pagePdf(path))
-    return pdfResponse(title, pdf)
+    const printed = yield* call((): Promise<PagePdf> => robot(c, id).pagePdf(path))
+    switch (printed.kind) {
+      case 'pdf': return pdfResponse(printed.title, printed.pdf)
+      case 'limited': return yield* Effect.fail(new ApiError({ status: 429, message: printed.message }))
+      case 'unavailable': return yield* Effect.fail(new ApiError({ status: 503, message: 'PDF unavailable: this Robot reached its spend limit.' }))
+    }
   }))
   // Shared Pages (v1.17 ticket 06): the owner alone shares and stops sharing; there is no Robot tool for it (dp-62di).
   .on('GET', '/api/robots/:id/page/share', (c, { id }) => Effect.gen(function* () {

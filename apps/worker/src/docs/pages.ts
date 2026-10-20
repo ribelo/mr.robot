@@ -22,6 +22,15 @@ The address is #/r/<robot>/pages/<path>.
 - Rename (the owner only) changes the title.
 - PDF prints the Page through Browser Rendering and downloads it.
 
+## PDF and its limits
+
+Browser Rendering prints a Page at most once per version of its content: the file and the Workspace images it shows. Every later PDF of the same version, from the app or from a share link, is the kept copy and costs nothing. The rendered HTML of a Page is kept the same way.
+
+- A share link prints at most 5 new PDFs in an hour.
+- All Pages of one Member print at most 50 new PDFs in a day, the owner's own included.
+- Over a limit, the PDF answers 429 with one sentence. A kept copy is still served.
+- The browser time of each print is the Robot's cost, under the source browser. It counts toward the Robot's spend limit. Over that limit, a new PDF answers 503 "PDF unavailable"; the Page itself still opens.
+
 The Robot's panel lists its Pages, newest first. The Files view groups them under Pages, with Open as Page.
 
 ## Sharing

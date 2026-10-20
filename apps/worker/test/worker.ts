@@ -92,6 +92,11 @@ export class Member extends ProductionMember {
     this.ctx.storage.sql.exec('UPDATE account SET expires = 0')
   }
 
+  /** PDF renders this Member's Pages already had in the last hours, for one share link or for none. */
+  async pdfRendersForTest(count: number, tokenHash: string | null): Promise<void> {
+    for (let index = 0; index < count; index += 1) this.ctx.storage.sql.exec('INSERT INTO pdf_render (at, token_hash) VALUES (?, ?)', Date.now() - 60_000, tokenHash)
+  }
+
   /** Every notification delivered to devices, in order. */
   async deliveredForTest(): Promise<PushNotification[]> {
     return delivered.get((await this.profile()).id) ?? []
@@ -126,6 +131,9 @@ export class Member extends ProductionMember {
   }
 }
 
+/** Every document a test Robot printed to PDF, in order. */
+export const printedPdfs: string[] = []
+
 /** The production Robot with the scripted stub model on the "stub" Provider. */
 export class Robot extends ProductionRobot {
   /** Fake connectors set by a test replace the real ones; their HTTP is the recorded fake service. */
@@ -135,6 +143,18 @@ export class Robot extends ProductionRobot {
 
   protected override connectorFetch(): typeof globalThis.fetch {
     return fakeConnectors.size === 0 ? connectorFixtures.fetch : fakeService
+  }
+
+  /** Browser Rendering is not reached from a test: a print takes 20 ms, is counted, and gives a PDF that names the document's title. */
+  protected override async printPdf(html: string): Promise<Uint8Array> {
+    printedPdfs.push(html)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    return new TextEncoder().encode(`%PDF-1.7 ${/<title>([^<]*)<\/title>/.exec(html)?.[1] ?? ''}`)
+  }
+
+  /** A cost on this Robot's counters, as a Turn would leave it. */
+  async spendForTest(usd: number): Promise<void> {
+    await this.recordUsage('robot', 0, 0, usd)
   }
 
   protected override adapter(provider: string, contextWindow?: number, model?: string, wire?: 'chat' | 'anthropic' | 'responses'): LlmAdapter {
