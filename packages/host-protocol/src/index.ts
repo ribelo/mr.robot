@@ -166,6 +166,10 @@ export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Downl
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])
 export type Sandbox = typeof Sandbox.Type
 
+/** The shell a Host runs commands in: bash (Linux, macOS) or PowerShell 7 (Windows), so a Robot writes the right commands (v1.16 ticket 04, ob-vyyg). */
+export const Shell = Schema.Literals(['bash', 'pwsh'])
+export type Shell = typeof Shell.Type
+
 /** What a Host reports every few seconds while connected (hs-7dlt). */
 export const Heartbeat = Schema.Struct({
   version: Schema.String,
@@ -178,6 +182,10 @@ export const Heartbeat = Schema.Struct({
     chrome: Schema.NullOr(Schema.String),
     /** How completely this computer confines a command (v1.16, ob-n72n): full, partial (older kernel, Windows) or none (a confined command fails closed). */
     sandbox: Sandbox,
+    /** The shell of this computer; absent in an app from before v1.16 (which ran bash). */
+    shell: Schema.optional(Shell),
+    /** Why no command can run here, in words for the owner (the Windows app without PowerShell 7, with the link to install it); absent when commands run. */
+    shellProblem: Schema.optional(Schema.String),
   }),
 })
 export type Heartbeat = typeof Heartbeat.Type

@@ -13,8 +13,15 @@ allowBuilds:
   protobufjs: false
   '@google/genai': false
   '@deepseek-ai/dsh-subprocess-local': false
+  electron-winstaller: false
 
 minimumReleaseAge: 0
+
+# The Windows installer of the Host app is built on any machine (apps/host, "pnpm dist:win"): it needs the Windows binary of koffi
+# (the Win32 calls of DSH's sandbox), which pnpm would otherwise skip because it is not this machine's platform.
+supportedArchitectures:
+  os: [current, win32]
+  cpu: [current, x64]
 
 # The PWA uses DSH client packages whose cordis peer resolves differently from the Worker's;
 # keep each app's copy instead of merging them (merging broke the Worker's cordis types).
