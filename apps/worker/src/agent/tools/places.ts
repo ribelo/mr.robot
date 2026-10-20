@@ -12,21 +12,19 @@ import { readWindow, replaceText } from '../../places/file-ops.ts'
 import type { PlaceFiles } from '../../places/files.ts'
 import { parseJobId, type JobId } from '../../places/job-id.ts'
 import type { JobEntry, JobOutputView, KillView, RunResult } from '../../places/jobs.ts'
-import type { CopyEnd, CopyResult, Escalation, FilesRequest, RunInput } from '../../places/places.ts'
+import type { CopyEnd, CopyResult, PlaceCall, RunInput } from '../../places/places.ts'
 import { isTransferFailure } from '../../places/transfers.ts'
 import { tool } from './define.ts'
 
 /** What the tools ask of the Robot's places. */
 export interface PlacesHost {
-  /** The files of a place, for a call that only reads. */
-  files(on: string, tool: string): Promise<PlaceFiles>
-  /** Do something on the files of a place; a call that asked to escalate waits for its owner first. */
-  withFiles<A>(request: FilesRequest, exec: ToolRunContext, action: (files: PlaceFiles) => Promise<A>): Promise<A | WaitingResult>
-  run(input: RunInput, exec: ToolRunContext): Promise<RunResult | WaitingResult>
-  copy(from: CopyEnd, to: CopyEnd, exec: ToolRunContext, escalation?: Escalation): Promise<CopyResult | WaitingResult>
+  /** Do something on the files of a place; a call to a place at ask, or one that asked to escalate, waits for its owner first. */
+  withFiles<A>(on: string, call: PlaceCall, action: (files: PlaceFiles) => Promise<A>): Promise<A | WaitingResult>
+  run(input: RunInput, call: PlaceCall): Promise<RunResult | WaitingResult>
+  copy(from: CopyEnd, to: CopyEnd, call: PlaceCall): Promise<CopyResult | WaitingResult>
   jobList(): JobEntry[]
-  jobOutput(id: JobId, wait: boolean, timeoutMs: number): Promise<JobOutputView>
-  jobKill(id: JobId): Promise<KillView>
+  jobOutput(id: JobId, wait: boolean, timeoutMs: number, call: PlaceCall): Promise<JobOutputView | WaitingResult>
+  jobKill(id: JobId, call: PlaceCall): Promise<KillView | WaitingResult>
 }
 
 /**
@@ -50,16 +48,9 @@ function jobOf(text: unknown): JobId {
   return id
 }
 
-/** A call that asked to escalate, with its arguments as given; the Ask stores them and the owner's approval runs them again. */
-const escalationOf = (args: { readonly escalate?: boolean; readonly reason?: string }): Escalation | undefined =>
-  args.escalate === true ? { reason: args.reason, arguments: { ...args } } : undefined
-
-
-/** The escalation of a call, as the property a request carries when there is one. */
-const escalating = (args: { readonly escalate?: boolean; readonly reason?: string }): { escalation?: Escalation } => {
-  const escalation = escalationOf(args)
-  return escalation === undefined ? {} : { escalation }
-}
+/** One call with its arguments as given: when it waits for the owner, the Ask stores them and the owner's approval runs them again. */
+const callOf = (tool: string, args: object, exec: ToolRunContext): PlaceCall =>
+  ({ tool, arguments: { ...args }, escalate: 'escalate' in args && args.escalate === true, exec })
 
 const ESCALATE_PARAMETER = { type: 'boolean', description: 'Only after the sandbox of a computer denied this: ask your owner to let it run once without the sandbox. Needs reason. The call does not run now; you are woken with its result or the answer. Computers only' }
 const REASON_PARAMETER = { type: 'string', description: 'With escalate: why this needs to reach outside the sandbox, in one sentence; your owner reads it. Also required when your owner approves each use of the files grant' }
@@ -121,9 +112,12 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           required: ['on', 'file_path'],
         },
         concurrencySafe: true,
-        execute: ({ on, file_path, offset, limit }) => guarded('read', async () => {
-          const content = await (await host.files(on, 'read')).readFile(file_path)
-          return 'text' in content ? readWindow(content.path, content.text, offset, limit) : { path: content.path, size: content.size, encoding: 'base64', base64: content.base64 }
+        execute: (args, exec) => guarded('read', async () => {
+          const { on, file_path, offset, limit } = args
+          return host.withFiles(on, callOf('read', args, exec), async (files) => {
+            const content = await files.readFile(file_path)
+            return 'text' in content ? readWindow(content.path, content.text, offset, limit) : { path: content.path, size: content.size, encoding: 'base64', base64: content.base64 }
+          })
         }),
       }),
       tool<{ on: string; file_path: string; content: string; encoding?: 'text' | 'base64'; escalate?: boolean; reason?: string }>({
@@ -143,7 +137,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         emptyAllowed: ['content'],
         execute: (args, exec) => guarded('write', async () => {
           const { on, file_path, content, encoding } = args
-          const done = await host.withFiles({ on, tool: 'write', ...escalating(args) }, exec, (files) => files.writeFile(file_path, content, encoding ?? 'text'))
+          const done = await host.withFiles(on, callOf('write', args, exec), (files) => files.writeFile(file_path, content, encoding ?? 'text'))
           return isWaitingResult(done) ? done : { on, written: done.path, bytes: done.bytes }
         }),
       }),
@@ -165,7 +159,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         emptyAllowed: ['new_string'],
         execute: (args, exec) => guarded('edit', async () => {
           const { on, file_path, old_string, new_string, replace_all } = args
-          const done = await host.withFiles({ on, tool: 'edit', ...escalating(args) }, exec, async (files) => {
+          const done = await host.withFiles(on, callOf('edit', args, exec), async (files) => {
             const content = await files.readFile(file_path)
             if (!('text' in content)) throw new Error(`${content.path} is not a text file, so it cannot be edited`)
             return files.writeFile(file_path, replaceText(content.text, old_string, new_string, replace_all === true), 'text')
@@ -178,7 +172,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         description: `Delete a file. ${filePlaces(reach)} ${PATH_RULES}`,
         parameters: { properties: { on: filePlace(reach), path: { type: 'string', description: 'The file to delete' }, escalate: ESCALATE_PARAMETER, reason: REASON_PARAMETER }, required: ['on', 'path'] },
         execute: (args, exec) => guarded('delete_file', async () => {
-          const done = await host.withFiles({ on: args.on, tool: 'delete_file', ...escalating(args) }, exec, (files) => files.removeFile(args.path))
+          const done = await host.withFiles(args.on, callOf('delete_file', args, exec), (files) => files.removeFile(args.path))
           return isWaitingResult(done) ? done : { deleted: done.path }
         }),
       }),
@@ -187,7 +181,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         description: `List the files matching a glob (* within a segment, ** across segments, ?), as an array of paths (empty when none match). On a Box or a computer the paths are those the place prints, .git and node_modules are skipped, and a pattern starts at the directory before its first wildcard. ${filePlaces(reach)}`,
         parameters: { properties: { on: filePlace(reach), pattern: { type: 'string', description: 'The pattern to match' } }, required: ['on', 'pattern'] },
         concurrencySafe: true,
-        execute: ({ on, pattern }) => guarded('glob', async () => (await host.files(on, 'glob')).glob(pattern)),
+        execute: (args, exec) => guarded('glob', async () => host.withFiles(args.on, callOf('glob', args, exec), (files) => files.glob(args.pattern))),
       }),
       tool<{ on: string; pattern: string; glob?: string; ignore_case?: boolean; path?: string }>({
         name: 'grep',
@@ -203,14 +197,16 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           required: ['on', 'pattern'],
         },
         concurrencySafe: true,
-        execute: ({ on, pattern, glob, ignore_case, path }) => guarded('grep', async () =>
-          (await host.files(on, 'grep')).grep({ pattern, ignoreCase: ignore_case === true, ...(glob === undefined ? {} : { glob }), ...(path === undefined ? {} : { path }) })),
+        execute: (args, exec) => guarded('grep', async () => {
+          const { on, pattern, glob, ignore_case, path } = args
+          return host.withFiles(on, callOf('grep', args, exec), (files) => files.grep({ pattern, ignoreCase: ignore_case === true, ...(glob === undefined ? {} : { glob }), ...(path === undefined ? {} : { path }) }))
+        }),
       }),
       tool<{ from: CopyEnd; to: CopyEnd; escalate?: boolean; reason?: string }>({
         name: 'copy',
         description: `Copy one file from one place to another, as it is (binary too); the content does not pass through you, so use this, not read and write, for reports, datasets, images and anything large. Both ends name their place; copy overwrites the target. There is no size limit: a file goes straight between R2 and the computer or the Box. Between two computers, or the Box and a computer, the file is parked in your Workspace under tmp/ and deleted when the copy ends. A file copied into your Workspace under box/ is on your Box at its next boot. ${filePlaces(reach)} Returns both paths, the size and the time. ${PATH_RULES}`,
         parameters: { properties: { from: endSchema('The file to copy'), to: endSchema('Where the copy goes'), escalate: ESCALATE_PARAMETER, reason: REASON_PARAMETER }, required: ['from', 'to'] },
-        execute: (args, exec) => guarded('copy', async () => host.copy(end(args.from, 'from'), end(args.to, 'to'), exec, escalationOf(args))),
+        execute: (args, exec) => guarded('copy', async () => host.copy(end(args.from, 'from'), end(args.to, 'to'), callOf('copy', args, exec))),
       }),
     )
   }
@@ -234,7 +230,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         },
         execute: (args, exec) => guarded('run', async () => {
           const { on, command, cwd, timeout_seconds, run_in_background } = args
-          return host.run({ on, command, ...(cwd === undefined ? {} : { cwd }), seconds: Math.min(RUN_MAX_TIMEOUT, Math.max(1, Math.round(timeout_seconds ?? RUN_DEFAULT_TIMEOUT))), background: run_in_background === true, ...escalating(args) }, exec)
+          return host.run({ on, command, ...(cwd === undefined ? {} : { cwd }), seconds: Math.min(RUN_MAX_TIMEOUT, Math.max(1, Math.round(timeout_seconds ?? RUN_DEFAULT_TIMEOUT))), background: run_in_background === true }, callOf('run', args, exec))
         }),
       }),
       tool<Record<string, never>>({
@@ -255,13 +251,13 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           },
           required: ['job_id'],
         },
-        execute: ({ job_id, wait, timeout_seconds }) => guarded('job_output', async () => host.jobOutput(jobOf(job_id), wait === true, Math.round((timeout_seconds ?? JOB_WAIT_DEFAULT_SECONDS) * 1000))),
+        execute: (args, exec) => guarded('job_output', async () => host.jobOutput(jobOf(args.job_id), args.wait === true, Math.round((args.timeout_seconds ?? JOB_WAIT_DEFAULT_SECONDS) * 1000), callOf('job_output', args, exec))),
       }),
       tool<{ job_id: string }>({
         name: 'job_kill',
         description: 'Stop a running job: on the Box TERM to its whole process group, KILL five seconds later; on a computer the app stops it. Its output so far is kept in spill/jobs/.',
         parameters: { properties: { job_id: { type: 'string', description: 'The job id from run or job_list' } }, required: ['job_id'] },
-        execute: ({ job_id }) => guarded('job_kill', async () => host.jobKill(jobOf(job_id))),
+        execute: (args, exec) => guarded('job_kill', async () => host.jobKill(jobOf(args.job_id), callOf('job_kill', args, exec))),
       }),
     )
   }

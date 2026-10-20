@@ -67,7 +67,7 @@ import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platfor
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { CredentialSave } from '@mr-robot/protocol'
-import type { ChainEntry, HomeSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
+import type { ChainEntry, GrantLevel, HomeSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
@@ -167,7 +167,8 @@ import type { RobotInit } from './programs.ts'
 
 export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost, SayHost {
   protected readonly store: RobotStore
-  private composition: { readonly revision: number; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
+  /** The composition, with the settings revision and the reach (mountsKey) it was built for. */
+  private composition: { readonly revision: number; readonly reach: string; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
   private browserPage: Promise<BrowserPage> | undefined
@@ -791,14 +792,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private places(): Places {
     this.placeService ??= new Places({
       workspace: this,
-      workspaceUsable: () => this.workspaceUsable(),
-      boxUsable: () => this.groupUsable('box'),
-      hostUsable: (hostId, facet) => this.store.mayUse('host', hostFacetKey(hostId, facet)),
+      inSetup: () => this.store.config()?.status === 'setup',
+      workspaceLevel: () => this.groupLevel('files'),
+      boxLevel: () => this.groupLevel('box'),
+      hostLevel: (hostId, facet) => this.store.levelOf('host', hostFacetKey(hostId, facet)),
       hosts: () => this.home().hostsFor(this.store.requireConfig().ownerId),
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
       link: (host, reach) => hostLink(this.hostCaller(), host, reach),
       jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach),
-      escalation: { approved: (callId) => this.approvedCalls.has(callId), ask: (request, exec) => this.askGateHost().askToolCall(request, exec) },
+      asks: { approved: (callId) => this.approvedCalls.has(callId), ask: (request, exec) => this.askGateHost().askToolCall(request, exec) },
       jobs: this.jobs(),
       transfers: this.transfers(),
       windowParts: this.hostWindowParts(),
@@ -813,7 +815,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Whether a tool group is usable now: allow or ask, and the Home has its plugin on. */
   private groupUsable(group: 'files' | 'box'): boolean {
-    return !disabledToolGroups(this.pluginsOn).has(group) && this.store.mayUse('tool', group)
+    return usableLevel(this.groupLevel(group))
+  }
+
+  /** The level of a tool group now: deny when the Home has its plugin off. */
+  private groupLevel(group: 'files' | 'box'): GrantLevel {
+    return disabledToolGroups(this.pluginsOn).has(group) ? 'deny' : this.store.levelOf('tool', group)
   }
 
   /** The S3 side of the Files bucket (v1.16 ticket 06); tests give a recorded one. */
@@ -1845,7 +1852,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async agent(): Promise<Composition> {
     const config = this.store.requireConfig()
-    if (this.composition?.revision === config.revision) return this.composition.value
+    const reach = this.mountsKey()
+    if (this.composition?.revision === config.revision && this.composition.reach === reach) return this.composition.value
     // Running Subagents live in this composition: a settings change applies once they are done (ao-ij3i).
     if (this.composition !== undefined && this.children.size > 0) return this.composition.value
     await this.releaseComposition()
@@ -1894,9 +1902,23 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await Effect.runPromise(Scope.close(scope, Exit.void))
       throw error
     })
-    this.composition = { revision: config.revision, value, scope }
+    this.composition = { revision: config.revision, reach, value, scope }
     this.pendingSeed = undefined
     return value
+  }
+
+  /**
+   * What the mounted tools follow beside the settings revision: the levels that apply (Mr. Robot's follow what his owner reaches, which
+   * changes without a settings change), the Hosts and Connections the owner reaches, and the Home's plugin switches. A composition built
+   * for another reach is rebuilt, so that a tool at ask is wrapped by the ask gate.
+   */
+  private mountsKey(): string {
+    return JSON.stringify({
+      grants: this.store.effectiveGrants(),
+      hosts: this.knownHosts.map((host) => [host.id, host.name]),
+      connections: this.knownConnections.map((connection) => connection.id),
+      plugins: this.pluginsOn,
+    })
   }
 
   /** The identity line the adapter of the Robot's model puts before its prompt; null when none, or when no adapter can be built for it. */
