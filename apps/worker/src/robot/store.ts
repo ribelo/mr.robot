@@ -8,6 +8,7 @@ import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
+import { isRemovedBrowserBackend } from '../browser/removed-backends.ts'
 import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
 import { costBreakdown, type CostBreakdown, type UsageSource } from '@mr-robot/protocol'
 import { emptyGrants, GRANT_FIELDS, grantLevel, isGrantLevel, overlayGrants, parseGrantSet, robotIdentity, usableLevel, type StoredIdentity } from '@mr-robot/protocol'
@@ -180,7 +181,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 19
+const SCHEMA_VERSION = 20
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -239,6 +240,21 @@ function renameComputerToBox(sql: SqlStorage): void {
   }
 }
 
+/**
+ * A Robot on a removed browser backend follows the Home default (v1.16 ticket 08, ob-l24v), which is Browser Rendering after the
+ * Home's own migration. A session left open on the removed backend is forgotten: nothing runs there any more. Usage rows keep their
+ * backend names as history (ob-0c3o).
+ */
+function moveOffRemovedBrowsers(sql: SqlStorage): void {
+  const row = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  if (row !== undefined) {
+    const config = JSON.parse(row.v) as { readonly browserBackend?: unknown }
+    if (isRemovedBrowserBackend(config.browserBackend)) sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, browserBackend: null }))
+  }
+  const session = sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = 'browser-session'").toArray()[0]
+  if (session !== undefined && isRemovedBrowserBackend((JSON.parse(session.v) as { readonly backend?: unknown }).backend)) sql.exec("DELETE FROM kv WHERE k = 'browser-session'")
+}
+
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
 function addColumns(sql: SqlStorage, table: string, columns: readonly string[]): void {
   const present = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((column) => column.name))
@@ -246,6 +262,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Two browsers (v1.16 ticket 08, ob-l24v): a Robot on Container Chrome follows the Home default.
+  20: [moveOffRemovedBrowsers],
   // The Box's jobs (v1.15 ticket 07, gb-lnph): commands that go on by themselves, with the offsets of what the Robot has read.
   19: ["CREATE TABLE IF NOT EXISTS box_job (id TEXT PRIMARY KEY, command TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, exit_code INTEGER, status TEXT NOT NULL, out_offset INTEGER NOT NULL DEFAULT 0, err_offset INTEGER NOT NULL DEFAULT 0, foreground INTEGER NOT NULL DEFAULT 1, spill TEXT) WITHOUT ROWID"],
   // Every Robot can ask its chief (v1.15 ticket 04, gb-qmnc): the recipient Grant to its owner's Mr. Robot and the messaging group, given once to the Robots that exist.

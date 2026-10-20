@@ -2,7 +2,6 @@
  * The Box seam (v1.14 ticket 10, ao-33fs): what a Robot needs of its Box, like the browser seam. The
  * Cloudflare Container adapter is the one runtime today; another runtime later is another adapter. Tests use a stub.
  */
-import { BACKENDS } from '../browser/backends.ts'
 import type { Env } from '../env.ts'
 
 export interface BoxFile {
@@ -61,8 +60,10 @@ export function containerBox(env: Env, robotId: string): BoxBackend {
   }
 }
 
-/** Cloudflare's container rate for the standard instance: the Chrome container's rate (ao-54j2). */
-export const BOX_HOURLY_USD = BACKENDS.container.hourlyUsd
+/**
+ * Cloudflare's container rate for the standard instance (1 vCPU, 4 GiB, ao-54j2): $0.000020 per vCPU-second + $0.0000025 per GiB-second.
+ */
+export const BOX_HOURLY_USD = 0.108
 
 export function boxCost(ms: number): number {
   return (Math.max(0, ms) / 3_600_000) * BOX_HOURLY_USD

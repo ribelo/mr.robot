@@ -4,14 +4,11 @@ Each Robot has its own browser. The Robot uses it to open pages, read them, clic
 
 ## Backends
 
-A browser backend is what runs the Chrome. The owner chooses it per Robot. The default comes from the Home.
-- Browser Run: Cloudflare Browser Rendering. Its requests come from Cloudflare addresses and carry a Cloudflare signature. Some sites block them.
-- Container Chrome: Chrome in a Cloudflare Container, without the signature.
-- Container Chrome via VPN: the same, with the traffic through a VPN of the owner.
-- Container Chrome via proxy: the same, through a proxy address of the owner.
-- Host browser: Chrome on a Host. Read hosts.md.
+A browser backend is what runs the Chrome. There are two. The owner chooses one per Robot. The default comes from the Home and is Browser Run.
+- Browser Run: Cloudflare Browser Rendering, in the cloud. Its requests come from Cloudflare addresses and carry a Cloudflare signature. Some sites block them.
+- Host browser: Chrome on a Host, a real computer of the owner with a home connection. Read hosts.md.
 
-All backends sit behind one seam. The tools work in the same way on each. Cookies and local storage stay per Robot between Turns and between backends. When a site blocks the Robot, browser_observe says so and names the backend. Tell the owner and suggest another backend. Do not retry.
+Both backends sit behind one seam. The tools work in the same way on each. Cookies and local storage stay per Robot between Turns and between backends. When a site blocks the Robot, browser_observe says so, names the backend and names the other one. Tell the owner and suggest the other one: a Host browser when Browser Run was blocked, Browser Run when a Host browser was blocked. Do not retry.
 
 ## Logins
 
