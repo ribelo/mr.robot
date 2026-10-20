@@ -4,6 +4,7 @@
  * says whether the owner approved this call to run without the sandbox.
  */
 import type { HostView } from '@mr-robot/protocol'
+import { answerOf, type HostCallReply } from '../member/host-call.ts'
 import type { Member } from '../member/member.ts'
 import { HostRunner, type HostJobLink, type HostRuns } from './host-runner.ts'
 import { hostPlace, type Reach } from './host-facet.ts'
@@ -15,8 +16,11 @@ export interface HostCaller {
   readonly robotId: string
   /** The Member DO of the owner of a Host. */
   owner(hostId: string): Promise<DurableObjectStub<Member>>
-  /** A Host call, failing as Host calls fail (hs-bfr8): offline, refused, a mode that does not allow it, no sandbox, an OS error. */
-  call<A>(host: string, call: () => Promise<A>): Promise<A>
+  /**
+   * A Host call, failing as Host calls fail (hs-bfr8): offline, refused, an OS error; a mode that does not allow it and a computer with no
+   * sandbox as the place errors WriteDenied and SandboxUnavailable.
+   */
+  call<A>(host: string, call: () => Promise<HostCallReply<A>>): Promise<A>
   readonly runs: HostRuns
   /** Keeps the Robot up while the Run call is pending. */
   keepAlive(pending: Promise<unknown>): void
@@ -27,7 +31,7 @@ export interface HostCaller {
 export function hostLink(caller: HostCaller, host: HostView, reach: Reach): HostLink {
   const { robotId } = caller
   const owner = () => caller.owner(host.id)
-  const call = <A>(action: () => Promise<A>): Promise<A> => caller.call(host.name, action)
+  const call = <A>(action: () => Promise<HostCallReply<A>>): Promise<A> => caller.call(host.name, action)
   return {
     name: host.name,
     read: (path) => call(async () => (await owner()).hostRead(host.id, robotId, path)),
@@ -50,11 +54,12 @@ export function hostLink(caller: HostCaller, host: HostView, reach: Reach): Host
 export function hostJobPlace(caller: HostCaller, host: { readonly id: string; readonly name: string }, reach: Reach): JobPlace {
   const { robotId } = caller
   const owner = () => caller.owner(host.id)
-  const call = <A>(action: () => Promise<A>): Promise<A> => caller.call(host.name, action)
+  const call = <A>(action: () => Promise<HostCallReply<A>>): Promise<A> => caller.call(host.name, action)
   const link: HostJobLink = {
     start: ({ job, command, cwd, timeoutMs, background }) => call(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, background, job }, reach)),
-    // The alarm asks for the state of every running job: the raw error comes back, so that a Host that is away is told from one the Robot lost access to.
-    list: async () => (await owner()).hostJobList(host.id, robotId),
+    // The alarm asks for the state of every running job: the Host's own failure comes back (HostAccessLost, HostOffline), so that a Host
+    // that is away is told from one the Robot lost access to.
+    list: async () => answerOf(await (await owner()).hostJobList(host.id, robotId)),
     output: (job, stream, offset) => call(async () => (await owner()).hostJobOutput(host.id, robotId, job, stream, offset)),
     kill: async (job) => { await call(async () => (await owner()).hostJobKill(host.id, robotId, job)) },
   }

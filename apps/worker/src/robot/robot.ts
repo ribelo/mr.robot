@@ -110,6 +110,7 @@ import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRuns } from '../places/host-runner.ts'
 import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
 import { AmbiguousPlace, SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
+import { answerOf, HostNoSandbox, HostOffline, HostWriteDenied, type HostCallReply } from '../member/host-call.ts'
 import { withDistinctNames } from '../places/host-names.ts'
 import { parseJobId, type JobId } from '../places/job-id.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
@@ -2246,24 +2247,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async hostOwnerStub(hostId: string) {
     const owner = await this.home().hostOwner(hostId)
-    if (owner === null) throw Object.assign(new Error(`there is no host ${hostId} any more`), { name: 'HostOffline' })
+    if (owner === null) throw new HostOffline({ message: `there is no host ${hostId} any more` })
     return this.env.MEMBER.getByName(owner)
   }
 
   /**
-   * Host calls fail clearly (hs-bfr8); a Task's Turn that hits an offline host tells the owner (hs-nwcl). A refusal the app or the Member
-   * made on purpose comes back as the place error the tools word: a mode that does not allow a change, a computer that cannot confine.
+   * Host calls fail clearly (hs-bfr8); a Task's Turn that hits an offline host tells the owner (hs-nwcl). The Member answers with a reply
+   * whose failure is a tagged value (deep review P16); a refusal the app or the Member made on purpose becomes the place error the tools
+   * word: a mode that does not allow a change, a computer that cannot confine.
    */
-  private async hostCall<A>(call: () => Promise<A>, hostName = 'the computer'): Promise<A> {
+  private async hostCall<A>(call: () => Promise<HostCallReply<A>>, hostName = 'the computer'): Promise<A> {
     try {
-      return await call()
+      return answerOf(await call())
     } catch (error) {
-      if (error instanceof Error && error.name === 'HostWriteDenied') throw new WriteDenied({ host: hostName, message: error.message })
-      if (error instanceof Error && error.name === 'HostNoSandbox') throw new SandboxUnavailable({ host: hostName, message: error.message })
-      if (error instanceof Error && error.name === 'HostOffline' && this.currentWakeup === 'task') {
-        await this.notifyMembers('needs you', `could not finish a task: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
-      }
-      throw error instanceof Error && error.name === 'HostOffline' ? new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running; do not switch to a cloud browser.`) : error
+      if (error instanceof HostWriteDenied) throw new WriteDenied({ host: hostName, message: error.message })
+      if (error instanceof HostNoSandbox) throw new SandboxUnavailable({ host: hostName, message: error.message })
+      if (!(error instanceof HostOffline)) throw error
+      if (this.currentWakeup === 'task') await this.notifyMembers('needs you', `could not finish a task: ${error.message}. Start the Mr. Robot app on that computer.`).catch(() => 0)
+      throw new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running; do not switch to a cloud browser.`)
     }
   }
 

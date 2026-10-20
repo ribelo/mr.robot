@@ -30,8 +30,8 @@ export interface JobRunner {
   kill(job: JobId): Promise<void>
   /** The registry has closed the job: whatever the runner kept in memory for it (a pending call, an answer) can go. */
   release(job: JobId): void
-  /** Why the command never ran (a Host refused the call), when that is why the job is gone. */
-  refusal?(job: JobId): string | undefined
+  /** Why the command never ran (a Host refused the call), when that is why the job is gone: the call's error as it was, a tagged refusal tagged. */
+  refusal?(job: JobId): Error | undefined
   /** What a finished command adds to its result beside the output: its directory, the sandbox's facts and a note. */
   extras?(job: JobId): RunExtras | undefined
 }
@@ -219,7 +219,7 @@ export class Jobs {
         const why = refused !== undefined || where.place === 'box' ? '' : (await runner.output(id, 'err', 0).catch(() => ({ text: '' }))).text.trim()
         this.close(where, id, 'lost', null, null)
         await where.touch()
-        if (refused !== undefined) throw new Error(refused)
+        if (refused !== undefined) throw refused
         throw new Error(`${where.subject} lost the command before it ended.${why === '' ? '' : ` ${why}`}`)
       }
       if (this.host.now() >= deadline || signal?.aborted === true) return undefined

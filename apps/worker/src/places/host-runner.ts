@@ -11,6 +11,7 @@
  */
 import type { JobInfo, RunOutcome } from '@mr-robot/host-protocol'
 import type { BoxJobStatus } from '../box/backend.ts'
+import { HostAccessLost } from '../member/host-call.ts'
 import type { HostRunAnswer } from '../member/hosts.ts'
 import type { JobId } from './job-id.ts'
 import type { JobRunner, RunExtras, SpawnOptions } from './jobs.ts'
@@ -36,8 +37,11 @@ type Entry =
   | { state: 'running' }
   /** The command ended within its call. */
   | { state: 'done'; result: Foreground }
-  /** The call did not run the command: the Host refused it, was offline or has no sandbox. The message says why. */
-  | { state: 'refused'; message: string }
+  /**
+   * The call did not run the command: the Host refused it, was offline or has no sandbox. The error is the call's own, kept as it is so
+   * that a tagged refusal (WriteDenied, SandboxUnavailable) reaches the Robot tagged (deep review P16).
+   */
+  | { state: 'refused'; error: Error }
 
 /** The pending calls of every Host of one Robot, by job id. */
 export class HostRuns {
@@ -86,7 +90,7 @@ export class HostRunner implements JobRunner {
     this.keepAlive(call.then(
       (outcome) => this.answer(job, outcome),
       (error: unknown) => {
-        if (this.runs.entries.get(job)?.state === 'running') this.runs.entries.set(job, { state: 'refused', message: error instanceof Error ? error.message : String(error) })
+        if (this.runs.entries.get(job)?.state === 'running') this.runs.entries.set(job, { state: 'refused', error: error instanceof Error ? error : new Error(String(error)) })
       },
     ))
   }
@@ -110,7 +114,7 @@ export class HostRunner implements JobRunner {
     if (entry?.state === 'done') return entry.result.exitCode === null ? { state: 'gone' } : { state: 'exited', exitCode: entry.result.exitCode }
     // The Host holds the job (or the Robot restarted and forgot the call): ask it. A Host that is away is not an answer, and the job goes
     // on; a Host the Robot has no access to any more (shared no more, unpaired, the grant lowered) never will be, so its job is lost.
-    const listed = await this.link.list().then((jobs) => jobs.find((candidate) => candidate.job === job), (error: unknown) => (error instanceof Error && error.name === 'HostAccessLost' ? 'lost' as const : 'away' as const))
+    const listed = await this.link.list().then((jobs) => jobs.find((candidate) => candidate.job === job), (error: unknown) => (error instanceof HostAccessLost ? 'lost' as const : 'away' as const))
     if (listed === 'lost') return { state: 'gone' }
     if (listed === 'away' || listed?.state === 'running') return { state: 'running' }
     if (listed === undefined || listed.exitCode === null) return { state: 'gone' }
@@ -120,7 +124,7 @@ export class HostRunner implements JobRunner {
   async output(job: JobId, stream: 'out' | 'err', offset: number): Promise<{ text: string; bytes: number; size: number }> {
     const entry = this.runs.entries.get(job)
     if (entry?.state === 'refused' || entry?.state === 'done') {
-      const text = entry.state === 'refused' ? (stream === 'err' ? entry.message : '') : stream === 'out' ? entry.result.stdout.text : entry.result.stderr.text
+      const text = entry.state === 'refused' ? (stream === 'err' ? entry.error.message : '') : stream === 'out' ? entry.result.stdout.text : entry.result.stderr.text
       const bytes = new TextEncoder().encode(text)
       const piece = bytes.subarray(offset, offset + 262_144)
       return { text: new TextDecoder().decode(piece), bytes: piece.length, size: bytes.length }
@@ -134,9 +138,9 @@ export class HostRunner implements JobRunner {
     await this.link.kill(job)
   }
 
-  refusal(job: JobId): string | undefined {
+  refusal(job: JobId): Error | undefined {
     const entry = this.runs.entries.get(job)
-    return entry?.state === 'refused' ? entry.message : undefined
+    return entry?.state === 'refused' ? entry.error : undefined
   }
 
   extras(job: JobId): RunExtras | undefined {

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { HostNotification } from '@mr-robot/host-protocol'
 import type { Conversation, HostView, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { closeHosts, fakeHost, hostCommands, hostDisk, hostFileCalls, hostRuns, ran } from './fake-host.ts'
+import { closeHosts, fakeHost, hostCommands, hostDisk, hostFileCalls, hostRuns, linkedRoots, ran } from './fake-host.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -138,6 +138,24 @@ describe('a denied write (ob-vnld)', () => {
     expect(json(result)).toMatchObject({ kind: 'foreground', exitCode: 1, sandbox: { mode: 'workspace-write', denied: true, deniedPath: '/etc/hosts' } })
     expect(json(result).note).toContain('the write to /etc/hosts was denied under workspace-write mode')
     expect(json(result).note).toContain('escalate: true')
+  })
+
+  // Deep review P16: a command the app refused before it ran came back from a foreground run as a plain error, so the Robot lost the
+  // way to escalate that the same refusal of a background run (or of a file tool) shows.
+  it('refused by the app before the command runs keeps the way to escalate, in the foreground as in the background', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk, { files: 'allow', shell: 'allow' }, { [`${desk.hostId}:shell`]: { mode: 'workspace-write', roots: ['/srv/data'] } })
+    linkedRoots.add('/srv/data')
+    const [foreground, background, listed] = await calls(id, [
+      { name: 'run', args: { on: 'Desk', command: 'make' } },
+      { name: 'run', args: { on: 'Desk', command: 'make', run_in_background: true } },
+      { name: 'job_list', args: {} },
+    ])
+    for (const refused of [foreground, background]) {
+      expect(refused).toContain('/srv/data is a symbolic link')
+      expect(refused).toContain('call run again with escalate: true and a reason')
+    }
+    expect(listed).not.toContain('make')
   })
 })
 

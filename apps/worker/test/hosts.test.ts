@@ -38,14 +38,10 @@ async function say(as: string, id: string, script: Parameters<typeof scripts.set
   await settle(id)
 }
 
-/** The message of a refused RPC call. */
-async function refusal(call: () => Promise<unknown>): Promise<string> {
-  try {
-    await call()
-    return 'not refused'
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error)
-  }
+/** The tag and message of a refused Host call: the Member answers it with a failed reply, the failure a tagged value (deep review P16). */
+async function refusal(call: () => Promise<{ _tag: string; error?: { _tag: string; message: string } }>): Promise<string> {
+  const reply = await call()
+  return reply._tag === 'Failed' && reply.error !== undefined ? `${reply.error._tag}: ${reply.error.message}` : 'not refused'
 }
 
 let annaId = ''
@@ -79,7 +75,7 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     expect(denied).toContain('permission denied (EACCES)')
     // run is not offered without a shell grant; the Member DO refuses it too.
     expect(requests.get(without)!.at(-1)!.tools!.map((definition) => definition.name)).not.toContain('run')
-    expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, without, { command: 'id', background: false, job: 'j-direct' }))).toMatch(/no shell grant/)
+    expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, without, { command: 'id', background: false, job: 'j-direct' }))).toMatch(/^HostAccessLost: .*no shell grant/)
     expect(ran).not.toContain('id')
     const shell = await robotWith(ANNA, [`${host.hostId}:shell`])
     await say(ANNA, shell, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'leash --help' } }] }, { text: 'ok' }])

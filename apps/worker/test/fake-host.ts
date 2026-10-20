@@ -42,6 +42,9 @@ export const heldCommands = new Set<string>()
 export const hostJobCalls: string[] = []
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
 
+/** Write roots that are symbolic links on the fake disk: like the app, it refuses a confined command under a grant naming one (deep review P1b). Cleared by closeHosts. */
+export const linkedRoots = new Set<string>()
+
 /** The app refuses a change in read-only mode, with the code the Worker looks for. */
 const readOnly = (access: HostAccess, path: string) => access.mode === 'read-only'
   ? Effect.fail(new HostError({ message: `${path} was not written: this grant is read-only, so nothing on this computer may be changed.`, code: 'SANDBOX_DENIED' }))
@@ -149,6 +152,8 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       hostRuns.push({ command, cwd, access, background, timeoutMs, job })
       // The app fails a confined command closed where it has no sandbox (ob-n72n).
       if (access.mode !== 'full' && options.sandbox === 'none') return Effect.fail(new HostError({ message: 'This computer has no usable sandbox', code: 'SANDBOX_UNAVAILABLE' }))
+      const linked = access.mode === 'full' ? undefined : access.roots.find((root) => linkedRoots.has(root))
+      if (linked !== undefined) return Effect.fail(new HostError({ message: `No command runs and no file is changed under this grant on this computer: ${linked} is a symbolic link on the way to ${linked}, and the sandbox would let you change what it points at.`, code: 'SANDBOX_DENIED' }))
       const scripted = hostCommands.map((answer) => answer(command, access)).find((answer) => answer !== undefined)
       const sandbox = scripted?.sandbox ?? (access.mode === 'full' ? { mode: access.mode, denied: false } : { mode: access.mode, denied: false, enforcement: options.sandbox === 'partial' ? 'partial' as const : 'full' as const })
       const where = cwd ?? `/home/anna/mr-robot/${access.robot}`
@@ -284,6 +289,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
 export async function closeHosts(): Promise<void> {
   hostJobs.clear()
   heldCommands.clear()
+  linkedRoots.clear()
   hostJobCalls.length = 0
   for (const socket of open.splice(0)) {
     try { socket.close(1000) } catch { /* closed */ }

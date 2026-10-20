@@ -3,7 +3,6 @@
  * this Durable Object, heartbeats, and the typed RPC calls robots make on them. Every call names
  * the Robot and the grant it runs under; the grant is checked here before anything reaches the host.
  */
-import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
@@ -12,6 +11,7 @@ import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, pars
 import type { Env } from '../env.ts'
 import { HOME_ID } from '../env.ts'
 import type { Reach } from '../places/host-facet.ts'
+import { HostAccessLost, HostCallFailed, HostNoSandbox, HostOffline, HostWriteDenied } from './host-call.ts'
 
 export type HostGrant = 'browser' | 'files' | 'shell'
 
@@ -72,19 +72,6 @@ export type HostRunAnswer = RunOutcome | { readonly kind: 'unanswered'; readonly
 
 /** A call that was sent and not answered: the connection ended or the time was up. `offline` when the Host is offline now. */
 type Sent<A> = { readonly kind: 'answered'; readonly value: A } | { readonly kind: 'cut'; readonly message: string; readonly offline: boolean }
-
-export class HostOffline extends Data.TaggedError('HostOffline')<{ readonly message: string }> {
-  readonly status = 409
-}
-
-/** The Robot may not use this Host any more: it is not among the Hosts its owner reaches (unpaired, no longer shared) or its grant is gone. */
-export class HostAccessLost extends Data.TaggedError('HostAccessLost')<{ readonly message: string }> {}
-
-/** The Host's app refused a change: the mode or the roots of the grant do not allow it. */
-export class HostWriteDenied extends Data.TaggedError('HostWriteDenied')<{ readonly message: string }> {}
-
-/** The Host cannot confine a confined call: no usable sandbox, or an app too old to enforce the grant. The call is refused before it is sent, or by the app. */
-export class HostNoSandbox extends Data.TaggedError('HostNoSandbox')<{ readonly message: string }> {}
 
 export class HostRefused extends Error {
   override readonly name = 'Invalid'
@@ -457,7 +444,7 @@ export class HostHub {
   async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string }, reach: Reach = 'granted'): Promise<A> {
     try {
       const sent = await this.send(id, robotId, grant, call, timeoutMs, reach)
-      if (sent.kind === 'cut') throw sent.offline ? new HostOffline({ message: sent.message }) : new Error(sent.message)
+      if (sent.kind === 'cut') throw sent.offline ? new HostOffline({ message: sent.message }) : new HostCallFailed({ message: sent.message })
       if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: null })
       return sent.value
     } catch (error) {
@@ -490,7 +477,7 @@ export class HostHub {
       const said = `${error.message}${error.code === undefined ? '' : ` (${error.code})`}`
       if (error.code === SANDBOX_DENIED) throw new HostWriteDenied({ message: error.message ?? said })
       if (error.code === SANDBOX_UNAVAILABLE) throw new HostNoSandbox({ message: error.message ?? said })
-      throw new Error(said)
+      throw new HostCallFailed({ message: said })
     }
     if (error?._tag === 'TimeoutError') return { kind: 'cut', message: `the host did not answer within ${Math.round(timeoutMs / 1000)} s`, offline: false }
     if (this.row(id)?.online !== 1) return { kind: 'cut', message: `the host "${this.row(id)?.name ?? id}" went offline`, offline: true }
