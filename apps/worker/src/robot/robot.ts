@@ -110,7 +110,7 @@ import { hostFacetKey, hostIdOfPlace, splitHostFacet, type Reach, type StoredPla
 import { SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
 import { parseJobId, type JobId } from '../places/job-id.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
-import { HOST_ACCESS, HOST_DIRECTORY, hostAccessOf, hostIdsOf, robotDirectoryName } from './host-access.ts'
+import { HOST_ACCESS, hostAccessOf, hostIdsOf } from './host-access.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Ask } from '../plugins/ask.ts'
 import { IdentityTools } from '../plugins/identity.ts'
@@ -2180,17 +2180,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const granted = usableLevel(this.store.hostLevel(facet))
     // The mode and roots of the facet, and the Robot's directory on the Host (v1.16 ticket 02): the Host app enforces them.
     const { mode, roots } = hostAccessOf(this.store.get<HostAccessByFacet>(HOST_ACCESS), facet)
-    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.hostDirectory(), mode, roots } }
-  }
-
-  /** The name of this Robot's directory on its owner's Hosts: chosen when first needed and kept, so that a rename does not lose its files there. */
-  private hostDirectory(): string {
-    const kept = this.store.get<string>(HOST_DIRECTORY)
-    if (kept !== undefined) return kept
-    const config = this.store.requireConfig()
-    const chosen = robotDirectoryName(config.identity.name, config.id)
-    this.store.set(HOST_DIRECTORY, chosen)
-    return chosen
+    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.store.hostDirectory(), mode, roots } }
   }
 
   private async hostOwnerStub(hostId: string) {

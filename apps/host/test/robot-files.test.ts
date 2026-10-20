@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import * as Effect from 'effect/Effect'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CopyIo } from '@mr-robot/host-protocol'
-import { access, connected } from './connected.ts'
+import { access, connected, jobName } from './connected.ts'
 
 /** R2 behind every presigned URL: one object, answered by range. */
 const OBJECT = new TextEncoder().encode('downloaded bytes')
@@ -155,6 +155,50 @@ describe('a change cannot leave the roots through a link on its path', () => {
     await call('Delete', { path: 'delete-door', access: access() })
     await expect(lstat(join(robotDir(), 'delete-door'))).rejects.toThrow()
     expect(await readFile(join(outside, 'keep.txt'), 'utf8')).toBe('keep')
+  })
+})
+
+// Deep review P1b: the sandbox opens each write root when it starts and follows a link there, so a root inside another root could be
+// swapped for a link by the Robot itself. Such roots, and a root reached through a link, are refused for commands and file changes alike.
+describe('write roots the sandbox cannot hold', () => {
+  const runFailure = (command: string, grant: ReturnType<typeof access>) => failure('Run', { command, background: false, job: jobName(), access: grant })
+
+  it('are refused when the Robot replaced an inner root by a link, and nothing lands where the link points', async () => {
+    const victim = join(home, 'roots-victim')
+    await mkdir(victim, { recursive: true })
+    await mkdir(join(home, 'project'), { recursive: true })
+    await mkdir(join(home, 'mr-robot'), { recursive: true })
+    // What a Robot granted ~/project (or ~/mr-robot) can do: put a link where the inner root (or its own directory) was. The link stays
+    // when the owner drops the outer root.
+    const inner = join(home, 'project', 'inner')
+    const linkedDirectory = join(home, 'mr-robot', 'linked')
+    await symlink(victim, inner)
+    await symlink(victim, linkedDirectory)
+    const cases = [
+      { grant: access({ roots: ['~/project', '~/project/inner'] }), link: inner },
+      { grant: access({ roots: ['~/project/inner'] }), link: inner },
+      { grant: access({ robot: 'linked' }), link: linkedDirectory },
+    ]
+    for (const { grant, link } of cases) {
+      const write = await failure('Write', { path: join(link, 'x.txt'), text: 'no', access: grant })
+      expect(write.code).toBe('SANDBOX_DENIED')
+      expect(write.message).toContain(`${link} is a symbolic link`)
+      expect((await runFailure(`echo no > ${link}/y.txt`, grant)).code).toBe('SANDBOX_DENIED')
+    }
+    expect(await readdir(victim)).toEqual([])
+  })
+
+  it('are refused when one lies inside another or holds the Robot directory, compared by real path; roots side by side run', async () => {
+    await mkdir(join(home, 'outer', 'inner'), { recursive: true })
+    for (const roots of [['~/outer', join(home, 'outer', 'inner')], ['~'], [join(home, 'mr-robot')]]) {
+      const write = await failure('Write', { path: 'nested.txt', text: 'no', access: access({ roots }) })
+      expect(write.code).toBe('SANDBOX_DENIED')
+      expect(write.message).toContain('lies inside')
+      expect((await runFailure('true', access({ roots }))).code).toBe('SANDBOX_DENIED')
+    }
+    await expect(stat(join(robotDir(), 'nested.txt'))).rejects.toThrow()
+    const written = await call('Write', { path: join(home, 'outer', 'inner', 'ok.txt'), text: 'ok', access: access({ roots: [join(home, 'outer', 'inner'), '~/side'] }) })
+    expect(await readFile(written.path, 'utf8')).toBe('ok')
   })
 })
 

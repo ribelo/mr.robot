@@ -3,8 +3,8 @@
  * grant adds, and the mode. Reads are as wide as the OS user in every mode (ob-xj2y). A change of a file obeys the same mode and roots as
  * a command does: it runs in the sandbox too (file-change.ts); the checks here only refuse a plain miss early, in words the Robot reads.
  */
-import { mkdir, realpath, stat } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstat, mkdir, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import * as Data from 'effect/Data'
 import { SANDBOX_DENIED, type HostAccess } from '@mr-robot/host-protocol'
 import { errorCode } from './error-code.ts'
@@ -70,6 +70,61 @@ const inside = (root: string, target: string): boolean => {
 /** A write the mode and roots refuse; its code is the one the Worker looks for. */
 export class WriteDenied extends Data.TaggedError('WriteDenied')<{ readonly message: string }> {
   readonly code = SANDBOX_DENIED
+}
+
+/** On a file system that ignores case (macOS and Windows by default) two spellings name one directory, so real paths compare without it. */
+const comparable = (path: string): string => (process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path)
+
+/**
+ * The first symbolic link (a Windows junction too) on the way to `path`, the path itself included; undefined when there is none. The walk
+ * starts at the OS user's home directory when the path lies in it, since what leads to the home is the OS's and not writable by the user,
+ * and it ends at the first component that is not there yet.
+ */
+async function linkOnTheWay(home: string, path: string): Promise<string | undefined> {
+  const start = inside(home, path) ? home : parse(path).root
+  let current = start
+  for (const part of relative(start, path).split(sep)) {
+    if (part === '') continue
+    current = join(current, part)
+    let info
+    try {
+      info = await lstat(current)
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return undefined
+      throw error
+    }
+    if (info.isSymbolicLink()) return current
+  }
+  return undefined
+}
+
+/**
+ * Check, before a command or a file change starts in workspace-write mode, that the sandbox can hold the grant's write roots (deep review
+ * P1b). bubblewrap and Landlock open each root when they start and follow a link there; so a root that lies inside another root (the
+ * Robot's directory among them) could be swapped for a link to any directory by the Robot itself, and one already behind a link leads
+ * where the link points. Both are refused: no root may be or pass through a symbolic link now, and none may lie inside another, compared
+ * by real path. Other modes bind no root.
+ * @throws WriteDenied naming the link or the two roots, so that the owner can change the roots.
+ */
+export async function assertConfinableRoots(home: string, access: HostAccess): Promise<void> {
+  if (access.mode !== 'workspace-write') return
+  const roots = writeRoots(home, access)
+  const directory = roots[0]
+  const named = (root: string): string => (root === directory ? `your directory ${root}` : `the write root ${root}`)
+  const refused = (why: string): WriteDenied =>
+    new WriteDenied({ message: `No command runs and no file is changed under this grant on this computer: ${why} Ask your owner to change the write roots of the grant in your settings so that none lies inside another or inside your directory, and none is reached through a link.` })
+  for (const root of roots) {
+    const link = await linkOnTheWay(home, root)
+    if (link !== undefined) throw refused(`${link} is a symbolic link on the way to ${named(root)}, and the sandbox would let you change what it points at.`)
+  }
+  // A root that cannot be resolved (a file on the way) cannot be made either, and the sandbox gets no such root (madeExtraRoots).
+  const real = await Promise.all(roots.map((root) => resolvedPath(root).then(comparable, () => undefined)))
+  for (const [i, inner] of real.entries()) {
+    for (const [j, outer] of real.entries()) {
+      if (inner === undefined || outer === undefined || inner === outer || !inside(outer, inner)) continue
+      throw refused(`${named(roots[i]!)} lies inside ${named(roots[j]!)}, so a link put in its place would let you change any directory.`)
+    }
+  }
 }
 
 /**

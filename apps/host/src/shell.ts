@@ -20,7 +20,7 @@ import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import { RUN_MAX_WAIT_SECONDS, SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
 import { errorCode } from './error-code.ts'
-import { ensureRobotDirectory, expandPath, madeExtraRoots } from './access.ts'
+import { assertConfinableRoots, ensureRobotDirectory, expandPath, madeExtraRoots } from './access.ts'
 import { runFileChange, type ChangePlace, type FileChange, type FileChanges } from './file-change.ts'
 import { HostJobs } from './jobs.ts'
 import { aclRunnerWorks, findInstalledPwsh7, startRunnersAsNode, withoutElectronSwitch } from './windows.ts'
@@ -208,8 +208,12 @@ export class HostShell implements FileChanges {
     this.problem = undefined
   }
 
-  /** Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy of its mode and roots. */
+  /**
+   * Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy of its mode and roots. The roots
+   * are checked before anything is made, on every call, since links can appear between calls (access.ts, assertConfinableRoots).
+   */
   private async place(access: HostAccess): Promise<ChangePlace> {
+    await assertConfinableRoots(this.home, access)
     const directory = await ensureRobotDirectory(this.home, access)
     const extraRoots = await madeExtraRoots(this.home, access)
     const policy: RootedExecutionPolicy = { mode: SANDBOX_MODE[access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }

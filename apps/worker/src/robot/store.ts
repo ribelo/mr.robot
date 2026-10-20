@@ -8,7 +8,7 @@ import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import * as Schema from 'effect/Schema'
 import { HOST_FACETS, hostFacetKey, StoredPlace } from '../places/host-facet.ts'
-import { HOST_ACCESS, mrRobotHostLevel } from './host-access.ts'
+import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName } from './host-access.ts'
 import { JobId } from '../places/job-id.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
@@ -503,6 +503,19 @@ export class RobotStore {
     const stored = this.grants().hosts[facet]
     if (stored !== undefined) return stored
     return this.config()?.kind === 'mr-robot' ? mrRobotHostLevel(facet) : 'deny'
+  }
+
+  /**
+   * The name of this Robot's directory under mr-robot/ on its owner's Hosts: chosen when first needed (a Host call, or write roots to check
+   * against it) and kept, so that a rename does not lose its files there.
+   */
+  hostDirectory(): string {
+    const kept = this.get<string>(HOST_DIRECTORY)
+    if (kept !== undefined) return kept
+    const config = this.requireConfig()
+    const chosen = robotDirectoryName(config.identity.name, config.id)
+    this.set(HOST_DIRECTORY, chosen)
+    return chosen
   }
 
   /** The mode and roots of a Host facet that is no longer usable are forgotten: they would come back with the next grant. */

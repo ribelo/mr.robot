@@ -472,7 +472,8 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
     const refusal = yield* promise(() => platform.env.HOME.getByName(HOME_ID).chainRefusal(before.ownerId, chain))
     if (refusal !== null) return yield* invalid(refusal)
   }
-  const hostAccess = patch.hostAccess === undefined ? undefined : parseHostAccess(patch.hostAccess)
+  // Roots are checked against the Robot's directory on its Hosts, so its name is chosen now if no Host call chose it yet.
+  const hostAccess = patch.hostAccess === undefined ? undefined : parseHostAccess(patch.hostAccess, store.hostDirectory())
   if (hostAccess !== undefined && Result.isFailure(hostAccess)) return yield* invalid(hostAccess.failure.message)
   const nextActive = patch.chain !== undefined ? 0 : active
   store.transaction(() => {

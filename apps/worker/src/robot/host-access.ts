@@ -18,8 +18,43 @@ export const MAX_HOST_ROOTS = 20
 /** An access map the Robot refuses to keep. */
 export class InvalidHostAccess extends Data.TaggedError('InvalidHostAccess')<{ readonly message: string }> {}
 
-/** A request's access map as the Robot keeps it: roots trimmed and without duplicates, defaults left out. A bad root is the error. */
-export function parseHostAccess(input: HostAccessByFacet): Result.Result<HostAccessByFacet, InvalidHostAccess> {
+/**
+ * A root as written, for comparing two of them: its anchor (~, /, or a drive) and its directory names, with . and .. taken away. Case is
+ * ignored, as macOS and Windows ignore it: two roots that differ only in case are taken for one directory.
+ */
+function rootParts(root: string): string[] {
+  const parts: string[] = []
+  for (const part of root.toLowerCase().split(/[\\/]+/).slice(1)) {
+    if (part === '..') parts.pop()
+    else if (part !== '' && part !== '.') parts.push(part)
+  }
+  const anchor = root.startsWith('~') ? '~' : /^[A-Za-z]:/.test(root) ? root.slice(0, 2).toLowerCase() : ''
+  return [anchor, ...parts]
+}
+
+/** Whether `inner` lies strictly inside `outer`, both as rootParts gives them. */
+const strictlyInside = (outer: readonly string[], inner: readonly string[]): boolean => inner.length > outer.length && outer.every((part, at) => part === inner[at])
+
+/**
+ * Why the roots of one grant cannot be confined, or undefined (deep review P1b): the sandbox follows a link at a root, so a root that lies
+ * inside another root, inside the Robot's own directory, or that holds that directory, could be swapped for a link by the Robot. Compared
+ * as written; a root written as an absolute path inside the home directory is caught by the Host app, which compares real paths.
+ */
+function nestedRoot(roots: readonly string[], robotDirectory: string): string | undefined {
+  const directory = `~/mr-robot/${robotDirectory}`
+  const named: ReadonlyArray<readonly [string, string[]]> = [[`the Robot's own directory ${directory}`, rootParts(directory)], ...roots.map((root) => [`"${root}"`, rootParts(root)] as const)]
+  for (const [innerName, inner] of named) {
+    const outer = named.find(([, candidate]) => strictlyInside(candidate, inner))
+    if (outer !== undefined) return `${innerName} lies inside ${outer[0]}: no write root may lie inside another, inside the Robot's own directory (${directory}), or hold it, because the Robot could put a link in its place and the sandbox would follow it`
+  }
+  return undefined
+}
+
+/**
+ * A request's access map as the Robot keeps it: roots trimmed and without duplicates, defaults left out. A bad root is the error, and so
+ * is a root nested in another or in the Robot's directory (`robotDirectory`, its name under ~/mr-robot/).
+ */
+export function parseHostAccess(input: HostAccessByFacet, robotDirectory: string): Result.Result<HostAccessByFacet, InvalidHostAccess> {
   const access: Record<string, HostGrantAccess> = {}
   for (const [facet, given] of Object.entries(input)) {
     const split = splitHostFacet(facet)
@@ -28,6 +63,8 @@ export function parseHostAccess(input: HostAccessByFacet): Result.Result<HostAcc
     const bad = roots.find((root) => !isHostRoot(root))
     if (bad !== undefined) return Result.fail(new InvalidHostAccess({ message: `"${bad}" is not a directory on a computer: write an absolute path or one that starts with ~/` }))
     if (roots.length > MAX_HOST_ROOTS) return Result.fail(new InvalidHostAccess({ message: `a grant lists at most ${MAX_HOST_ROOTS} write roots` }))
+    const nested = nestedRoot(roots, robotDirectory)
+    if (nested !== undefined) return Result.fail(new InvalidHostAccess({ message: nested }))
     if (given.mode !== DEFAULT_HOST_GRANT_ACCESS.mode || roots.length > 0) access[facet] = { mode: given.mode, roots }
   }
   return Result.succeed(access)

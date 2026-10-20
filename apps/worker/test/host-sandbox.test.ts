@@ -90,6 +90,25 @@ describe('the mode and roots of a Host grant (ob-wh59, ob-397e)', () => {
     const saved = await api<RobotPanel['settings']>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { hostAccess: { [facet]: { mode: 'full', roots: [] }, [`${desk.hostId}:files`]: { mode: 'workspace-write', roots: [] } } } })
     expect(saved.body.hostAccess).toEqual({ [facet]: { mode: 'full', roots: [] } })
   })
+
+  // Deep review P1b: the sandbox follows a link at a root, so a root the Robot could replace by a link (one inside another root or inside
+  // its own directory) is refused when the owner saves it, whatever the mode.
+  it('refuse a root inside another root, inside the Robot\'s directory, or holding it', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk)
+    await calls(id, [{ name: 'run', args: { on: 'Desk', command: 'pwd' } }])
+    const directory = `~/mr-robot/${hostRuns[0]!.access.robot}`
+    const facet = `${desk.hostId}:shell`
+    const save = (roots: string[]) => api<{ error?: string }>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { hostAccess: { [facet]: { mode: 'read-only', roots } } } })
+    for (const roots of [['~/projects', '~/projects/app'], ['/srv/data/', '/srv/./data/cache'], ['C:\\Work', 'c:/work/sub'], [`${directory}/inner`], ['~'], ['~/mr-robot']]) {
+      const refused = await save(roots)
+      expect(refused.status, roots.join(' ')).toBe(400)
+      expect(JSON.stringify(refused.body)).toContain('lies inside')
+    }
+    expect((await env.ROBOT.getByName(id).settings()).hostAccess ?? {}).toEqual({})
+    const saved = await save(['~/projects', '~/projects-old', '/srv/data', `~/mr-robot/another-robot`])
+    expect(saved.status).toBe(200)
+  })
 })
 
 describe('a denied write (ob-vnld)', () => {
