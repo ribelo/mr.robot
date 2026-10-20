@@ -8,6 +8,7 @@ import SkillRegistry, { type SkillCandidate } from '@deepseek-ai/dsh-skill'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { SkillLibraryRow, SkillView } from '@mr-robot/protocol'
+import type { PlatformSkill } from '../skills/platform.ts'
 import { tool } from './tools/define.ts'
 
 export interface SkillSource {
@@ -16,15 +17,26 @@ export interface SkillSource {
   /** The Robot's own skills in its Workspace. */
   local(): Promise<Array<{ name: string; description: string }>>
   localContent(name: string): Promise<string | null>
+  /** The platform skills this Robot is shown now (v1.15 ticket 12): they need no Grant. */
+  platform(): readonly PlatformSkill[]
 }
 
 export function skillsPlugin(source: SkillSource): (ctx: Context) => Promise<void> {
   return async (ctx) => {
     await ctx.plugin(SkillRegistry, {})
-    const candidate = (name: string, description: string, provider: string, base: string): SkillCandidate => ({
-      name, description, invocation: { modelInvocable: true, userInvocable: false }, source: 'custom', provider, rank: provider === 'local' ? 1 : 0, locator: name,
+    const candidate = (name: string, description: string, provider: string, base: string, rank = provider === 'local' ? 1 : 0): SkillCandidate => ({
+      name, description, invocation: { modelInvocable: true, userInvocable: false }, source: 'custom', provider, rank, locator: name,
       resourceBase: { kind: 'opaque', description: base },
     })
+    // Platform skills first: the skill tool resolves one before a library or a local skill of the same name (gb-n6by).
+    ctx.skills.registerProvider(() => ({
+      name: 'platform',
+      list: async () => source.platform().map((skill) => candidate(skill.name, skill.description, 'platform', 'the platform skills (read-only, docs/skills/)', -1)),
+      get: async (found) => {
+        const skill = source.platform().find((entry) => entry.name === String(found.locator))
+        return skill === undefined ? undefined : { ...found, content: skill.text }
+      },
+    }))
     ctx.skills.registerProvider(() => ({
       name: 'home-library',
       list: async () => (await source.granted()).map((skill) => candidate(skill.name, skill.description, 'home-library', 'the Home skill library (read-only)')),

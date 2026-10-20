@@ -2,7 +2,7 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AdminView, Conversation, Me, TaskPage } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 import type { Home as TestHome } from './worker.ts'
 
 const ANNA = 'anna@example.com'
@@ -62,7 +62,7 @@ describe('Routines become Tasks (v1.13 ticket 05)', () => {
     scripts.set(id, [{ say: 'Digest sent again.' }])
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
-    expect(JSON.stringify(requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'user').at(-1))).toContain('Task \\"Digest\\" (schedule-1) is due')
+    expect(JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))).toContain('Task \\"Digest\\" (schedule-1) is due')
     expect((await api<TaskPage>(ANNA, `/api/tasks?assignee=robot:${id}&state=all`)).body.tasks.find((task) => task.id === 'schedule-1')!.attempts[0]).toMatchObject({ outcome: 'ok', firstLine: 'Digest sent again.' })
 
     // Migrating again changes nothing.

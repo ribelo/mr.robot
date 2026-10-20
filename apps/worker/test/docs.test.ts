@@ -2,12 +2,14 @@ import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RobotSummary, WorkspaceFileContent, WorkspaceFileView } from '@mr-robot/protocol'
 import { docsIndex } from '../src/agent/docs-index.ts'
+import { PLATFORM_SKILLS } from '../src/skills/platform.ts'
 import { api, settle, stubModels } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'connections', 'hosts', 'browser', 'providers', 'subagents', 'box', 'auto-review']
 const DOC_PATHS = DOC_NAMES.map((name) => `docs/${name}.md`)
+const SKILL_PATHS = PLATFORM_SKILLS.map((skill) => `docs/skills/${skill.name}/SKILL.md`)
 
 beforeEach(async () => {
   await reset()
@@ -77,7 +79,7 @@ describe('the product docs (v1.11 ticket 02)', () => {
     const id = await activeRobot()
     const listed = async () => (await api<WorkspaceFileView[]>(ANNA, `/api/robots/${id}/files`)).body
     const docs = (await listed()).filter((file) => file.group === 'docs')
-    expect(docs.map((file) => file.path).sort()).toEqual([...DOC_PATHS].sort())
+    expect(docs.map((file) => file.path).sort()).toEqual([...DOC_PATHS, ...SKILL_PATHS].sort())
     expect(docs.every((file) => file.size > 0)).toBe(true)
 
     const opened = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/tasks.md`)).body
@@ -88,13 +90,15 @@ describe('the product docs (v1.11 ticket 02)', () => {
     expect((await api(ANNA, `/api/robots/${id}/file?path=docs/nothing.md`)).status).toBe(404)
 
     expect((await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'Mr. Robot', memory: true } })).status).toBe(200)
-    expect((await listed()).filter((file) => file.group === 'docs')).toHaveLength(DOC_PATHS.length)
+    expect((await listed()).filter((file) => file.group === 'docs')).toHaveLength(DOC_PATHS.length + SKILL_PATHS.length)
     expect((await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/tasks.md`)).body.text).toContain('# Tasks')
   })
 
   it('are listed by docsIndex with the rule to read them first (sk-xseb)', () => {
     const index = docsIndex()
     for (const path of DOC_PATHS) expect(index).toContain(path)
+    // The platform skills are in the skill catalog, not in the docs index.
+    for (const path of SKILL_PATHS) expect(index).not.toContain(path)
     expect(index).toContain('Before you answer a question about Mr. Robot, its features or your own capabilities, read the relevant doc')
     expect(index).toContain('say you do not know')
   })

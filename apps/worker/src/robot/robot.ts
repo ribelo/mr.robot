@@ -121,7 +121,8 @@ import { Tasks } from '../plugins/tasks.ts'
 import { tasksHost, type TaskTurn } from './tasks-host.ts'
 import type { TaskView } from '@mr-robot/protocol'
 import { Setup } from '../plugins/setup.ts'
-import { Skills } from '../plugins/skills.ts'
+import { SkillCatalog, Skills } from '../plugins/skills.ts'
+import { platformSkillsFor } from '../skills/platform.ts'
 import { Web } from '../plugins/web.ts'
 import { onSiteDomain, withoutSite, type BrowserAction, type BrowserDriver, type BrowserPage, type BrowserSite, type BrowserState } from '../browser/driver.ts'
 import { SERVICE, SESSION_SITE, sessionValues, SIGN_IN_TIMEOUT_MS, START_URL, type SignInKind } from '@mr-robot/host-protocol'
@@ -129,7 +130,7 @@ import { connectPastedValues } from '../member/connect-pasted.ts'
 import type { SessionCapture } from '@mr-robot/protocol'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
-import { PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
+import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, normalizePath, type WorkspaceShape } from '../workspace/workspace.ts'
@@ -1877,17 +1878,18 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
     const skillNames = () => this.heldSkills()
-    if (granted.has('skills') || connectorSkills.length > 0) {
-      mounts.push(mount(Skills, {
-        host: this,
-        source: {
-          granted: () => this.home().loadableSkills(config.ownerId, skillNames()),
-          content: async (name) => skillNames().includes(name) ? this.home().skillContent(config.ownerId, name) : null,
-          local: () => this.localSkills(),
-          localContent: (name) => this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null),
-        },
-      }, gate(items.skills(granted.has('skills')))))
-    }
+    const holdsSkills = granted.has('skills') || connectorSkills.length > 0
+    // The skill tool is every Robot's: the platform skills need no Grant (v1.15 ticket 12). The Home's and the local skills come with the group.
+    mounts.push(mount(SkillCatalog, {
+      source: {
+        granted: () => holdsSkills ? this.home().loadableSkills(config.ownerId, skillNames()) : Promise.resolve([]),
+        content: async (name) => holdsSkills && skillNames().includes(name) ? this.home().skillContent(config.ownerId, name) : null,
+        local: () => holdsSkills ? this.localSkills() : Promise.resolve([]),
+        localContent: (name) => holdsSkills ? this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null) : Promise.resolve(null),
+        platform: () => platformSkillsFor(this.platformSkillAudience(granted)),
+      },
+    }, gate(items.skills(granted.has('skills')))))
+    if (holdsSkills) mounts.push(mount(Skills, { host: this }, gate(items.skills(granted.has('skills')))))
     // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
     const hostGrants = usableNames(grants.hosts)
     const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
@@ -1974,6 +1976,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** Connections of a kind this Robot holds a grant for, with the write grant marked (cn-xezx). */
+  /**
+   * Which platform skills this Robot is shown (v1.15 ticket 12, gb-ekkf): the ones about subagents and the browser follow their tool group; channels, a
+   * Discord channel of its own or a chat Connection it may use; writing-as-owner, any surface it can write on in its owner's name (a chat Channel or a Connection).
+   */
+  private platformSkillAudience(granted: ReadonlySet<string>): { subagents: boolean; browser: boolean; channels: boolean; surfaces: boolean } {
+    const config = this.store.requireConfig()
+    const held = this.knownConnections.filter((connection) => this.store.mayUse('connection', connection.id))
+    const channels = (config.discordChannel ?? '') !== '' || held.some((connection) => connection.kind === 'slack' || connection.kind === 'discord' || connection.kind === 'discord-user')
+    return { subagents: granted.has('subagents'), browser: granted.has('browser'), channels, surfaces: channels || held.length > 0 }
+  }
+
   private grantedConnections(kind: ConnectorKind): GrantedConnection[] {
     const usable = (name: string) => this.store.mayUse('connection', name)
     return this.knownConnections
@@ -3226,7 +3239,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async files(): Promise<WorkspaceFileView[]> {
     const stored = (await this.run(this.workspace.list(''))).filter((entry) => !isDocsPath(entry.path))
     // The product docs come from the Worker bundle, never from R2 (v1.11 ticket 02).
-    const bundled = PRODUCT_DOCS.map((entry) => ({ path: entry.path, size: new TextEncoder().encode(entry.text).length, uploaded: 0, etag: '' }))
+    const bundled = ALL_DOCS.map((entry) => ({ path: entry.path, size: new TextEncoder().encode(entry.text).length, uploaded: 0, etag: '' }))
     const entries = [...stored, ...bundled]
     const order = (path: string) => { const index = (PERSONA_FILES as readonly string[]).indexOf(path); return index === -1 ? PERSONA_FILES.length : index }
     const group = (path: string): WorkspaceFileView['group'] =>

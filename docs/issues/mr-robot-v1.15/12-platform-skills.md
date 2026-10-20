@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 03, 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: the index lists tasks-cadence and asking for every Robot and the group skills only with the group; the skill tool loads a platform skill; write, edit and delete under docs/skills refuse; the Home library does not list them (gb-n6by, gb-kwhl, gb-ekkf, gb-8wx5)
-- [ ] The six skills exist with a one-line description each and cover the points the spec names (gb-vmmx, gb-58ad, gb-ej8r)
+- [x] Workerd test: the index lists tasks-cadence and asking for every Robot and the group skills only with the group; the skill tool loads a platform skill; write, edit and delete under docs/skills refuse; the Home library does not list them (gb-n6by, gb-kwhl, gb-ekkf, gb-8wx5)
+- [x] The six skills exist with a one-line description each and cover the points the spec names (gb-vmmx, gb-58ad, gb-ej8r)

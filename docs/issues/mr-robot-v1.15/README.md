@@ -15,6 +15,6 @@ Spec: ../mr-robot-v1.15.md. Frontier at the start: 01, 03, 05, 06, 08, 10, 11 in
 | 09 | [host_copy](09-host-copy.md) | 06 | done |
 | 10 | [External text is fenced](10-external-fence.md) | — | done |
 | 11 | [Identity after setup](11-identity-after-setup.md) | — | done |
-| 12 | [Platform skills](12-platform-skills.md) | 01, 03, 04 | ready-for-agent |
+| 12 | [Platform skills](12-platform-skills.md) | 01, 03, 04 | done |
 | 13 | [The platform prompt](13-platform-prompt.md) | 01, 02, 03, 04, 05, 10, 12 | ready-for-agent |
 | 14 | [Glossary and product docs](14-glossary-docs.md) | 01, 03, 04, 05, 07, 08, 09, 11, 12, 13 | ready-for-agent |

@@ -2,7 +2,7 @@ import { abortAllDurableObjects, env, reset, runDurableObjectAlarm } from 'cloud
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, RobotSummary } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 
@@ -56,7 +56,7 @@ describe('Robot-to-Robot messaging', () => {
 
     scripts.set(accountant, [
       (request) => {
-        const text = JSON.stringify(request.messages.at(-1))
+        const text = JSON.stringify(wakeOf(request))
         const handle = /handle (rh-[0-9a-f-]+)/.exec(text)![1]!
         return { calls: [{ name: 'robot_reply', args: { handle, reply: 'Revenue is 42k.' } }] }
       },

@@ -2,7 +2,7 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, Me, TaskView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 import type { Home as TestHome, Member as TestMember } from './worker.ts'
 
 const ANNA = 'anna@example.com'
@@ -44,7 +44,7 @@ describe('The Home fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', (
     const task = await create({ title: 'Send the report', instructions: 'Mail the weekly report to Anna.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } })
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
-    const last = JSON.stringify(requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'user').at(-1))
+    const last = JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))
     expect(last).toContain(`Task \\"Send the report\\" (${task.id}) is due`)
     expect(last).toContain('Mail the weekly report to Anna.')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body

@@ -5,7 +5,7 @@
  * read-only (robot-jpzp, v1.11 sk-9db0).
  */
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../../docs/index.ts'
+import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../../docs/index.ts'
 import { MEMBER_FILE_NAMES, type MemberFileName } from '../../member/member.ts'
 import { normalizePath } from '../../workspace/workspace.ts'
 import type { RobotHost, WorkspaceHost } from '../host.ts'
@@ -21,7 +21,7 @@ function memberFileName(path: string): MemberFileName | undefined {
 
 const READ_ONLY = (name: string) => `${name} belongs to your owner and is read-only to you. To change it, use the tool you were given for shared files: memory_write_shared, or propose_member_file_edit (your owner approves or rejects the new full content).`
 
-const DOCS_PATHS = PRODUCT_DOCS.map((entry) => entry.path)
+const DOCS_PATHS = ALL_DOCS.map((entry) => entry.path)
 /** Stored entries without anything under docs/: the platform's docs come from the bundle only. */
 const stored = <T extends { path: string }>(entries: readonly T[]): T[] => entries.filter((entry) => !isDocsPath(entry.path))
 

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { CapabilitiesView, Conversation, GrantSet, Me, RobotPanel, RobotSummary, SettingsCatalog } from '@mr-robot/protocol'
 import { docsIndex } from '../src/agent/docs-index.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const WARSAW = 'Europe/Warsaw'
@@ -279,7 +279,7 @@ describe('the time of a Wake-up (sk-nitq)', () => {
     const before = Date.now()
     await say(id, 'Buy milk.')
     const after = Date.now()
-    const text = JSON.stringify(lastRequest(id).messages.filter((message) => message.role === 'user').at(-1))
+    const text = JSON.stringify(wakeOf(lastRequest(id)))
     const found = /^\{.*?"text":"\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) Europe\/Warsaw\]\\nBuy milk\."/.exec(text)
     expect(found, text).not.toBeNull()
     expect([warsaw(before), warsaw(after)]).toContain(found![1])
@@ -295,7 +295,7 @@ describe('the time of a Wake-up (sk-nitq)', () => {
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
     const after = Date.now()
-    const wake = JSON.stringify(lastRequest(id).messages.filter((message) => message.role === 'user').at(-1))
+    const wake = JSON.stringify(wakeOf(lastRequest(id)))
     const found = /"text":"\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) Europe\/Warsaw\] \[Task \\"Pulse\\" \([^)]+\) is due\. Nobody is watching this turn\. When the Task is finished, call task_done\.\]\\n/.exec(wake)
     expect(found, wake).not.toBeNull()
     expect([warsaw(before), warsaw(after)]).toContain(found![1])

@@ -27,6 +27,14 @@ export const stepScripts = new Map<string, StubReply[]>()
 const sayEnds = new Set<string>()
 export const stepRequests = new Map<string, GenerateOptions[]>()
 
+/**
+ * The Wake-up a request carries: its last user message that is not a context reminder. Since v1.15 every Robot has the skill tool, so
+ * the skill catalog is a reminder in every context, after the Wake-up of the first Turn.
+ */
+export function wakeOf(request: GenerateOptions): GenerateOptions['messages'][number] | undefined {
+  return request.messages.filter((message) => message.role === 'user' && !JSON.stringify(message).includes('<available_skills>')).at(-1)
+}
+
 function isSafetyNetStep(options: GenerateOptions): boolean {
   const last = options.messages.at(-1)
   // The step is the last message and begins with the notice (after its label line); a transcript that mentions an earlier step is not one.

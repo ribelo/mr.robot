@@ -2,7 +2,7 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, RobotSummary, TaskView } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 
 const requestsOf = (id: string) => requests.get(id) ?? []
 
@@ -110,7 +110,7 @@ describe('The Turn knows its cause and subject (v1.13 ticket 03)', () => {
     await api(ANNA, `/api/robots/${id}/resume`, { body: {} })
     const summary = await working(id)
     expect(summary.turn).toMatchObject({ wakeup: { kind: 'task', from: 'Anna' }, task: { id: shopping.id, title: 'Shopping' } })
-    expect(JSON.stringify(requestsOf(id).at(-1)!.messages.at(-1))).toContain(`Task \\"Shopping\\" (${shopping.id}): Anna asked you to run it now.`)
+    expect(JSON.stringify(wakeOf(requestsOf(id).at(-1)!))).toContain(`Task \\"Shopping\\" (${shopping.id}): Anna asked you to run it now.`)
     expect((await api(ANNA, `/api/tasks/${shopping.id}/run`, { body: {} })).status).toBe(409)
     await api(ANNA, `/api/robots/${id}/interrupt`, { body: {} })
     await settle(id)

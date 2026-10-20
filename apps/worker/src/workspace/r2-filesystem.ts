@@ -21,7 +21,7 @@ import {
   type FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
 import * as Effect from 'effect/Effect'
-import { DOCS_DIRECTORY, PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
+import { DOCS_DIRECTORY, docsChildren, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { MEMBER_FILE_NAMES, type MemberFileName } from '../member/member.ts'
 import { normalizePath, type WorkspaceShape } from './workspace.ts'
 
@@ -92,7 +92,7 @@ export class R2FileSystem extends FileSystem {
     if (isDocsPath(key)) {
       const bundled = productDoc(key)
       if (bundled !== undefined) return { version: await contentVersion(bundled.text), type: 'file', size: new TextEncoder().encode(bundled.text).length }
-      return key === DOCS_DIRECTORY ? { version: FsVersion('docs'), type: 'directory' } : undefined
+      return docsChildren(key) !== undefined ? { version: FsVersion(key), type: 'directory' } : undefined
     }
     const entry = await this.run(this.workspace.stat(key))
     if (entry !== undefined) return { version: FsVersion(entry.etag), type: 'file', size: entry.size }
@@ -145,9 +145,12 @@ export class R2FileSystem extends FileSystem {
   async listDir(fsTarget: FsTarget): Promise<FsDirEntry[]> {
     const key = String(fsTarget.targetKey)
     if (isDocsPath(key)) {
-      if (key !== DOCS_DIRECTORY) throw new FsError(`${fsTarget.displayPath} is not a directory`, 'FS_NOT_FOUND')
+      const children = docsChildren(key)
+      if (children === undefined) throw new FsError(`${fsTarget.displayPath} is not a directory`, 'FS_NOT_FOUND')
       const size = (text: string) => new TextEncoder().encode(text).length
-      return Promise.all(PRODUCT_DOCS.map(async (entry): Promise<FsDirEntry> => ({ name: entry.path.slice(DOCS_DIRECTORY.length + 1), type: 'file', target: target(entry.path), version: await contentVersion(entry.text), size: size(entry.text) })))
+      return Promise.all(children.map(async (child): Promise<FsDirEntry> => child.doc === undefined
+        ? { name: child.name, type: 'directory', target: target(`${key}/${child.name}`) }
+        : { name: child.name, type: 'file', target: target(child.doc.path), version: await contentVersion(child.doc.text), size: size(child.doc.text) }))
     }
     const entries = (await this.run(this.workspace.list(key))).filter((entry) => !isDocsPath(entry.path))
     const prefix = key === '' ? '' : `${key}/`

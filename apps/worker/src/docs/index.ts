@@ -18,6 +18,7 @@ import { TASKS } from './tasks.ts'
 import { SUBAGENTS } from './subagents.ts'
 import { BOX } from './box.ts'
 import { AUTO_REVIEW } from './auto-review.ts'
+import { PLATFORM_SKILLS, platformSkillPath } from '../skills/platform.ts'
 
 export const DOCS_DIRECTORY = 'docs'
 
@@ -27,6 +28,8 @@ export interface ProductDoc {
   /** One line for the prompt's docs index. */
   readonly summary: string
   readonly text: string
+  /** A platform skill (docs/skills/<name>/SKILL.md): the skill catalog lists it, the docs index does not (v1.15 ticket 12). */
+  readonly platformSkill?: string
 }
 
 const doc = (name: string, summary: string, text: string): ProductDoc => ({ path: `${DOCS_DIRECTORY}/${name}.md`, summary, text })
@@ -48,7 +51,26 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('auto-review', 'Auto review: the reviewer model, risk levels, a denied call becomes an Ask, the reviewer setting.', AUTO_REVIEW),
 ]
 
-const BY_PATH: ReadonlyMap<string, ProductDoc> = new Map(PRODUCT_DOCS.map((entry) => [entry.path, entry]))
+/** The platform skills are product docs too: read-only, in the bundle, never in R2 (v1.15 ticket 12, gb-n6by). */
+const SKILL_DOCS: readonly ProductDoc[] = PLATFORM_SKILLS.map((entry) => ({ path: platformSkillPath(entry.name), summary: entry.description, text: entry.text, platformSkill: entry.name }))
+
+/** Every file under docs/: the docs and the platform skills. */
+export const ALL_DOCS: readonly ProductDoc[] = [...PRODUCT_DOCS, ...SKILL_DOCS]
+
+const BY_PATH: ReadonlyMap<string, ProductDoc> = new Map(ALL_DOCS.map((entry) => [entry.path, entry]))
+
+/** What a docs directory holds: its files and its subdirectories, by name. Undefined when the path is no directory of docs. */
+export function docsChildren(directory: string): Array<{ name: string; doc?: ProductDoc }> | undefined {
+  const prefix = `${directory}/`
+  const found = new Map<string, { name: string; doc?: ProductDoc }>()
+  for (const entry of ALL_DOCS) {
+    if (!entry.path.startsWith(prefix)) continue
+    const [first, ...more] = entry.path.slice(prefix.length).split('/')
+    if (first === undefined) continue
+    found.set(first, more.length === 0 ? { name: first, doc: entry } : { name: first })
+  }
+  return found.size === 0 ? undefined : [...found.values()]
+}
 
 /** Whether a normalized Workspace path is the docs folder or inside it: the platform owns all of it. */
 export function isDocsPath(path: string): boolean {

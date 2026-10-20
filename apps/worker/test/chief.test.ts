@@ -6,7 +6,7 @@ import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Conversation, Me, ProposalView, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 let annaId = ''
@@ -136,7 +136,7 @@ describe('need_help is gone (gb-c0ub)', () => {
     const answered = await api<ProposalView>(ANNA, `/api/robots/${id}/help/${askId}`, { body: { text: 'It is PL 123-45-67-890.' } })
     expect(answered.body).toMatchObject({ id: askId, status: 'done', help: { answeredBy: 'owner', answer: 'It is PL 123-45-67-890.' } })
     await settle(id)
-    expect(JSON.stringify(requests.get(id)!.at(-1)!.messages.at(-1))).toContain(`[Answer to your request ${askId} from `)
+    expect(JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))).toContain(`[Answer to your request ${askId} from `)
     expect((await api(ANNA, `/api/robots/${id}/help/${askId}`, { body: { text: 'again' } })).status).toBe(409)
   })
 })

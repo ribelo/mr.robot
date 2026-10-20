@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Me, RobotPanel, TaskView } from '@mr-robot/protocol'
 import { localDate } from '../src/robot/schedule.ts'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const NEW_YORK = 'America/New_York'
@@ -34,7 +34,7 @@ async function turn(id: string, text: string, script: Parameters<typeof scripts.
   await settle(id)
 }
 
-const lastUser = (id: string) => JSON.stringify((requests.get(id) ?? []).filter((request) => request.purpose !== 'compaction').at(-1)!.messages.filter((message) => message.role === 'user').at(-1))
+const lastUser = (id: string) => JSON.stringify(wakeOf((requests.get(id) ?? []).filter((request) => request.purpose !== 'compaction').at(-1)!))
 const allUser = (id: string) => JSON.stringify((requests.get(id) ?? []).filter((request) => request.purpose !== 'compaction').at(-1)!.messages.filter((message) => message.role === 'user'))
 const panel = async (id: string) => (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body
 /** A daily Task of the Robot at 09:00 (or `time`); without a zone it is the owner's. */
