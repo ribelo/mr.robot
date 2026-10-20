@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Workerd test with the Host stub: mode and roots per grant reach the stub; default cwd is the Robot's directory; a denial result; escalate creates a tool-call Ask whose approval runs once in full; confined fails closed on sandbox none; full runs (ob-wh59, ob-397e, ob-vnld, ob-ifak, ob-n72n, ob-he20)
 - [x] Component test: the facet editor with mode and roots; the Hosts page sandbox state (ob-wh59, ob-n72n)

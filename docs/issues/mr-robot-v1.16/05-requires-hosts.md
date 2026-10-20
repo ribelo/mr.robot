@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Workerd test: recurring fails without a Turn and notifies once across two misses; scheduled parks and runs on the online event; scheduled fails at the deadline; an owner message wakes the Robot (ob-5nvd, ob-qgpy, ob-e271, ob-amlz)
 - [x] Component test: the switch in Robot settings (ob-5nvd)

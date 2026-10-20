@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Workerd test: the backend union, the migration of Robots and the Home default, old usage rows kept (ob-ltsr, ob-l24v, ob-0c3o) (apps/worker/test/two-browsers.test.ts; the block message in browser-backends.test.ts, ob-myzd)
 - [x] Component test: the picker with two choices (ob-myzd) (apps/web/test/browser-picker.test.tsx)

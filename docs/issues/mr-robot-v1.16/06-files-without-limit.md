@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Workerd test: presign scoped to the prefix, refused outside it and after the Box stopped; copy workspace↔host through the stub's presigned flow; host↔host staged and cleaned; size in the Trajectory (ob-qshq, ob-qr7v, ob-7hp3, ob-o6aw)
 - [x] Workerd test: ws commands against the Box stub (ob-fgyk, ob-63nt): the stub Box runs the real ws program (`infra/computer/ws-core.ts`) against the real presign endpoint. The image also built once with docker, and `ws` ran in it.

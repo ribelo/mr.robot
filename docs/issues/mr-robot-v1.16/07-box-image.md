@@ -4,7 +4,7 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Staging: a Box boots, docs/box.md lists its tools with versions, ffmpeg and ripgrep run, a second boot reuses the uv cache; boot time recorded in the closing note (ob-asp3, ob-phi5, ob-m73k) (not run in this session: needs a deployed Box)
 - [x] The Dockerfile excludes the named packages; the image size is in the closing note (ob-e8q1)
