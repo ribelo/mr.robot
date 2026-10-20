@@ -115,6 +115,20 @@ export const SharedPages = Effect.gen(function* () {
 })
 
 /**
+ * The libraries a rendered Page loads (v1.17 review 3): /vendor/* (KaTeX's styles and fonts, Mermaid) is outside the Access login, so a shared Page
+ * and Browser Rendering load them from this origin and no CDN. They are public open-source files; nothing of the Home is under /vendor.
+ */
+export const PublicVendor = Effect.gen(function* () {
+  const edge = yield* Edge
+  return yield* Cloudflare.Access.Application('PublicVendor', {
+    type: 'self_hosted',
+    name: 'Mr. Robot Page libraries',
+    domain: edge.url.pipe(Output.map((url) => `${new URL(url ?? 'https://unknown').host}/vendor`)),
+    policies: [{ name: 'Public libraries of rendered Pages', decision: 'bypass', include: ['everyone'] }],
+  })
+})
+
+/**
  * Google's OAuth callback (v1.10 ticket 01): outside the Access login so a sign-in finished in the
  * system browser needs no Mr. Robot session; the one-time consent state is checked by the Worker.
  */

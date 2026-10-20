@@ -1,20 +1,21 @@
 /**
  * A Page as one HTML document (v1.17, dp-239c, dp-jl3d): what Browser Rendering prints to PDF and what a share link serves. A Markdown Page is
  * rendered on the server with the app's grammar (GFM, KaTeX), its Workspace images inlined, Mermaid diagrams drawn in the page; an HTML Page is
- * the Robot's file with a Content-Security-Policy that lets it load nothing from anywhere (dp-p5yn).
+ * the Robot's file with a Content-Security-Policy that lets it load nothing from anywhere (dp-p5yn). KaTeX's styles and Mermaid come from the
+ * app's own origin (/vendor/, packages/protocol/src/vendor.ts), never from a CDN (v1.17 review 3).
  */
+import { KATEX_CSS_PATH, MERMAID_MODULE_PATH } from '@mr-robot/protocol'
 import { escapeHtml, markdownToHtml } from '../platform/markdown-html.ts'
 import { markdownBody, pageFormat } from './page.ts'
-
-/** KaTeX's styles and Mermaid, pinned to the versions the app uses; only a rendered Markdown Page loads them. */
-const KATEX_CSS = 'https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css'
-const MERMAID = 'https://cdn.jsdelivr.net/npm/mermaid@12.2.0/dist/mermaid.esm.min.mjs'
 
 /** What a Robot's HTML Page may do: run its own inline script and styles, show inline images; reach nothing. */
 export const HTML_PAGE_CSP = "default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:"
 
-/** The Content-Security-Policy of a rendered Markdown Page: its own styles, KaTeX and Mermaid from the pinned CDN, nothing else. */
-export const MARKDOWN_PAGE_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net data:; script-src 'unsafe-inline' https://cdn.jsdelivr.net"
+/**
+ * The Content-Security-Policy of a rendered Markdown Page: its own inline styles and script, KaTeX and Mermaid from `source`, nothing else. A share
+ * link sends it with 'self'; the document carries it with the app's origin, because Browser Rendering opens it with no address of its own.
+ */
+export const markdownPageCsp = (source: string): string => `default-src 'none'; img-src data:; style-src 'unsafe-inline' ${source}; font-src ${source} data:; script-src 'unsafe-inline' ${source}`
 
 const STYLE = [
   'body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; color: #1f2328; max-width: 46rem; margin: 2.5rem auto; padding: 0 1.25rem; }',
@@ -25,11 +26,11 @@ const STYLE = [
 ].join('\n')
 
 /** Mermaid fences become diagrams; window.pageReady says the page is drawn (the PDF waits for it). */
-const DIAGRAMS = '<script type="module">\n' +
+const diagrams = (mermaid: string): string => '<script type="module">\n' +
   'const blocks = [...document.querySelectorAll("pre > code.language-mermaid")]\n' +
   'if (blocks.length === 0) { window.pageReady = true } else {\n' +
   '  for (const code of blocks) { const div = document.createElement("div"); div.className = "mermaid"; div.textContent = code.textContent; code.parentElement.replaceWith(div) }\n' +
-  '  import("' + MERMAID + '").then(async ({ default: mermaid }) => { mermaid.initialize({ startOnLoad: false, securityLevel: "strict" }); await mermaid.run() }).catch(() => undefined).finally(() => { window.pageReady = true })\n' +
+  '  import("' + mermaid + '").then(async ({ default: mermaid }) => { mermaid.initialize({ startOnLoad: false, securityLevel: "strict" }); await mermaid.run() }).catch(() => undefined).finally(() => { window.pageReady = true })\n' +
   '}\n</script>'
 
 /** A Workspace image as the page needs it: its bytes and type, or undefined when there is none. */
@@ -69,15 +70,15 @@ async function inlineImages(html: string, pagePath: string, read: ReadImage): Pr
   return html.replace(/<img src="([^"]*)"/g, (match, source: string) => { const data = resolved.get(source); return data === undefined ? match : '<img src="' + data + '"' })
 }
 
-/** The Page as one HTML document: rendered Markdown with its title, or the Robot's HTML with the sandboxing policy in its head. */
-export async function pageDocument(path: string, title: string, text: string, read: ReadImage): Promise<string> {
+/** The Page as one HTML document: rendered Markdown with its title, or the Robot's HTML with the sandboxing policy in its head. `origin` is the app's. */
+export async function pageDocument(path: string, title: string, text: string, read: ReadImage, origin: string): Promise<string> {
   if (pageFormat(path) === 'html') return withPolicy(text, HTML_PAGE_CSP)
   const body = await inlineImages(markdownToHtml(markdownBody(text), { math: true }), path, read)
   const heading = /^\s*<h1[\s>]/.test(body) ? '' : '<h1>' + escapeHtml(title) + '</h1>'
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<meta http-equiv="Content-Security-Policy" content="' + MARKDOWN_PAGE_CSP + '">' +
-    '<title>' + escapeHtml(title) + '</title><link rel="stylesheet" href="' + KATEX_CSS + '"><style>' + STYLE + '</style></head><body>' +
-    heading + body + DIAGRAMS + '</body></html>'
+    '<meta http-equiv="Content-Security-Policy" content="' + markdownPageCsp(origin) + '">' +
+    '<title>' + escapeHtml(title) + '</title><link rel="stylesheet" href="' + origin + KATEX_CSS_PATH + '"><style>' + STYLE + '</style></head><body>' +
+    heading + body + diagrams(origin + MERMAID_MODULE_PATH) + '</body></html>'
 }
 
 /** An HTML document with a Content-Security-Policy meta first in its head (a header is not there when Browser Rendering sets the content). */

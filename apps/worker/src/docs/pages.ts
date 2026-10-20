@@ -44,6 +44,6 @@ The Share switch in the reading view makes a public link: https://<host>/p/<toke
 - Stop sharing revokes the link at once. The address then answers "not found".
 - The profile lists every shared Page of the owner, with its link and Stop sharing.
 - A shared HTML Page is served with a Content-Security-Policy sandbox and no cookies, so it cannot reach the app.
-- A shared Markdown Page loads KaTeX styles and Mermaid from a pinned CDN address, and nothing else.
+- A shared or printed Markdown Page loads KaTeX's styles and Mermaid from the app's own address (/vendor/), and nothing else. No CDN.
 - If the file is deleted or moved, the link answers "not found".
 `

@@ -9,7 +9,7 @@
  * - /p/<token>/pdf: the Page printed by Browser Rendering, once per content version, within the render and spend limits (429 and 503 otherwise).
  */
 import { escapeHtml } from '../platform/markdown-html.ts'
-import { HTML_PAGE_CSP, MARKDOWN_PAGE_CSP } from '../pages/page-html.ts'
+import { HTML_PAGE_CSP, markdownPageCsp } from '../pages/page-html.ts'
 import { shareTokenHash, signedShareToken } from '../pages/share-token.ts'
 import type { Env } from '../env.ts'
 import { pdfResponse } from './api.ts'
@@ -46,9 +46,10 @@ export async function sharedPageChannel(request: Request, env: Env): Promise<Res
   const shared = await env.MEMBER.getByName(signed.memberId).sharedPageOf(signed.token).catch(() => null)
   if (shared === null) return notFound()
   const robot = env.ROBOT.getByName(shared.robotId)
+  const origin = new URL(request.url).origin
   try {
     if (part === 'pdf') {
-      const printed = await robot.pagePdf(shared.path, { tokenHash: await shareTokenHash(signed.token) })
+      const printed = await robot.pagePdf(shared.path, origin, { tokenHash: await shareTokenHash(signed.token) })
       switch (printed.kind) {
         case 'pdf': {
           const response = pdfResponse(printed.title, printed.pdf)
@@ -60,12 +61,12 @@ export async function sharedPageChannel(request: Request, env: Env): Promise<Res
         case 'unavailable': return text('PDF unavailable.', 503)
       }
     }
-    const page = await robot.pageHtml(shared.path)
+    const page = await robot.pageHtml(shared.path, origin)
     if (part === 'content') return page.format === 'html' ? html(page.html, SANDBOX + '; ' + HTML_PAGE_CSP) : notFound()
     if (part !== undefined) return notFound()
     if (page.format === 'html') return html(frameDocument(page.title, signed.token), "default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'")
     const withBar = page.html.replace('<body>', '<body><p style="text-align:right;margin:0 0 1rem"><a href="/p/' + signed.token + '/pdf">PDF</a></p>')
-    return html(withBar, SANDBOX + '; ' + MARKDOWN_PAGE_CSP)
+    return html(withBar, SANDBOX + '; ' + markdownPageCsp("'self'"))
   } catch {
     // The file was deleted or moved, or the Robot is gone: the link leads nowhere.
     return notFound()

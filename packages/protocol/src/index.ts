@@ -6,6 +6,8 @@
  */
 import * as Schema from 'effect/Schema'
 
+export * from './vendor.ts'
+
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
 // ---------------------------------------------------------------- Home, Members

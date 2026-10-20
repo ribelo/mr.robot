@@ -574,7 +574,7 @@ export const api = new Router<ApiContext>()
     yield* reach(c, id)
     const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
     if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
-    const printed = yield* call((): Promise<PagePdf> => robot(c, id).pagePdf(path))
+    const printed = yield* call((): Promise<PagePdf> => robot(c, id).pagePdf(path, new URL(c.request.url).origin))
     switch (printed.kind) {
       case 'pdf': return pdfResponse(printed.title, printed.pdf)
       case 'limited': return yield* Effect.fail(new ApiError({ status: 429, message: printed.message }))

@@ -3477,13 +3477,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * The Page as one HTML document: what the PDF prints and a share link serves (dp-239c, dp-jl3d). It is rendered once per content version and
    * kept (page-cache.ts): a view of an unchanged Page reads the cache and checks the etags of the file and its images.
    */
-  async pageHtml(path: string): Promise<PageDocument> {
+  async pageHtml(path: string, origin: string): Promise<PageDocument> {
     const id = this.store.requireConfig().id
     const format = pageFormat(path)
     const entry = format === undefined ? undefined : await this.run(this.workspace.stat(path))
     if (format === undefined || entry === undefined) throw Object.assign(new Error(format === undefined ? `"${path}" is not a Page` : `no Page "${path}"`), { name: 'NotFound', status: 404 })
     const imageEtag = async (image: string) => (await this.run(this.workspace.stat(image)))?.etag ?? null
-    const hit = await cachedDocument(this.env.FILES, id, path, { pageEtag: entry.etag, salt: '', imageEtag })
+    // The document loads KaTeX and Mermaid from the app's origin: another origin is another document.
+    const hit = await cachedDocument(this.env.FILES, id, path, { pageEtag: entry.etag, salt: origin, imageEtag })
     if (hit !== undefined) return hit
     const file = await this.run(this.workspace.read(path))
     if (file === undefined) throw Object.assign(new Error(`no Page "${path}"`), { name: 'NotFound', status: 404 })
@@ -3494,8 +3495,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const found = await this.run(this.workspace.read(image))
       images.push({ path: image, etag: found?.etag ?? null })
       return found === undefined ? undefined : { bytes: new Uint8Array(found.body), contentType: mediaTypeOf(image) }
-    })
-    const sources = { pageEtag: file.etag, images, salt: '' }
+    }, origin)
+    const sources = { pageEtag: file.etag, images, salt: origin }
     const document: PageDocument = { title, html, format, version: await versionOf(sources) }
     await storeDocument(this.env.FILES, id, path, sources, document).catch((error: unknown) => console.warn('page not cached', error))
     return document
@@ -3506,9 +3507,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * A render needs the Robot under its spend limit, and a turn within the Member's render limits (per share link, per day); its browser time is
    * the Robot's cost under the source browser.
    */
-  async pagePdf(path: string, share?: { readonly tokenHash: string }): Promise<PagePdf> {
+  async pagePdf(path: string, origin: string, share?: { readonly tokenHash: string }): Promise<PagePdf> {
     const config = this.store.requireConfig()
-    const document = await this.pageHtml(path)
+    const document = await this.pageHtml(path, origin)
     const cached = await cachedPdf(this.env.FILES, config.id, path, document.version)
     if (cached !== undefined) return { kind: 'pdf', title: document.title, pdf: cached }
     if (await this.checkLimits()) return { kind: 'unavailable' }

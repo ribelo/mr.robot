@@ -48,8 +48,15 @@ describe('shared Pages (dp-hf7v, dp-jl3d, dp-zq16, dp-62di, dp-p5yn)', () => {
     expect(page.status).toBe(200)
     expect(page.headers.get('content-type')).toContain('text/html')
     expect(page.headers.get('set-cookie')).toBeNull()
-    expect(page.headers.get('content-security-policy')).toContain('sandbox allow-scripts')
+    const policy = page.headers.get('content-security-policy') ?? ''
+    expect(policy).toContain('sandbox allow-scripts')
+    // KaTeX and Mermaid come from this origin, never from a CDN (v1.17 review 3).
+    expect(policy).toContain("script-src 'unsafe-inline' 'self'")
+    expect(policy).not.toContain('https:')
     const text = await page.text()
+    expect(text).toContain('href="https://mr-robot.test/vendor/katex-0.16.47/katex.min.css"')
+    expect(text).toContain('import("https://mr-robot.test/vendor/mermaid-12.2.0/mermaid.esm.min.mjs")')
+    expect(text).not.toContain('jsdelivr')
     expect(text).toContain('<title>Flats</title>')
     expect(text).toContain('<table>')
     expect(text).toContain('/pdf">PDF</a>')

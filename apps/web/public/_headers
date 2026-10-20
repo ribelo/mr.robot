@@ -1,0 +1,7 @@
+# Static asset headers (Cloudflare Workers static assets).
+# /vendor/* holds KaTeX and Mermaid for rendered Pages (v1.17 review 3): a shared Page runs with an opaque origin, so its font and module loads are
+# cross-origin requests and need CORS; the paths carry the versions, so they never change.
+/vendor/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable
+  X-Content-Type-Options: nosniff
