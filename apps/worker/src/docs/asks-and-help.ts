@@ -13,12 +13,12 @@ An Ask is a pending decision that a Robot puts to its owner. The Conversation sh
 | takeover | Take over the Robot's browser. |
 | review | Approve a list of items, one by one or all at once. |
 | thread | Accept or decline a Thread invitation, and set its Scope. |
-| tool-call | Approve or reject one call of a tool at the ask level. |
+| tool-call | Approve or reject one call of a tool at the ask level. A send tool's call is a draft. |
 | question | Answer one question with an option or in words (the ask tool). |
 | credential | Give the Robot a login or a secret (the request_credential tool). |
 | help | An old request for help (see the end of this page). |
 
-The platform stores each Ask exactly and applies the stored Ask when the owner approves. A tool-call Ask comes from a grant item at the ask level (read grants.md). One approval covers one call. Only the owner answers it.
+The platform stores each Ask exactly and applies it when the owner approves. A tool-call Ask comes from a grant item at the ask level (read grants.md). One approval covers one call. Only the owner answers it.
 
 ## Questions: the ask tool
 
@@ -52,6 +52,10 @@ What happens next:
 
 On Discord, a question is text with numbered options. The owner answers there with a number, or several numbers ("1, 3") for multi-select. The newest open question takes them.
 
+## Drafts
+
+A tool-call Ask of a send tool is a draft: the owner reads the message, edits it, and sends or discards it. draft: true makes one at allow too. Change a waiting draft with draft_revise. Read connections.md and the asking skill.
+
 ## Questions to your chief
 
 Every Robot is created with a recipient Grant to its owner's Mr. Robot, its chief. The owner can remove it in the Robot's Grants. Send the question with robot_send and set question to true. The chief answers with robot_reply.
@@ -60,14 +64,11 @@ Ask your chief for facts, the owner's preferences, and how things are done here.
 
 ## Credentials: the request_credential tool
 
-When a site needs a login you do not have, call request_credential. It takes the kind (login or secret), the service, why you need it, and for a login the websites and what you will use it for. The owner sees the Login form in your Conversation, filled in with what you gave. When the owner saves it:
-- The entry is created under the owner.
-- It is granted to you at allow.
-- You wake with the name of the entry.
+When a site needs a login you do not have, call request_credential with the kind (login or secret), the service, why, and for a login the websites and what you will do. The owner fills the Login form in your Conversation. Saving it creates the entry under the owner, grants it to you at allow and wakes you with its name.
 
-The password never reaches you. Use a login with login_fill and a secret with secret_get. If the owner declines, you wake with the refusal. Do not ask again. On Discord the request is one line with a link into the app.
+The password never reaches you. Use a login with login_fill and a secret with secret_get. If the owner declines, do not ask again. On Discord the request is one line with a link into the app.
 
 ## Old requests for help
 
-Before v1.15, a Robot called need_help. That tool, help_requests, help_answer and the 30-minute wait are gone. A request that was still open stays in the Conversation. The owner can answer it in words. The answer closes it and wakes the Robot with "[Answer to your request <id> from <name>]".
+need_help is gone since v1.15. A request still open stays in the Conversation; the owner answers it in words, which wakes the Robot with "[Answer to your request <id> from <name>]".
 `

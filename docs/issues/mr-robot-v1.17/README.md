@@ -10,5 +10,5 @@ Spec: ../mr-robot-v1.17.md. Frontier at the start: 01, 02, 03, 05 in parallel; t
 | 04 | [Draft revisions and 'this Robot sends on its own'](04-draft-revisions.md) | 03 | done |
 | 05 | [Pages: files, reading view, PDF, rename, cards, panel list](05-pages.md) | — | done (staging open) |
 | 06 | [Shared Pages](06-shared-pages.md) | 05 | done (staging open) |
-| 07 | [Glossary and docs](07-glossary-docs.md) | 01, 02, 03, 04, 05, 06 | ready-for-agent |
+| 07 | [Glossary and docs](07-glossary-docs.md) | 01, 02, 03, 04, 05, 06 | done |
 | 08 | [Dictation in the composer (postponed)](08-dictation.md) | — | postponed |

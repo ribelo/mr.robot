@@ -27,18 +27,14 @@ The Member connects in the Connections section of the profile. A Connection is c
 
 Slack and Discord as you connect with the Member's own session. There are three ways:
 - In the desktop app: Connect opens a sign-in window for the service. The Member signs in there. The app reads the session, connects it and closes the window.
-- In the PWA: Connect opens Mr. Robot's browser on the sign-in page under Takeover. The Member signs in and hands the browser back. The platform reads the session from the browser and connects it. Then it closes the tab and discards the state of that tab. The session lives only in the Connection, not in Mr. Robot's browser.
+- In the PWA: Connect opens Mr. Robot's browser on the sign-in page under Takeover. The Member signs in and hands the browser back. The platform reads the session, connects it, and discards the tab. The session lives only in the Connection.
 - "Paste a session instead" is the fallback: the fields and the steps to copy the session from a browser.
 
-If nobody signs in within 10 minutes, the attempt stops. Nothing is connected. The Member tries again or pastes a session. The session is never shown to the Member or to a Robot.
-
-## Connections that were shared
-
-An update unshared each Slack and Google Connection that was shared before. Robots of other Members lost their grant and got a note at their next Turn. A note in the owner's Connections section names the Connection and the Robots that lost it.
+If nobody signs in within 10 minutes, the attempt stops and nothing is connected. The session is never shown to the Member or to a Robot.
 
 ## Google
 
-The Home admin creates one OAuth client in Google Cloud and pastes it in the Google plugin settings. A guided page shows the steps. Then each Member links accounts with Connect Google. The Member chooses the services at that time. The services are Gmail, Calendar, Drive (with Docs and Sheets), and Contacts. Gmail send is a separate grant. The tool google_accounts lists the accounts and the services each one offers. Files from Google land in the Robot's Workspace.
+The Home admin pastes one Google Cloud OAuth client in the Google plugin settings (a guided page shows the steps). Each Member links accounts with Connect Google and chooses the services. The services are Gmail, Calendar, Drive (with Docs and Sheets), and Contacts. Gmail send is a separate grant. The tool google_accounts lists the accounts and the services each one offers. Files from Google land in the Robot's Workspace.
 
 ## Slack
 
@@ -46,11 +42,15 @@ Slack connects as you. The Robot can read by default: channels, unread messages,
 
 ## Discord
 
-The Discord row has two ways to connect, each with its own Connect: as a bot and as you. A Member can have both.
+Discord connects as a bot, as you, or both.
 
 As a bot: one bot belongs to the Home. The Member invites it to a Discord server. A Discord bot Connection shows its id next to its name. Discord is also a Channel. A message in a Robot's Discord channel or in a DM wakes the Robot. The Robot's reply goes to the same place.
 
 As you: the Member connects their own Discord account. Robots read the servers the Member is on: servers, channels, messages, threads, search and people. They read through Discord's REST API, so a Discord message does not wake a Robot through this Connection. The write tools (send, reply, react, mark read) need the Connection write grant. The connect form says: "Discord forbids automating a user account and may close it. You take that risk." The Member takes that risk knowingly.
+
+## Drafts and sending
+
+With the write grant at ask, a call of a send tool (Gmail send, reply, forward; Slack and Discord messages) is a draft. The owner reads it as the message, edits it, and sends exactly that or discards it with a reason. draft: true makes a draft at allow too; draft_revise changes an open one, and the card marks the changed words. "This Robot sends on its own" sets the write grant to allow. E-mail bodies are Markdown, sent as HTML with a plain-text part. gmail_draft leaves a draft in the mailbox instead.
 
 ## Instructions
 

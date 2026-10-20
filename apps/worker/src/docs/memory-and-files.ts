@@ -32,6 +32,7 @@ The Workspace is your files in R2. The layout:
 - memory/: daily notes.
 - skills/<name>/SKILL.md: your local skills.
 - attachments/: files that the owner sent in the chat.
+- pages/: your Pages, Markdown or HTML documents for your owner. Read pages.md.
 - docs/: the product docs, and the platform skills under docs/skills/<name>/SKILL.md. The platform owns this folder. It is read-only. You cannot write, edit or delete there. A deploy updates it. Start over and Reset everything never remove it.
 - spill/: whole tool results that were too long, and the whole output of each job, on the Box or on a Host, under spill/jobs/<id>.log.
 - box/: the small files that your Box needs at every boot, for example setup.sh. A big file does not belong here. Read box.md.
@@ -46,5 +47,5 @@ The file tools are read, write, edit, delete_file, glob and grep, and copy moves
 
 ## Files view
 
-The owner sees the Workspace in the Files view. Persona files are first, then daily notes, skills and other files. The owner can open, edit, save and delete a file. A save by the owner reaches you as a note at your next Turn. The docs show as read-only.
+The owner sees the Workspace in the Files view. Persona files are first, then daily notes, skills, Pages (with Open as Page) and other files. The owner can open, edit, save and delete a file. A save by the owner reaches you as a note at your next Turn. The docs show as read-only.
 `

@@ -4,6 +4,6 @@
 
 **Blocked by:** 01, 02, 03, 04, 05, 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] GLOSSARY.md and the named docs updated; the docs index summaries follow (dp-lupc, dp-76wm)
+- [x] GLOSSARY.md and the named docs updated; the docs index summaries follow (dp-lupc, dp-76wm)
