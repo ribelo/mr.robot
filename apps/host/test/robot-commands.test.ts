@@ -3,7 +3,8 @@
  * roots of its grant. These run the real sandbox of the machine (bubblewrap or Landlock); where it has none, the same calls must fail closed.
  * The test directory is in the home directory and not in /tmp, because a confined command may write /tmp (bubblewrap gives it a private one).
  */
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import * as Effect from 'effect/Effect'
@@ -65,6 +66,36 @@ describe('the sandbox state', () => {
     if (host.sandbox !== 'none') return context.skip()
     expect((await failure('echo hi')).code).toBe('SANDBOX_UNAVAILABLE')
     expect((await run('echo hi', { mode: 'full' })).exitCode).toBe(0)
+  })
+})
+
+describe('a login shell whose PATH has no bubblewrap', () => {
+  // Deep review P6: the Nix build puts bubblewrap only on the app's PATH, and commands get the login shell's PATH. The sandbox state the
+  // heartbeat reports must be what a confined command then gets: it runs with that enforcement, or nothing here confines and it fails closed.
+  it('runs confined commands under the sandbox the app found, or reports none', async () => {
+    const own = await mkdtemp(join(homedir(), '.mr-robot-host-test-'))
+    const bin = join(own, 'bin')
+    await mkdir(bin)
+    await symlink(execFileSync('bash', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim(), join(bin, 'bash'))
+    const shell = join(own, 'login-shell')
+    await writeFile(shell, `#!/bin/sh\nprintf %s '${bin}'\n`)
+    await chmod(shell, 0o755)
+    const before = process.env['SHELL']
+    process.env['SHELL'] = shell
+    const short = await connected(own).finally(() => { process.env['SHELL'] = before })
+    try {
+      const payload = { command: 'echo confined > note.txt && echo "$(<note.txt)"', background: false, job: jobName(), access: access() }
+      if (short.sandbox === 'none') {
+        expect(((await Effect.runPromise(Effect.flip(short.rpc['Run']!(payload)))) as { code?: string }).code).toBe('SANDBOX_UNAVAILABLE')
+        return
+      }
+      const result = await Effect.runPromise(short.rpc['Run']!(payload))
+      expect(result).toMatchObject({ kind: 'foreground', exitCode: 0, sandbox: { mode: 'workspace-write', denied: false, enforcement: short.sandbox } })
+      expect(result.stdout.text.trim()).toBe('confined')
+    } finally {
+      await short.close()
+      await rm(own, { recursive: true, force: true })
+    }
   })
 })
 
