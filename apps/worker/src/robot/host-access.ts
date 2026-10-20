@@ -51,8 +51,23 @@ function nestedRoot(roots: readonly string[], robotDirectory: string): string | 
 }
 
 /**
+ * The temporary directories a command in the sandbox may change on some Host (Landlock grants the real /tmp) or that every user may write
+ * (deep review P1c). The Host app checks the ones its own sandbox grants, by real path.
+ */
+const TEMP_DIRECTORIES = ['/tmp', '/var/tmp', '/dev/shm']
+
+/** Why a root lies inside a temporary directory, or undefined: a command could put a link in its place before the next call. */
+function rootInTemp(roots: readonly string[]): string | undefined {
+  for (const root of roots) {
+    const temp = TEMP_DIRECTORIES.find((directory) => strictlyInside(rootParts(directory), rootParts(root)))
+    if (temp !== undefined) return `"${root}" lies inside ${temp}: no write root may lie inside ${TEMP_DIRECTORIES.join(', ')}, because a command in the sandbox may change it and could put a link in the root's place`
+  }
+  return undefined
+}
+
+/**
  * A request's access map as the Robot keeps it: roots trimmed and without duplicates, defaults left out. A bad root is the error, and so
- * is a root nested in another or in the Robot's directory (`robotDirectory`, its name under ~/mr-robot/).
+ * is a root nested in another or in the Robot's directory (`robotDirectory`, its name under ~/mr-robot/), or one in a temporary directory.
  */
 export function parseHostAccess(input: HostAccessByFacet, robotDirectory: string): Result.Result<HostAccessByFacet, InvalidHostAccess> {
   const access: Record<string, HostGrantAccess> = {}
@@ -63,8 +78,8 @@ export function parseHostAccess(input: HostAccessByFacet, robotDirectory: string
     const bad = roots.find((root) => !isHostRoot(root))
     if (bad !== undefined) return Result.fail(new InvalidHostAccess({ message: `"${bad}" is not a directory on a computer: write an absolute path or one that starts with ~/` }))
     if (roots.length > MAX_HOST_ROOTS) return Result.fail(new InvalidHostAccess({ message: `a grant lists at most ${MAX_HOST_ROOTS} write roots` }))
-    const nested = nestedRoot(roots, robotDirectory)
-    if (nested !== undefined) return Result.fail(new InvalidHostAccess({ message: nested }))
+    const confinable = nestedRoot(roots, robotDirectory) ?? rootInTemp(roots)
+    if (confinable !== undefined) return Result.fail(new InvalidHostAccess({ message: confinable }))
     if (given.mode !== DEFAULT_HOST_GRANT_ACCESS.mode || roots.length > 0) access[facet] = { mode: given.mode, roots }
   }
   return Result.succeed(access)

@@ -202,6 +202,42 @@ describe('write roots the sandbox cannot hold', () => {
   })
 })
 
+// Deep review P1c: Landlock lets every confined command change the real /tmp, so a root there, or the Robot's directory in a home there,
+// could be swapped for a link between two calls. Such roots are refused, for commands and file changes alike.
+describe('write roots inside a directory the sandbox leaves writable', () => {
+  it('are refused under Landlock, and nothing is written in them', async () => {
+    const temp = await mkdtemp('/tmp/mr-robot-temp-root-')
+    const tempHome = await mkdtemp('/tmp/mr-robot-temp-home-')
+    const landlock = await connected(home, r2, { sandboxChain: ['landlock'] })
+    const landlockInTemp = await connected(tempHome, r2, { sandboxChain: ['landlock'] })
+    try {
+      const fails = (on: typeof landlock, name: string, payload: unknown) => Effect.runPromise(Effect.flip(on.rpc[name]!(payload))) as Promise<{ message: string; code?: string }>
+      const cases = [
+        { on: landlock, grant: access({ roots: [temp] }), path: join(temp, 'x.txt'), inside: `the write root ${temp} lies inside /tmp` },
+        { on: landlockInTemp, grant: access(), path: 'x.txt', inside: `your directory ${join(tempHome, 'mr-robot', 'bot')} lies inside /tmp` },
+      ]
+      for (const { on, grant, path, inside } of cases) {
+        const write = await fails(on, 'Write', { path, text: 'no', access: grant })
+        const run = await fails(on, 'Run', { command: 'echo no > y.txt', background: false, job: jobName(), access: grant })
+        // Without Landlock on this machine the calls fail closed for that reason instead.
+        if (landlock.sandbox === 'none') continue
+        expect(write.code).toBe('SANDBOX_DENIED')
+        expect(write.message).toContain(inside)
+        expect(run.code).toBe('SANDBOX_DENIED')
+      }
+      expect(await readdir(temp)).toEqual([])
+      for (const name of ['x.txt', 'y.txt']) await expect(stat(join(tempHome, 'mr-robot', 'bot', name))).rejects.toThrow()
+      // A root out of the temporary directories still takes changes under Landlock.
+      if (landlock.sandbox !== 'none') await Effect.runPromise(landlock.rpc['Write']!({ path: join(home, 'beside-temp', 'ok.txt'), text: 'ok', access: access({ roots: ['~/beside-temp'] }) }))
+    } finally {
+      await landlock.close()
+      await landlockInTemp.close()
+      await rm(temp, { recursive: true, force: true })
+      await rm(tempHome, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('list, search and delete', () => {
   it('lists files by a glob with the paths as the pattern sees them, skipping .git and node_modules', async () => {
     for (const path of ['src/a.ts', 'src/deep/b.ts', 'src/c.md', 'node_modules/x/d.ts', '.git/e.ts']) await call('Write', { path: join('glob', path), text: 'x', access: access() })

@@ -100,25 +100,31 @@ async function linkOnTheWay(home: string, path: string): Promise<string | undefi
 
 /**
  * Check, before a command or a file change starts in workspace-write mode, that the sandbox can hold the grant's write roots (deep review
- * P1b). bubblewrap and Landlock open each root when they start and follow a link there; so a root that lies inside another root (the
- * Robot's directory among them) could be swapped for a link to any directory by the Robot itself, and one already behind a link leads
- * where the link points. Both are refused: no root may be or pass through a symbolic link now, and none may lie inside another, compared
- * by real path. Other modes bind no root.
- * @throws WriteDenied naming the link or the two roots, so that the owner can change the roots.
+ * P1b, P1c). bubblewrap and Landlock open each root when they start and follow a link there; so a root that lies inside another root (the
+ * Robot's directory among them), or inside a directory every confined command may change (`sandboxWritable`: the temp directories the
+ * sandbox grants, such as the real /tmp under Landlock), could be swapped for a link to any directory by the Robot itself, and one already
+ * behind a link leads where the link points. All are refused: no root may be or pass through a symbolic link now, and none may lie inside
+ * another or inside a directory of `sandboxWritable`, compared by real path. Other modes bind no root.
+ * @throws WriteDenied naming the link or the two directories, so that the owner can change the roots.
  */
-export async function assertConfinableRoots(home: string, access: HostAccess): Promise<void> {
+export async function assertConfinableRoots(home: string, access: HostAccess, sandboxWritable: readonly string[]): Promise<void> {
   if (access.mode !== 'workspace-write') return
   const roots = writeRoots(home, access)
   const directory = roots[0]
   const named = (root: string): string => (root === directory ? `your directory ${root}` : `the write root ${root}`)
   const refused = (why: string): WriteDenied =>
-    new WriteDenied({ message: `No command runs and no file is changed under this grant on this computer: ${why} Ask your owner to change the write roots of the grant in your settings so that none lies inside another or inside your directory, and none is reached through a link.` })
+    new WriteDenied({ message: `No command runs and no file is changed under this grant on this computer: ${why} Ask your owner to change the write roots of the grant in your settings so that none lies inside another, inside your directory or inside a temporary directory, and none is reached through a link.` })
   for (const root of roots) {
     const link = await linkOnTheWay(home, root)
     if (link !== undefined) throw refused(`${link} is a symbolic link on the way to ${named(root)}, and the sandbox would let you change what it points at.`)
   }
   // A root that cannot be resolved (a file on the way) cannot be made either, and the sandbox gets no such root (madeExtraRoots).
   const real = await Promise.all(roots.map((root) => resolvedPath(root).then(comparable, () => undefined)))
+  const writable = sandboxWritable.map(comparable)
+  for (const [i, root] of real.entries()) {
+    const temp = writable.find((path) => root !== undefined && root !== path && inside(path, root))
+    if (temp !== undefined) throw refused(`${named(roots[i]!)} lies inside ${temp}, which every command in the sandbox may change, so a link put in its place would let you change any directory.`)
+  }
   for (const [i, inner] of real.entries()) {
     for (const [j, outer] of real.entries()) {
       if (inner === undefined || outer === undefined || inner === outer || !inside(outer, inner)) continue

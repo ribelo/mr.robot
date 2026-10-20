@@ -14,7 +14,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import Bash from '@deepseek-ai/dsh-bash-sandbox'
 import Jobs from '@deepseek-ai/dsh-jobs-local'
 import Pwsh from '@deepseek-ai/dsh-pwsh-sandbox'
-import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, type SandboxExecutionPolicy, type SandboxMode, type SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, canonicalPath, type SandboxExecutionPolicy, type SandboxMode, type SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import Sandbox, { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
@@ -92,6 +92,32 @@ async function probeSandbox(ctx: Context, kind: Shell, root: string): Promise<Sa
   }
 }
 
+/**
+ * The directories the selected runner lets every command in workspace-write change besides the call's own roots (deep review P1c), read
+ * from the runner's grants for `root` and as real paths: Landlock grants the real /tmp (--rw), Seatbelt /private/tmp and the user's temp
+ * directory (subpath), the Windows runner a private directory it makes in the temp directory (--temp); bubblewrap gives a private /tmp
+ * and binds only the roots (--bind). A file among them (/dev/null) holds no root and is left out. None when no runner is usable: then
+ * nothing confined runs at all.
+ */
+async function sandboxWritable(ctx: Context, root: string): Promise<string[]> {
+  let argv: readonly string[]
+  try {
+    argv = (await ctx.sandbox.confine(['true'], { mode: 'workspace-write', workspaceRoot: root })).argv
+  } catch {
+    return []
+  }
+  const grants = argv.slice(0, argv.lastIndexOf('--'))
+  const named = grants.flatMap((arg, at) => {
+    if (['--rw', '--bind', '--temp'].includes(grants[at - 1] ?? '')) return [arg]
+    return [...arg.matchAll(/\(subpath "((?:[^"\\]|\\.)*)"\)/g)].map((found) => found[1]!.replace(/\\(.)/g, '$1'))
+  })
+  const own = canonicalPath(root)
+  const real = [...new Set(named.map(canonicalPath))].filter((path) => path !== own)
+  // A path that is not there is kept: a root inside it is still refused.
+  const directories = await Promise.all(real.map((path) => stat(path).then((info) => info.isDirectory(), () => true)))
+  return real.filter((_, at) => directories[at])
+}
+
 /** The path of the denied file effect, from the error output of the command (the bash, coreutils and PowerShell dialects). */
 export function deniedPath(stderr: string): string | undefined {
   // PowerShell names the path in quotes: "Set-Content: Access to the path 'C:\x\y.txt' is denied."
@@ -150,6 +176,8 @@ export class HostShell implements FileChanges {
     readonly sandbox: SandboxState,
     /** The shell the Robots write for: PowerShell 7 on Windows, bash elsewhere. */
     readonly kind: Shell,
+    /** The directories every confined command may change besides its roots (sandboxWritable): no write root may lie inside them. */
+    private readonly writable: readonly string[],
   ) {
     this.jobs = new HostJobs(ctx, (ended) => this.jobEnded(ended))
   }
@@ -160,7 +188,7 @@ export class HostShell implements FileChanges {
   }
 
   /** Compose DSH's layer and find out what the sandbox can do here (the heartbeat reports it, ob-n72n). */
-  static async start(options: { readonly home?: string; readonly landlockLauncher?: string } = {}): Promise<HostShell> {
+  static async start(options: { readonly home?: string; readonly landlockLauncher?: string; readonly sandboxChain?: LocalSandboxProvider['internals']['chain'] } = {}): Promise<HostShell> {
     const home = options.home ?? homedir()
     const kind: Shell = process.platform === 'win32' ? 'pwsh' : 'bash'
     const ctx = new Context()
@@ -175,10 +203,13 @@ export class HostShell implements FileChanges {
     const launcher = options.landlockLauncher
     // SAFETY: the sandbox service above is the LocalSandboxProvider this app plugged in; Cordis types it as the abstract sandbox.
     if (launcher !== undefined && existsSync(launcher)) (ctx.sandbox as LocalSandboxProvider).internals.landlockLauncher = launcher
+    // The runners to try, in order, in place of the platform's: a test picks Landlock on a machine that has bubblewrap too.
+    // SAFETY: as above.
+    if (options.sandboxChain !== undefined) (ctx.sandbox as LocalSandboxProvider).internals.chain = options.sandboxChain
     const probeRoot = join(home, 'mr-robot')
     await mkdir(probeRoot, { recursive: true })
     const sandbox = await probeSandbox(ctx, kind, probeRoot)
-    const shell = new HostShell(ctx, home, await loginPath(), sandbox, kind)
+    const shell = new HostShell(ctx, home, await loginPath(), sandbox, kind, await sandboxWritable(ctx, probeRoot))
     await shell.recheck()
     return shell
   }
@@ -213,7 +244,7 @@ export class HostShell implements FileChanges {
    * are checked before anything is made, on every call, since links can appear between calls (access.ts, assertConfinableRoots).
    */
   private async place(access: HostAccess): Promise<ChangePlace> {
-    await assertConfinableRoots(this.home, access)
+    await assertConfinableRoots(this.home, access, this.writable)
     const directory = await ensureRobotDirectory(this.home, access)
     const extraRoots = await madeExtraRoots(this.home, access)
     const policy: RootedExecutionPolicy = { mode: SANDBOX_MODE[access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }

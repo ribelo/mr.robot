@@ -7,8 +7,8 @@ import { HostShell } from '../src/shell.ts'
 
 type Rpc = Record<string, (payload: unknown) => Effect.Effect<any, any>>
 
-export async function connected(home: string, copyIo?: CopyIo) {
-  const shell = await HostShell.start({ home })
+export async function connected(home: string, copyIo?: CopyIo, options: { readonly sandboxChain?: Parameters<typeof HostShell.start>[0]['sandboxChain'] } = {}) {
+  const shell = await HostShell.start({ home, ...options })
   // The job frames the app would send to the Worker.
   const ended: JobEnded[] = []
   shell.onJobEnded((job) => ended.push(job))

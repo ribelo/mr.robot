@@ -109,6 +109,20 @@ describe('the mode and roots of a Host grant (ob-wh59, ob-397e)', () => {
     const saved = await save(['~/projects', '~/projects-old', '/srv/data', `~/mr-robot/another-robot`])
     expect(saved.status).toBe(200)
   })
+
+  // Deep review P1c: a command in the sandbox may change /tmp on some Hosts, so it could swap a root there for a link between two calls.
+  it('refuse a root inside a temporary directory', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk)
+    const facet = `${desk.hostId}:files`
+    const save = (roots: string[]) => api<{ error?: string }>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { hostAccess: { [facet]: { mode: 'workspace-write', roots } } } })
+    for (const [root, temp] of [['/tmp/work', '/tmp'], ['/var/tmp/cache/', '/var/tmp'], ['/dev//shm/x', '/dev/shm'], ['/srv/../tmp/x', '/tmp']]) {
+      const refused = await save([root!])
+      expect(refused.status, root).toBe(400)
+      expect(JSON.stringify(refused.body)).toContain(`lies inside ${temp}`)
+    }
+    expect((await save(['/tmpfiles/work', '/srv/tmp/x'])).status).toBe(200)
+  })
 })
 
 describe('a denied write (ob-vnld)', () => {
