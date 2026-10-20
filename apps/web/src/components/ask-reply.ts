@@ -4,6 +4,8 @@ import type { CredentialSave } from '@mr-robot/protocol'
 export type AskReply =
   | { readonly kind: 'option'; readonly value: string }
   | { readonly kind: 'custom'; readonly text: string }
+  /** A multi-select question (v1.17): every chosen value, and the owner's words when the question allows them. */
+  | { readonly kind: 'options'; readonly values: readonly string[]; readonly text?: string }
   | { readonly kind: 'dismiss' }
   | { readonly kind: 'save'; readonly entry: Omit<CredentialSave, 'revision'> }
   | { readonly kind: 'decline' }

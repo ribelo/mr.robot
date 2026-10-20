@@ -12,7 +12,7 @@ const base = { revision: 1, grants: null, file: null, skill: null } as const
 const question: ProposalView = {
   ...base, id: 'q-1', kind: 'question', status: 'open', purpose: 'Which one should I order?',
   question: {
-    prompt: 'Which one should I order?', help: 'Both are in stock.', allowCustom: true, dismissOnMoveOn: false, urgent: false, answer: null,
+    prompt: 'Which one should I order?', help: 'Both are in stock.', allowCustom: true, multiSelect: false, dismissOnMoveOn: false, urgent: false, answer: null,
     options: [
       { label: 'Order the red one', value: 'red', description: 'Ships Friday, 129 zł', style: 'primary' },
       { label: 'Order the blue one', value: 'blue', description: null, style: 'default' },
@@ -77,6 +77,33 @@ describe('the question Ask (gb-k88x)', () => {
     const urgent: ProposalView = { ...question, question: { ...question.question!, urgent: true } }
     render(<ChatView items={[{ kind: 'proposal', id: 'q', seq: 1, at, proposal: urgent }]} meId="m-1" working={false} canAnswer={true} now={at} />)
     expect(screen.getByText('Urgent: Which one should I order? · answer below')).toBeTruthy()
+  })
+})
+
+describe('the multi-select question (dp-53uq)', () => {
+  const multi: ProposalView = { ...question, id: 'q-2', question: { ...question.question!, multiSelect: true } }
+
+  it('shows a checkbox per option and Submit; Submit sends every value ticked with the owner\'s words', () => {
+    const onReply = vi.fn()
+    const { container } = render(<AskBar asks={[multi]} onAnswer={vi.fn()} onReplyInstead={vi.fn()} onReply={onReply} />)
+    expect(container.querySelectorAll('.question-checks input[type="checkbox"]')).toHaveLength(3)
+    expect(container.querySelector('.question-option')).toBeNull()
+    const submit = screen.getByText('Submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('Cancel the order'))
+    fireEvent.click(screen.getByLabelText('Order the red one'))
+    fireEvent.change(screen.getByLabelText('Your own answer'), { target: { value: ' gift wrap ' } })
+    fireEvent.click(submit)
+    expect(onReply).toHaveBeenLastCalledWith(multi, { kind: 'options', values: ['red', 'cancel'], text: 'gift wrap' })
+  })
+
+  it('has no text field when the Robot did not allow one, and shows every choice once answered', () => {
+    render(<AskBar asks={[{ ...multi, question: { ...multi.question!, allowCustom: false } }]} onAnswer={vi.fn()} onReplyInstead={vi.fn()} onReply={vi.fn()} />)
+    expect(screen.queryByLabelText('Your own answer')).toBeNull()
+    cleanup()
+    const answered: ProposalView = { ...multi, status: 'approved', question: { ...multi.question!, answer: { kind: 'selected', selected: [{ value: 'red', label: 'Order the red one' }, { value: 'blue', label: 'Order the blue one' }], text: null } } }
+    render(<ChatView items={[{ kind: 'proposal', id: 'q', seq: 1, at, proposal: answered }]} meId="m-1" working={false} canAnswer={true} now={at} />)
+    expect(screen.getByText('You chose: Order the red one, Order the blue one')).toBeTruthy()
   })
 })
 

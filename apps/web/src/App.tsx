@@ -181,7 +181,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   const reply = async (proposal: ProposalView, answered: AskReply) => {
     setFailure(exitFailure(await command((api) => answered.kind === 'save' ? api.saveCredential(id, proposal, answered.entry)
       : answered.kind === 'decline' ? api.answer(id, proposal, false)
-        : api.choose(id, proposal, answered.kind === 'option' ? { value: answered.value } : answered.kind === 'custom' ? { text: answered.text } : { dismiss: true }), [keys.robot(id), keys.robots, keys.secrets])))
+        : api.choose(id, proposal, answered.kind === 'option' ? { value: answered.value } : answered.kind === 'options' ? { values: answered.values, ...(answered.text === undefined ? {} : { text: answered.text }) } : answered.kind === 'custom' ? { text: answered.text } : { dismiss: true }), [keys.robot(id), keys.robots, keys.secrets])))
   }
   const answer = async (proposal: ProposalView, approve: boolean, approved?: readonly string[], scope?: string, note?: string) => {
     setFailure(exitFailure(await command((api) => api.answer(id, proposal, approve, approved, scope, note), [keys.robot(id), keys.robots])))

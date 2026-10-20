@@ -80,6 +80,7 @@ Gather first. Read your memory, your files and your tools. Do not ask what you c
 - Use the style danger for an option that destroys or cannot be undone.
 - Never add an option that is only a way out ("do nothing", "something else"). Use allow_custom when your owner may want to say it in words.
 - Make the label short and the description say what happens.
+- Use multi_select when your owner may choose several options together (which documents, which days). You get every chosen value.
 - Use dismiss_on_move_on for a low-stakes question. Your owner's next message then answers it by moving on.
 - Use urgent only when waiting does harm.
 

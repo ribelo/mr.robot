@@ -36,19 +36,21 @@ The fields:
 - help: one line of context (optional).
 - options: up to 6. Each has a label (the button text), a value (what you get back), an optional description, and a style: default, primary (the one you recommend, first in the list) or danger (destructive or irreversible).
 - allow_custom: the owner may write their own answer.
+- multi_select: the owner may choose several options. The card shows a checkbox for each option and Submit. Give at least two options.
 - dismiss_on_move_on: the question is dismissed when the owner's next message arrives and the question is still open. Use it for low-stakes questions.
 - urgent: the owner gets a "needs you" push at once. Use it only when waiting does harm.
 
-Make the options real. Check that each one is possible before you offer it. Never add an option that is only a way out.
+Make the options real. Never add an option that is only a way out.
 
 What happens next:
 1. The platform stores an Ask of kind question and returns { askId, status: "waiting" }.
-2. You go on with work that does not depend on the answer. If there is none, end your Turn with one short line. Take no visible action while you wait.
+2. You go on with work that does not depend on the answer, or end your Turn with one short line.
 3. The owner answers with one tap, with words (when you allowed them), or dismisses the question.
 4. The answer wakes you as a steer, for example "[Your owner answered your question <id>: \"Order the red one\" (value: red)]".
+   A multi-select answer names every chosen option and value. The owner's own words follow on the next line.
 5. A dismissal wakes you with that fact. Do not ask the same question again. If the owner moved on, their next message tells you.
 
-On Discord, a question is text with numbered options. The owner answers it in the app.
+On Discord, a question is text with numbered options. The owner answers there with a number, or several numbers ("1, 3") for multi-select. The newest open question takes them.
 
 ## Questions to your chief
 

@@ -342,7 +342,7 @@ function QuestionAnswerPanel({ proposal, canAnswer, onReply }: { proposal: Propo
     <>
       <div className="question-prompt">{question.prompt}</div>
       {question.help === null ? null : <div className="question-purpose">{question.help}</div>}
-      {open ? (
+      {open && question.multiSelect ? <MultiSelectPanel proposal={proposal} {...(onReply === undefined ? {} : { onReply })} /> : open ? (
         <>
           <div className="question-options">
             {question.options.map((option) => (
@@ -361,8 +361,39 @@ function QuestionAnswerPanel({ proposal, canAnswer, onReply }: { proposal: Propo
           <div className="question-actions"><button type="button" className="link" onClick={() => onReply?.(proposal, { kind: 'dismiss' })}>Dismiss</button></div>
         </>
       ) : answer === null ? <div className="question-status">{statusText(proposal)}</div> : (
-        <div className="question-status">{answer.kind === 'option' ? `You chose: ${answer.label}` : answer.kind === 'custom' ? `You answered: ${answer.text}` : answer.reason === 'moved-on' ? 'Dismissed: you moved on' : 'Dismissed'}</div>
+        <div className="question-status">{answer.kind === 'option' ? `You chose: ${answer.label}` : answer.kind === 'selected' ? `You chose: ${answer.selected.map((option) => option.label).join(', ')}${answer.text === null ? '' : ` · ${answer.text}`}` : answer.kind === 'custom' ? `You answered: ${answer.text}` : answer.reason === 'moved-on' ? 'Dismissed: you moved on' : 'Dismissed'}</div>
       )}
+    </>
+  )
+}
+
+/** A multi-select question (v1.17, dp-53uq): a checkbox per option, the owner's own words alongside when allowed, Submit and Dismiss. */
+function MultiSelectPanel({ proposal, onReply }: { proposal: ProposalView; onReply?: (proposal: ProposalView, reply: AskReply) => void }) {
+  const question = proposal.question!
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(() => new Set())
+  const [text, setText] = useState('')
+  const toggle = (value: string) => setChosen((current) => {
+    const next = new Set(current)
+    if (!next.delete(value)) next.add(value)
+    return next
+  })
+  const words = text.trim()
+  const values = question.options.filter((option) => chosen.has(option.value)).map((option) => option.value)
+  return (
+    <>
+      <ul className="question-checks">
+        {question.options.map((option) => (
+          <li key={option.value}>
+            <label className="check"><input type="checkbox" checked={chosen.has(option.value)} onChange={() => toggle(option.value)} /><span>{option.label}</span></label>
+            {option.description === null ? null : <small className="muted">{option.description}</small>}
+          </li>
+        ))}
+      </ul>
+      {question.allowCustom ? <input className="question-custom-text" value={text} placeholder="Add your own words (optional)" aria-label="Your own answer" onChange={(event) => setText(event.target.value)} /> : null}
+      <div className="question-actions">
+        <button type="button" className="link" onClick={() => onReply?.(proposal, { kind: 'dismiss' })}>Dismiss</button>
+        <button type="button" className="button button-primary" disabled={values.length === 0 && words === ''} onClick={() => onReply?.(proposal, { kind: 'options', values, ...(words === '' ? {} : { text: words }) })}>Submit</button>
+      </div>
     </>
   )
 }

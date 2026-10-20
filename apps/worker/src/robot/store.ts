@@ -1071,9 +1071,10 @@ function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk }
 }
 
 function questionOf(payload: Record<string, unknown>): { question: QuestionAsk } | Record<string, never> {
-  const question = payload['question'] as Omit<QuestionAsk, 'answer'> | undefined
+  const question = payload['question'] as Omit<QuestionAsk, 'answer' | 'multiSelect'> & { readonly multiSelect?: boolean } | undefined
   if (question === undefined) return {}
-  return { question: { ...question, answer: (payload['questionAnswer'] as QuestionAsk['answer'] | undefined) ?? null } }
+  // A question stored before v1.17 takes one answer.
+  return { question: { ...question, multiSelect: question.multiSelect === true, answer: (payload['questionAnswer'] as QuestionAsk['answer'] | undefined) ?? null } }
 }
 
 function credentialOf(payload: Record<string, unknown>): { credential: CredentialAsk } | Record<string, never> {

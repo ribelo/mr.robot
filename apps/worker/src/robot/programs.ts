@@ -17,7 +17,7 @@ import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { chiefGrants, type ProposalRow, type RobotConfig, type RobotStore, type WakeupKind } from './store.ts'
 import { setupGrants } from '../agent/catalog.ts'
 import { effectiveSpendLimit, emptyGrants, grantSetFrom, overlayGrants, usableNames, type HomeSpendLimit } from '@mr-robot/protocol'
-import { THREAD_PAUSE_AT } from '../agent/sources.ts'
+import { THREAD_PAUSE_AT, type AskAnswerLabel } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { readStoredEvents, storedLength } from '../agent/session-log.ts'
@@ -655,14 +655,14 @@ const threadAnswered = (proposal: ProposalRow, approved: boolean) => Effect.gen(
   if (told._tag === 'Failure') store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), `Thread "${ask.topic}": ${String(told.failure)}`, Date.now())
 })
 
-export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[], scope?: string, extra: { readonly note?: string; readonly value?: string; readonly text?: string; readonly by?: Answerer } = {}) => Effect.gen(function* () {
+export const answer = (proposalId: string, revision: number, approve: boolean, approvedIds?: readonly string[], scope?: string, extra: { readonly note?: string; readonly value?: string; readonly values?: readonly string[]; readonly text?: string; readonly by?: Answerer } = {}) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const pending = store.proposal(proposalId)
   if (pending === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
   if (!mayAnswer(pending.kind, extra.by ?? 'owner')) return { ok: false, reason: 'not-yours' } as AnswerResult
   if (pending.kind === 'tool-call') return yield* answerToolCall(pending, revision, approve, extra.note)
-  if (pending.kind === 'question') return yield* answerQuestion(pending, revision, approve, extra.value, extra.text)
+  if (pending.kind === 'question') return yield* answerQuestion(pending, revision, approve, { ...(extra.value === undefined ? {} : { value: extra.value }), ...(extra.values === undefined ? {} : { values: extra.values }), ...(extra.text === undefined ? {} : { text: extra.text }) })
   if (pending.kind === 'credential') {
     if (approve) return yield* invalid('save the form to answer a credential request; to refuse it, decline')
     return yield* answerCredential(pending, revision, { declined: true })
@@ -718,30 +718,72 @@ const answerToolCall = (pending: ProposalRow, revision: number, approve: boolean
   return { ok: true, proposal: proposalView(answered) } as AnswerResult
 })
 
+/** What the owner chose for a question: an option by value, several values (multi-select), their own words. */
+export interface QuestionChoice {
+  readonly value?: string
+  readonly values?: readonly string[]
+  readonly text?: string
+}
+
+type QuestionAnswerValue = NonNullable<NonNullable<ProposalView['question']>['answer']>
+
 /**
- * The owner's answer to a question Ask (v1.15, gb-1lfb, gb-ewfe): an option (by value), their own words when the question allows them, or a
- * dismissal. One answer per Ask, compare-and-swap on the revision. It wakes the Robot as a steer carrying the Ask id and the value.
+ * The answer a choice gives a question, or the reason it is refused (pure). A single-select question takes one option or the owner's words; a
+ * multi-select question takes every chosen option (at least one) with the owner's words alongside when allowed, or the words alone (dp-xz6h).
  */
-const answerQuestion = (pending: ProposalRow, revision: number, approve: boolean, value: string | undefined, text: string | undefined) => Effect.gen(function* () {
+export function questionAnswerOf(question: NonNullable<ProposalView['question']>, choice: QuestionChoice): { readonly answer: QuestionAnswerValue } | { readonly refused: string } {
+  const custom = choice.text?.trim() ?? ''
+  const unknown = [...(choice.value === undefined ? [] : [choice.value]), ...(choice.values ?? [])].find((value) => !question.options.some((option) => option.value === value))
+  if (unknown !== undefined) return { refused: `"${unknown}" is not one of the options of this question` }
+  if (custom !== '' && !question.allowCustom) return { refused: 'this question takes one of its options, not your own words' }
+  if (question.multiSelect) {
+    const chosen = new Set([...(choice.values ?? []), ...(choice.value === undefined ? [] : [choice.value])])
+    const selected = question.options.filter((option) => chosen.has(option.value)).map((option) => ({ value: option.value, label: option.label }))
+    if (selected.length === 0 && custom === '') return { refused: question.allowCustom ? 'choose at least one option or write your answer' : 'choose at least one option' }
+    return { answer: selected.length === 0 ? { kind: 'custom', text: custom } : { kind: 'selected', selected, text: custom === '' ? null : custom } }
+  }
+  if (choice.values !== undefined && choice.values.length > 1) return { refused: 'this question takes one answer' }
+  const value = choice.value ?? choice.values?.[0]
+  const option = value === undefined ? undefined : question.options.find((entry) => entry.value === value)
+  if (option !== undefined) return { answer: { kind: 'option', value: option.value, label: option.label } }
+  if (custom !== '') return { answer: { kind: 'custom', text: custom } }
+  return { refused: question.allowCustom ? 'answer with an option or write your answer' : 'answer with one of the options' }
+}
+
+/** What the Robot reads of an answer: the label names the choice, the text carries the values and the owner's words. */
+function questionWake(askId: string, answer: QuestionAnswerValue): { readonly label: AskAnswerLabel; readonly text: string } {
+  switch (answer.kind) {
+    case 'option': return { label: { askId, kind: 'option', label: answer.label, value: answer.value }, text: answer.value }
+    case 'selected': return {
+      label: { askId, kind: 'selected', labels: answer.selected.map((option) => option.label), values: answer.selected.map((option) => option.value), withText: answer.text !== null },
+      text: [answer.selected.map((option) => option.value).join(', '), ...(answer.text === null ? [] : [answer.text])].join('\n'),
+    }
+    case 'custom': return { label: { askId, kind: 'custom' }, text: answer.text }
+    case 'dismissed': return { label: { askId, kind: 'dismissed' }, text: 'Your owner chose not to answer. Do not ask it again; decide yourself, or leave it.' }
+  }
+}
+
+/**
+ * The owner's answer to a question Ask (v1.15, gb-1lfb, gb-ewfe; v1.17 dp-xz6h, dp-f8z1): an option (by value), several options for a multi-select
+ * question, their own words when the question allows them, or a dismissal. One answer per Ask, compare-and-swap on the revision. It wakes the Robot
+ * as a steer carrying the Ask id and every chosen value.
+ */
+const answerQuestion = (pending: ProposalRow, revision: number, approve: boolean, choice: QuestionChoice) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const store = yield* RobotState
   const question = pending.question
   if (question === undefined) return { ok: false, reason: 'not-found' } as AnswerResult
-  const custom = text?.trim() ?? ''
-  const option = value === undefined ? undefined : question.options.find((entry) => entry.value === value)
-  if (approve && option === undefined && !(question.allowCustom && custom !== '')) {
-    return yield* invalid(value !== undefined ? `"${value}" is not one of the options of this question` : question.allowCustom ? 'answer with an option or write your answer' : 'answer with one of the options')
-  }
-  const answer: NonNullable<ProposalView['question']>['answer'] = !approve ? { kind: 'dismissed', reason: 'owner' } : option !== undefined ? { kind: 'option', value: option.value, label: option.label } : { kind: 'custom', text: custom }
-  const answered = store.answerQuestion(pending.id, revision, answer!, Date.now())
+  const decided = approve ? questionAnswerOf(question, choice) : { answer: { kind: 'dismissed', reason: 'owner' } as QuestionAnswerValue }
+  if ('refused' in decided) return yield* invalid(decided.refused)
+  const answered = store.answerQuestion(pending.id, revision, decided.answer, Date.now())
   if (answered === undefined) return { ok: false, reason: 'stale' } as AnswerResult
   yield* platform.changed()
-  const label = answer!.kind === 'option' ? { askId: answered.id, kind: 'option' as const, label: answer!.label, value: answer!.value } : answer!.kind === 'custom' ? { askId: answered.id, kind: 'custom' as const } : { askId: answered.id, kind: 'dismissed' as const }
+  const told = questionWake(answered.id, decided.answer)
   yield* wake({
     kind: 'platform',
     sender: { kind: 'platform' },
-    text: answer!.kind === 'option' ? answer!.value : answer!.kind === 'custom' ? answer!.text : 'Your owner chose not to answer. Do not ask it again; decide yourself, or leave it.',
-    payload: { byOwner: true, summary: answer!.kind === 'dismissed' ? 'Dismissed a question' : 'Answered a question', askAnswer: label },
+    text: told.text,
+    payload: { byOwner: true, summary: decided.answer.kind === 'dismissed' ? 'Dismissed a question' : 'Answered a question', askAnswer: told.label },
   })
   return { ok: true, proposal: proposalView(answered) } as AnswerResult
 })

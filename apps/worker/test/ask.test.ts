@@ -257,11 +257,61 @@ describe('notification (gb-e5bs, gb-viep)', () => {
       '1. Order the red one — Ships Friday, 129 zł',
       '2. Order the blue one',
       '3. Cancel the order',
-      'Answer in the app.',
+      'Answer with a number here or answer in the app.',
     ].join('\n')])
   })
 
   it('writes the text form for a question that takes free words', () => {
-    expect(questionText({ prompt: 'Which?', help: null, options: [], allowCustom: true, urgent: false })).toBe('Which?\nAnswer in the app, or write your own answer here.')
+    expect(questionText({ prompt: 'Which?', help: null, options: [], allowCustom: true, multiSelect: false, urgent: false })).toBe('Which?\nAnswer in the app, or write your own answer here.')
+  })
+})
+
+describe('multi-select (dp-xz6h, dp-f8z1, dp-rys9)', () => {
+  const TOPPINGS = { prompt: 'Which toppings?', options: [{ label: 'Cheese', value: 'cheese' }, { label: 'Ham', value: 'ham' }, { label: 'Olives', value: 'olives' }], multi_select: true, allow_custom: true }
+
+  it('stores the question as multi-select and refuses one with fewer than two options', async () => {
+    const id = await activeRobot()
+    const ask = await asked(id, TOPPINGS)
+    expect(ask.question).toMatchObject({ multiSelect: true, allowCustom: true })
+    scripts.set(id, [{ calls: [{ name: 'ask', args: { prompt: 'Which?', options: [{ label: 'A', value: 'a' }], multi_select: true } }] }, { text: '' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+    await settle(id)
+    expect(toolResults(id).at(-1)).toContain('multi_select needs at least two options')
+  })
+
+  it('answers with every chosen value in the order of the options, the owner\'s words alongside, and wakes the Robot with the list', async () => {
+    const id = await activeRobot()
+    const ask = await asked(id, TOPPINGS)
+    expect((await answerAsk(id, ask, { approve: true, values: ['tomato'] })).status).toBe(400)
+    expect((await answerAsk(id, ask, { approve: true, values: [] })).status).toBe(400)
+    scripts.set(id, [{ text: '' }])
+    const answered = await answerAsk(id, ask, { approve: true, values: ['olives', 'cheese'], text: 'and extra basil' })
+    expect(answered.body).toMatchObject({ status: 'approved', question: { answer: { kind: 'selected', selected: [{ value: 'cheese', label: 'Cheese' }, { value: 'olives', label: 'Olives' }], text: 'and extra basil' } } })
+    await settle(id)
+    const wake = lastWake(id)
+    expect(wake).toContain(`[Your owner answered your question ${ask.id}: \\"Cheese\\", \\"Olives\\" (values: cheese, olives), with their own words]`)
+    expect(wake).toContain('cheese, olives\\nand extra basil')
+  })
+
+  it('takes several numbers on Discord from the owner; a number with no option stays a message', async () => {
+    await env.MEMBER.getByName(annaId).addConnection({ kind: 'discord-user', label: 'anna', account: 'anna', services: [], shared: false, meta: { userId: 'u-anna' }, secrets: { token: 't' } })
+    connectorFixtures.on('GET', `${API}/users/@me`, { id: 'B1', username: 'mr-robot', global_name: 'Mr. Robot', bot: true })
+    await api<ConnectionView>(ANNA, '/api/connections/discord', { body: { shared: false, values: { token: 'bot-token-123' } } })
+    connectorFixtures.on('POST', `${API}/channels/C-robot/messages`, { id: 'M-out', channel_id: 'C-robot', content: '', timestamp: '2026-10-20T10:00:00Z', author: { id: 'B1', username: 'mr-robot', bot: true } })
+    const id = await activeRobot({ discordChannel: 'C-robot' })
+    connectorFixtures.calls = []
+    const ask = await asked(id, TOPPINGS)
+    const posted = connectorFixtures.calls.filter((call) => call.method === 'POST' && call.url === `${API}/channels/C-robot/messages`).map((call) => (JSON.parse(call.body ?? '{}') as { content: string }).content)
+    expect(posted[0]).toContain('1. Cheese\n2. Ham\n3. Olives\nAnswer with one or more numbers here (for example 1, 3), write your own answer, or answer in the app.')
+    scripts.set(id, [{ text: '' }])
+    await env.HOME.getByName('home').discordReceived({ id: 'M-9', channelId: 'C-robot', guildId: 'G-1', authorId: 'u-anna', authorName: 'Anna', text: '1, 7', direct: false }, annaId)
+    await settle(id)
+    expect((await proposals(id)).find((proposal) => proposal.id === ask.id)).toMatchObject({ status: 'open' })
+    expect(lastWake(id)).toContain('1, 7')
+    scripts.set(id, [{ text: '' }])
+    await env.HOME.getByName('home').discordReceived({ id: 'M-10', channelId: 'C-robot', guildId: 'G-1', authorId: 'u-anna', authorName: 'Anna', text: '3 and 1', direct: false }, annaId)
+    await settle(id)
+    expect((await proposals(id)).find((proposal) => proposal.id === ask.id)).toMatchObject({ status: 'approved', question: { answer: { kind: 'selected', selected: [{ value: 'cheese' }, { value: 'olives' }], text: null } } })
+    expect(lastWake(id)).toContain('(values: cheese, olives)')
   })
 })

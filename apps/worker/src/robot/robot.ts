@@ -82,7 +82,7 @@ import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
 import { fanOut, type ChannelAdapter, type ChannelFile, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
-import { questionText } from '../agent/tools/ask.ts'
+import { answerByNumbers, questionText } from '../agent/tools/ask.ts'
 import { dismissedTrailer, QUIET_STEER_MS, quietSteerNote, SAFETY_NET_STEPS, safetyNetNote, SAY_MAX_ATTACHMENTS, SAY_RECORD, sayOf, SCREEN_PREFIX, type SayRecord } from '../agent/say.ts'
 import type { SayHost } from '../agent/tools/say.ts'
 import { Say } from '../plugins/say.ts'
@@ -1503,8 +1503,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       if (this.store.get<boolean>(`inbound:${wakeup.dedupeKey}`) === true) return { accepted: true }
       this.store.set(`inbound:${wakeup.dedupeKey}`, true)
     }
+    // The owner answers a question on Discord with the numbers of its options (dp-rys9): the newest open question takes them.
+    if (event.channel === 'discord' && event.fromOwner === true && (await this.answerByNumbers(wakeup.text))) return { accepted: true }
     await this.wake({ kind: 'channel', sender: wakeup.sender, text: wakeup.text, payload: { route: wakeup.route, ...(event.fromOwner === true && event.channel !== 'webhook' ? { fromOwner: true } : {}) } })
     return { accepted: true }
+  }
+
+  /** Answer the newest open question with the options a text of numbers names; false when the text is not such an answer. */
+  private async answerByNumbers(text: string): Promise<boolean> {
+    const open = this.store.proposals('open').filter((row) => row.kind === 'question' && row.question !== undefined).at(-1)
+    const values = open?.question === undefined ? undefined : answerByNumbers(open.question, text)
+    if (open === undefined || values === undefined) return false
+    const result = await this.answer(open.id, open.revision, true, undefined, undefined, undefined, open.question!.multiSelect ? { values } : { value: values[0]! })
+    return result.ok
   }
 
   // ---------------------------------------------------------------- webhook (v1.6 ticket 07)
@@ -2670,7 +2681,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
    * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
    */
-  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string, choice: { readonly value?: string; readonly text?: string } = {}): Promise<AnswerResult> {
+  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string, choice: { readonly value?: string; readonly values?: readonly string[]; readonly text?: string } = {}): Promise<AnswerResult> {
     return this.program(Programs.answer(proposalId, revision, approve, approved, scope, { ...(note === undefined ? {} : { note }), ...choice }))
   }
 

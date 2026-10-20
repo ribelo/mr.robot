@@ -859,6 +859,8 @@ export type QuestionOption = typeof QuestionOption.Type
 
 export const QuestionAnswer = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('option'), value: Schema.String, label: Schema.String }),
+  /** A multi-select question (v1.17, dp-xz6h): every option chosen, in the order the question lists them, and the owner's own words when allowed. */
+  Schema.Struct({ kind: Schema.Literal('selected'), selected: Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })), text: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('custom'), text: Schema.String }),
   Schema.Struct({ kind: Schema.Literal('dismissed'), reason: Schema.Literals(['owner', 'moved-on']) }),
 ])
@@ -869,6 +871,8 @@ export const QuestionAsk = Schema.Struct({
   help: Schema.NullOr(Schema.String),
   options: Schema.Array(QuestionOption),
   allowCustom: Schema.Boolean,
+  /** The owner may choose several options (v1.17, dp-xz6h); false on a question stored before it. */
+  multiSelect: Schema.Boolean,
   dismissOnMoveOn: Schema.Boolean,
   urgent: Schema.Boolean,
   answer: Schema.NullOr(QuestionAnswer),
@@ -931,6 +935,8 @@ export const ProposalAnswer = Schema.Struct({
   note: Schema.optional(Schema.String),
   /** Question Ask only: the value of the option chosen, or the owner's own words in `text`; approve false dismisses. */
   value: Schema.optional(Schema.String),
+  /** Multi-select question only (v1.17, dp-xz6h): the values of every option chosen; `text` may ride along when the question allows it. */
+  values: Schema.optional(Schema.Array(Schema.String)),
   text: Schema.optional(Schema.String),
 })
 

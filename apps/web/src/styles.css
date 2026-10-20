@@ -695,6 +695,9 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .question-option { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; }
 .question-custom { display: flex; gap: 8px; margin-top: 8px; }
 .question-custom input { flex: 1; }
+.question-checks { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.question-checks small { display: block; margin-left: 24px; }
+.question-custom-text { width: 100%; margin-top: 8px; box-sizing: border-box; }
 .credential-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .credential-form label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .credential-form label.check { flex-direction: row; align-items: center; gap: 6px; }

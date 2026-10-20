@@ -97,6 +97,8 @@ export function toolCallAnswerLabel(answer: ToolCallAnswerLabel): string {
 /** The owner's answer to a question Ask or a credential Ask (v1.15), as the label names it. */
 export type AskAnswerLabel =
   | { readonly askId: string; readonly kind: 'option'; readonly label: string; readonly value: string }
+  /** A multi-select answer (v1.17, dp-f8z1): every chosen option, and whether the owner's words follow in the text. */
+  | { readonly askId: string; readonly kind: 'selected'; readonly labels: readonly string[]; readonly values: readonly string[]; readonly withText: boolean }
   | { readonly askId: string; readonly kind: 'custom' }
   | { readonly askId: string; readonly kind: 'dismissed' }
   | { readonly askId: string; readonly kind: 'credential-saved'; readonly entry: string }
@@ -106,6 +108,7 @@ export type AskAnswerLabel =
 export function askAnswerLabel(answer: AskAnswerLabel): string {
   switch (answer.kind) {
     case 'option': return `[Your owner answered your question ${answer.askId}: "${oneLine(answer.label)}" (value: ${oneLine(answer.value)})]`
+    case 'selected': return `[Your owner answered your question ${answer.askId}: ${answer.labels.map((label) => `"${oneLine(label)}"`).join(', ')} (values: ${answer.values.map(oneLine).join(', ')})${answer.withText ? ', with their own words' : ''}]`
     case 'custom': return `[Your owner answered your question ${answer.askId} in their own words]`
     case 'dismissed': return `[Your owner dismissed your question ${answer.askId}]`
     case 'credential-saved': return `[Your owner saved the login or secret you asked for (${answer.askId}): its name is ${answer.entry}]`
