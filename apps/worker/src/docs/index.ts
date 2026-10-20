@@ -35,20 +35,20 @@ export interface ProductDoc {
 const doc = (name: string, summary: string, text: string): ProductDoc => ({ path: `${DOCS_DIRECTORY}/${name}.md`, summary, text })
 
 export const PRODUCT_DOCS: readonly ProductDoc[] = [
-  doc('mr-robot', 'What Mr. Robot is: Home, Members, Robots, Turns, and the role of Mr. Robot as chief (Chief of Staff).', MR_ROBOT),
-  doc('members', 'Members: what they own and share, the profile, the nickname and the Owner line, avatars, the Robot list with its groups and Hidden.', MEMBERS),
-  doc('robots', 'Robots: creation and setup interview, Persona files, settings and the Robot avatar (Another look), Mr. Robot versus other Robots, skills.', ROBOTS),
-  doc('grants', 'Grant items and the levels allow, ask and deny; tool-call Asks; propose_grants; my_capabilities and the Owner line.', GRANTS),
-  doc('tasks', 'Tasks: doers, the three timings, state and attempts, parents, the Task tools, what a Robot sees and whom it gives Tasks, limits, reminders for people.', TASKS),
-  doc('asks-and-help', 'Asks and their kinds; ask (one question with options), request_credential, asking your chief, old help requests.', ASKS_AND_HELP),
-  doc('memory-and-files', 'Memory files and whose they are, the first message of the context, the Workspace layout, the file tools.', MEMORY_AND_FILES),
-  doc('connections', 'Connectors and Connections: Google, Slack, Discord as a bot and as you; connecting as you (sign-in window, Takeover, paste), Sign in again, sharing, grants, write access.', CONNECTIONS),
-  doc('hosts', 'Hosts: the desktop app, pairing, the Hosts line with online state, host_read, host_write, host_run, the Host browser, offline Hosts.', HOSTS),
+  doc('mr-robot', 'What Mr. Robot is: Home, Members, Robots, Turns, the chief.', MR_ROBOT),
+  doc('members', 'Members: what they own and share, the profile, avatars, the Robot list.', MEMBERS),
+  doc('robots', 'Robots: creation and setup, Persona files, settings, Mr. Robot versus other Robots.', ROBOTS),
+  doc('grants', 'Grant items and the levels allow, ask and deny; propose_grants; my_capabilities.', GRANTS),
+  doc('tasks', 'Tasks: doers, timings, state and attempts, the Task tools, limits, reminders.', TASKS),
+  doc('asks-and-help', 'Asks and their kinds; ask, request_credential, asking your chief.', ASKS_AND_HELP),
+  doc('memory-and-files', 'Memory files and whose they are, the Workspace layout, the file tools.', MEMORY_AND_FILES),
+  doc('connections', 'Connectors and Connections: Google, Slack, Discord; connecting, sharing, grants, instructions.', CONNECTIONS),
+  doc('hosts', 'Hosts: the desktop app, pairing, host_read, host_write, host_copy, host_run, the Host browser.', HOSTS),
   doc('browser', 'The browser: backends, logins, Live view, Takeover, payments, screenshots.', BROWSER),
-  doc('providers', 'Providers: accounts, model chains, account states, the Workers AI switch, usage, Spend limits (the Home\'s, no limit, an amount).', PROVIDERS),
-  doc('subagents', 'Subagents: the grant and its models, subagent and subagent_fork, what a Subagent cannot do, reports, limits and cost.', SUBAGENTS),
-  doc('box', 'The Box: the tools, the kept box/ folder and setup.sh, starting and stopping, cost.', BOX),
-  doc('auto-review', 'Auto review: the reviewer model, risk levels, a denied call becomes an Ask, the reviewer setting.', AUTO_REVIEW),
+  doc('providers', 'Providers: accounts, model chains, usage, Spend limits.', PROVIDERS),
+  doc('subagents', 'Subagents: the grant, subagent and subagent_fork, limits, reports, cost.', SUBAGENTS),
+  doc('box', 'The Box: tools, jobs, the kept box/ folder, starting and stopping, cost.', BOX),
+  doc('auto-review', 'Auto review: the reviewer, risk levels, a denied call becomes an Ask.', AUTO_REVIEW),
 ]
 
 /** The platform skills are product docs too: read-only, in the bundle, never in R2 (v1.15 ticket 12, gb-n6by). */

@@ -398,7 +398,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return {
       sections: sections.map((section) => ({ ...section, text: this.mask(section.text) })),
       tools: config.codeMode && config.status !== 'setup' ? ['run_code (code mode), calling:', ...this.toolNames()] : this.toolNames(),
-      skills: config.status === 'setup' ? [] : usableNames(this.store.effectiveGrants().skills),
+      // The platform skills first (v1.15 ticket 12, gb-dzf6), then the Home skills granted.
+      skills: config.status === 'setup' ? [] : [...(this.capabilityInput().platformSkills ?? []).map((skill) => `${skill.name} (platform): ${skill.description}`), ...usableNames(this.store.effectiveGrants().skills)],
     }
   }
 
@@ -3585,13 +3586,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.knownCatalog === undefined ? undefined : capabilityItems(this.knownCatalog, this.store.effectiveGrants())
   }
 
-  private capabilityInput(): { capabilities?: CapabilityItem[]; connectionInstructions?: Array<{ label: string; instructions: string }> } {
+  private capabilityInput(): { capabilities?: CapabilityItem[]; connectionInstructions?: Array<{ label: string; instructions: string }>; platformSkills?: Array<{ name: string; description: string }> } {
     const items = this.capabilityItems()
     // The owner's words about each Connection this Robot holds at allow or ask (v1.15, gb-j887).
     const instructions = this.knownConnections
       .filter((connection) => connectorOn(this.pluginsOn, connection.kind) && this.store.mayUse('connection', connection.id) && (connection.instructions ?? '').trim() !== '')
       .map((connection) => ({ label: connection.label, instructions: (connection.instructions ?? '').trim() }))
-    return { ...(items === undefined ? {} : { capabilities: items }), ...(instructions.length === 0 ? {} : { connectionInstructions: instructions }) }
+    // The platform skills, by what this Robot holds (v1.15 ticket 12).
+    const config = this.store.requireConfig()
+    const granted = new Set(usableNames(this.store.effectiveGrants().tools))
+    const skills = config.status === 'setup' ? [] : platformSkillsFor(this.platformSkillAudience(granted)).map((skill) => ({ name: skill.name, description: skill.description }))
+    return { ...(items === undefined ? {} : { capabilities: items }), ...(instructions.length === 0 ? {} : { connectionInstructions: instructions }), ...(skills.length === 0 ? {} : { platformSkills: skills }) }
   }
 
   /** The my_capabilities tool: the list as it is now, read fresh. */

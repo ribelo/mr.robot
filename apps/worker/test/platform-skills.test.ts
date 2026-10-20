@@ -158,7 +158,7 @@ describe('the texts (gb-vmmx, gb-58ad, gb-ej8r)', () => {
 
   it('tasks-cadence has the points of the spec', () => {
     const cadence = text('tasks-cadence')
-    for (const point of ['weekdays', 'awake', 'needs a reason', 'Save a time your owner names as they named it', 'current minute of the day', 'deadline', 'paused', 'propose']) expect(cadence).toContain(point)
+    for (const point of ['weekdays', 'awake', 'needs a reason', 'Save a time your owner names as they named it', 'current minute of the day', 'deadline', 'paused', 'Propose it with ask']) expect(cadence).toContain(point)
   })
 
   it('asking has when to ask, the options, the Takeover rule, the chief rule and what is never relayed', () => {

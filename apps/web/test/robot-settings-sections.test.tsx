@@ -103,3 +103,22 @@ describe('Robot settings: Auto review (ao-c8k9, ao-6m9i)', () => {
   })
 })
 
+
+describe('Robot settings: the prompt preview (v1.15 ticket 13, gb-dzf6)', () => {
+  it('shows the new sections of the Platform part and the platform skills before the granted ones', async () => {
+    const preview = {
+      sections: [{ name: 'Platform', text: '## Talking to Anna\nReply first.\n\n## Platform skills\n- tasks-cadence: When a Task runs.\n- asking: When to ask.' }, { name: 'mr-robot:box', text: '## Your Box' }],
+      tools: ['say', 'ask'],
+      skills: ['tasks-cadence (platform): When a Task runs.', 'asking (platform): When to ask.', 'invoices'],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(String(url).endsWith('/prompt') ? preview : { sections: [], tools: [], skills: [] })))
+    render(<RegistryProvider><AdvancedSettings panel={panel} catalog={catalog} onSave={async () => true} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
+    await waitFor(() => expect(screen.getByText(/^Platform/, { selector: 'summary' })).toBeTruthy())
+    const platform = screen.getByText(/^Platform/, { selector: 'summary' }).closest('details')!
+    expect(platform.querySelector('pre')?.textContent).toContain('## Talking to Anna')
+    expect(platform.querySelector('pre')?.textContent).toContain('## Platform skills\n- tasks-cadence: When a Task runs.')
+    const skills = screen.getByText(/^Skills/, { selector: 'summary' }).closest('details')!
+    expect(skills.querySelector('summary')?.textContent).toContain('3')
+    expect(skills.querySelector('pre')?.textContent).toBe('tasks-cadence (platform): When a Task runs.\nasking (platform): When to ask.\ninvoices')
+  })
+})
