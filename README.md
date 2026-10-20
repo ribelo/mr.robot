@@ -24,6 +24,13 @@ Self-hosted robots on Cloudflare: persistent agents with one endless conversatio
 - `pnpm dev`: local server on http://127.0.0.1:8787, signed in as owner@example.com
 - `pnpm cloudflare-login`: one-time Cloudflare login for deploying (Alchemy profile `mr-robot` in ~/.alchemy-mr-robot)
 - `pnpm deploy`: build the PWA and deploy every resource; prints the URL
+- `pnpm --filter @mr-robot/host dist:win`: the Windows installer of the Host app, `apps/host/release/mr-robot-host-setup-<version>-x64.exe` (NSIS, per user, unsigned: SmartScreen warns on first run). On a machine that is not Windows, electron-builder needs Wine in the PATH to write the uninstaller (`nix shell nixpkgs#wineWow64Packages.stable -c pnpm --filter @mr-robot/host dist:win`). `pack:win` stops at the unpacked folder and needs no Wine
 - `pnpm --filter @mr-robot/worker test:integration`: deploys a staging Worker, checks real Browser Rendering (actions, screenshot, cookies, screencast), deletes it; needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 
 After the first deploy, open the URL, sign in with the e-mail code, and add a DeepSeek key (or a subscription) on your profile page; the first person to sign in is the Home admin.
+
+## Deploy artefacts
+
+- The Worker and the PWA: `pnpm deploy`.
+- The Host app for NixOS: `nix-build apps/host/package.nix`.
+- The Host app for Windows: the installer from `pnpm --filter @mr-robot/host dist:win` (above). Install PowerShell 7 on the computer first; the app tells the owner when it is missing.

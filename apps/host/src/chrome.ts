@@ -4,30 +4,37 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { delimiter, isAbsolute, join, win32 } from 'node:path'
+
+/** Where Chrome installs on Windows: for all users (64 and 32 bit) and for the one user. */
+export const windowsChromePaths = (env: NodeJS.ProcessEnv): string[] =>
+  [env['ProgramFiles'], env['ProgramFiles(x86)'], env['LocalAppData']]
+    .filter((root): root is string => root !== undefined && root !== '')
+    .map((root) => win32.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'))
 
 const CANDIDATES: Record<string, string[]> = {
   linux: ['google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser'],
   darwin: ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium'],
+  win32: windowsChromePaths(process.env),
 }
 
 /** The Chrome this host would use, or null. */
 export function findChrome(): string | null {
   for (const candidate of CANDIDATES[process.platform] ?? []) {
-    if (candidate.startsWith('/')) {
+    if (isAbsolute(candidate)) {
       if (existsSync(candidate)) return candidate
       continue
     }
-    for (const directory of (process.env.PATH ?? '').split(':')) {
+    for (const directory of (process.env.PATH ?? '').split(delimiter)) {
       if (directory !== '' && existsSync(join(directory, candidate))) return join(directory, candidate)
     }
   }
   return null
 }
 
-/** A graphical session the browser can open a window in. */
+/** A graphical session the browser can open a window in (a Windows desktop session always has one: the app itself runs in it). */
 export function hasGraphicalSession(): boolean {
-  return process.platform === 'darwin' || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
+  return process.platform === 'darwin' || process.platform === 'win32' || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
 }
 
 export class HostChrome {

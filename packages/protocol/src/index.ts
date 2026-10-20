@@ -307,7 +307,7 @@ export type WorkspaceFileContent = typeof WorkspaceFileContent.Type
 export const HostSandbox = Schema.Literals(['full', 'partial', 'none'])
 export type HostSandbox = typeof HostSandbox.Type
 
-/** The shell a Host runs a Robot's commands in (v1.16 ticket 09, ob-vyyg): bash, or pwsh on Windows. The same words as the Host protocol's ShellName. */
+/** The shell a Host runs a Robot's commands in (v1.16 ticket 09, ob-vyyg): bash, or pwsh on Windows. The same words as the Host protocol's Shell. */
 export const HostShellName = Schema.Literals(['bash', 'pwsh'])
 export type HostShellName = typeof HostShellName.Type
 

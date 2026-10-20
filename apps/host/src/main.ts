@@ -12,12 +12,13 @@ import { HostLink, startPairing, waitForApproval, type LinkState } from './conne
 import { isSignInKind } from './sign-in.ts'
 import { HostShell } from './shell.ts'
 import { connectThroughSignIn } from './sign-in-window.ts'
+import { PWSH_INSTALL_URL } from './windows.ts'
 
 const VERSION = '0.1.0'
 // A small green robot dot for the tray (16x16 PNG).
 const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMElEQVR4nGNgoBZgZGRk+M/AwMDAxMTEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMBQAQC5xQMRrW1ZcgAAAABJRU5ErkJggg=='
 
-// Settings live in ~/.config/mr-robot-host (Linux) or ~/Library/Application Support/mr-robot-host (macOS).
+// Settings live in ~/.config/mr-robot-host (Linux), ~/Library/Application Support/mr-robot-host (macOS) or %APPDATA%\\mr-robot-host (Windows).
 app.setName('Mr. Robot host')
 app.setPath('userData', join(app.getPath('appData'), 'mr-robot-host'))
 if (!app.requestSingleInstanceLock()) app.quit()
@@ -39,7 +40,7 @@ let window: BrowserWindow | undefined
 let unread = 0
 
 function snapshot() {
-  return { ...config, token: undefined, state, detail, code: pairing?.code, approveUrl: pairing?.approveUrl, sessions }
+  return { ...config, token: undefined, state, detail, code: pairing?.code, approveUrl: pairing?.approveUrl, sessions, shell: hostShell?.kind, shellProblem: hostShell?.problem, shellInstallUrl: hostShell?.problem === undefined ? undefined : PWSH_INSTALL_URL }
 }
 
 function changed(): void {
@@ -52,6 +53,8 @@ function changed(): void {
     tray.setContextMenu(Menu.buildFromTemplate([
       ...(unread > 0 ? [{ label: `${unread} robot(s) with unread messages`, click: () => openWindow() }, { type: 'separator' }] : []),
       { label: `${config.name}: ${state}`, enabled: false },
+      // Windows without PowerShell 7 (v1.16 ticket 04): the way to fix it is one click away.
+      ...(hostShell?.problem === undefined ? [] : [{ label: 'PowerShell 7 is missing: robots cannot run commands. Install it…', click: () => { void shell.openExternal(PWSH_INSTALL_URL) } }]),
       ...(sessions > 0 ? [{ label: `${sessions} robot browser session(s)`, enabled: false }] : []),
       { type: 'separator' },
       { label: 'Open Mr. Robot', click: () => openWindow() },
@@ -144,10 +147,15 @@ function connect(): void {
   link.start()
 }
 
-/** Start at login (hs-5slg): a login item on macOS, an XDG autostart entry on Linux. */
+/** Start at login (hs-5slg): a login item on macOS and Windows, an XDG autostart entry on Linux. */
 function applyAutostart(enabled: boolean): void {
   if (process.platform === 'darwin') {
     app.setLoginItemSettings({ openAtLogin: enabled })
+    return
+  }
+  if (process.platform === 'win32') {
+    // Installed, the login item is the app itself; from source it is Electron with this bundle. Either way it starts in the tray.
+    app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: [...(app.isPackaged ? [] : [join(__dirname, 'main.cjs')]), '--hidden'] })
     return
   }
   const file = join(homedir(), '.config', 'autostart', 'mr-robot-host.desktop')
@@ -256,6 +264,11 @@ void app.whenReady().then(() => {
     hostShell = started
     connect()
     changed()
+    // A person who installs PowerShell 7 after the app started should not have to restart it: look again while it is missing.
+    setInterval(() => {
+      if (started.problem === undefined) return
+      void started.recheck().then(changed)
+    }, 10_000)
   })
   // At login it starts in the tray; otherwise (and on first start) the window opens.
   if (config.server === null || !process.argv.includes('--hidden')) openWindow()

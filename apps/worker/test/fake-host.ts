@@ -5,7 +5,7 @@
 import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type HostNotification, type Sandbox, type SandboxReport, type ShellName } from '@mr-robot/host-protocol'
+import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type HostNotification, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -30,7 +30,7 @@ const skippedPath = (path: string): boolean => path.split('/').some((segment) =>
 
 
 /** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). Its notifications (notify frames) are kept in `notices`. */
-export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: ShellName } = {}) {
+export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell } = {}) {
   const platform = options.platform ?? 'linux'
   const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform }) })
   const { code, approveUrl } = (await start.json()) as { code: string; approveUrl: string }
