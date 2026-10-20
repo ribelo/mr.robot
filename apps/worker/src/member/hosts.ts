@@ -48,8 +48,9 @@ export const NO_SANDBOX = (host: string, mode: string): string =>
 
 /**
  * How long a Host may stay away before its running jobs count as lost (v1.16 ticket 03, ob-cgn1). The jobs live in the app's memory, so a
- * connection that drops and returns with the same app instance loses nothing; a new instance is a restart and loses them at once (the
- * heartbeat says which). A Host that does not come back at all would leave the Robot waiting for ever, so this is the end of the wait.
+ * connection that drops and returns with the same app instance loses nothing, a command a Run call was waiting for included (the app
+ * keeps it as a job, deep review P11); a new instance is a restart and loses them at once (the heartbeat says which). A Host that does not
+ * come back at all would leave the Robot waiting for ever, so this is the end of the wait.
  */
 export const JOBS_LOST_AFTER_MS = 5 * 60_000
 
@@ -61,6 +62,16 @@ const splitRef = (ref: string): { robotId: string; jobId: string } | undefined =
 }
 
 type JobRow = { host_id: string; robot_id: string; job_id: string; instance: string }
+
+/**
+ * What a Run call came to: the app's answer, or none, because the connection ended (or the answer was late) after the call was sent.
+ * Then the app may hold the command as a job: it keeps a command whose call went away running, and keeps the result of one that ended
+ * (deep review P11). The Robot asks the app for it; `reason` says why there was no answer.
+ */
+export type HostRunAnswer = RunOutcome | { readonly kind: 'unanswered'; readonly reason: string }
+
+/** A call that was sent and not answered: the connection ended or the time was up. `offline` when the Host is offline now. */
+type Sent<A> = { readonly kind: 'answered'; readonly value: A } | { readonly kind: 'cut'; readonly message: string; readonly offline: boolean }
 
 export class HostOffline extends Data.TaggedError('HostOffline')<{ readonly message: string }> {
   readonly status = 409
@@ -292,8 +303,8 @@ export class HostHub {
     if (alarm === null || alarm > due) await this.ctx.storage.setAlarm(due)
   }
 
-  /** A Robot started a job on a Host (the app answered promoted or background): remember which Robot to tell if it is lost. */
-  trackJob(hostId: string, robotId: string, jobId: string): void {
+  /** A Robot's command may go on as a job on a Host: remember which Robot to tell if it is lost, and which run of the app holds it. */
+  private trackJob(hostId: string, robotId: string, jobId: string): void {
     const instance = this.instanceOf(this.row(hostId))
     this.ctx.storage.sql.exec('INSERT OR REPLACE INTO host_job (host_id, robot_id, job_id, instance, started_at) VALUES (?, ?, ?, ?, ?)', hostId, robotId, jobId, instance, Date.now())
   }
@@ -326,8 +337,7 @@ export class HostHub {
 
   /**
    * The app on `hostId` says a job ended with nobody waiting for it: the Robot that owns it closes it and wakes. Only a job this Host
-   * was asked to run counts; a frame naming any other job (another Host's, a Box job, a Robot that never ran here) is dropped. A frame
-   * that comes before the job was remembered is dropped too, and the Robot's alarm finds the ended job by asking the app.
+   * was asked to run counts; a frame naming any other job (another Host's, a Box job, a Robot that never ran here) is dropped.
    */
   private async jobEnded(hostId: string, ended: JobEnded): Promise<void> {
     const ref = splitRef(ended.job)
@@ -357,10 +367,29 @@ export class HostHub {
     this.forgetJob(id, robotId, jobId)
   }
 
-  /** What a Run answered: a job that goes on is remembered. */
-  jobStarted(hostId: string, robotId: string, jobId: string, outcome: RunOutcome): RunOutcome {
-    if (outcome.kind !== 'foreground') this.trackJob(hostId, robotId, jobId)
-    return outcome
+  /**
+   * A command (Run) under the shell grant. The job is remembered before the call is sent, so that its frame counts and a restart or a long
+   * absence of the app loses it, also when the answer never comes (deep review P11): the app keeps such a command as a job. A command that
+   * ended within its call, or that the call never ran, is forgotten again.
+   */
+  async runCommand(id: string, robotId: string, jobId: string, call: (client: Client, access: HostAccess) => Effect.Effect<RunOutcome, unknown>, timeoutMs: number, log: { action: string; detail: string }, reach: Reach): Promise<HostRunAnswer> {
+    this.trackJob(id, robotId, jobId)
+    const record = (outcome: string, exitCode: number | null) => this.record({ hostId: id, robotId, ...log, outcome, exitCode })
+    let sent: Sent<RunOutcome>
+    try {
+      sent = await this.send(id, robotId, 'shell', call, timeoutMs, reach)
+    } catch (error) {
+      this.forgetJob(id, robotId, jobId)
+      record(error instanceof Error ? error.message : String(error), null)
+      throw error
+    }
+    if (sent.kind === 'cut') {
+      record(`${sent.message}; the command may go on as a job`, null)
+      return { kind: 'unanswered', reason: sent.message }
+    }
+    if (sent.value.kind === 'foreground') this.forgetJob(id, robotId, jobId)
+    record('done', sent.value.kind === 'foreground' ? sent.value.exitCode : null)
+    return sent.value
   }
 
   private async armSweep(): Promise<void> {
@@ -425,18 +454,23 @@ export class HostHub {
       .map((row) => ({ robotId: row.robot_id, robotName: row.robot_name, action: row.action, detail: row.detail, outcome: row.outcome, exitCode: row.exit_code, at: row.at }))
   }
 
-  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string; exitCode?: (value: A) => number | null }, reach: Reach = 'granted'): Promise<A> {
+  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string }, reach: Reach = 'granted'): Promise<A> {
     try {
-      const value = await this.runUnlogged(id, robotId, grant, call, timeoutMs, reach)
-      if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: log.exitCode?.(value) ?? null })
-      return value
+      const sent = await this.send(id, robotId, grant, call, timeoutMs, reach)
+      if (sent.kind === 'cut') throw sent.offline ? new HostOffline({ message: sent.message }) : new Error(sent.message)
+      if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: null })
+      return sent.value
     } catch (error) {
       if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: error instanceof Error ? error.message : String(error), exitCode: null })
       throw error
     }
   }
 
-  private async runUnlogged<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs: number, reach: Reach): Promise<A> {
+  /**
+   * Send one call: its answer, or `cut` when it was sent and no answer came. It fails before sending (no access, offline, no sandbox) and
+   * when the app refused the call (HostError).
+   */
+  private async send<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs: number, reach: Reach): Promise<Sent<A>> {
     const { row, access: granted } = await this.authorize(id, robotId, grant)
     // An escalated call is one the owner approved to run without the sandbox, once (ob-ifak); it never changes the grant.
     const access: HostAccess = reach === 'escalated' ? { ...granted, mode: 'full' } : granted
@@ -449,7 +483,7 @@ export class HostHub {
     }
     const client = await this.client(id)
     const exit = await Effect.runPromiseExit(call(client, access).pipe(Effect.timeout(timeoutMs)))
-    if (Exit.isSuccess(exit)) return exit.value
+    if (Exit.isSuccess(exit)) return { kind: 'answered', value: exit.value }
     const failure = exit.cause.reasons.find((reason) => reason._tag === 'Fail') as { error?: { _tag?: string; message?: string; code?: string } } | undefined
     const error = failure?.error
     if (error?._tag === 'HostError') {
@@ -458,9 +492,9 @@ export class HostHub {
       if (error.code === SANDBOX_UNAVAILABLE) throw new HostNoSandbox({ message: error.message ?? said })
       throw new Error(said)
     }
-    if (error?._tag === 'TimeoutError') throw new Error(`the host did not answer within ${Math.round(timeoutMs / 1000)} s`)
-    if (this.row(id)?.online !== 1) throw new HostOffline({ message: `the host "${this.row(id)?.name ?? id}" went offline` })
-    throw new Error(`the host call failed: ${String(error?.message ?? exit.cause)}`)
+    if (error?._tag === 'TimeoutError') return { kind: 'cut', message: `the host did not answer within ${Math.round(timeoutMs / 1000)} s`, offline: false }
+    if (this.row(id)?.online !== 1) return { kind: 'cut', message: `the host "${this.row(id)?.name ?? id}" went offline`, offline: true }
+    return { kind: 'cut', message: `the host call failed: ${String(error?.message ?? exit.cause)}`, offline: false }
   }
 
   /** What the last heartbeat said about the sandbox; undefined for an app from before v1.16, which does not say. */

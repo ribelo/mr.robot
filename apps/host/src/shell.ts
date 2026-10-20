@@ -194,7 +194,7 @@ export interface RunInput {
   /** The name the Worker gives the job. */
   readonly job: string
   readonly access: HostAccess
-  /** The call is cancelled (its connection went away): a command still being waited for is stopped. */
+  /** The call is cancelled (its connection went away): a command still being waited for goes on as a job (jobs.ts, settled). */
   readonly signal?: AbortSignal | undefined
 }
 
@@ -341,8 +341,9 @@ export class HostShell implements FileChanges {
       const [out, err] = await Promise.all([this.jobs.output(input.job, 'out', 0), this.jobs.output(input.job, 'err', 0)])
       return { kind: 'promoted', cwd, timeoutMs, jobId: input.job, output: printedSoFar(out.text, err.text) }
     }
+    // The job stays among the ended ones: a Worker that lost this answer (a dropped connection, a Robot that restarted while it waited)
+    // reads the result there (deep review P11).
     const result: ShellRunResult = await started.result()
-    this.jobs.release(input.job)
     const sandbox = result.sandbox
     return {
       kind: 'foreground',

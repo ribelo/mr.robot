@@ -1,5 +1,6 @@
 /** Client and server of the Host protocol joined in this process, over the real handlers of the Host app. */
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as Scope from 'effect/Scope'
 import { makeHostClient, parseFrame, serveHost, type CopyIo, type HostAccess, type JobEnded } from '@mr-robot/host-protocol'
 import { hostHandlers } from '../src/handlers.ts'
@@ -13,26 +14,42 @@ export async function connected(home: string, copyIo?: CopyIo, options: { readon
   const ended: JobEnded[] = []
   shell.onJobEnded((job) => ended.push(job))
   const chrome = { devtools: async () => { throw new Error('no Chrome here') } } as never
-  let toClient: (text: string) => void = () => undefined
-  const server = serveHost(hostHandlers(shell, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, copyIo), (text) => toClient(text))
-  const client = makeHostClient((text) => {
-    const parsed = parseFrame(text)
-    if (parsed?.t === 'rpc') Effect.runFork(server.deliver(parsed.d))
-  })
-  toClient = (text) => {
-    const parsed = parseFrame(text)
-    if (parsed?.t === 'rpc') Effect.runFork(client.deliver(parsed.d))
+  /** One connection, as the app makes one to the Worker: new handlers and server, and the Worker's client. */
+  const link = async () => {
+    let toClient: (text: string) => void = () => undefined
+    const server = serveHost(hostHandlers(shell, chrome, () => ({ hostId: 'h', token: 't' }), () => undefined, copyIo), (text) => toClient(text))
+    const client = makeHostClient((text) => {
+      const parsed = parseFrame(text)
+      if (parsed?.t === 'rpc') Effect.runFork(server.deliver(parsed.d))
+    })
+    toClient = (text) => {
+      const parsed = parseFrame(text)
+      if (parsed?.t === 'rpc') Effect.runFork(client.deliver(parsed.d))
+    }
+    const scope = Effect.runSync(Scope.make())
+    const serving = Effect.runFork(Scope.provide(server.server, scope))
+    const rpc = (await Effect.runPromise(Scope.provide(client.client, scope))) as unknown as Rpc
+    return { rpc, serving, scope }
   }
-  const scope = Effect.runSync(Scope.make())
-  Effect.runFork(Scope.provide(server.server, scope))
-  const rpc = (await Effect.runPromise(Scope.provide(client.client, scope))) as unknown as Rpc
+  const end = (scope: Scope.Closeable) => Effect.runPromise(Scope.close(scope, { _tag: 'Success', value: undefined } as never))
+  let current = await link()
   return {
-    rpc,
+    get rpc(): Rpc {
+      return current.rpc
+    },
     shell,
     ended,
     sandbox: shell.sandbox,
+    /** The connection drops: the app interrupts its server, as HostLink does on a close; a call still pending gets no answer. */
+    drop: () => Effect.runPromise(Fiber.interrupt(current.serving)),
+    /** The same run of the app connects again: the Worker's calls go over the new connection. */
+    reconnect: async () => {
+      const old = current.scope
+      current = await link()
+      await end(old)
+    },
     close: async () => {
-      await Effect.runPromise(Scope.close(scope, { _tag: 'Success', value: undefined } as never))
+      await end(current.scope)
       await shell.dispose()
     },
   }

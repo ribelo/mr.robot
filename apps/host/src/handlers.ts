@@ -55,7 +55,7 @@ export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => 
     Glob: ({ pattern, access }) => Effect.tryPromise({ try: () => disk.glob(access, pattern), catch: fail }),
     Grep: ({ pattern, ignoreCase, glob, path, access }) => Effect.tryPromise({ try: () => disk.grep(access, { pattern, ignoreCase, glob, path }), catch: fail }),
     Delete: ({ path, access }) => Effect.tryPromise({ try: () => disk.remove(access, path), catch: fail }),
-    // The signal ends when the connection to the Worker is lost: a command the call was still waiting for is then stopped.
+    // The signal ends when the connection to the Worker is lost: a command the call was still waiting for then goes on as a job.
     Run: ({ command, cwd, timeoutMs, background, job, access }) => Effect.tryPromise({ try: (signal) => shell.run({ command, cwd, timeoutMs, background, job, access, signal }), catch: fail }),
     JobList: ({ robot }) => Effect.try({ try: () => ({ jobs: shell.jobs.list(robot) }), catch: fail }),
     JobOutput: ({ job, stream, offset }) => Effect.tryPromise({ try: () => shell.jobs.output(job, stream, offset), catch: fail }),

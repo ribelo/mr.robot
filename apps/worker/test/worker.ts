@@ -391,6 +391,11 @@ export class Robot extends ProductionRobot {
     return this.ctx.storage.getAlarm()
   }
 
+  /** A restart of this Robot alone: its isolate's memory is gone, and other Durable Objects go on (the call itself fails). */
+  async restartForTest(): Promise<void> {
+    this.ctx.abort('restarted by a test')
+  }
+
   /** The cookies and storage the Robot keeps for its next browser session. */
   async browserStateForTest(): Promise<BrowserState | null> {
     return this.store.get<BrowserState>('browser-state') ?? null

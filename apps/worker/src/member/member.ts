@@ -4,9 +4,9 @@
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
 import * as Schema from 'effect/Schema'
-import { copyTimeoutMs, RUN_MAX_WAIT_SECONDS, type RunOutcome, type UploadPart } from '@mr-robot/host-protocol'
+import { copyTimeoutMs, RUN_MAX_WAIT_SECONDS, type UploadPart } from '@mr-robot/host-protocol'
 import type { Reach } from '../places/host-facet.ts'
-import { HostHub, jobRef, type HostEntry, type HostAction } from './hosts.ts'
+import { HostHub, jobRef, type HostEntry, type HostAction, type HostRunAnswer } from './hosts.ts'
 import { GoogleConsents } from './google-consent.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
 import { describeConnectorFailure } from '../connectors/connector.ts'
@@ -965,14 +965,14 @@ export class Member extends DurableObject<Env> {
   recordHostCopy(id: string, robotId: string, detail: string, outcome: string): void { this.hosts.recordCopy({ hostId: id, robotId, detail, outcome }) }
   /**
    * A command under the shell grant's mode and roots, run by the app as a job (v1.16 ticket 03): the call waits up to `timeoutMs` and
-   * answers with the result, or says the command goes on as a job, or starts one at once. `job` is the Robot's name for it.
+   * answers with the result, or says the command goes on as a job, or starts one at once; with no answer (the connection dropped) the
+   * app may hold it as a job (HostRunAnswer). `job` is the Robot's name for it.
    * An escalated `reach` is a call its owner approved to run without the sandbox, once (ob-ifak).
    */
-  async hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; background: boolean; job: string }, reach: Reach = 'granted'): Promise<RunOutcome> {
+  hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; background: boolean; job: string }, reach: Reach = 'granted'): Promise<HostRunAnswer> {
     const { job, ...payload } = input
     const wait = input.background ? 60_000 : Math.min(input.timeoutMs ?? 120_000, RUN_MAX_WAIT_SECONDS * 1000) + 10_000
-    const outcome = await this.hosts.run(id, robotId, 'shell', (client, access) => client.Run({ ...payload, job: jobRef(robotId, job), access }), wait, { action: reach === 'escalated' ? 'run (escalated)' : 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})`, exitCode: (result) => result.kind === 'foreground' ? result.exitCode : null }, reach)
-    return this.hosts.jobStarted(id, robotId, job, outcome)
+    return this.hosts.runCommand(id, robotId, job, (client, access) => client.Run({ ...payload, job: jobRef(robotId, job), access }), wait, { action: reach === 'escalated' ? 'run (escalated)' : 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})` }, reach)
   }
   hostJobList(id: string, robotId: string) { return this.hosts.jobList(id, robotId) }
   hostJobOutput(id: string, robotId: string, job: string, stream: 'out' | 'err', offset: number) { return this.hosts.jobOutput(id, robotId, job, stream, offset) }

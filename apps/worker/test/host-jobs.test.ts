@@ -281,6 +281,63 @@ describe('jobs lost when the Host goes (ob-cgn1)', () => {
   })
 })
 
+describe('a run that loses its connection or its Robot while it waits (deep review P11)', () => {
+  /** Start a Turn whose run waits for a held command, and return once the app runs it, with the Robot's id for the job. */
+  async function waitingRun(id: string, command: string): Promise<string> {
+    heldCommands.add(command)
+    scripts.set(id, [{ calls: [run(command, { timeout_seconds: 30 })] }, { text: '' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+    await vi.waitFor(() => expect(hostRuns.map((call) => call.command)).toContain(command), { timeout: 10_000 })
+    return hostRuns.find((call) => call.command === command)!.job.split(':').at(-1)!
+  }
+  const lastResult = (id: string) => JSON.parse(requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').at(-1)!.content.map((block) => ('text' in block ? block.text : '')).join('')) as Record<string, unknown>
+
+  it('a connection that drops and comes back loses nothing: the command goes on and the run answers with its result', async () => {
+    const desk = await fakeHost()
+    const id = await robotOn(desk)
+    await waitingRun(id, 'make all')
+    desk.print('make all', 'cc a.c\n')
+    await desk.blip()
+    desk.finish('make all', { stdout: 'done\n', exitCode: 0 })
+    await settle(id)
+    expect(lastResult(id)).toMatchObject({ kind: 'foreground', stdout: 'cc a.c\ndone\n', exitCode: 0 })
+    expect(hostRuns).toHaveLength(1)
+  })
+
+  it('a connection that stays down past the limit makes the run a job, and its end over the next connection wakes the Robot', async () => {
+    const desk = await fakeHost()
+    const id = await robotOn(desk)
+    heldCommands.add('make all')
+    scripts.set(id, [{ calls: [run('make all', { timeout_seconds: 2 })] }, { text: '' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+    await vi.waitFor(() => expect(hostRuns.map((call) => call.command)).toContain('make all'), { timeout: 10_000 })
+    await desk.drop()
+    await settle(id)
+    const promoted = lastResult(id)
+    expect(promoted).toMatchObject({ kind: 'promoted', jobId: expect.stringMatching(/^j-/) })
+    desk.finish('make all', { stdout: 'built\n', exitCode: 0 })
+    scripts.set(id, [{ text: '' }])
+    await desk.back()
+    await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${promoted.jobId as string} finished: exit 0]`), { timeout: 10_000 })
+    expect(wakes(id)[0]).toContain('built')
+  })
+
+  it('a Robot that restarts while its run waits is woken with the result the app kept, not told the command was lost', async () => {
+    const desk = await fakeHost()
+    const id = await robotOn(desk)
+    const jobId = await waitingRun(id, 'make all')
+    await testRobot(id).restartForTest().catch(() => undefined)
+    // The app answers the call that waited, to a Robot that is no longer there; it sends no frame, since the call carried the result.
+    desk.finish('make all', { stdout: 'built\n', exitCode: 0 })
+    await vi.waitFor(() => expect(hostJobs.get(`${id}:${jobId}`)?.awaited).toBe(false))
+    scripts.set(id, [{ text: '' }, { text: '' }])
+    await tick(id)
+    await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${jobId} finished: exit 0]`), { timeout: 10_000 })
+    expect(wakes(id)[0]).toContain('built')
+    expect(hostRuns).toHaveLength(1)
+  })
+})
+
 describe('a Host the Robot can no longer reach (S6)', () => {
   it('marks its running jobs lost and wakes the Robot as failed when sharing ends', async () => {
     const BEN = 'ben@example.com'

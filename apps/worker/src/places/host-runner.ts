@@ -5,10 +5,13 @@
  * asks the Host for the job's state and output (JobList, JobOutput), and the registry (jobs.ts) does what it does for the Box.
  *
  * What the Robot keeps in memory is only the pending Run call and its answer. When the Robot restarts the memory is gone, and the
- * runner asks the Host instead; a job the Host does not know is gone (the app restarted).
+ * runner asks the Host instead: the app keeps a command that ended within its call among its ended jobs, so the result is still there
+ * (deep review P11). A call that got no answer (the connection dropped) is asked for the same way; a job the Host does not know is gone
+ * (the app restarted).
  */
 import type { JobInfo, RunOutcome } from '@mr-robot/host-protocol'
 import type { BoxJobStatus } from '../box/backend.ts'
+import type { HostRunAnswer } from '../member/hosts.ts'
 import type { JobId } from './job-id.ts'
 import type { JobRunner, RunExtras, SpawnOptions } from './jobs.ts'
 
@@ -17,7 +20,7 @@ type Foreground = Extract<RunOutcome, { kind: 'foreground' }>
 /** The Host's job calls for one Robot on one Host, each failing as a Host call fails (offline, refused, an OS error). */
 export interface HostJobLink {
   /** Run: start the command as a job, wait for it up to `timeoutMs` (not at all for a background job). */
-  start(input: { job: JobId; command: string; cwd: string | undefined; timeoutMs: number; background: boolean }): Promise<RunOutcome>
+  start(input: { job: JobId; command: string; cwd: string | undefined; timeoutMs: number; background: boolean }): Promise<HostRunAnswer>
   list(): Promise<readonly JobInfo[]>
   output(job: JobId, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
   kill(job: JobId): Promise<void>
@@ -88,7 +91,8 @@ export class HostRunner implements JobRunner {
     ))
   }
 
-  private answer(job: JobId, outcome: RunOutcome): void {
+  /** The Host holds a job that goes on, or one whose answer was lost: from now on it is asked. */
+  private answer(job: JobId, outcome: HostRunAnswer): void {
     if (this.runs.entries.get(job)?.state !== 'running') return
     if (outcome.kind === 'foreground') this.runs.entries.set(job, { state: 'done', result: outcome })
     else this.runs.entries.delete(job)

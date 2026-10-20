@@ -189,10 +189,11 @@ export class Jobs {
     } finally {
       this.waiting.delete(id)
     }
-    // Still going at the limit, or the Turn was stopped: it becomes a job. What it printed so far is returned and counts as read.
+    // Still going at the limit, or the Turn was stopped: it becomes a job. What it printed so far is returned and counts as read. A Host
+    // that is away now (its connection dropped while it ran the command, deep review P11) keeps the job: its output is read later.
     this.store.promoteJob(id)
-    const stdout = await this.readAll(runner, id, 'out', 0)
-    const stderr = await this.readAll(runner, id, 'err', 0)
+    const printed = await Promise.all([this.readAll(runner, id, 'out', 0), this.readAll(runner, id, 'err', 0)]).catch(() => ['', ''] as const)
+    const [stdout, stderr] = printed
     this.store.setJobOffsets(id, new TextEncoder().encode(stdout).length, new TextEncoder().encode(stderr).length)
     await where.touch()
     await this.host.changed()

@@ -4,6 +4,7 @@
  */
 import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import { expect } from 'vitest'
 import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
@@ -29,8 +30,11 @@ const hostError = (error: unknown) => new HostError({ message: error instanceof 
 /** Answers to commands, in order: the first that returns a result wins; every other command echoes. Cleared by the test. */
 export const hostCommands: Array<(command: string, access: HostAccess) => { stdout: string; stderr?: string; exitCode?: number; sandbox?: SandboxReport } | undefined> = []
 
-/** A job the fake app holds, as DSH's jobs-local would (v1.16 ticket 03): lost when the app restarts. */
-interface FakeJob { ref: string; command: string; cwd: string; state: JobState; exitCode: number | null; signal: string | null; out: string; err: string; startedAt: number; finishedAt: number | null }
+/**
+ * A job the fake app holds, as DSH's jobs-local would (v1.16 ticket 03): lost when the app restarts. `awaited` while a Run call waits for
+ * it; one that ended within its call is kept too, as the app keeps it (deep review P11).
+ */
+interface FakeJob { ref: string; command: string; cwd: string; state: JobState; exitCode: number | null; signal: string | null; out: string; err: string; startedAt: number; finishedAt: number | null; awaited: boolean }
 export const hostJobs = new Map<string, FakeJob>()
 /** Commands that do not end by themselves: a test ends them with finish. Cleared by closeHosts. */
 export const heldCommands = new Set<string>()
@@ -145,15 +149,16 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       const where = cwd ?? `/home/anna/mr-robot/${access.robot}`
       const held = heldCommands.has(command)
       const stdout = scripted?.stdout ?? `ran: ${command}`
-      const record: FakeJob = { ref: job, command, cwd: where, state: held ? 'running' : 'completed', exitCode: held ? null : scripted?.exitCode ?? 0, signal: null, out: held ? '' : stdout, err: held ? '' : scripted?.stderr ?? '', startedAt: Date.now(), finishedAt: held ? null : Date.now() }
+      const record: FakeJob = { ref: job, command, cwd: where, state: held ? 'running' : 'completed', exitCode: held ? null : scripted?.exitCode ?? 0, signal: null, out: held ? '' : stdout, err: held ? '' : scripted?.stderr ?? '', startedAt: Date.now(), finishedAt: held ? null : Date.now(), awaited: !background }
       hostJobs.set(job, record)
       const limit = timeoutMs ?? 120_000
       if (background) return Effect.succeed({ kind: 'background' as const, cwd: where, timeoutMs: limit, jobId: job })
-      // The call waits for the command up to its limit, as the app does; a command that is still running then goes on as a job.
-      return Effect.promise(async () => {
-        for (const started = Date.now(); record.state === 'running' && Date.now() - started < limit; ) await new Promise((resolve) => setTimeout(resolve, 25))
+      // The call waits for the command up to its limit, as the app does; a command that is still running then goes on as a job. When
+      // the connection drops first, the command goes on as a job too, and the call never answers (deep review P11).
+      return Effect.promise(async (signal) => {
+        for (const started = Date.now(); record.state === 'running' && !signal.aborted && Date.now() - started < limit; ) await new Promise((resolve) => setTimeout(resolve, 25))
+        record.awaited = false
         if (record.state === 'running') return { kind: 'promoted' as const, cwd: where, timeoutMs: limit, jobId: job, output: record.out }
-        hostJobs.delete(job)
         return {
           kind: 'foreground' as const, cwd: where, exitCode: record.exitCode, signal: null, timedOut: false, aborted: false, timeoutMs: limit,
           stdout: { text: record.out, truncated: false }, stderr: { text: record.err, truncated: false }, sandbox,
@@ -184,6 +189,14 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     BrowserClose: () => Effect.void,
   })
   let current = socket
+  /** The server of the current connection: interrupted when it drops, as the app's link does, so that a waiting Run call ends. */
+  let serving: Fiber.Fiber<never, never> | undefined
+  /** Job frames of jobs that ended while the connection was down: the app sends them when it is back. */
+  const unsent: string[] = []
+  const tell = (text: string) => {
+    if (current.readyState === WebSocket.READY_STATE_OPEN) current.send(text)
+    else unsent.push(text)
+  }
   const notices: HostNotification[] = []
   let instance = `app-run-${++runs}`
   // An app from before v1.16 says nothing of its sandbox, shell or run, and ignores the access of a call.
@@ -199,8 +212,25 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       if (parsed?.t === 'rpc') Effect.runFork(host.deliver(parsed.d))
       if (parsed?.t === 'notify') notices.push(parsed.d)
     })
-    Effect.runFork(host.server)
+    const fiber = Effect.runFork(host.server)
+    serving = fiber
+    // A connection that ends stops its server, as the app's link does: a Run call still waiting then ends.
+    on.addEventListener('close', () => { Effect.runFork(Fiber.interrupt(fiber)) })
     beat()
+    for (const text of unsent.splice(0)) on.send(text)
+  }
+  /** The connection drops: the app stops serving it. */
+  const disconnect = async () => {
+    if (serving !== undefined) await Effect.runPromise(Fiber.interrupt(serving))
+    current.close(1000)
+  }
+  /** The same run of the app connects again. */
+  const reconnect = async () => {
+    const again = (await connect()).webSocket!
+    again.accept()
+    open.push(again)
+    serve(again)
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
   serve(socket)
   await new Promise((resolve) => setTimeout(resolve, 100))
@@ -220,31 +250,27 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       job.out += result.stdout ?? ''
       job.err += result.stderr ?? ''
       Object.assign(job, { state: 'completed' as const, exitCode: result.exitCode ?? 0, finishedAt: Date.now() })
-      if (result.frame !== false) current.send(frame({ t: 'job', d: { job: job.ref, state: 'completed', exitCode: job.exitCode, signal: null } satisfies JobEnded }))
+      // A Run call that waits for it carries the result; otherwise a frame, held while the connection is down, as the app does.
+      if (result.frame !== false && !job.awaited) tell(frame({ t: 'job', d: { job: job.ref, state: 'completed', exitCode: job.exitCode, signal: null } satisfies JobEnded }))
     },
     /** The connection drops and the same run of the app connects again (a network blip): the jobs are still there. */
     blip: async () => {
-      current.close(1000)
+      await disconnect()
       await new Promise((resolve) => setTimeout(resolve, 50))
-      const again = (await connect()).webSocket!
-      again.accept()
-      open.push(again)
-      serve(again)
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await reconnect()
     },
     /** The connection drops and stays down. */
-    drop: async () => { current.close(1000); await new Promise((resolve) => setTimeout(resolve, 100)) },
+    drop: async () => { await disconnect(); await new Promise((resolve) => setTimeout(resolve, 100)) },
+    /** After a drop, the same run of the app connects again. */
+    back: reconnect,
     /** The app restarts: a new run, with no jobs, connected again. */
     restart: async () => {
-      current.close(1000)
+      await disconnect()
       hostJobs.clear()
+      unsent.length = 0
       instance = `app-run-${++runs}`
       await new Promise((resolve) => setTimeout(resolve, 50))
-      const again = (await connect()).webSocket!
-      again.accept()
-      open.push(again)
-      serve(again)
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await reconnect()
     },
   }
 }

@@ -32,10 +32,11 @@ afterAll(async () => {
 })
 
 describe('a command that ends within its call', () => {
-  it('answers with its result and leaves no job behind', async () => {
+  it('answers with its result, tells no frame, and keeps it among the ended jobs for a Worker that lost the answer (deep review P11)', async () => {
     const { job, outcome } = await run('echo quick')
     expect(outcome).toMatchObject({ kind: 'foreground', exitCode: 0, stdout: { text: 'quick\n' } })
-    expect(await info(job)).toBeUndefined()
+    expect(await info(job)).toMatchObject({ state: 'completed', exitCode: 0 })
+    expect((await out(job, 0)).text).toBe('quick\n')
     expect(host.ended).toEqual([])
   })
 })
@@ -111,15 +112,20 @@ describe('a long output (ob-ku5j)', () => {
   })
 })
 
-describe('a call that is gone', () => {
-  it('stops the command it was still waiting for', async () => {
-    const abort = new AbortController()
+describe('a connection that drops while a call waits (deep review P11)', () => {
+  it('leaves the command running as a job, which tells its end with a job frame and is read over the next connection', async () => {
     const job = jobName()
-    const waiting = host.shell.run({ command: 'sleep 60', background: false, job, access: access({ mode: 'full' }), timeoutMs: 30_000, signal: abort.signal })
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    abort.abort()
-    await expect(waiting).rejects.toBeDefined()
-    expect(await info(job)).toBeUndefined()
+    const waiting = call('Run', { command: 'echo before; sleep 1; echo after; exit 4', background: false, access: access({ mode: 'full' }), job, timeoutMs: 30_000 })
+    // The answer has nowhere to go once the connection is gone.
+    const answered = waiting.then(() => 'answered', () => 'no answer')
+    await vi.waitFor(async () => expect((await out(job, 0)).text).toBe('before\n'), { timeout: 3000 })
+    await host.drop()
+    await host.reconnect()
+    expect(await answered).toBe('no answer')
+    expect(await info(job)).toMatchObject({ state: 'running' })
+    await vi.waitFor(() => expect(host.ended).toContainEqual({ job, state: 'completed', exitCode: 4, signal: null }), { timeout: 5000 })
+    expect(await info(job)).toMatchObject({ state: 'completed', exitCode: 4 })
+    expect((await out(job, 0)).text).toBe('before\nafter\n')
   })
 })
 
