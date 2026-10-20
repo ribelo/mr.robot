@@ -269,6 +269,26 @@ export class Robot extends ProductionRobot {
     this.store.prepare()
   }
 
+  /** Tool-call Asks as v1.15 left them open (no Hosts pinned), then the store at the schema of v1.15 opened again, as after the deploy (deep review P18). */
+  async legacyToolAsksForTest(asks: ReadonlyArray<{ tool: string; arguments: Record<string, unknown>; reason: string }>): Promise<string[]> {
+    const robot = this.store.requireConfig().identity.name
+    const ids = asks.map((ask) => this.store.propose('tool-call', `${ask.tool}: ${ask.reason}`, { toolCall: { robot, tool: ask.tool, arguments: ask.arguments, reason: ask.reason, items: [{ kind: 'tool', name: 'box' }] } }, Date.now(), () => false).id)
+    this.store.sql.exec('UPDATE schema_version SET version = 19')
+    this.store.prepare()
+    return ids
+  }
+
+  /** The job table as v1.15 left it (box_job, no place), holding the jobs so far and one more that finished, then the upgrade as after the deploy (deep review P18). */
+  async legacyBoxJobsForTest(finished: { id: string; command: string; exitCode: number }): Promise<void> {
+    const sql = this.store.sql
+    sql.exec('CREATE TABLE box_job (id TEXT PRIMARY KEY, command TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, exit_code INTEGER, status TEXT NOT NULL, out_offset INTEGER NOT NULL DEFAULT 0, err_offset INTEGER NOT NULL DEFAULT 0, foreground INTEGER NOT NULL DEFAULT 1, spill TEXT) WITHOUT ROWID')
+    sql.exec('INSERT INTO box_job SELECT id, command, started_at, finished_at, exit_code, status, out_offset, err_offset, foreground, spill FROM job')
+    sql.exec("INSERT INTO box_job (id, command, started_at, finished_at, exit_code, status, foreground) VALUES (?, ?, ?, ?, ?, 'completed', 0)", finished.id, finished.command, Date.now() - 60_000, Date.now() - 30_000, finished.exitCode)
+    sql.exec('DROP TABLE job')
+    sql.exec('UPDATE schema_version SET version = 19')
+    this.store.prepare()
+  }
+
   /** The config exactly as stored. */
   async storedConfigForTest(): Promise<Record<string, unknown>> {
     return JSON.parse(this.store.sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").one().v) as Record<string, unknown>

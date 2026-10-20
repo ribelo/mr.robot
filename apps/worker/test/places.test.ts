@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost, hostCommands, hostDisk } from './fake-host.ts'
-import { boxDisks, boxLog, boxScripts, holdBoxJob } from './stub-box.ts'
+import { boxDisks, boxLog, boxScripts, finishBoxJob, holdBoxJob } from './stub-box.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -316,6 +316,49 @@ describe('old events still render (ob-j9nx)', () => {
     const trajectory = JSON.stringify((await api(ANNA, `/api/robots/${id}/trajectory`)).body)
     expect(trajectory).toContain('box_run')
     expect(trajectory).toContain('host_read')
+  })
+})
+
+describe('the upgrade from v1.15 (deep review P18)', () => {
+  it('closes an Ask left open for a removed tool and tells the owner; an Ask for a tool that stays waits as before', async () => {
+    const id = await robotWith({ tools: { box: 'ask', files: 'ask' } })
+    const [old, kept] = await testRobot(id).legacyToolAsksForTest([
+      { tool: 'box_run', arguments: { command: 'rm -rf build' }, reason: 'Clean the build' },
+      { tool: 'write', arguments: { on: 'workspace', file_path: 'notes/a.md', content: 'milk' }, reason: 'Keep the list' },
+    ])
+    const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
+    const asks = items.flatMap((item) => (item.kind === 'proposal' ? [item.proposal] : []))
+    const closed = asks.find((ask) => ask.id === old)
+    expect(closed).toMatchObject({ status: 'done' })
+    expect(asks.find((ask) => ask.id === kept)).toMatchObject({ status: 'open' })
+    const notices = items.flatMap((item) => (item.kind === 'notice' ? [item.text] : []))
+    expect(notices.filter((text) => text.includes('box_run no longer exists'))).toHaveLength(1)
+    // An approval that arrives for the closed Ask is refused: nothing runs and the Robot is not woken.
+    expect((await api(ANNA, `/api/robots/${id}/proposals/${old}`, { body: { revision: closed!.revision, approve: true } })).status).toBe(409)
+    await settle(id)
+    expect(requests.get(id)).toBeUndefined()
+    expect(boxLog.get(id) ?? []).toEqual([])
+  })
+
+  it('keeps the Box jobs of v1.15 as jobs on the box: listed with their place, and a running one wakes the Robot when it ends', async () => {
+    const id = await robotWith({ tools: { box: 'allow' } })
+    holdBoxJob(id, 'python3 serve.py')
+    const [started] = await calls(id, [{ name: 'run', args: { on: 'box', command: 'python3 serve.py', run_in_background: true } }])
+    const running = json(started).jobId as string
+    await testRobot(id).legacyBoxJobsForTest({ id: 'j-00015aaa', command: 'make all', exitCode: 2 })
+    const [list] = await calls(id, [{ name: 'job_list', args: {} }])
+    const jobs = (json(list).jobs as Array<{ id: string; place: string; command: string; status: string; exitCode: number | null }>).map(({ id: job, place, command, status, exitCode }) => ({ job, place, command, status, exitCode }))
+    expect(jobs).toEqual(expect.arrayContaining([
+      { job: running, place: 'box', command: 'python3 serve.py', status: 'running', exitCode: null },
+      { job: 'j-00015aaa', place: 'box', command: 'make all', status: 'completed', exitCode: 2 },
+    ]))
+    expect(jobs).toHaveLength(2)
+    finishBoxJob(id, 'python3 serve.py', { stdout: 'served\n' })
+    scripts.set(id, [{ text: '' }])
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    const wakes = requests.get(id)!.flatMap((request) => request.messages.filter((message) => message.role === 'user').map((message) => JSON.stringify(message)))
+    expect(wakes.some((text) => text.includes(`[Box job ${running} finished: exit 0]`))).toBe(true)
   })
 })
 

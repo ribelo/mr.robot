@@ -4,7 +4,7 @@
  * session log lives beside it (agent/session-log.ts).
  */
 import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
-import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
+import { SESSION_LOG_SCHEMA, storedLength } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import * as Schema from 'effect/Schema'
 import { HOST_FACETS, hostFacetKey, splitHostFacet, StoredPlace } from '../places/host-facet.ts'
@@ -189,7 +189,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 22
+const SCHEMA_VERSION = 23
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -274,6 +274,27 @@ function unshareMrRobotDirectory(sql: SqlStorage): void {
   sql.exec('UPDATE kv SET v = ? WHERE k = ?', JSON.stringify(directory), HOST_DIRECTORY)
 }
 
+/** The tools of v1.15 that run, read and write on a place replaced in v1.16 (ob-dyg4). */
+const REMOVED_PLACE_TOOLS: ReadonlySet<string> = new Set(['box_run', 'box_read', 'box_write', 'host_run', 'host_read', 'host_write', 'host_copy'])
+
+/**
+ * An Ask left open for a removed tool would run a tool that no longer exists once approved (deep review P18): it is closed, and a notice
+ * in the Conversation tells the owner why. The Robot is not woken; the owner asks it again when the work is still wanted.
+ */
+function closeAsksForRemovedTools(sql: SqlStorage): void {
+  const open = sql.exec<{ id: string; tool: string | null }>("SELECT id, json_extract(payload, '$.toolCall.tool') AS tool FROM proposal WHERE kind = 'tool-call' AND status = 'open' ORDER BY created_at").toArray()
+    .filter((row) => row.tool !== null && REMOVED_PLACE_TOOLS.has(row.tool))
+  const config = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
+  if (open.length === 0 || config === undefined) return
+  const { liveSessionId, identity } = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ liveSessionId: Schema.String, identity: Schema.Struct({ name: Schema.String }) })))(config.v)
+  const now = Date.now()
+  for (const { id, tool } of open) {
+    sql.exec("UPDATE proposal SET status = 'done', answered_at = ? WHERE id = ?", now, id)
+    const text = `Since the update, ${tool} no longer exists, so ${identity.name}'s Ask to use it was closed. If the work is still needed, ask ${identity.name} to do it again.`
+    sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, NULL)', `n-${crypto.randomUUID()}`, liveSessionId, storedLength(sql, liveSessionId), now, text)
+  }
+}
+
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
 function addColumns(sql: SqlStorage, table: string, columns: readonly string[]): void {
   const present = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((column) => column.name))
@@ -281,6 +302,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // A v1.15 Ask still open for box_run, host_run and the like would run a removed tool when approved (deep review P18): it is closed.
+  23: [closeAsksForRemovedTools],
   // Every Member's Mr. Robot had one directory on a shared Host (deep review P8): his own from now on.
   22: [unshareMrRobotDirectory],
   // Two browsers (v1.16 ticket 08, ob-l24v): a Robot on Container Chrome follows the Home default.
