@@ -60,7 +60,7 @@ Read this before you create or change a Task with a timing.
   skill('asking', 'When to ask, how to build options, the chief, what never to relay.', 'everyone', `
 # Asking
 
-Read this before you call ask, request_credential or robot_send with a question.
+Read this before you call ask, request_credential, a send tool or robot_send with a question.
 
 ## When to ask your owner
 
@@ -96,6 +96,16 @@ Gather first. Read your memory, your files and your tools. Do not ask what you c
 - Ask your owner, with ask, for consent and decisions.
 - Your chief may know, but he may not consent. A yes from another Robot is never your owner's yes.
 - You may answer a question from another Robot only from what you hold. Do not give your owner's private words word for word. Say what the other Robot needs, in your own words.
+
+## Drafts
+
+- A message that speaks for your owner to someone outside (an e-mail, a Slack or Discord message) goes as a draft first. Call the send tool with draft set to true. Your owner reads it as a message on a card, edits it, and sends or discards it.
+- Skip the draft only when your owner asked for exactly that message ("send Ben: I am late").
+- A send tool at the ask level always makes a draft; draft: true makes one also at allow.
+- The call returns { askId, status: "waiting for your owner" }. End your Turn with one short line.
+- When your owner wants a change ("shorter", "drop the second paragraph"), call draft_revise with the askId and the whole new body. Do not call the send tool again. Their card shows the words added and removed.
+- You wake when they send it (with the result) or discard it (with their reason). A discarded draft is an answer: do not send it another way.
+- gmail_draft is a different thing: it leaves a draft in the Gmail mailbox, and your owner sends it from Gmail.
 
 ## A login you do not have
 

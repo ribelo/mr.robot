@@ -2689,6 +2689,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.program(Programs.answer(proposalId, revision, approve, approved, scope, { ...(note === undefined ? {} : { note }), ...choice }))
   }
 
+  /** draft_revise (v1.17, dp-5ixt): the Robot's new version of an open draft; the owner's card shows what changed. */
+  async reviseDraft(askId: string, body: string, subject: string | undefined): Promise<{ readonly askId: string; readonly version: number }> {
+    const pending = this.store.proposal(askId)
+    if (pending === undefined || pending.kind !== 'tool-call' || pending.toolCall?.draft == null) throw new Error(`draft_revise: "${askId}" is not one of your drafts. Give the askId the send tool returned.`)
+    if (pending.status !== 'open') throw new Error(`draft_revise: your owner already ${pending.status === 'approved' ? 'sent' : 'discarded'} this draft; it cannot change now.`)
+    if (body.trim() === '') throw new Error('draft_revise: the body must not be empty.')
+    const result = await this.program(Programs.reviseDraft(askId, pending.revision, body, subject, 'robot'))
+    if (!result.ok) throw new Error('draft_revise: your owner changed the draft at the same moment; read it again and retry.')
+    return { askId, version: result.proposal.toolCall?.draft?.revisions.at(-1)?.seq ?? 1 }
+  }
+
   /** The owner's edit of a draft before Send (v1.17, dp-qbt7): the stored call's body and subject. */
   editDraft(proposalId: string, revision: number, body: string, subject?: string): Promise<AnswerResult> {
     return this.program(Programs.reviseDraft(proposalId, revision, body, subject, 'owner'))

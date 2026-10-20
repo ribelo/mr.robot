@@ -4,7 +4,7 @@
  */
 import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { ConnectionView, Conversation, Me, ProposalView } from '@mr-robot/protocol'
+import type { ConnectionView, Conversation, Me, ProposalView, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { connectorFixtures } from './connector-fixtures.ts'
 import { decodeRaw } from './connector-host.ts'
@@ -132,6 +132,50 @@ describe('a send tool at ask is a draft (dp-si4p, dp-wd2q, dp-qbt7, dp-ky1h)', (
     expect(card).toContain('wrote a draft for you to check "Dinner" (To: ben@example.com).')
     expect(card).toContain('Hi Ben,\nseven works.')
     expect(card).toContain('Open the Conversation to send or discard it')
+  })
+
+  it('draft_revise replaces the body and subject of the open draft; the view carries both versions (dp-5ixt, dp-o3st)', async () => {
+    const { id } = await mailRobot('ask')
+    const ask = await drafted(id, { ...SEND, attachments: [], reason: 'Ben asked' })
+    scripts.set(id, [{ calls: [{ name: 'draft_revise', args: { ask_id: ask.id, body: 'Dinner at seven.', subject: 'Dinner at 7' } }, { name: 'draft_revise', args: { ask_id: 'p-nope', body: 'x' } }] }, { text: '' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'shorter, and put the time in the subject' } })
+    await settle(id)
+    const results = requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').slice(-2).map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
+    expect(JSON.parse(results[0]!)).toMatchObject({ askId: ask.id, version: 2, status: 'waiting' })
+    expect(results[1]).toContain('is not one of your drafts')
+    const revised = (await asks(id)).find((entry) => entry.id === ask.id)!
+    expect(revised.revision).toBe(ask.revision + 1)
+    expect(revised.toolCall!.draft).toMatchObject({
+      subject: 'Dinner at 7', body: 'Dinner at seven.',
+      revisions: [{ seq: 1, by: 'robot', subject: 'Dinner', body: SEND.body }, { seq: 2, by: 'robot', subject: 'Dinner at 7', body: 'Dinner at seven.' }],
+    })
+    // Send sends the revised text.
+    connectorFixtures.on('POST', `${GMAIL}/messages/send`, { id: 'm-1', threadId: 't-1' })
+    scripts.set(id, [{ text: '' }])
+    await api(ANNA, `/api/robots/${id}/proposals/${ask.id}`, { body: { revision: revised.revision, approve: true } })
+    await settle(id)
+    expect(decodeRaw((JSON.parse(sends()[0]!.body ?? '{}') as { raw: string }).raw)).toContain('Subject: Dinner at 7')
+  })
+
+  it('"This Robot sends on its own" raises the write grant to allow and sends; the grants lower it back (dp-ef0p, dp-fjh7)', async () => {
+    const { id, connection } = await mailRobot('ask')
+    connectorFixtures.on('POST', `${GMAIL}/messages/send`, { id: 'm-1', threadId: 't-1' })
+    const ask = await drafted(id, { to: ['ben@example.com'], subject: 'Dinner', body: 'Hi', reason: 'Ben asked' })
+    const edited = (await api<ProposalView>(ANNA, `/api/robots/${id}/proposals/${ask.id}/draft`, { method: 'PATCH', body: { revision: ask.revision, body: 'Hi Ben' } })).body
+    scripts.set(id, [{ text: '' }])
+    expect((await api(ANNA, `/api/robots/${id}/proposals/${ask.id}/always-allow`, { body: { revision: edited.revision } })).status).toBe(200)
+    await settle(id)
+    expect(part(decodeRaw((JSON.parse(sends()[0]!.body ?? '{}') as { raw: string }).raw), 'text/plain')).toBe('Hi Ben')
+    const grants = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.grants
+    expect(grants.connections[`${connection}:write`]).toBe('allow')
+    // From now on it sends without a card...
+    await drafted(id, { to: ['ben@example.com'], subject: 'Again', body: 'Hi' }).catch(() => undefined)
+    expect(sends()).toHaveLength(2)
+    // ...until the owner lowers the grant again.
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { ...grants, connections: { ...grants.connections, [`${connection}:write`]: 'ask' } } } })
+    const again = await drafted(id, { to: ['ben@example.com'], subject: 'Third', body: 'Hi', reason: 'Ben asked' })
+    expect(again).toMatchObject({ status: 'open', toolCall: { draft: { subject: 'Third' } } })
+    expect(sends()).toHaveLength(2)
   })
 
   it('keeps an Ask of a send tool stored before v1.17 as it was (dp-f0pp)', async () => {

@@ -43,6 +43,34 @@ export function answerByNumbers(question: { readonly options: ReadonlyArray<{ re
   return numbers.sort((a, b) => a - b).map((number) => question.options[number - 1]!.value)
 }
 
+/** What draft_revise needs of the Robot (v1.17, dp-5ixt). */
+export interface DraftReviseHost {
+  /** Replace the body (and the subject) of an open draft Ask; throws a clear error for an Ask that is not an open draft of this Robot. */
+  reviseDraft(askId: string, body: string, subject: string | undefined): Promise<{ readonly askId: string; readonly version: number }>
+}
+
+/** A new version of a draft the owner has not sent yet (v1.17 ticket 04): the card shows what changed. */
+export function draftTools(host: DraftReviseHost): ToolDefinition[] {
+  return [
+    tool<{ ask_id: string; body: string; subject?: string }>({
+      name: 'draft_revise',
+      description: "Replace the text of a draft that waits for your owner (the Ask of a send tool, still open): give the Ask id, the whole new body and, for an e-mail, the subject. Use it when your owner asks for a change (\"shorter\", \"drop the second paragraph\"); do not call the send tool again. Their card shows the words added and removed, and Send sends the new text.",
+      parameters: {
+        properties: {
+          ask_id: { type: 'string', description: 'The id of the draft Ask, from the result of the send tool' },
+          body: { type: 'string', description: 'The whole new message, in Markdown' },
+          subject: { type: 'string', description: 'An e-mail: the new subject; left out, it stays' },
+        },
+        required: ['ask_id', 'body'],
+      },
+      execute: async ({ ask_id, body, subject }) => {
+        const revised = await host.reviseDraft(ask_id.trim(), body, subject)
+        return { askId: revised.askId, version: revised.version, status: 'waiting', note: 'Your owner sees the new version with the changes marked. End your Turn with one short line; you are woken when they send or discard it.' }
+      },
+    }),
+  ]
+}
+
 /**
  * Asking the owner (v1.15 ticket 03, gb-b4wz): one question with real options, stored as an Ask. The call returns at once; the Robot goes on
  * with work that does not depend on the answer, or ends its Turn, and the answer wakes it as a steer (gb-htdw, gb-1lfb).

@@ -4,8 +4,8 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: draft_revise appends a revision and the view carries both versions; sends-on-its-own raises the grant and approves; lowering restores ask (dp-5ixt, dp-o3st, dp-ef0p, dp-fjh7)
-- [ ] Component test: the revision diff (dp-o3st)
-- [ ] The asking skill and the prompt name when to draft and what gmail_draft is (dp-41yj)
+- [x] Workerd test: draft_revise appends a revision and the view carries both versions; sends-on-its-own raises the grant and approves; lowering restores ask (dp-5ixt, dp-o3st, dp-ef0p, dp-fjh7)
+- [x] Component test: the revision diff (dp-o3st)
+- [x] The asking skill and the prompt name when to draft and what gmail_draft is (dp-41yj)
