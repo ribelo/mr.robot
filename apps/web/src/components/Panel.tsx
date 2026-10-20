@@ -16,12 +16,14 @@ export interface PanelProps {
   readonly onOpenHelp?: (requestId: string) => void
   /** Stop the Robot's Box (ao-9q18). */
   readonly onStopBox?: () => void
+  /** Stop one job of the Box (v1.15, gb-66kh). */
+  readonly onStopJob?: (jobId: string) => void
   /** The time the ages are counted from; the clock when left out. */
   readonly now?: number
 }
 
 /** The robot panel (robot-z3ud): screen thumbnail, Tasks, simple settings. */
-export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, onStopBox, now = Date.now() }: PanelProps) {
+export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanced, onTrajectory, onFiles, onClose, onOpenHelp, onStopBox, onStopJob, now = Date.now() }: PanelProps) {
   const name = panel.summary.identity.name
   return (
     <aside className="panel">
@@ -68,7 +70,7 @@ export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanc
               {panel.threads.length === 0 ? <div className="muted">No Threads.</div> : <ul className="thread-list">{panel.threads.map((thread) => <li key={thread.id}><ThreadCard thread={thread} /></li>)}</ul>}
             </>
           )}
-          {panel.box === undefined ? null : <BoxSection box={panel.box} {...(onStopBox === undefined ? {} : { onStop: onStopBox })} />}
+          {panel.box === undefined ? null : <BoxSection box={panel.box} {...(onStopBox === undefined ? {} : { onStop: onStopBox })} {...(onStopJob === undefined ? {} : { onStopJob })} now={now} />}
           <div className="panel-links">
             <button type="button" className="link" onClick={onFiles}>Files</button>
             <button type="button" className="link" onClick={onTrajectory}>Trajectory</button>
@@ -87,7 +89,7 @@ export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanc
 const BOX_STATES: Record<BoxView['state'], string> = { off: 'Off', booting: 'Booting', running: 'Running', stopping: 'Stopping' }
 
 /** The Robot's Box (ao-9q18): its state, since when, and Stop while it is on. */
-function BoxSection({ box, onStop }: { box: BoxView; onStop?: () => void }) {
+function BoxSection({ box, onStop, onStopJob, now }: { box: BoxView; onStop?: () => void; onStopJob?: (jobId: string) => void; now: number }) {
   return (
     <section aria-label="Box">
       <h3 className="panel-section">Box</h3>
@@ -95,7 +97,17 @@ function BoxSection({ box, onStop }: { box: BoxView; onStop?: () => void }) {
         <span>{BOX_STATES[box.state]}{box.since === null ? '' : ` · since ${new Date(box.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}</span>
         {box.state === 'off' || onStop === undefined ? null : <button type="button" className="button" disabled={box.state === 'stopping'} onClick={onStop}>Stop</button>}
       </div>
-      <div className="muted">Stops by itself ten minutes after its last command; box/ in the Workspace is kept.</div>
+      {(box.jobs ?? []).length === 0 ? null : (
+        <ul className="box-jobs" aria-label="Jobs">
+          {box.jobs!.map((job) => (
+            <li key={job.id}>
+              <code title={job.command}>{job.command.length > 60 ? `${job.command.slice(0, 60)}…` : job.command}</code> <span className="muted">· {ageText(now - job.startedAt).replace(' ago', '')}</span>
+              {onStopJob === undefined ? null : <button type="button" className="link" aria-label={`Stop job ${job.command}`} onClick={() => onStopJob(job.id)}>Stop</button>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="muted">Stops by itself ten minutes after its last command or job; box/ in the Workspace is kept.</div>
     </section>
   )
 }

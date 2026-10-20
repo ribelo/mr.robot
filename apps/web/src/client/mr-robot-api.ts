@@ -120,6 +120,7 @@ const make = Effect.gen(function* () {
     /** Stop the Robot's running Turn (mc-w5ee). */
     interrupt: (robotId: string) => send('POST', `/api/robots/${enc(robotId)}/interrupt`),
     stopBox: (robotId: string) => send('POST', `/api/robots/${enc(robotId)}/box/stop`),
+    stopBoxJob: (robotId: string, jobId: string) => send('POST', `/api/robots/${enc(robotId)}/box/jobs/${enc(jobId)}/stop`),
     assignTask: (id: string, assignee: TaskAssignee) => request(TaskView, 'POST', `/api/tasks/${enc(id)}/assign`, { assignee }),
     rewind: (id: string, atSeq: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { atSeq }),
     rewindBeforeTurn: (id: string, turn: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { beforeTurn: turn }),

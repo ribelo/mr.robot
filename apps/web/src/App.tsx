@@ -278,6 +278,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
           onFiles={() => go({ page: 'files', id, path: null })}
           onOpenHelp={() => go({ page: 'robot', id, panel: false })}
           onStopBox={() => void command((api) => api.stopBox(id), [keys.robot(id)])}
+          onStopJob={(jobId) => void command((api) => api.stopBoxJob(id, jobId), [keys.robot(id)])}
         />
       ) : null}
     </div>

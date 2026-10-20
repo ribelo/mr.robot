@@ -4,13 +4,13 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test with the Box stub: a command past the limit is promoted with its output so far; run_in_background returns at once (gb-lnph, gb-lco0)
-- [ ] Workerd test: job_output returns output since the last read and waits up to the timeout; job_kill ends a job (gb-p4r5)
-- [ ] Workerd test: a finished job queues the follow-up Wake-up with exit code and tail, and the log exists under spill/jobs/ (gb-pptr)
-- [ ] Workerd test: the idle stop is not set while a job runs and starts from the job's end; the Turn ends while the job runs (gb-5bfw, gb-aafm)
-- [ ] Workerd test: a stub restart with a job gone marks it lost and wakes the Robot as failed (gb-aafm)
-- [ ] Component test: the Box section with running jobs and Stop (gb-66kh)
-- [ ] Staging, by hand: a two-minute script, the Turn ends, the finished job wakes the Robot, the Robot says the result with the log attached (gb-pptr, gb-5bfw, gb-aafm)
-- [ ] docs/box.md describes jobs the DSH way (gb-g39d)
+- [x] Workerd test with the Box stub: a command past the limit is promoted with its output so far; run_in_background returns at once (gb-lnph, gb-lco0)
+- [x] Workerd test: job_output returns output since the last read and waits up to the timeout; job_kill ends a job (gb-p4r5)
+- [x] Workerd test: a finished job queues the follow-up Wake-up with exit code and tail, and the log exists under spill/jobs/ (gb-pptr)
+- [x] Workerd test: the idle stop is not set while a job runs and starts from the job's end; the Turn ends while the job runs (gb-5bfw, gb-aafm)
+- [x] Workerd test: a stub restart with a job gone marks it lost and wakes the Robot as failed (gb-aafm)
+- [x] Component test: the Box section with running jobs and Stop (gb-66kh)
+- [ ] Staging, by hand (not run in this session: it needs a deployed Box): a two-minute script, the Turn ends, the finished job wakes the Robot, the Robot says the result with the log attached (gb-pptr, gb-5bfw, gb-aafm)
+- [x] docs/box.md describes jobs the DSH way (gb-g39d)

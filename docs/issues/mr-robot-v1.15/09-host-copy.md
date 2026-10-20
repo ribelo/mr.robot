@@ -4,8 +4,8 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test with the Host stub: a binary file copied each way is byte-equal; a file over the cap is refused with the reason; a Host without the file Grant refuses (gb-iw01, gb-rvj5)
-- [ ] Workerd test: a file copied under box/ is in the Box stub after boot (gb-mcnc)
-- [ ] The Host app streams the copy in chunks; the result names both paths and the size
+- [x] Workerd test with the Host stub: a binary file copied each way is byte-equal; a file over the cap is refused with the reason; a Host without the file Grant refuses (gb-iw01, gb-rvj5)
+- [x] Workerd test: a file copied under box/ is in the Box stub after boot (gb-mcnc)
+- [x] The Host app streams the copy in chunks; the result names both paths and the size

@@ -12,9 +12,22 @@ export interface BoxFile {
   readonly mtime: number
 }
 
+/** What a job is doing, as the Box reports it (v1.15 ticket 07). `gone`: its process is not there and left no exit code. */
+export type BoxJobStatus = { readonly state: 'running' } | { readonly state: 'exited'; readonly exitCode: number } | { readonly state: 'gone' }
+
 export interface BoxBackend {
   start(): Promise<void>
   running(): Promise<boolean>
+  /**
+   * Start a command that goes on by itself (v1.15 ticket 07, gb-lnph): its own session, its output in two files. The call returns once
+   * the command is started. A job lives as long as the Box does.
+   */
+  spawn(job: string, command: string, cwd: string): Promise<void>
+  status(job: string): Promise<BoxJobStatus>
+  /** The output of one stream of a job from a byte offset on (at most 256 KB), and the size of that stream now. */
+  output(job: string, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
+  /** TERM to the job's whole session, KILL five seconds later. */
+  kill(job: string): Promise<void>
   run(command: string, cwd: string, timeoutSeconds: number): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>
   read(path: string): Promise<Uint8Array | null>
   write(path: string, bytes: Uint8Array): Promise<void>
@@ -36,6 +49,10 @@ export function containerBox(env: Env, robotId: string): BoxBackend {
   return {
     start: () => stub.begin(),
     running: () => stub.running(),
+    spawn: (job, command, cwd) => stub.spawn(job, command, cwd),
+    status: (job) => stub.status(job),
+    output: (job, stream, offset) => stub.output(job, stream, offset),
+    kill: (job) => stub.killJob(job),
     run: (command, cwd, seconds) => stub.run(command, cwd, seconds),
     read: (path) => stub.read(path),
     write: (path, bytes) => stub.write(path, bytes),

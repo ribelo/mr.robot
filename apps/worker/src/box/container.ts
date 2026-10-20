@@ -30,6 +30,44 @@ export class ComputerContainer extends Container<Env> {
     return { stdout: text.decode(out.stdout), stderr: text.decode(out.stderr), exitCode: out.exitCode }
   }
 
+  /**
+   * A job (v1.15 ticket 07): the command in its own session, stdout and stderr in /workspace/.jobs/<id>.out and .err, its exit code in
+   * <id>.exit when it ends, its process group in <id>.pid. The exec call returns as soon as the command is started.
+   */
+  async spawn(job: string, command: string, cwd: string): Promise<void> {
+    this.renewActivityTimeout()
+    const script = [
+      'mkdir -p /workspace/.jobs',
+      // The wrapper is its own session leader; its pid is the process group the job runs in.
+      'setsid nohup bash -c \'echo $$ > "$2.pid"; cd "$3"; bash -lc "$1" > "$2.out" 2> "$2.err" < /dev/null; echo $? > "$2.exit.tmp"; mv "$2.exit.tmp" "$2.exit"\' _ "$0" "/workspace/.jobs/' + job + '" "$1" > /dev/null 2>&1 < /dev/null &',
+      'for i in 1 2 3 4 5 6 7 8 9 10; do test -f "/workspace/.jobs/' + job + '.pid" && exit 0; sleep 0.1; done',
+      'exit 1',
+    ].join('\n')
+    const process = await this.ctx.container!.exec(['bash', '-c', script, command, cwd], { env: { HOME: '/root', PATH: '/usr/local/python/bin:/usr/local/bin:/usr/bin:/bin' } })
+    const out = await process.output()
+    if (out.exitCode !== 0) throw new Error(`the job did not start: ${text.decode(out.stderr)}`)
+  }
+
+  async status(job: string): Promise<{ state: 'running' } | { state: 'exited'; exitCode: number } | { state: 'gone' }> {
+    const script = 'f="/workspace/.jobs/$0"; if [ -f "$f.exit" ]; then echo "exited $(cat "$f.exit")"; elif [ -f "$f.pid" ] && kill -0 "$(cat "$f.pid")" 2>/dev/null; then echo running; else echo gone; fi'
+    const out = await (await this.ctx.container!.exec(['bash', '-c', script, job], {})).output()
+    const [state, code] = text.decode(out.stdout).trim().split(' ')
+    return state === 'running' ? { state: 'running' } : state === 'exited' ? { state: 'exited', exitCode: Number(code) } : { state: 'gone' }
+  }
+
+  async output(job: string, stream: 'out' | 'err', offset: number): Promise<{ text: string; bytes: number; size: number }> {
+    const script = 'f="/workspace/.jobs/$0.$1"; test -f "$f" || { echo 0; exit 0; }; stat -c %s "$f"; tail -c +"$(( $2 + 1 ))" "$f" | head -c 262144 | base64 -w0'
+    const out = await (await this.ctx.container!.exec(['bash', '-c', script, job, stream, String(offset)], {})).output()
+    const [size = '0', body = ''] = text.decode(out.stdout).split('\n')
+    const raw = Uint8Array.from(atob(body.trim()), (char) => char.charCodeAt(0))
+    return { text: text.decode(raw), bytes: raw.length, size: Number(size) }
+  }
+
+  async killJob(job: string): Promise<void> {
+    const script = 'f="/workspace/.jobs/$0.pid"; test -f "$f" || exit 0; p="$(cat "$f")"; kill -TERM -- "-$p" 2>/dev/null; ( sleep 5; kill -KILL -- "-$p" 2>/dev/null ) > /dev/null 2>&1 < /dev/null &'
+    await (await this.ctx.container!.exec(['bash', '-c', script, job], {})).output()
+  }
+
   /** A file's bytes, or null when it is not there. */
   async read(path: string): Promise<Uint8Array | null> {
     const process = await this.ctx.container!.exec(['bash', '-lc', 'test -f "$0" && base64 -w0 "$0"', path], {})

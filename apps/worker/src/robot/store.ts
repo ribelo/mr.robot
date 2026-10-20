@@ -106,6 +106,29 @@ export interface ActiveTurn {
   readonly task: { readonly id: string; readonly title: string; readonly attemptId: number } | null
 }
 
+/** One command of the Box that goes on by itself (v1.15 ticket 07, gb-lnph). */
+export interface BoxJobRow {
+  readonly id: string
+  readonly command: string
+  readonly startedAt: number
+  readonly finishedAt: number | null
+  readonly exitCode: number | null
+  readonly status: 'running' | 'completed' | 'killed' | 'lost'
+  /** How much of each stream the Robot has read (job_output). */
+  readonly outOffset: number
+  readonly errOffset: number
+  /** Still the foreground wait of a box_run: its end does not wake the Robot, which is waiting for it. */
+  readonly foreground: boolean
+  /** The Workspace path of the whole output once the job ended. */
+  readonly spill: string | null
+}
+
+type BoxJobSql = { id: string; command: string; started_at: number; finished_at: number | null; exit_code: number | null; status: BoxJobRow['status']; out_offset: number; err_offset: number; foreground: number; spill: string | null }
+
+function boxJobFromSql(row: BoxJobSql): BoxJobRow {
+  return { id: row.id, command: row.command, startedAt: row.started_at, finishedAt: row.finished_at, exitCode: row.exit_code, status: row.status, outOffset: row.out_offset, errOffset: row.err_offset, foreground: row.foreground === 1, spill: row.spill }
+}
+
 export interface ProposalRow extends ProposalView {
   readonly createdAt: number
   readonly answeredAt: number | null
@@ -155,7 +178,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 18
+const SCHEMA_VERSION = 19
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -221,6 +244,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // The Box's jobs (v1.15 ticket 07, gb-lnph): commands that go on by themselves, with the offsets of what the Robot has read.
+  19: ["CREATE TABLE IF NOT EXISTS box_job (id TEXT PRIMARY KEY, command TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, exit_code INTEGER, status TEXT NOT NULL, out_offset INTEGER NOT NULL DEFAULT 0, err_offset INTEGER NOT NULL DEFAULT 0, foreground INTEGER NOT NULL DEFAULT 1, spill TEXT) WITHOUT ROWID"],
   // Every Robot can ask its chief (v1.15 ticket 04, gb-qmnc): the recipient Grant to its owner's Mr. Robot and the messaging group, given once to the Robots that exist.
   18: [giveChiefRecipient],
   // The Computer became the Box (v1.15 ticket 06, gb-ao8m): its grant, its running time, its cost rows, its state and its open Asks.
@@ -580,6 +605,43 @@ export class RobotStore {
       outcome.status, now, JSON.stringify(outcome.patch), id, revision,
     )
     return cursor.rowsWritten === 1 ? this.proposal(id) : undefined
+  }
+
+  // ------------------------------------------------------------ Box jobs (v1.15 ticket 07)
+
+  addBoxJob(id: string, command: string, now: number): void {
+    this.sql.exec("INSERT INTO box_job (id, command, started_at, status) VALUES (?, ?, ?, 'running')", id, command, now)
+  }
+
+  boxJob(id: string): BoxJobRow | undefined {
+    const row = this.sql.exec<BoxJobSql>('SELECT * FROM box_job WHERE id = ?', id).toArray()[0]
+    return row === undefined ? undefined : boxJobFromSql(row)
+  }
+
+  /** The newest jobs first; the table keeps the last 50 finished ones. */
+  boxJobs(): BoxJobRow[] {
+    return this.sql.exec<BoxJobSql>('SELECT * FROM box_job ORDER BY started_at DESC, id').toArray().map(boxJobFromSql)
+  }
+
+  runningBoxJobs(): BoxJobRow[] {
+    return this.sql.exec<BoxJobSql>("SELECT * FROM box_job WHERE status = 'running' ORDER BY started_at").toArray().map(boxJobFromSql)
+  }
+
+  /** Close a running job; false when it was closed already (one close per job). */
+  closeBoxJob(id: string, status: 'completed' | 'killed' | 'lost', exitCode: number | null, now: number, spill: string | null): boolean {
+    const cursor = this.sql.exec("UPDATE box_job SET status = ?, exit_code = ?, finished_at = ?, spill = ? WHERE id = ? AND status = 'running'", status, exitCode, now, spill, id)
+    if (cursor.rowsWritten !== 1) return false
+    this.sql.exec("DELETE FROM box_job WHERE status <> 'running' AND id NOT IN (SELECT id FROM box_job WHERE status <> 'running' ORDER BY started_at DESC LIMIT 50)")
+    return true
+  }
+
+  /** The job went on past the foreground wait or was started in the background: its end wakes the Robot. */
+  promoteBoxJob(id: string): void {
+    this.sql.exec('UPDATE box_job SET foreground = 0 WHERE id = ?', id)
+  }
+
+  setBoxJobOffsets(id: string, outOffset: number, errOffset: number): void {
+    this.sql.exec('UPDATE box_job SET out_offset = ?, err_offset = ? WHERE id = ?', outOffset, errOffset, id)
   }
 
   closeProposal(id: string, now: number): void {

@@ -342,8 +342,9 @@ interface TakeoverRow { readonly reason: string; readonly claimedBy: string | nu
 type StoredBox = { readonly state: BoxView['state']; readonly since?: number; readonly lastCommandAt?: number }
 
 /** The Box as the panel shows it (ao-9q18): off, booting, running or stopping, since when and its last command. */
-function boxView(stored: StoredBox | undefined): BoxView {
-  return stored === undefined || stored.state === 'off' ? { state: 'off', since: null, lastCommandAt: null } : { state: stored.state, since: stored.since ?? null, lastCommandAt: stored.lastCommandAt ?? null }
+function boxView(stored: StoredBox | undefined, jobs: ReadonlyArray<{ id: string; command: string; startedAt: number }>): BoxView {
+  const running = jobs.length === 0 ? {} : { jobs: jobs.map(({ id, command, startedAt }) => ({ id, command: command.slice(0, 200), startedAt })) }
+  return stored === undefined || stored.state === 'off' ? { state: 'off', since: null, lastCommandAt: null, ...running } : { state: stored.state, since: stored.since ?? null, lastCommandAt: stored.lastCommandAt ?? null, ...running }
 }
 
 /** The robot panel (robot-z3ud). */
@@ -360,7 +361,7 @@ export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly T
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
     ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),
-    ...(store.mayUse('tool', 'box') ? { box: boxView(store.get<StoredBox>('box')) } : {}),
+    ...(store.mayUse('tool', 'box') ? { box: boxView(store.get<StoredBox>('box'), store.runningBoxJobs().filter((job) => !job.foreground)) } : {}),
     // Requests for help still waiting, oldest first (sk-fmvh).
     help: store.proposals('open').flatMap((row) => row.kind === 'help' && row.help !== undefined ? [{ id: row.id, text: row.help.need, urgent: row.help.urgent, created: row.help.created, escalated: row.help.escalated }] : []),
   } as RobotPanel

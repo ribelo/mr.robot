@@ -78,7 +78,7 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     const log = boxLog.get(id)!
     expect(log.slice(0, 2)).toEqual(['boot', 'run /workspace/box: bash setup.sh'])
     const [sum, failed, long] = results(requests.get(id)![1]!)
-    expect(JSON.parse(sum!)).toEqual({ stdout: 'sum: 3\n', stderr: '', exitCode: 0 })
+    expect(JSON.parse(sum!)).toEqual({ kind: 'foreground', stdout: 'sum: 3\n', stderr: '', exitCode: 0 })
     expect(JSON.parse(failed!)).toMatchObject({ exitCode: 1, stderr: 'failed' })
     expect(long).toContain('Full formatted result stored at: /workspace/spill/')
     expect(results(requests.get(id)![2]!).at(-1)).toContain('a,b')

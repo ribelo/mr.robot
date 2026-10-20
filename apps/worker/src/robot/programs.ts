@@ -23,6 +23,7 @@ import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 import { causedByOwner, deliveryOf, robotMessageDelivery } from './delivery.ts'
 import { SubagentStore } from './subagent-store.ts'
+import { JOB_CHECK_MS } from '../box/jobs.ts'
 import { DEFAULT_IDLE_FLOOR_TOKENS, idleSettings, type IdleStep } from './idle.ts'
 
 export const MAX_CHAIN_HOPS = 8
@@ -984,9 +985,12 @@ export const rearm = Effect.gen(function* () {
   const quiet = store.get<{ readonly at: number }>(QUIET_DUE)?.at
   // The Box stops ten minutes after its last command (ao-joux).
   const box = store.get<{ state: string; lastCommandAt?: number }>('box')
-  const boxStop = box?.state === 'running' && box.lastCommandAt !== undefined ? box.lastCommandAt + 10 * 60_000 : undefined
+  // Never while a job runs: then the alarm looks at the jobs every 15 seconds instead (v1.15 ticket 07, gb-5bfw).
+  const jobsRunning = store.runningBoxJobs().length > 0
+  const boxStop = !jobsRunning && box?.state === 'running' && box.lastCommandAt !== undefined ? box.lastCommandAt + 10 * 60_000 : undefined
   const candidates = [
     ...(boxStop === undefined ? [] : [boxStop]),
+    ...(jobsRunning ? [Date.now() + JOB_CHECK_MS] : []),
     ...(quiet === undefined ? [] : [quiet]),
     ...(idle === undefined || !runnable ? [] : [idle]),
     ...(taskDue === undefined ? [] : [taskDue]),

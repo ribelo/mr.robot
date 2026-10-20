@@ -1244,6 +1244,8 @@ export const BoxView = Schema.Struct({
   state: Schema.Literals(['off', 'booting', 'running', 'stopping']),
   since: Schema.NullOr(Schema.Number),
   lastCommandAt: Schema.NullOr(Schema.Number),
+  /** The jobs that run now, each with Stop (v1.15 ticket 07, gb-66kh); absent when none runs. */
+  jobs: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, command: Schema.String, startedAt: Schema.Number }))),
 })
 export type BoxView = typeof BoxView.Type
 

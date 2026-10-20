@@ -10,9 +10,9 @@ Spec: ../mr-robot-v1.15.md. Frontier at the start: 01, 03, 05, 06, 08, 10, 11 in
 | 04 | [The chief question and the end of need_help](04-chief-question.md) | 03 | done |
 | 05 | [request_credential](05-request-credential.md) | — | done |
 | 06 | [Computer becomes Box](06-box-rename.md) | — | done |
-| 07 | [Box jobs](07-box-jobs.md) | 06 | ready-for-agent |
+| 07 | [Box jobs](07-box-jobs.md) | 06 | done |
 | 08 | [Connection instructions](08-connection-instructions.md) | — | done |
-| 09 | [host_copy](09-host-copy.md) | 06 | ready-for-agent |
+| 09 | [host_copy](09-host-copy.md) | 06 | done |
 | 10 | [External text is fenced](10-external-fence.md) | — | done |
 | 11 | [Identity after setup](11-identity-after-setup.md) | — | done |
 | 12 | [Platform skills](12-platform-skills.md) | 01, 03, 04 | ready-for-agent |

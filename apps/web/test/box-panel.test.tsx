@@ -26,6 +26,21 @@ describe('the Box section of the panel (ao-9q18)', () => {
     expect(screen.getByText(/12\.5 Box min/)).toBeTruthy()
   })
 
+  it('lists the jobs that run, each with Stop (gb-66kh)', () => {
+    const onStopJob = vi.fn()
+    const now = Date.parse('2026-10-19T10:30:00Z')
+    render(<Panel panel={panelWith({ state: 'running', since: now - 40 * 60_000, lastCommandAt: now - 30 * 60_000, jobs: [{ id: 'j-1', command: 'python3 train.py --epochs 50', startedAt: now - 12 * 60_000 }, { id: 'j-2', command: 'python3 -m http.server', startedAt: now - 20_000 }] })} {...handlers} onStopBox={vi.fn()} onStopJob={onStopJob} now={now} />)
+    const jobs = within(screen.getByRole('list', { name: 'Jobs' })).getAllByRole('listitem')
+    expect(jobs.map((job) => job.textContent)).toEqual(['python3 train.py --epochs 50 · 12 minStop', 'python3 -m http.server · just nowStop'])
+    fireEvent.click(screen.getByRole('button', { name: 'Stop job python3 -m http.server' }))
+    expect(onStopJob).toHaveBeenCalledWith('j-2')
+  })
+
+  it('shows no job list when none runs', () => {
+    render(<Panel panel={panelWith({ state: 'running', since: 1, lastCommandAt: 1 })} {...handlers} onStopBox={vi.fn()} onStopJob={vi.fn()} />)
+    expect(screen.queryByRole('list', { name: 'Jobs' })).toBeNull()
+  })
+
   it('has no Stop when off, and no section without the grant', () => {
     const { rerender } = render(<Panel panel={panelWith({ state: 'off', since: null, lastCommandAt: null })} {...handlers} onStopBox={vi.fn()} />)
     const section = screen.getByRole('region', { name: 'Box' })

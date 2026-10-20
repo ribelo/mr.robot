@@ -1,4 +1,4 @@
-import type { BoxBackend, BoxFile } from '../src/box/backend.ts'
+import type { BoxBackend, BoxFile, BoxJobStatus } from '../src/box/backend.ts'
 
 /** What a stub Box did, per Robot: boots, commands with their directory, stops. */
 export const boxLog = new Map<string, string[]>()
@@ -6,6 +6,34 @@ export const boxLog = new Map<string, string[]>()
 export const boxDisks = new Map<string, Map<string, { bytes: Uint8Array; mtime: number }>>()
 /** A scripted command: the test answers it; unanswered commands echo. */
 export const boxScripts = new Map<string, (command: string, disk: StubDisk) => { stdout: string; stderr?: string; exitCode?: number } | undefined>()
+
+/**
+ * A scripted job (v1.15 ticket 07): the command's answer when it ends. A command the test holds with `holdBoxJob` stays running until
+ * the test releases it; every other command ends at once with its scripted or echoed answer.
+ */
+interface StubJob { command: string; out: string; err: string; exit: number | null; gone: boolean }
+const jobs = new Map<string, StubJob>()
+/** Commands that stay running until `finishBoxJob`: robot id → command. */
+const held = new Map<string, Set<string>>()
+export const holdBoxJob = (robotId: string, command: string): void => { held.set(robotId, (held.get(robotId) ?? new Set()).add(command)) }
+/** The held command ends with this output and exit code; it may print as it goes with `printBoxJob`. */
+export function finishBoxJob(robotId: string, command: string, result: { stdout?: string; stderr?: string; exitCode?: number } = {}): void {
+  const found = [...jobs.entries()].find(([id, job]) => id.startsWith(robotId + ':') && job.command === command && job.exit === null)
+  if (found === undefined) throw new Error(`no running job for ${command}`)
+  found[1].out += result.stdout ?? ''
+  found[1].err += result.stderr ?? ''
+  found[1].exit = result.exitCode ?? 0
+}
+export function printBoxJob(robotId: string, command: string, stdout: string): void {
+  const found = [...jobs.entries()].find(([id, job]) => id.startsWith(robotId + ':') && job.command === command && job.exit === null)
+  if (found === undefined) throw new Error(`no running job for ${command}`)
+  found[1].out += stdout
+}
+/** The Box vanishes under its jobs (a restart): whatever ran is gone and left no exit code. */
+export function loseBoxJobs(robotId: string): void {
+  for (const [id, job] of jobs) if (id.startsWith(robotId + ':') && job.exit === null) job.gone = true
+}
+export const boxJobIds = (robotId: string): string[] => [...jobs.keys()].filter((id) => id.startsWith(robotId + ':')).map((id) => id.slice(robotId.length + 1))
 
 const running = new Set<string>()
 let clock = 1
@@ -52,6 +80,40 @@ export class StubBox implements BoxBackend {
     return running.has(this.robotId)
   }
 
+  private jobKey(job: string): string {
+    return `${this.robotId}:${job}`
+  }
+
+  async spawn(job: string, command: string, cwd: string): Promise<void> {
+    if (!running.has(this.robotId)) throw new Error('the Box is not running')
+    this.log(`spawn ${cwd}: ${command}`)
+    if (held.get(this.robotId)?.has(command) === true) {
+      jobs.set(this.jobKey(job), { command, out: '', err: '', exit: null, gone: false })
+      return
+    }
+    const answer = boxScripts.get(this.robotId)?.(command, new StubDisk(this.disk()))
+    jobs.set(this.jobKey(job), { command, out: answer?.stdout ?? `ran: ${command}`, err: answer?.stderr ?? '', exit: answer?.exitCode ?? 0, gone: false })
+  }
+
+  async status(job: string): Promise<BoxJobStatus> {
+    const found = jobs.get(this.jobKey(job))
+    if (found === undefined || found.gone) return { state: 'gone' }
+    return found.exit === null ? { state: 'running' } : { state: 'exited', exitCode: found.exit }
+  }
+
+  async output(job: string, stream: 'out' | 'err', offset: number): Promise<{ text: string; bytes: number; size: number }> {
+    const found = jobs.get(this.jobKey(job))
+    const bytes = new TextEncoder().encode(found === undefined ? '' : stream === 'out' ? found.out : found.err)
+    const piece = bytes.subarray(offset, offset + 262_144)
+    return { text: new TextDecoder().decode(piece), bytes: piece.length, size: bytes.length }
+  }
+
+  async kill(job: string): Promise<void> {
+    const found = jobs.get(this.jobKey(job))
+    if (found !== undefined && found.exit === null) found.exit = 143
+    this.log(`kill ${job}`)
+  }
+
   async run(command: string, cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (!running.has(this.robotId)) throw new Error('the Box is not running')
     this.log(`run ${cwd}: ${command}`)
@@ -74,6 +136,7 @@ export class StubBox implements BoxBackend {
 
   async stop(): Promise<void> {
     if (!running.delete(this.robotId)) return
+    for (const [id, job] of jobs) if (id.startsWith(this.robotId + ':') && job.exit === null) job.gone = true
     this.log('stop')
   }
 }

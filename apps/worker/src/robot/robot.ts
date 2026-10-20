@@ -136,6 +136,7 @@ import { makeWorkspace, normalizePath, type WorkspaceShape } from '../workspace/
 import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
 import type { BoxHost } from '../agent/tools/box.ts'
 import { Box } from '../plugins/box.ts'
+import { BoxJobs } from '../box/jobs.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
@@ -620,6 +621,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const current = this.boxState()
     if (current.state === 'running' && (await backend.running())) return backend
     const now = Date.now()
+    // A Box that is not up holds no job: what still ran in the old one is lost (gb-aafm).
+    await this.jobs().loseAll('the Box was restarted').catch((error: unknown) => console.warn('jobs not closed', error))
     this.store.set(BOX, { state: 'booting', since: now, lastCommandAt: now, baseline: {} } satisfies BoxState)
     await this.changed()
     try {
@@ -678,6 +681,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.set(BOX, { ...current, state: 'stopping' } satisfies BoxState)
     await this.changed()
     try {
+      // What still runs ends with the Box; its output so far is saved and the Robot is told (gb-aafm).
+      await this.jobs().loseAll('the Box was stopped', backend).catch((error: unknown) => console.warn('jobs not closed', error))
       await this.syncBox(backend).catch((error: unknown) => console.warn('Box not synced', error))
       await backend.stop()
     } finally {
@@ -697,14 +702,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await this.rearm()
     }
     return {
-      boxRun: async (command, timeoutSeconds) => {
-        const backend = await this.bootBox()
-        try {
-          return await backend.run(command, BOX_ROOT, timeoutSeconds)
-        } finally {
-          await touch()
-        }
-      },
+      boxRun: (command, timeoutSeconds, background, signal) => this.jobs().run(command, timeoutSeconds, background, signal),
+      boxJobs: async () => this.jobs().list(),
+      boxJobOutput: (jobId, wait, timeoutMs) => this.jobs().output(jobId, wait, timeoutMs),
+      boxJobKill: (jobId) => this.jobs().kill(jobId),
       boxRead: async (path) => {
         const backend = await this.bootBox()
         try {
@@ -728,8 +729,37 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** The alarm's Box duty: ten minutes after the last command it stops (ao-joux). */
+  /** The jobs of the Box (v1.15 ticket 07), made on first use. */
+  private boxJobs: BoxJobs | undefined
+  private jobs(): BoxJobs {
+    this.boxJobs ??= new BoxJobs({
+      store: this.store,
+      boot: () => this.bootBox(),
+      backend: () => this.boxBackend(),
+      up: () => this.boxState().state === 'running',
+      saveLog: async (path, text) => { await this.run(this.workspace.write(path, text, 'text/plain')) },
+      wake: async (text, summary) => { await this.wake({ kind: 'platform', sender: { kind: 'platform' }, text, payload: { summary } }) },
+      touch: async () => {
+        const current = this.boxState()
+        if (current.state !== 'off') this.store.set(BOX, { ...current, lastCommandAt: Date.now() } satisfies BoxState)
+        await this.rearm()
+      },
+      changed: () => this.changed(),
+      now: () => Date.now(),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    })
+    return this.boxJobs
+  }
+
+  /** The owner's Stop on one job in the panel; the Robot is told (gb-66kh). */
+  async stopBoxJob(jobId: string, by: string): Promise<{ jobId: string; status: string }> {
+    return this.jobs().kill(jobId, by)
+  }
+
+  /** The alarm's Box duty: look at the jobs; ten minutes after the last command or job it stops, never while a job runs (ao-joux, gb-5bfw). */
   private async idleBox(now: number): Promise<void> {
+    await this.jobs().check().catch((error: unknown) => console.warn('jobs not checked', error))
+    if (this.store.runningBoxJobs().length > 0) return
     const current = this.boxState()
     if (current.state !== 'running' || current.lastCommandAt + BOX_IDLE_MS > now) return
     await this.stopBox()

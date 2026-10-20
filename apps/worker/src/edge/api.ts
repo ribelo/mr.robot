@@ -650,6 +650,8 @@ export const api = new Router<ApiContext>()
   }))
   // Stop the Robot's Box from its panel (ao-9q18): its kept folder is synced first.
   .on('POST', '/api/robots/:id/box/stop', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopBox()))))
+  // Stop one job of the Box from the panel (v1.15 ticket 07, gb-66kh); the Robot is told.
+  .on('POST', '/api/robots/:id/box/jobs/:job/stop', (c, { id, job }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopBoxJob(decodeURIComponent(job), c.member.name)))))
   .on('POST', '/api/robots/:id/pause', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).pause()))))
   .on('POST', '/api/robots/:id/resume', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).resume()))))
   .on('DELETE', '/api/robots/:id', (c, { id }) => Effect.gen(function* () {
