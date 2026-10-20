@@ -6,6 +6,6 @@
 
 **Status:** ready-for-agent
 
-- [ ] Staging: a Box boots, docs/box.md lists its tools with versions, ffmpeg and ripgrep run, a second boot reuses the uv cache; boot time recorded in the closing note (ob-asp3, ob-phi5, ob-m73k)
-- [ ] The Dockerfile excludes the named packages; the image size is in the closing note (ob-e8q1)
-- [ ] Cost by source still shows box minutes (ob-g6vg)
+- [ ] Staging: a Box boots, docs/box.md lists its tools with versions, ffmpeg and ripgrep run, a second boot reuses the uv cache; boot time recorded in the closing note (ob-asp3, ob-phi5, ob-m73k) (not run in this session: needs a deployed Box)
+- [x] The Dockerfile excludes the named packages; the image size is in the closing note (ob-e8q1)
+- [x] Cost by source still shows box minutes (ob-g6vg)
