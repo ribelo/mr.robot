@@ -13,4 +13,5 @@ Spec: ../mr-robot-v1.16.md. Frontier at the start: 01, 05, 08 in parallel; then 
 | 07 | [The Box image and the generated docs/box.md](07-box-image.md) | 06 | ready-for-agent |
 | 08 | [Two browsers: remove Container Chrome and its variants](08-two-browsers.md) | — | ready-for-agent |
 | 09 | [Native Ask on a Host and Mr. Robot's defaults](09-host-ask-and-defaults.md) | 02 | ready-for-agent |
-| 10 | [Skills, prompt, glossary and docs](10-skills-glossary-docs.md) | 01, 02, 03, 04, 05, 06, 07, 08, 09 | ready-for-agent |
+| 10 | [Skills, prompt, glossary and docs](10-skills-glossary-docs.md) | 01, 02, 03, 04, 05, 06, 07, 08, 09 | ready-for-agent || 11 | [Tasks triggered by external events](11-event-triggered-tasks.md) | own spec | postponed |
+| 12 | [Groups](12-groups.md) | own spec | postponed |
