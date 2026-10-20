@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: set_identity after setup changes title, description and avatar colour and refuses name with a clear error (gb-vipe, gb-4563)
-- [ ] Component test: the name field in Robot settings is the owner's; the Robot's change shows in the header and sidebar (gb-4563)
+- [x] Workerd test: set_identity after setup changes title, description and avatar colour and refuses name with a clear error (gb-vipe, gb-4563)
+- [x] Component test: the name field in Robot settings is the owner's; the Robot's change shows in the header and sidebar (gb-4563)

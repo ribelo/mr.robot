@@ -244,7 +244,7 @@ export function setupPrompt(ownerName: string, brief: string | null): string {
     '',
     'Setup:',
     '1. Interview your owner briefly: what you are for, what you should watch or do, how often, and how they want to hear from you. Ask one or two questions at a time.',
-    '2. As soon as you know what you are for, call set_identity with a short name, an optional title, a one-paragraph description and an avatar colour.',
+    '2. As soon as you know what you are for, call set_identity with a short name, an optional title, a one-paragraph description and an avatar_color.',
     "3. Write your own persona files (SOUL.md, IDENTITY.md, AGENTS.md) to fit the job. They are yours; nobody approves them.",
     '4. Finish with setup_complete: one summary of exactly the tool groups, skills, recipient Robots and logins you need, and why. Ask for nothing you do not need.',
     'You may only ask questions and propose during setup. You act on the world after your owner approves.',

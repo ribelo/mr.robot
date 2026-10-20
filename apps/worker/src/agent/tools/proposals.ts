@@ -108,17 +108,48 @@ export function reviewTools(host: RobotHost): ToolDefinition[] {
   ]
 }
 
-/** Setup (robot-btct, robot-cobv): the Robot defines itself, then proposes one Grant summary. */
+interface IdentityInput { name?: string; title?: string; description?: string; avatar_color?: string }
+
+const AVATAR_COLOR = /^#[0-9a-fA-F]{6}$/
+
+/**
+ * Who the Robot is (robot-btct; v1.15 ticket 11, gb-vipe, gb-4563). During setup it sets all of it. After setup it may
+ * change its title, description and avatar colour as it grows into its job; its name stays its owner's to change in the
+ * Robot's settings, so the sidebar never changes under them. The Robot tells its owner what changed.
+ */
+export function identityTools(host: RobotHost): ToolDefinition[] {
+  return [
+    tool<IdentityInput>({
+      name: 'set_identity',
+      description: 'Set your title, one-paragraph description and avatar colour (#rrggbb). During setup also your short name, as soon as your owner has said what you are for. After setup your name is your owner\'s to change in your settings. Tell your owner what you changed.',
+      parameters: {
+        properties: {
+          name: { type: 'string', description: 'Your short name; accepted during setup only' },
+          title: { type: 'string', description: 'Your title, for example "Housing"' },
+          description: { type: 'string', description: 'One paragraph on what you are for' },
+          avatar_color: { type: 'string', description: 'A colour as #rrggbb' },
+        },
+      },
+      execute: async ({ name, title, description, avatar_color }) => {
+        if (name !== undefined && host.config().status !== 'setup') throw new Error('set_identity: your name is your owner\'s to change, in your settings. Change your title, description or avatar_color, and ask your owner to rename you.')
+        if (avatar_color !== undefined && !AVATAR_COLOR.test(avatar_color)) throw new Error('set_identity: avatar_color must be a colour like #3b82f6.')
+        const before = host.config().identity
+        const identity = host.setIdentity({
+          ...(name === undefined ? {} : { name }),
+          ...(title === undefined ? {} : { title }),
+          ...(description === undefined ? {} : { description }),
+          ...(avatar_color === undefined ? {} : { avatarColor: avatar_color }),
+        })
+        const changed = (['name', 'title', 'description', 'avatarColor'] as const).filter((field) => identity[field] !== before[field])
+        return { identity, changed }
+      },
+    }),
+  ]
+}
+
+/** Setup (robot-btct, robot-cobv): the Robot proposes one Grant summary. */
 export function setupTools(host: RobotHost): ToolDefinition[] {
   return [
-    tool<{ name?: string; title?: string; description?: string; avatarColor?: string }>({
-      name: 'set_identity',
-      description: 'Set your name, optional title, one-paragraph description and avatar colour (#rrggbb). Use it as soon as the owner has said what you are for.',
-      parameters: {
-        properties: { name: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, avatarColor: { type: 'string' } },
-      },
-      execute: async (input) => ({ identity: host.setIdentity(input) }),
-    }),
     tool<{ purpose: string } & Partial<Record<GrantField, unknown>>>({
       name: 'setup_complete',
       description: `Finish setup: propose the one summary of Grants you need, each at allow or ask (allow when you name no level). Approval activates you with what you proposed; files, web and exa are at ask unless you propose them, everything else stays denied. Only Grants are approved; your persona files are your own business. Tool groups:\n${catalogText}`,

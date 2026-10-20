@@ -29,7 +29,7 @@ async function newRobot(as: string, interview: Parameters<typeof scripts.set>[1]
 async function setupThroughProposal(as: string): Promise<{ id: string; proposal: ProposalView }> {
   const id = await newRobot(as)
   scripts.set(id, [
-    { calls: [{ name: 'set_identity', args: { name: 'Flat Watcher', title: 'Housing', description: 'Watches apartment prices.', avatarColor: '#3b82f6' } }] },
+    { calls: [{ name: 'set_identity', args: { name: 'Flat Watcher', title: 'Housing', description: 'Watches apartment prices.', avatar_color: '#3b82f6' } }] },
     { calls: [{ name: 'setup_complete', args: { purpose: 'Watch listings daily', tools: ['web', 'tasks'], skills: [], recipients: [], secrets: [] } }] },
     { text: 'Here is what I need.' },
   ])

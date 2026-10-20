@@ -96,6 +96,7 @@ import { Exa } from '../plugins/exa.ts'
 import { Files } from '../plugins/files.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Help } from '../plugins/help.ts'
+import { IdentityTools } from '../plugins/identity.ts'
 import { Host } from '../plugins/host.ts'
 import { connectorCapability } from '../plugins/connector.ts'
 import { connectorOn, disabledToolGroups } from '../plugins/catalog.ts'
@@ -1657,9 +1658,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected mounts(config: RobotConfig): Mount[] {
     const mounts: Mount[] = [mount(Credentials, { source: this.credentials() })]
     if (config.status === 'setup') {
-      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
+      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
-    mounts.push(mount(ConversationPlugin, { host: this }), mount(GrantProposals, { host: this }), ...(config.kind === 'mr-robot' ? [] : [mount(Help, { host: this })]), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
+    mounts.push(mount(ConversationPlugin, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), ...(config.kind === 'mr-robot' ? [] : [mount(Help, { host: this })]), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
     const grants = this.store.effectiveGrants()
     // Plugins the Home switched off are not mounted for anyone (cn-dbm9).

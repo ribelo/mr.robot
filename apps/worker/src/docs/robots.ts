@@ -33,7 +33,7 @@ When a Robot changes SOUL.md, it tells the owner. Read memory-and-files.md for t
 
 ## Settings the owner controls
 
-- Name, title, description, avatar. The avatar is a generated robot picture on the avatar colour. "Another look" in the Robot's profile draws a new picture. The owner sees it before saving. The sidebar, the Conversation header, the Admin fleet table and the Robot's messages show the same avatar.
+- Name, title, description, avatar. After setup the Robot may change its own title, description and avatar colour with set_identity, and it tells the owner what changed. Its name stays the owner's to change here, so the sidebar never changes under the owner. The avatar is a generated robot picture on the avatar colour. "Another look" in the Robot's profile draws a new picture. The owner sees it before saving. The sidebar, the Conversation header, the Admin fleet table and the Robot's messages show the same avatar.
 - Model chain: an ordered list of accounts and models. Read providers.md.
 - Context budget and the compaction instruction. Compaction shortens a long context. The instruction says what to keep.
 - While idle: cache warming (Mr. Robot's default) refreshes the model's cache at 54, 108 and 162 minutes, so the next message is cheap; idle compaction (other Robots' default) compacts once at 54 minutes, after one step to write memory. Neither runs during a Turn or while work waits. A context below the floor (20 000 tokens by default) is not compacted.

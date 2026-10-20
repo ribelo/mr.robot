@@ -1,4 +1,4 @@
-/** Mounted only while a Robot is being set up: define itself and propose its Grants once. */
+/** Mounted only while a Robot is being set up: propose its Grants once. */
 import z from '@deepseek-ai/schemastery'
 import { setupTools } from '../agent/tools/proposals.ts'
 import { capability } from './define.ts'
