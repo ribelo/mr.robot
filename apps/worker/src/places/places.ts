@@ -13,7 +13,7 @@ import type { WorkspaceHost } from '../agent/host.ts'
 import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
 import type { BoxBackend } from '../box/backend.ts'
 import { runWs, type CopyPermits } from './copy-permit.ts'
-import { BadCall, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
+import { ApprovedHostsChanged, BadCall, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
 import { shellQuote } from './file-ops.ts'
 import { BoxFiles, boxPath, BOX_ROOT, HostFiles, STAGING_DIRECTORY, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
 import { hostFacetKey, hostIdOfPlace } from './host-facet.ts'
@@ -56,7 +56,8 @@ export interface PlacesDeps {
    * call again, and only then is it approved.
    */
   readonly asks: {
-    approved(callId: string): boolean
+    /** The Hosts an approved call was asked for, by id in the order it names them; undefined when the call is not one the owner approved. */
+    approval(callId: string): { readonly hosts: readonly string[] } | undefined
     ask(request: ToolCallRequest, exec: ToolRunContext): { readonly askId: string }
   }
   readonly jobs: Jobs
@@ -198,10 +199,25 @@ export class Places {
    * Whether a call waits for the owner instead of running now (sk-hx8j, ob-ifak): a place it uses is at ask, or it asks to run without the
    * sandbox of the computer `unconfined`. One tool-call Ask covers both, the same Ask the ask gate stores; the call the owner approved
    * comes back here and runs. A level is read at each call, so a place that went to ask after the tools were registered still asks.
+   * The Ask keeps the Hosts the call's places resolved to, by id; the approved call runs only when its places resolve to the same Hosts
+   * again, so a computer renamed, unpaired or paired under the same name meanwhile does not get a call the owner approved for another
+   * (deep review P14).
    * @returns the waiting result the Robot is told, or undefined when the call runs now.
+   * @throws ApprovedHostsChanged when the approved call names other Hosts now.
    */
   private waiting(call: PlaceCall, used: readonly Granted[], unconfined?: Granted): WaitingResult | undefined {
-    if (this.deps.asks.approved(String(call.exec.callId))) return undefined
+    const approval = this.deps.asks.approval(String(call.exec.callId))
+    if (approval !== undefined) {
+      const now = used.flatMap((reached) => (reached.place.kind === 'host' ? [reached.place.host] : []))
+      const same = now.length === approval.hosts.length && now.every((host, at) => host.id === approval.hosts[at])
+      if (!same) {
+        throw new ApprovedHostsChanged({
+          tool: call.tool,
+          message: `${call.tool} did not run: the computers it names (${now.map((host) => host.name).join(', ') || 'none'}) are not the ones your owner approved it for. A computer was renamed, unpaired or paired under the same name meanwhile. Check which computer you mean, and call it again if you still need it.`,
+        })
+      }
+      return undefined
+    }
     const items: GrantItem[] = []
     for (const item of [...used.filter((reached) => reached.level === 'ask').map((reached) => reached.item), ...(unconfined === undefined ? [] : [unconfined.item])]) {
       if (!items.some((known) => sameItem(known, item))) items.push(item)
@@ -210,7 +226,7 @@ export class Places {
     const given = call.arguments['reason']
     const reason = typeof given === 'string' ? given.trim() : ''
     if (unconfined !== undefined && reason === '') throw new BadCall({ tool: call.tool, message: `${call.tool}: escalate needs a reason: your owner reads it before they approve the call.` })
-    const { askId } = this.deps.asks.ask({ tool: call.tool, arguments: call.arguments, reason: reason === '' ? NO_REASON : reason, items }, call.exec)
+    const { askId } = this.deps.asks.ask({ tool: call.tool, arguments: call.arguments, reason: reason === '' ? NO_REASON : reason, items, uses: used.map((reached) => reached.item) }, call.exec)
     return waitingResult(askId, call.tool)
   }
 

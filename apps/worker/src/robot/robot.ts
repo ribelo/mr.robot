@@ -112,7 +112,7 @@ import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, typ
 import { SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
 import { parseJobId, type JobId } from '../places/job-id.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
-import { HOST_ACCESS, hostAccessOf, hostIdsOf } from './host-access.ts'
+import { HOST_ACCESS, hostAccessOf, hostIdsOf, hostsInOrder } from './host-access.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Ask } from '../plugins/ask.ts'
 import { IdentityTools } from '../plugins/identity.ts'
@@ -193,8 +193,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private secretValues: Array<readonly [string, string]> = []
   /** Secret values fetched during the running Turn; redacted from everything stored. */
   private turnSecrets: Array<readonly [string, string]> = []
-  /** Calls the platform runs because their owner approved them (sk-ed7r): they pass the ask gate once. */
-  private readonly approvedCalls = new Set<string>()
+  /** Calls the platform runs because their owner approved them (sk-ed7r): they pass the ask gate once, on the Hosts the Ask names (deep review P14). */
+  private readonly approvedCalls = new Map<string, readonly string[]>()
   /** backend|host pairs that showed a block page in the running Turn. */
   private readonly blockedThisTurn = new Map<string, string>()
   private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
@@ -827,7 +827,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
       link: (host, reach) => hostLink(this.hostCaller(), host, reach),
       jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach),
-      asks: { approved: (callId) => this.approvedCalls.has(callId), ask: (request, exec) => this.askGateHost().askToolCall(request, exec) },
+      asks: {
+        approval: (callId) => {
+          const hosts = this.approvedCalls.get(callId)
+          return hosts === undefined ? undefined : { hosts }
+        },
+        ask: (request, exec) => this.askGateHost().askToolCall(request, exec),
+      },
       jobs: this.jobs(),
       transfers: this.transfers(),
       permits: this.wsPermits,
@@ -1269,7 +1275,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.store.get(started) !== undefined) return 'The call was started before a platform restart; whether it finished is unknown. Check its effect before you do it again.'
     this.store.set(started, Date.now())
     const callId = `approved-${askId}`
-    this.approvedCalls.add(callId)
+    this.approvedCalls.set(callId, call.hosts)
     try {
       const result = await ctx.tools.execute({ callId: ToolCallId(callId), name: call.tool, arguments: call.arguments, signal: new AbortController().signal })
       if (result.isError) return `The call failed: ${result.error.message}`
@@ -1345,7 +1351,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const unconfined = request.arguments['escalate'] === true
     const reason = unconfined ? `This runs without the sandbox, once. ${request.reason}` : request.reason
     const proposal = this.propose('tool-call', `${request.tool}${unconfined ? ' without the sandbox' : ''}: ${request.reason}`, {
-      toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason, items: request.items },
+      toolCall: { robot: config.identity.name, tool: request.tool, arguments: request.arguments, reason, items: request.items, hosts: hostsInOrder(request.uses) },
     }, hostIdsOf(request.items))
     return { askId: proposal.id }
   }
@@ -2094,8 +2100,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       }
     }
     const everywhere = (facet: 'files' | 'shell'): readonly GrantItem[] => [...(facet === 'files' ? [tool('files')] : []), tool('box'), ...hostFacets(facet)]
-    const onItems = (facet: 'files' | 'shell'): ToolItems => ({ possible: everywhere(facet), used: (args) => placeItem(args['on'], facet) })
+    // The places ask the owner themselves (deep review P2, P14): the gate wants the reason and reviews calls at allow.
+    const onItems = (facet: 'files' | 'shell'): ToolItems => ({ possible: everywhere(facet), used: (args) => placeItem(args['on'], facet), asksAtExecution: true })
     const jobItems: ToolItems = {
+      asksAtExecution: true,
       possible: everywhere('shell'),
       used: async (args) => {
         const job = parseJobId(args['job_id'])
@@ -2123,7 +2131,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         if (name === 'run') return onItems('shell')
         if (name === 'job_output' || name === 'job_kill') return jobItems
         if (name === 'job_list') return NO_ITEMS
-        if (name === 'copy') return { possible: everywhere('files'), used: async (args) => [...(await placeItem(copyEnd(args['from']), 'files')), ...(await placeItem(copyEnd(args['to']), 'files'))] }
+        if (name === 'copy') return { possible: everywhere('files'), used: async (args) => [...(await placeItem(copyEnd(args['from']), 'files')), ...(await placeItem(copyEnd(args['to']), 'files'))], asksAtExecution: true }
         return onItems('files')
       },
     }

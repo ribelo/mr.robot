@@ -1020,11 +1020,16 @@ export interface StoredToolCall {
   readonly tool: string
   readonly arguments: Readonly<Record<string, unknown>>
   readonly reason: string
+  /** The Hosts the call's places resolved to when it was asked, by id in the order it names them (deep review P14); none when it names none. */
+  readonly hosts: readonly string[]
 }
 
 export function storedToolCall(payload: Record<string, unknown>): StoredToolCall | undefined {
-  const call = payload['toolCall'] as StoredToolCall | undefined
-  return call === undefined || typeof call.tool !== 'string' ? undefined : call
+  const call = payload['toolCall'] as Omit<StoredToolCall, 'hosts'> & { readonly hosts?: unknown } | undefined
+  if (call === undefined || typeof call.tool !== 'string') return undefined
+  // An Ask stored without its Hosts pins none: a replay that names a Host is then refused, never sent to whichever Host has the name now.
+  const hosts = Array.isArray(call.hosts) ? call.hosts.filter((host): host is string => typeof host === 'string') : []
+  return { ...call, hosts }
 }
 
 function toolCallOf(payload: Record<string, unknown>): { toolCall: ToolCallAsk } | Record<string, never> {

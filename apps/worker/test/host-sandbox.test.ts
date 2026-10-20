@@ -6,6 +6,7 @@
  */
 import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { HostNotification } from '@mr-robot/host-protocol'
 import type { Conversation, HostView, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost, hostCommands, hostDisk, hostFileCalls, hostRuns, ran } from './fake-host.ts'
@@ -188,6 +189,40 @@ describe('escalate (ob-ifak)', () => {
     await api(ANNA, `/api/robots/${id}/proposals/${open[0]!.id}`, { body: { revision: open[0]!.revision, approve: true } })
     await settle(id)
     expect(hostRuns.map((run) => run.access.mode)).toEqual(['full'])
+  })
+})
+
+describe('the Hosts an Ask names (deep review P14)', () => {
+  it('runs an approved call only on the Host it was asked for, not on another one that took its name meanwhile', async () => {
+    const first = await fakeHost('Desk')
+    const id = await robotWith(first, { files: 'allow' }, { [`${first.hostId}:files`]: { mode: 'read-only', roots: [] } })
+    await calls(id, [{ name: 'write', args: { on: 'Desk', file_path: '/etc/motd', content: 'hello', escalate: true, reason: 'Set the message of the day' } }])
+    expect((await asks(id)).filter((ask) => ask.status === 'open')).toHaveLength(1)
+    await api(ANNA, `/api/hosts/${first.hostId}`, { method: 'DELETE' })
+    const second = await fakeHost('Desk')
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${second.hostId}:files`]: 'allow' } } } })
+    await approveOpen(id)
+    expect(hostDisk.has('/etc/motd')).toBe(false)
+    expect(hostFileCalls.filter((call) => call.rpc === 'Write')).toEqual([])
+    const woken = requests.get(id)!.map((request) => JSON.stringify(request.messages)).join('\n')
+    expect(woken).toContain('write did not run: the computers it names (Desk) are not the ones your owner approved it for')
+  })
+
+  it('names the Host an escalated copy writes to, even when only its source is at ask', async () => {
+    const laptop = await fakeHost('Laptop')
+    const desk = await fakeHost('Desk')
+    const id = await robotWith(desk, { files: 'allow' }, { [`${desk.hostId}:files`]: { mode: 'read-only', roots: [] } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${laptop.hostId}:files`]: 'ask', [`${desk.hostId}:files`]: 'allow' } } } })
+    hostDisk.set('/home/anna/report.txt', new TextEncoder().encode('the report'))
+    const [waiting] = await calls(id, [{ name: 'copy', args: { from: { on: 'Laptop', path: '/home/anna/report.txt' }, to: { on: 'Desk', path: '/etc/report.txt' }, escalate: true, reason: 'Publish the report' } }])
+    expect(waiting).toContain('waiting for your owner')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const asked = (notices: HostNotification[]) => notices.filter((notice) => notice.body.startsWith('wants to use'))
+    expect(asked(desk.notices)).toEqual([expect.objectContaining({ body: 'wants to use copy without the sandbox: Publish the report' })])
+    expect(asked(laptop.notices)).toHaveLength(1)
+    await approveOpen(id)
+    expect(new TextDecoder().decode(hostDisk.get('/etc/report.txt'))).toBe('the report')
+    expect(hostFileCalls.filter((call) => call.rpc === 'Download').map((call) => call.access.mode)).toEqual(['full'])
   })
 })
 

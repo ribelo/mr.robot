@@ -99,6 +99,14 @@ export function hostIdsOf(items: readonly GrantItem[]): string[] {
   return [...new Set(items.flatMap((item) => (item.kind === 'host' ? [splitHostFacet(item.name)?.hostId ?? []].flat() : [])))]
 }
 
+/** The Hosts the Host facets among a call's grant items name, in the order the call names them, a Host named twice twice (deep review P14). */
+export function hostsInOrder(items: readonly GrantItem[]): string[] {
+  return items.flatMap((item) => {
+    const hostId = item.kind === 'host' ? splitHostFacet(item.name)?.hostId : undefined
+    return hostId === undefined ? [] : [hostId]
+  })
+}
+
 /**
  * Eight hex digits that tell Robots apart in a directory name: FNV-1a (32 bits) over the whole id. The start of the id did not (deep review
  * P8): every Mr. Robot's id starts with mr-robot-, so every Member's Mr. Robot had one directory on a shared Host.
