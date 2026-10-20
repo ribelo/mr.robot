@@ -98,17 +98,23 @@ export const Download = Rpc.make('Download', {
   error: HostError,
 })
 
-/** List the files that match a glob, as the Host prints them (.git and node_modules skipped); relative paths start in the Robot's directory. */
+/**
+ * List the files that match a glob, as the Host prints them (SKIPPED_DIRECTORIES left out); relative paths start in the Robot's directory.
+ * `truncated`: the walk stopped at LISTING_MAX_FILES files, so some matches may be missing.
+ */
 export const Glob = Rpc.make('Glob', {
   payload: { pattern: Schema.String, access: HostAccess },
   success: Schema.Struct({ paths: Schema.Array(Schema.String), truncated: Schema.Boolean }),
   error: HostError,
 })
 
-/** Search the text files under a directory with a JavaScript regular expression (the Robot's directory when no path is given). */
+/**
+ * Search the text files under a directory with a JavaScript regular expression (the Robot's directory when no path is given).
+ * `truncated`: there were more than GREP_MAX_MATCHES matches, or the walk stopped at LISTING_MAX_FILES files.
+ */
 export const Grep = Rpc.make('Grep', {
   payload: { pattern: Schema.String, ignoreCase: Schema.Boolean, glob: Schema.optional(Schema.String), path: Schema.optional(Schema.String), access: HostAccess },
-  success: Schema.Struct({ matches: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Number, text: Schema.String })) }),
+  success: Schema.Struct({ matches: Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Number, text: Schema.String })), truncated: Schema.Boolean }),
   error: HostError,
 })
 

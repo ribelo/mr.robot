@@ -3,6 +3,7 @@
  * Cloudflare Container adapter is the one runtime today; another runtime later is another adapter. Tests use a stub.
  */
 import type { Env } from '../env.ts'
+import type { BoxFileList, BoxGrepQuery, BoxGrepResult } from './box-search.ts'
 
 export interface BoxFile {
   /** Relative to the listed directory. */
@@ -35,6 +36,10 @@ export interface BoxBackend {
   remove(path: string): Promise<void>
   /** Every file under `directory`, except those under the folders `pruned` names relative to it (they are not walked). */
   list(directory: string, pruned?: readonly string[]): Promise<readonly BoxFile[]>
+  /** The files under `under` (relative to /workspace; all of it when undefined) as ripgrep lists them, for glob (box-search.ts). */
+  files(under: string | undefined): Promise<BoxFileList>
+  /** The lines of the files under /workspace that match a ripgrep pattern (box-search.ts); a refused pattern is a BadPattern value. */
+  grep(query: BoxGrepQuery): Promise<BoxGrepResult>
   stop(): Promise<void>
 }
 
@@ -61,6 +66,8 @@ export function containerBox(env: Env, robotId: string): BoxBackend {
     write: (path, bytes) => stub.write(path, bytes),
     remove: (path) => stub.remove(path),
     list: (directory, pruned) => stub.list(directory, pruned),
+    files: (under) => stub.files(under),
+    grep: (query) => stub.grep(query),
     stop: () => stub.end(),
   }
 }

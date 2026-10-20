@@ -1,4 +1,6 @@
+import { globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, LISTING_MAX_FILES, skipped } from '@mr-robot/host-protocol'
 import type { BoxBackend, BoxFile, BoxJobStatus } from '../src/box/backend.ts'
+import type { BoxFileList, BoxGrepMatch, BoxGrepQuery, BoxGrepResult } from '../src/box/box-search.ts'
 import { main as ws, PERMIT_ENV, type WsIo } from '../../../infra/computer/ws-core.ts'
 
 /** What a stub Box did, per Robot: boots, commands with their directory, stops. */
@@ -226,6 +228,39 @@ export class StubBox implements BoxBackend {
     return [...this.disk().entries()]
       .filter(([path]) => path.startsWith(prefix) && !pruned.some((folder) => path.startsWith(`${prefix}${folder}/`)))
       .map(([path, file]) => ({ path: path.slice(prefix.length), size: file.bytes.byteLength, mtime: file.mtime }))
+  }
+
+  /** The files ripgrep would walk under /workspace: not the skipped directories at any depth, not .jobs; sorted, unlike rg. */
+  private walked(under: string | undefined): Array<[string, Uint8Array]> {
+    return [...this.disk().entries()]
+      .filter(([path]) => path.startsWith('/workspace/'))
+      .map(([path, file]): [string, Uint8Array] => [path.slice('/workspace/'.length), file.bytes])
+      .filter(([path]) => !skipped(path) && !path.startsWith('.jobs/') && (under === undefined || path === under || path.startsWith(`${under}/`)))
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+  }
+
+  async files(under: string | undefined): Promise<BoxFileList> {
+    const paths = this.walked(under).map(([path]) => path)
+    return { paths: paths.slice(0, LISTING_MAX_FILES), truncated: paths.length > LISTING_MAX_FILES }
+  }
+
+  /** A JavaScript regular expression stands in for ripgrep's; binary files and files over the size limit are skipped as rg skips them. */
+  async grep(query: BoxGrepQuery): Promise<BoxGrepResult> {
+    let regex: RegExp
+    try {
+      regex = new RegExp(query.pattern, query.ignoreCase ? 'i' : '')
+    } catch (error) {
+      return { _tag: 'BadPattern', message: `rg: regex parse error: ${String(error)}` }
+    }
+    const glob = query.glob === undefined ? undefined : globToRegExp(query.glob)
+    const found: BoxGrepMatch[] = []
+    for (const [path, bytes] of this.walked(query.under)) {
+      if (bytes.length > GREP_MAX_FILE_BYTES || (glob !== undefined && !glob.test(path))) continue
+      const text = new TextDecoder().decode(bytes)
+      if (text.includes('\u0000')) continue
+      for (const [index, line] of text.split('\n').entries()) if (regex.test(line)) found.push({ path, line: index + 1, text: line.slice(0, GREP_MAX_LINE) })
+    }
+    return { _tag: 'Matches', matches: found.slice(0, GREP_MAX_MATCHES), truncated: found.length > GREP_MAX_MATCHES }
   }
 
   async stop(): Promise<void> {

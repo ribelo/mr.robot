@@ -5,11 +5,11 @@
  * place logic: places/places.ts checks the grants and dispatches.
  */
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { RUN_MAX_WAIT_SECONDS } from '@mr-robot/host-protocol'
+import { GREP_MAX_MATCHES, LISTING_MAX_FILES, RUN_MAX_WAIT_SECONDS } from '@mr-robot/host-protocol'
 import { isWaitingResult, type WaitingResult } from '../ask-gate.ts'
 import { isPlaceError, placeErrorText } from '../../places/errors.ts'
 import { readWindow, replaceText } from '../../places/file-ops.ts'
-import type { PlaceFiles } from '../../places/files.ts'
+import { WORKSPACE_GREP_MAX_FILES, type PlaceFiles } from '../../places/files.ts'
 import { parseJobId, type JobId } from '../../places/job-id.ts'
 import type { JobEntry, JobOutputView, KillView, RunResult } from '../../places/jobs.ts'
 import type { CopyEnd, CopyResult, PlaceCall, RunInput } from '../../places/places.ts'
@@ -178,14 +178,14 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       }),
       tool<{ on: string; pattern: string }>({
         name: 'glob',
-        description: `List the files matching a glob (* within a segment, ** across segments, ?), as an array of paths (empty when none match). On a Box or a computer the paths are those the place prints, .git and node_modules are skipped, and a pattern starts at the directory before its first wildcard. ${filePlaces(reach)}`,
+        description: `List the files matching a glob (* within a segment, ** across segments, ?). Returns { paths, truncated }: the paths (empty when none match), and truncated true when the place stopped listing after ${LISTING_MAX_FILES} files, so some matches may be missing; then narrow the pattern. On a Box or a computer the paths are those the place prints, .git, node_modules and .cache are skipped, and a pattern starts at the directory before its first wildcard. ${filePlaces(reach)}`,
         parameters: { properties: { on: filePlace(reach), pattern: { type: 'string', description: 'The pattern to match' } }, required: ['on', 'pattern'] },
         concurrencySafe: true,
         execute: (args, exec) => guarded('glob', async () => host.withFiles(args.on, callOf('glob', args, exec), (files) => files.glob(args.pattern))),
       }),
       tool<{ on: string; pattern: string; glob?: string; ignore_case?: boolean; path?: string }>({
         name: 'grep',
-        description: `Search text files with a regular expression; returns an array of { path, line, text } (empty when nothing matches). The expression is a JavaScript one; on a computer it searches under path (your directory there when left out). ${filePlaces(reach)}`,
+        description: `Search text files with a regular expression. Returns { matches, truncated }: at most ${GREP_MAX_MATCHES} matches as { path, line, text } (empty when nothing matches), and truncated true when there were more or not every file was searched (the Workspace searches up to ${WORKSPACE_GREP_MAX_FILES} files); then narrow path or glob. The expression is a JavaScript one, on the Box ripgrep's; on a computer it searches under path (your directory there when left out). .git, node_modules and .cache are skipped on a Box or a computer. ${filePlaces(reach)}`,
         parameters: {
           properties: {
             on: filePlace(reach),

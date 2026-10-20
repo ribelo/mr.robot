@@ -4,7 +4,9 @@
  * runs commands with the Container exec API and keeps no state the Robot needs: its disk is scratch.
  */
 import { Container } from '@cloudflare/containers'
+import { GREP_MAX_MATCHES, LISTING_MAX_FILES } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
+import { cappedRg, filesArgs, grepArgs, parseFiles, parseGrep, type BoxFileList, type BoxGrepQuery, type BoxGrepResult, type RgOutput } from './box-search.ts'
 
 const text = new TextDecoder()
 
@@ -99,6 +101,24 @@ export class ComputerContainer extends Container<Env> {
       const [path, size, mtime] = line.split('\t')
       return { path: path!, size: Number(size), mtime: Number(mtime) }
     })
+  }
+
+  /** The files under /workspace or a path in it, by rg --files (box-search.ts). */
+  async files(under: string | undefined): Promise<BoxFileList> {
+    return parseFiles(await this.rg(cappedRg(LISTING_MAX_FILES + 1), filesArgs(under)))
+  }
+
+  /** The matching lines under /workspace or a path in it, by rg (box-search.ts). */
+  async grep(query: BoxGrepQuery): Promise<BoxGrepResult> {
+    return parseGrep(await this.rg(cappedRg(GREP_MAX_MATCHES + 1), grepArgs(query)))
+  }
+
+  /** A cappedRg script with rg's arguments as its own (no shell quoting), in /workspace. */
+  private async rg(script: string, args: readonly string[]): Promise<RgOutput> {
+    this.renewActivityTimeout()
+    const process = await this.ctx.container!.exec(['bash', '-c', script, 'rg', ...args], { cwd: '/workspace', env: { HOME: '/root', PATH: '/usr/local/python/bin:/usr/local/bin:/usr/bin:/bin' } })
+    const out = await process.output()
+    return { stdout: text.decode(out.stdout), stderr: text.decode(out.stderr), exitCode: out.exitCode }
   }
 
   async end(): Promise<void> {

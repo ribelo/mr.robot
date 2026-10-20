@@ -246,10 +246,10 @@ describe('write roots inside a directory the sandbox leaves writable', () => {
 })
 
 describe('list, search and delete', () => {
-  it('lists files by a glob with the paths as the pattern sees them, skipping .git and node_modules', async () => {
-    for (const path of ['src/a.ts', 'src/deep/b.ts', 'src/c.md', 'node_modules/x/d.ts', '.git/e.ts']) await call('Write', { path: join('glob', path), text: 'x', access: access() })
+  it('lists files by a glob with the paths as the pattern sees them, skipping .git, node_modules and .cache', async () => {
+    for (const path of ['src/a.ts', 'src/deep/b.ts', 'src/c.md', 'node_modules/x/d.ts', '.git/e.ts', 'src/.cache/f.ts']) await call('Write', { path: join('glob', path), text: 'x', access: access() })
     const found = await call('Glob', { pattern: 'glob/**/*.ts', access: access() })
-    expect(found.paths).toEqual(['glob/src/a.ts', 'glob/src/deep/b.ts'])
+    expect(found).toEqual({ paths: ['glob/src/a.ts', 'glob/src/deep/b.ts'], truncated: false })
     expect((await call('Glob', { pattern: 'glob/src/*.md', access: access() })).paths).toEqual(['glob/src/c.md'])
   })
 
@@ -261,6 +261,18 @@ describe('list, search and delete', () => {
     expect(all.matches).toEqual([{ path: 'find/two.md', line: 1, text: 'needle again' }, { path: 'find/one.txt', line: 2, text: 'Needle here' }].sort((a, b) => (a.path < b.path ? -1 : 1)))
     expect((await call('Grep', { pattern: 'needle', ignoreCase: false, path: 'find', access: access() })).matches).toEqual([{ path: 'find/two.md', line: 1, text: 'needle again' }])
     expect((await call('Grep', { pattern: 'needle', ignoreCase: true, glob: 'find/*.txt', path: 'find', access: access() })).matches.map((match) => match.path)).toEqual(['find/one.txt'])
+    expect(all.truncated).toBe(false)
+  })
+
+  it('says a search is truncated when it has more matches than it returns (deep review P15)', async () => {
+    await call('Write', { path: 'many/exact.txt', text: 'hit\n'.repeat(200), access: access() })
+    await call('Write', { path: 'many/more/over.txt', text: 'hit\n'.repeat(201), access: access() })
+    const exact = await call('Grep', { pattern: 'hit', ignoreCase: false, path: 'many/exact.txt', access: access() })
+    expect(exact.matches).toHaveLength(200)
+    expect(exact.truncated).toBe(false)
+    const over = await call('Grep', { pattern: 'hit', ignoreCase: false, path: 'many/more', access: access() })
+    expect(over.matches).toHaveLength(200)
+    expect(over.truncated).toBe(true)
   })
 
   it('deletes a file in the Robot directory, and refuses outside it, a missing file and a directory', async () => {

@@ -6,7 +6,7 @@ import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
+import { CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HostError, LISTING_MAX_FILES, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -122,10 +122,12 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       },
       catch: hostError,
     }),
+    // Like the app, a listing walks at most LISTING_MAX_FILES files and a search returns at most GREP_MAX_MATCHES matches, and each says when it stopped early.
     Glob: ({ pattern, access }) => Effect.sync(() => {
       hostFileCalls.push({ rpc: 'Glob', path: pattern, access })
       const matcher = globToRegExp(pattern)
-      return { paths: [...hostDisk.keys()].filter((path) => !skippedPath(path) && matcher.test(path)).sort(), truncated: false }
+      const walked = [...hostDisk.keys()].filter((path) => !skippedPath(path)).sort()
+      return { paths: walked.slice(0, LISTING_MAX_FILES).filter((path) => matcher.test(path)), truncated: walked.length > LISTING_MAX_FILES }
     }),
     Grep: ({ pattern, ignoreCase, glob, path, access }) => Effect.sync(() => {
       hostFileCalls.push({ rpc: 'Grep', path: path ?? '', access })
@@ -133,7 +135,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       const files = glob === undefined ? undefined : globToRegExp(glob)
       const matches = [...hostDisk.entries()].filter(([file]) => !skippedPath(file) && (files === undefined || files.test(file)) && (path === undefined || file.startsWith(`${path}/`))).sort(([a], [b]) => (a < b ? -1 : 1))
         .flatMap(([file, bytes]) => new TextDecoder().decode(bytes).split('\n').flatMap((line, index) => (regex.test(line) ? [{ path: file, line: index + 1, text: line }] : [])))
-      return { matches }
+      return { matches: matches.slice(0, GREP_MAX_MATCHES), truncated: matches.length > GREP_MAX_MATCHES }
     }),
     Delete: ({ path, access }) => {
       hostFileCalls.push({ rpc: 'Delete', path, access })

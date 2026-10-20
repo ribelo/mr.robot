@@ -5,15 +5,13 @@
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
+import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, LISTING_MAX_FILES, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
 import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, resolvedPath } from './access.ts'
 import type { HostDownloads } from './copy.ts'
 import { errorCode } from './error-code.ts'
 import type { FileChanges } from './file-change.ts'
 
 const MAX_READ = 10 * 1024 * 1024
-/** The most files a listing returns, and the most a search looks into. */
-const LISTING_LIMIT = 20_000
 
 export interface FileMatch {
   readonly path: string
@@ -24,7 +22,7 @@ export interface FileMatch {
 /** A failure with an OS-style code (ENOENT, EISDIR, EFBIG) that the Worker shows after the message. */
 const failure = (message: string, code: string): Error => Object.assign(new Error(message), { code })
 
-/** The files below a directory, depth first, as paths relative to it with / between the parts; .git and node_modules are not entered. */
+/** The files below a directory, depth first, as paths relative to it with / between the parts; the SKIPPED_DIRECTORIES are not entered. */
 async function* filesBelow(directory: string, prefix = ''): AsyncGenerator<string> {
   let entries
   try {
@@ -101,40 +99,47 @@ export class HostDisk {
     let count = 0
     for await (const below of filesBelow(root)) {
       count += 1
-      if (count > LISTING_LIMIT) return { paths: paths.sort(), truncated: true }
+      if (count > LISTING_MAX_FILES) return { paths: paths.sort(), truncated: true }
       const path = shown(base, below)
       if (matcher.test(path)) paths.push(path)
     }
     return { paths: paths.sort(), truncated: false }
   }
 
-  async grep(access: HostAccess, input: { pattern: string; ignoreCase: boolean; glob?: string | undefined; path?: string | undefined }): Promise<{ matches: FileMatch[] }> {
+  /** At most GREP_MAX_MATCHES matches; `truncated` when there were more, or when the walk stopped at LISTING_MAX_FILES files. */
+  async grep(access: HostAccess, input: { pattern: string; ignoreCase: boolean; glob?: string | undefined; path?: string | undefined }): Promise<{ matches: FileMatch[]; truncated: boolean }> {
     const regex = new RegExp(input.pattern, input.ignoreCase ? 'i' : '')
     const files = input.glob === undefined ? undefined : globToRegExp(input.glob)
     const base = input.path ?? '.'
     const root = await this.full(access, base)
     const matches: FileMatch[] = []
+    let truncated = false
     const search = async (full: string, path: string): Promise<void> => {
       if (files !== undefined && !files.test(path)) return
       if ((await stat(full)).size > GREP_MAX_FILE_BYTES) return
       const text = await readFile(full, 'utf8').catch(() => undefined)
       if (text === undefined || text.includes('\u0000')) return
       for (const [index, line] of text.split('\n').entries()) {
-        if (matches.length >= GREP_MAX_MATCHES) return
-        if (regex.test(line)) matches.push({ path, line: index + 1, text: line.slice(0, GREP_MAX_LINE) })
+        if (!regex.test(line)) continue
+        if (matches.length >= GREP_MAX_MATCHES) {
+          truncated = true
+          return
+        }
+        matches.push({ path, line: index + 1, text: line.slice(0, GREP_MAX_LINE) })
       }
     }
     if ((await stat(root)).isFile()) {
       await search(root, base)
-      return { matches }
+      return { matches, truncated }
     }
     let count = 0
     for await (const below of filesBelow(root)) {
       count += 1
-      if (matches.length >= GREP_MAX_MATCHES || count > LISTING_LIMIT) break
+      if (count > LISTING_MAX_FILES) return { matches, truncated: true }
       await search(join(root, below), shown(base, below))
+      if (truncated) break
     }
-    return { matches }
+    return { matches, truncated }
   }
 
   async remove(access: HostAccess, path: string): Promise<{ path: string }> {
