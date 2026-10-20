@@ -1,6 +1,15 @@
+import { BOX_TOOLS, type BoxTool } from './box-tools.generated.ts'
+
+/** The image's tools as two Markdown bullets: the programs with their versions (and the command, when it is not their name), then the Python packages (ob-m73k). */
+function boxToolList(tools: readonly BoxTool[]): string {
+  const programs = tools.flatMap((tool) => (tool.kind === 'program' ? [tool.command === tool.name ? `${tool.name} ${tool.version}` : `${tool.name} ${tool.version} (\`${tool.command}\`)`] : []))
+  const packages = tools.flatMap((tool) => (tool.kind === 'package' ? [`${tool.name} ${tool.version}`] : []))
+  return [`- Programs: ${programs.join(', ')}.`, `- Python packages: ${packages.join(', ')}.`].join('\n')
+}
+
 export const BOX = `# The Box
 
-A Robot with the box grant has a Box: a container in Cloudflare with Python 3.11 (NumPy, Pandas, matplotlib, IPython), Node, Bun and git. The grant is off until the owner grants it, for Mr. Robot too. The Box is not the owner's computer: the owner's computer is a Host (hosts.md).
+A Robot with the box grant has a Box: a container in Cloudflare on the Box image, with Python 3.11, Node, Bun, git and the other tools listed under The image. The grant is off until the owner grants it, for Mr. Robot too. The Box is not the owner's computer: the owner's computer is a Host (hosts.md).
 
 ## The tools
 
@@ -13,12 +22,22 @@ The Box has no tools of its own. The tools of every place take a mandatory \`on\
 
 The paths are on the Box, under its /workspace. This is not the /workspace of on "workspace": that one is the Robot's Workspace. The owner's files, the product docs and the platform skills are in the Workspace only; the Box refuses their names.
 
+## The image
+
+The Box runs one image. The versions below are the ones it was built with. It has no browser, pandoc, tesseract, LibreOffice or Docker; install anything else in box/setup.sh.
+
+### Tools and packages
+
+${boxToolList(BOX_TOOLS)}
+
 ## What is kept
 
 The disk of the Box is scratch. Only one folder is kept:
 - When the Box boots, the box/ folder of the Workspace is copied to /workspace/box.
 - When box/setup.sh exists, it runs at boot. Install the packages you need in it (pip3 install, npm install).
 - When a Turn ends, and before the Box stops, the changed and new files under /workspace/box go back to box/ in the Workspace. A file you delete on the Box stays in the Workspace.
+
+The uv and Bun caches are in box/.cache/ (UV_CACHE_DIR and BUN_INSTALL_CACHE_DIR), so they are kept with box/. A file over 20 MB does not go back.
 
 Keep scripts, data and results that you need again under /workspace/box.
 
