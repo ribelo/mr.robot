@@ -464,6 +464,8 @@ export interface DueTask {
 export interface DueOccurrence extends DueTask {
   readonly recurring: boolean
   readonly deadline: number | null
+  /** When the Home handed it out (epoch ms): a Turn on the Task since then has served this occurrence (parkedOccurrence). */
+  readonly takenAt: number
 }
 
 /**
@@ -480,8 +482,23 @@ export const takeDue = (robotId: string, now = Date.now()) => Effect.gen(functio
   }
   return { tasks: rows.map((task): DueOccurrence => ({
       id: task.id, title: task.title, instructions: task.instructions,
-      recurring: task.timing.kind === 'recurring', deadline: task.timing.kind === 'recurring' ? null : task.timing.deadline,
+      recurring: task.timing.kind === 'recurring', deadline: task.timing.kind === 'recurring' ? null : task.timing.deadline, takenAt: now,
     })), nextDue: yield* nextDueOf(robotId) }
+})
+
+/**
+ * A scheduled occurrence its Robot held back while a Host was offline (v1.16 ticket 05), as it is now: null when the Task is no longer
+ * open and the Robot's, when its timing was replaced since it was handed out (the edit armed it again, so the Home hands it out anew),
+ * or when a Turn started on the Task since (run now, or a focus). An edit of the title or instructions keeps it, with the new text:
+ * the occurrence was handed out, so it is the only one left.
+ */
+export const parkedOccurrence = (taskId: string, robotId: string, takenAt: number) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const task = yield* taskRow(taskId)
+  if (task === undefined || task.state !== 'open' || task.assignee.kind !== 'robot' || task.assignee.robotId !== robotId) return null
+  if (task.timing.kind !== 'scheduled' || task.wakeAt !== null) return null
+  if ((yield* sql.first<{ id: number }>('SELECT id FROM task_attempt WHERE task_id = ? AND started_at >= ? LIMIT 1', taskId, takenAt)) !== undefined) return null
+  return { id: task.id, title: task.title, instructions: task.instructions, recurring: false, deadline: task.timing.deadline, takenAt } satisfies DueOccurrence
 })
 
 /** Record one attempt; only the newest ATTEMPTS_KEPT of the Task stay (mc-t4dd). @returns its id. */

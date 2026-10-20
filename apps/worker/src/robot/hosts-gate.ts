@@ -2,11 +2,13 @@
  * A Robot that waits for its Hosts (v1.16 ticket 05, ob-5nvd): what a due Task does while a Host of its Robot is
  * offline. Pure functions; the Robot's alarm and the Host's online event call them (programs.ts).
  *
- * The Robot's Hosts are those it holds any facet on (files, shell or browser, at allow or ask). Only a Task
- * Wake-up is held back; a message of the owner or of another Robot always wakes the Robot (ob-amlz).
+ * The Robot's Hosts are those it holds any facet on (files, shell or browser, at allow or ask); Mr. Robot's are only those his owner
+ * raised a facet on (taskHostFacets). Only a Task Wake-up is held back; a message of the owner or of another Robot always wakes the
+ * Robot (ob-amlz).
  */
-import { usableNames, type GrantLevels } from '@mr-robot/protocol'
+import { usableNames, type GrantLevel, type GrantLevels } from '@mr-robot/protocol'
 import { splitHostFacet } from '../places/host-facet.ts'
+import { mrRobotHostLevel } from './host-access.ts'
 
 /** A Host as the Home lists it for the Robot's owner. */
 export interface KnownHost {
@@ -19,6 +21,18 @@ export interface KnownHost {
 export interface GatedTask {
   readonly recurring: boolean
   readonly deadline: number | null
+}
+
+const LEVEL_RANK: Readonly<Record<GrantLevel, number>> = { deny: 0, ask: 1, allow: 2 }
+
+/**
+ * The Host facets that count for the setting, from the Robot's stored grant rows alone, so they hold after a restart: an ordinary
+ * Robot's rows; for Mr. Robot only the facets his owner raised above where he starts (files or shell at allow). He holds every Host his
+ * owner reaches without a row, other Members' shared Hosts too; counting those would let any offline Host stop all his Tasks.
+ */
+export function taskHostFacets(kind: 'mr-robot' | 'robot', stored: GrantLevels): GrantLevels {
+  if (kind === 'robot') return stored
+  return Object.fromEntries(Object.entries(stored).filter(([facet, level]) => LEVEL_RANK[level] > LEVEL_RANK[mrRobotHostLevel(facet)]))
 }
 
 /** The Hosts the Robot holds a facet on: "<hostId>:files", "<hostId>:shell" or "<hostId>:browser" at allow or ask. */

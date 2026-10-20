@@ -26,7 +26,7 @@ import type { Sender, Attachment } from '@mr-robot/protocol'
 import { causedByOwner, deliveryOf, robotMessageDelivery } from './delivery.ts'
 import { SubagentStore } from './subagent-store.ts'
 import { JOB_CHECK_MS } from '../places/jobs.ts'
-import { afterReturn, gateTask, heldHosts, outageNotice, type KnownHost, type TaskGate } from './hosts-gate.ts'
+import { afterReturn, gateTask, heldHosts, outageNotice, taskHostFacets, type KnownHost, type TaskGate } from './hosts-gate.ts'
 import { DEFAULT_IDLE_FLOOR_TOKENS, idleSettings, type IdleStep } from './idle.ts'
 
 export const MAX_CHAIN_HOPS = 8
@@ -997,6 +997,28 @@ interface ParkedTask {
   readonly title: string
   readonly instructions: string
   readonly deadline: number | null
+  /** When the Home handed the occurrence out: the Home drops it once a Turn on the Task started after this (parkedOccurrence). */
+  readonly takenAt: number
+}
+
+/** Hold a due occurrence back; one parked occurrence per Task, the newest. Read and written in one synchronous step. */
+const park = (store: RobotStore, task: ParkedTask): void => {
+  const parked = store.get<readonly ParkedTask[]>(PARKED_TASKS) ?? []
+  store.set(PARKED_TASKS, [...parked.filter((other) => other.id !== task.id), { id: task.id, title: task.title, instructions: task.instructions, deadline: task.deadline, takenAt: task.takenAt }])
+}
+
+/**
+ * Take a parked occurrence off the list, in one synchronous step after the awaits that decided it: false when it is gone already
+ * (another release, the alarm or a Host's online event, took it meanwhile), so only one of them acts on it. Occurrences parked
+ * meanwhile stay.
+ */
+const unpark = (store: RobotStore, task: ParkedTask): boolean => {
+  const parked = store.get<readonly ParkedTask[]>(PARKED_TASKS) ?? []
+  const left = parked.filter((other) => other.id !== task.id || other.takenAt !== task.takenAt)
+  if (left.length === parked.length) return false
+  if (left.length === 0) store.delete(PARKED_TASKS)
+  else store.set(PARKED_TASKS, left)
+  return true
 }
 
 /** The Hosts the Robot's owner reaches and whether each is online; null when the Home cannot say. */
@@ -1007,7 +1029,7 @@ const knownHosts = (ownerId: string) => Effect.gen(function* () {
 })
 
 /**
- * The Hosts the Robot holds a facet on, as they are now; a Host that returned leaves the list of reported outages.
+ * The Hosts that count for the Robot (taskHostFacets), as they are now; a Host that returned leaves the list of reported outages.
  * Null when the setting is off, or when the Home cannot say: then nothing is held back, so a missing answer never stops the Robot.
  */
 const hostsNow = Effect.gen(function* () {
@@ -1019,7 +1041,7 @@ const hostsNow = Effect.gen(function* () {
   const reported = store.get<readonly string[]>(HOST_OUTAGES) ?? []
   const left = afterReturn(reported, known)
   if (left.length !== reported.length) store.set(HOST_OUTAGES, left)
-  return heldHosts(store.effectiveGrants().hosts, known)
+  return heldHosts(taskHostFacets(current.kind, store.grants().hosts), known)
 })
 
 /** What a due Task does now (hosts-gate.ts). */
@@ -1054,10 +1076,8 @@ const startOrHold = (task: ParkedTask & { readonly recurring: boolean }, now: nu
       return
     case 'fail':
       return yield* failWithoutTurn(task, gate)
-    case 'park': {
-      const parked = store.get<readonly ParkedTask[]>(PARKED_TASKS) ?? []
-      store.set(PARKED_TASKS, [...parked.filter((other) => other.id !== task.id), { id: task.id, title: task.title, instructions: task.instructions, deadline: task.deadline }])
-    }
+    case 'park':
+      return park(store, task)
   }
 })
 
@@ -1073,21 +1093,22 @@ export const releaseParked = (now: number) => Effect.gen(function* () {
     if ((store.get<readonly string[]>(HOST_OUTAGES) ?? []).length > 0) yield* hostsNow
     return
   }
-  const waiting: ParkedTask[] = []
   const current = yield* config
   const home = (yield* RobotPlatform).env.HOME.getByName(HOME_ID)
-  for (const task of parked) {
-    // A cancelled, finished or reassigned Task gets no Turn.
-    if (!(yield* promise(() => home.taskStillOpenFor(task.id, current.id)))) continue
-    const gate = yield* gateOf({ ...task, recurring: false }, now)
+  for (const entry of parked) {
+    // A cancelled, finished, reassigned, rescheduled or already run Task gets no Turn; an edited text is taken as it is now.
+    const task = yield* promise(() => home.parkedOccurrence(entry.id, current.id, entry.takenAt))
+    if (task === null) {
+      unpark(store, entry)
+      continue
+    }
+    const gate = yield* gateOf(task, now)
+    if (gate.kind === 'park' || !unpark(store, entry)) continue
     // Released after its deadline it fails, as the deadline alarm would have failed it.
     if (gate.kind === 'run' && task.deadline !== null && now >= task.deadline) yield* failWithoutTurn(task, { kind: 'fail', line: 'The deadline passed before the Task could run.', offline: [] })
-    else if (gate.kind === 'park') waiting.push(task)
     else if (gate.kind === 'fail') yield* failWithoutTurn(task, gate)
     else if (!store.taskQueued(task.id)) enqueueScheduled(store, task, now)
   }
-  if (waiting.length === 0) store.delete(PARKED_TASKS)
-  else store.set(PARKED_TASKS, waiting)
 })
 
 /** The next alarm: a heartbeat while work runs, the earliest Task, outbox retry, screen check or screenshot sweep. */

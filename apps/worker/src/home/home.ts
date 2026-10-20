@@ -1458,12 +1458,9 @@ export class Home extends DurableObject<Env> {
     })
   }
 
-  /** Whether the Task is still open and assigned to this Robot: a parked Wake-up of any other Task is dropped (v1.16 ticket 05). */
-  taskStillOpenFor(taskId: string, robotId: string): Promise<boolean> {
-    return this.run(Effect.gen(function* () {
-      const task = yield* Tasks.taskRow(taskId)
-      return task !== undefined && task.state === 'open' && task.assignee.kind === 'robot' && task.assignee.robotId === robotId
-    }))
+  /** A parked scheduled occurrence as it is now, or null when the Robot drops it (Tasks.parkedOccurrence, v1.16 ticket 05). */
+  parkedOccurrence(taskId: string, robotId: string, takenAt: number): Promise<Tasks.DueOccurrence | null> {
+    return this.run(Tasks.parkedOccurrence(taskId, robotId, takenAt))
   }
 
   /** A Robot's alarm asks for its due Tasks; the Home hands them out and moves them on (mc-s1aa, mc-s2bb). */

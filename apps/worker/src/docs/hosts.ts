@@ -12,7 +12,7 @@ A Host is offline when its heartbeat stops. The Hosts line in the runtime sectio
 
 A Host offers three facets, each a separate grant item:
 - browser: the Host browser, which is Chrome on that computer. It needs a graphical session. Read browser.md.
-- files: read, write, edit, glob, grep, delete_file and copy with on set to the name of the Host. copy moves one file of any size, binary too, between the Host and your Workspace, or between two Hosts (parked in your Workspace under tmp/, deleted after). The Host app and R2 exchange it directly, in parts of 64 MB, not through the model.
+- files: read, write, edit, glob, grep, delete_file and copy with on set to the name of the Host. copy moves one file of any size, binary too, between the Host and your Workspace, or between two Hosts (parked in your Workspace under tmp/, deleted after). The Host app and R2 exchange it directly, in parts of 64 MB.
 - shell: run with on set to the name of the Host. It runs a command in bash (pwsh on Windows) under the sandbox of the app. A command still going at its time limit goes on as a job (job_list, job_output, job_kill); run_in_background starts one at once. A job that ends wakes you, as on the Box (read box.md). A job is lost if the app restarts, the Host is away for more than five minutes (a reconnect of the same app keeps it), or you lose access to the Host.
 
 Every tool takes a mandatory \`on\`: "workspace", "box" or the name of a Host. There is no default. A call to a Host that you hold no facet on, or to a name that is no Host, is refused and names the grant. A new Robot gets deny on all Hosts (read grants.md). Mr. Robot holds every facet his owner can reach, unless the owner lowered one; on every computer, a shared one too, his files and shell start at ask.
@@ -30,7 +30,7 @@ The write tools follow the same mode and roots as run, except for /tmp.
 
 When the mode denies a write, the result names the path. To get more, call the same tool (run, write, edit, delete_file, or copy to a Host) again with escalate set to true and a reason. The owner gets one Ask. If the owner approves, the call runs once without the sandbox and you wake with the result. The grant does not change.
 
-The app reports its sandbox as full, partial (some file changes are not confined, as on Windows) or none, and the Hosts page shows it. On macOS and Windows the sandbox confines one folder, so a command or a write in workspace-write mode fails closed when the grant lists extra roots. A Host with no usable sandbox refuses a command or a write in read-only or workspace-write mode and says why; full mode runs. Without PowerShell 7 on Windows no command runs.
+The app reports its sandbox as full, partial (some file changes are not confined, as on Windows) or none, as the Hosts page shows. On macOS and Windows the sandbox confines one folder, so a command or a write in workspace-write mode fails closed when the grant lists extra roots. A Host with no usable sandbox refuses a command or a write in read-only or workspace-write mode and says why; full mode runs. Without PowerShell 7 on Windows no command runs.
 
 ## Safety
 
@@ -42,8 +42,8 @@ A shared Host serves the Robots of every Member, as the OS user who installed th
 
 A Host tool or the Host browser fails with a typed "host offline" error. If a Task's Turn hit it, the owner gets a notification. The platform does not fall back to a cloud browser.
 
-A Robot has a setting, off by default: "Do not run while any of my Hosts is offline". Its Hosts are those it holds any facet on. When it is on:
-- A recurring Task that finds a Host offline ends its Attempt as failed, with the Host named. No Turn runs. The owner is told once for each outage.
-- A scheduled Task waits for the Host and runs when it returns, if its deadline allows. If not, it fails.
-- A message from the owner or from a Robot always wakes the Robot.
+A Robot has a setting, off by default: "Do not run while any of my Hosts is offline". Its Hosts are those it holds any facet on; Mr. Robot's only those where his owner set files or shell to allow. When it is on:
+- A recurring Task that finds a Host offline ends its Attempt as failed, naming the Host, without a Turn. The owner hears once per outage.
+- A scheduled Task waits for the Host and runs when it returns; past its deadline it fails.
+- A message from the owner or a Robot always wakes the Robot.
 `
