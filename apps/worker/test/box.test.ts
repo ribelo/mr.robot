@@ -89,6 +89,21 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     expect((await panel(id)).box).toMatchObject({ state: 'running' })
   })
 
+  it('parallel calls on a cold Box boot it once: setup.sh runs once and ws works with the token the boot wrote (deep review P9)', async () => {
+    const id = await robotWith({ box: 'allow', files: 'allow' })
+    await env.FILES.put(`robots/${id}/box/setup.sh`, 'pip3 install requests\n')
+    await env.FILES.put(`robots/${id}/box/data.csv`, 'a,b\n1,2\n')
+    await say(id, 'read them', [
+      { calls: [1, 2, 3].map(() => ({ name: 'read', args: { on: 'box', file_path: 'box/data.csv' } })) },
+      { calls: [{ name: 'run', args: { on: 'box', command: 'ws get box/data.csv copy.csv' } }] },
+      { text: 'Done.' },
+    ])
+    expect(results(requests.get(id)![1]!).filter((text) => text.includes('a,b'))).toHaveLength(3)
+    expect(boxLog.get(id)!.filter((entry) => entry.endsWith('bash setup.sh'))).toHaveLength(1)
+    expect(JSON.parse(results(requests.get(id)![2]!).at(-1)!)).toMatchObject({ exitCode: 0 })
+    expect(boxDisks.get(id)!.get('/workspace/copy.csv')).toBeDefined()
+  })
+
   it('stops ten minutes after the last command, bills its time, and boots again on the next command', async () => {
     const id = await robotWith({ box: 'allow' })
     await say(id, 'run it', [{ calls: [{ name: 'run', args: { on: 'box', command: 'echo hi' } }] }, { text: 'Done.' }])

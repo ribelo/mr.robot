@@ -636,11 +636,23 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.store.get<BoxState>(BOX) ?? { state: 'off' }
   }
 
+  /** The boot in flight in this isolate; every caller that needs the Box meanwhile waits for it (deep review P9). */
+  private boxBoot: Promise<BoxBackend> | undefined
+
+  /**
+   * The running Box, booted at most once at a time per Robot: parallel calls on a cold Box share one boot, so setup.sh runs once and
+   * the token in the container is the one the record holds (deep review P9). A record left at booting by a lost isolate boots again.
+   */
+  private bootBox(): Promise<BoxBackend> {
+    this.boxBoot ??= this.startBox().finally(() => { this.boxBoot = undefined })
+    return this.boxBoot
+  }
+
   /**
    * Boot (ao-7ptt, ao-ia4z): the Workspace's box/ folder is copied in, the uv and Bun caches come back from their archive
    * (box/box-cache.ts), then box/setup.sh runs when present.
    */
-  private async bootBox(): Promise<BoxBackend> {
+  private async startBox(): Promise<BoxBackend> {
     const backend = this.boxBackend()
     const current = this.boxState()
     if (current.state === 'running' && (await backend.running())) return backend
