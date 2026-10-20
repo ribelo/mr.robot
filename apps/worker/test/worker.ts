@@ -4,6 +4,7 @@ import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { scriptedProviders, StubLlm } from './stub-llm.ts'
 import { StubDriver } from './stub-browser.ts'
 import { StubBox } from './stub-box.ts'
+import { QUIET_DUE } from '../src/robot/programs.ts'
 import type { BoxBackend } from '../src/box/backend.ts'
 import { FakeChannel } from './fake-channel.ts'
 import { fakeConnectors, fakeService } from './fake-connector.ts'
@@ -180,6 +181,23 @@ export class Robot extends ProductionRobot {
     }
   }
 
+  /** The upgrade to v1.15 as a Robot with a Conversation already in its log sees it (gb-psyl): the markers are written again. */
+  async upgradeVoiceForTest(): Promise<void> {
+    this.store.sql.exec("DELETE FROM kv WHERE k = 'voice-upgraded' OR k LIKE 'voice-from:%'")
+    this.markVoiceUpgrade()
+    // v1.14 had indexed that assistant text as replies: the index is read again under the new marker.
+    this.store.search.clear()
+  }
+
+  /** The moment an owner Turn that said nothing gets its steer is now (gb-0skq); false when no such moment is kept. */
+  async quietDueForTest(): Promise<boolean> {
+    const due = this.store.get<{ wakeupId: number; at: number }>(QUIET_DUE)
+    if (due === undefined) return false
+    this.store.set(QUIET_DUE, { ...due, at: Date.now() - 1 })
+    await this.ctx.storage.setAlarm(Date.now() + 1)
+    return true
+  }
+
   /** The Box's last command was `ms` ago, and the alarm is due. */
   async backdateBoxForTest(ms: number): Promise<void> {
     const state = this.store.get<{ state: string; since?: number; lastCommandAt?: number }>('box')
@@ -302,9 +320,9 @@ export class Robot extends ProductionRobot {
     return this.store.get<number>('screens-sweep-next') ?? null
   }
 
-  /** A PNG screenshot (stored outside the Workspace), as a Turn with the browser leaves one. */
-  async saveScreenForTest(): Promise<void> {
-    await this.saveScreen(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 5, 0, 0, 0, 3, 32, 0, 255]))
+  /** A PNG screenshot (stored outside the Workspace), as a Turn with the browser leaves one; its name. */
+  async saveScreenForTest(): Promise<string> {
+    return (await this.saveScreen(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 5, 0, 0, 0, 3, 32, 0, 255]))).name
   }
 
   async outboxForTest(): Promise<Array<{ id: string; status: string }>> {

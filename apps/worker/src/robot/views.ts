@@ -111,6 +111,7 @@ export const conversation = (details = false) => Effect.gen(function* () {
   const items = projectChat({
     details,
     events,
+    assistantRepliesBefore: store.voiceFrom(current.liveSessionId),
     notices: store.notices(current.liveSessionId),
     thread: (id) => store.thread(id)?.view,
     avatarSeed: current.identity.avatarSeed,
@@ -310,7 +311,8 @@ export const subagentConversation = (childId: string) => Effect.gen(function* ()
   const row = yield* childOf(childId)
   const mask = yield* (yield* RobotPlatform).masker()
   const events = readStoredEvents(store.sql, row.id)
-  const items = projectChat({ events, notices: [], avatarSeed: current.identity.avatarSeed, proposal: () => undefined }).map((item) => maskItem(item, mask))
+  // A Subagent has no say: its assistant text is what it says (its report).
+  const items = projectChat({ events, assistantRepliesBefore: Number.POSITIVE_INFINITY, notices: [], avatarSeed: current.identity.avatarSeed, proposal: () => undefined }).map((item) => maskItem(item, mask))
   const working = row.status === 'running'
   const activity = working ? runningTool(events) : undefined
   return { robotId: current.id, working, items, ...(activity === undefined ? {} : { activity }) } as Conversation

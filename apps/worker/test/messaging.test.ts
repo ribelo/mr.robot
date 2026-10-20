@@ -65,7 +65,7 @@ describe('Robot-to-Robot messaging', () => {
     scripts.set(sales, [
       { calls: [{ name: 'robot_send', args: { to: accountant, request: 'What is revenue?', idempotency_key: 'k1' } }] },
       { text: 'Asked the Accountant.' },
-      { text: 'Revenue noted.' },
+      { say: 'Revenue noted.' },
     ])
     await api(ANNA, `/api/robots/${sales}/messages`, { body: { text: 'find revenue' } })
     await settle(sales)
@@ -119,7 +119,7 @@ describe('Robot-to-Robot messaging', () => {
   it('lets Mr. Robot create a Robot that he can then message (robot-hk2s, robot-70kf)', async () => {
     const mrRobot = (await robots(ANNA)).find((entry) => entry.kind === 'mr-robot') as RobotSummary
     await api(ANNA, `/api/robots/${mrRobot.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
-    scripts.set('*', [{ text: 'Hi, I am new. What should I watch?' }])
+    scripts.set('*', [{ say: 'Hi, I am new. What should I watch?' }])
     await say(mrRobot.id, 'I need someone to watch flat prices', [
       { calls: [{ name: 'robot_create', args: { brief: 'Watch flat prices in Warsaw' } }] },
       { text: 'Created it; it will ask you a few questions.' },

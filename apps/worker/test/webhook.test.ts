@@ -115,7 +115,7 @@ describe('webhook Channel (v1.6 ticket 07)', () => {
     const id = await activeRobot(['pwa', 'fake'])
     const { path } = (await api<WebhookView>(ANNA, `/api/robots/${id}/webhook`)).body
     fakeOutbox.length = 0
-    scripts.set(id, [{ text: 'Handled it.' }])
+    scripts.set(id, [{ say: 'Handled it.' }])
     await hook(path, { body: 'ping', type: 'text/plain' })
     await settle(id)
     expect(fakeOutbox.filter((output) => output.kind === 'reply')).toEqual([expect.objectContaining({ text: 'Handled it.', route: null, unprompted: true })])

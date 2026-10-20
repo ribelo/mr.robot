@@ -17,7 +17,7 @@ beforeEach(async () => {
 })
 
 async function newRobot(as: string, interview: Parameters<typeof scripts.set>[1] = []): Promise<string> {
-  scripts.set('*', [{ text: 'Hi! What should I do for you?' }])
+  scripts.set('*', [{ say: 'Hi! What should I do for you?' }])
   const created = await api<RegistryEntry>(as, '/api/robots', { body: { brief: 'watch apartment prices' } })
   expect(created.status).toBe(200)
   const id = created.body.id
@@ -54,7 +54,7 @@ describe('creating a Robot', () => {
     const id = await newRobot(ANNA)
     const tools = await env.ROBOT.getByName(id).toolNames()
     // Plus DSH's read, write and edit from the fs seam over its own Workspace.
-    expect(tools.sort()).toEqual(['delete_file', 'glob', 'grep', 'react', 'set_identity', 'setup_complete'])
+    expect(tools.sort()).toEqual(['delete_file', 'glob', 'grep', 'react', 'say', 'set_identity', 'setup_complete'])
   })
 
   it('asks for Grants in one summary; approval is a compare-and-swap that applies exactly that set (robot-cobv)', async () => {

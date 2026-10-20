@@ -32,8 +32,11 @@ export class ConversationIndex {
   /** How this runtime searches: FTS5, or LIKE over the same columns. */
   readonly mode: 'fts5' | 'like'
 
-  /** fullText false builds a new index for LIKE even where FTS5 exists (the fallback, tested in workerd). */
-  constructor(private readonly sql: SqlStorage, fullText = true) {
+  /**
+   * fullText false builds a new index for LIKE even where FTS5 exists (the fallback, tested in workerd). `assistantRepliesBefore`:
+   * the events of a session whose assistant text was a reply, from before the Robot had say (projection.ts).
+   */
+  constructor(private readonly sql: SqlStorage, fullText = true, private readonly assistantRepliesBefore: (sessionId: string) => number = () => 0) {
     this.sql.exec('CREATE TABLE IF NOT EXISTS chat_search_state (session_id TEXT PRIMARY KEY, next_seq INTEGER NOT NULL) WITHOUT ROWID')
     const existing = this.sql.exec<{ sql: string }>("SELECT sql FROM sqlite_master WHERE name = 'chat_search'").toArray()[0]
     if (existing !== undefined) {
@@ -64,6 +67,7 @@ export class ConversationIndex {
   /** Index every stored event of the session that is not indexed yet. */
   catchUp(sessionId: string): void {
     let next = this.sql.exec<{ next_seq: number }>('SELECT next_seq FROM chat_search_state WHERE session_id = ?', sessionId).toArray()[0]?.next_seq ?? 0
+    const legacy = this.assistantRepliesBefore(sessionId)
     for (;;) {
       const rows = this.sql.exec<{ seq: number; event: string }>(
         'SELECT seq, event FROM session_event WHERE session_id = ? AND seq >= ? ORDER BY seq LIMIT ?', sessionId, next, CATCH_UP_BATCH,
@@ -71,7 +75,7 @@ export class ConversationIndex {
       if (rows.length === 0) break
       for (const row of rows) {
         const event = JSON.parse(row.event) as SessionEvent
-        const found = chatTextOf(event)
+        const found = chatTextOf(event, legacy)
         if (found === undefined) continue
         this.sql.exec(
           'INSERT INTO chat_search (text, id, session_id, seq, kind, sender, at) VALUES (?, ?, ?, ?, ?, ?, ?)',

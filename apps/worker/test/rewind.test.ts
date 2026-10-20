@@ -46,7 +46,8 @@ describe('the Trajectory and rewind', () => {
   it('rewinds to a point: the new live log is exactly the prefix plus the rewind note (robot-0q6a, robot-acr3)', async () => {
     const id = await robotWithHistory()
     const before = await trajectory(id)
-    const regretted = before.events.filter((event) => event.type === 'user/message').at(-1)!
+    // The owner's last message (the platform's own step after a Turn without a say is a user message too).
+    const regretted = before.events.find((event) => event.type === 'user/message' && event.data.includes('Actually order the red one.'))!
     const atSeq = regretted.seq - 1
     const rewound = await api<RewindView>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq } })
     expect(rewound.status).toBe(200)
@@ -101,8 +102,9 @@ describe('the Trajectory and rewind', () => {
     await settle(id)
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'second question' } })
     await settle(id)
-    const turns = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body.events.filter((event) => event.type === 'turn/start')
-    const last = turns.at(-1)!.turn!
+    const events = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body.events
+    const asked = events.find((event) => event.type === 'user/message' && event.data.includes('second question'))!
+    const last = events.filter((event) => event.type === 'turn/start' && event.seq < asked.seq).at(-1)!.turn!
     expect((await api(ANNA, `/api/robots/${id}/rewind`, { body: { beforeTurn: last } })).status).toBe(200)
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'third question' } })
     await settle(id)

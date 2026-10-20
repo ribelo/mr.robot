@@ -16,7 +16,7 @@ beforeEach(async () => {
 })
 
 async function activeRobot(tools: string[] = []): Promise<string> {
-  scripts.set('*', [{ text: 'Hello.' }])
+  scripts.set('*', [{ say: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
   await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools, skills: [], recipients: [], secrets: [] } } })
@@ -69,8 +69,10 @@ describe('steer and follow-up (v1.14 ticket 03)', () => {
     const wait = gate()
     const script: StubReply[] = [
       { gate: wait.promise, then: { text: 'Working on the report.', calls: [{ name: 'task_list', args: {} }] } },
-      { text: 'Switched to the invoice as you asked.' },
-      { text: 'Webhook noted.' },
+      { calls: [{ name: 'say', args: { text: 'Switched to the invoice as you asked.' } }] },
+      { text: '' },
+      { calls: [{ name: 'say', args: { text: 'Webhook noted.' } }] },
+      { text: '' },
     ]
     scripts.set(id, script)
     await api<TaskView>(ANNA, '/api/tasks', { body: { title: 'Report', instructions: 'Write the report.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } } })
@@ -83,19 +85,19 @@ describe('steer and follow-up (v1.14 ticket 03)', () => {
     wait.open()
     await settle(id)
 
-    const [first, second, third] = requestsOf(id)
+    const [first, second, , fourth] = requestsOf(id)
     expect(textOf(first!)).not.toContain('stop, do the invoice first')
     // The steer is in the next request of the same Turn; the webhook is not.
     expect(textOf(second!)).toContain('stop, do the invoice first')
     expect(textOf(second!)).not.toContain('deploy finished')
-    expect(textOf(third!)).toContain('deploy finished')
+    expect(textOf(fourth!)).toContain('deploy finished')
     expect((await turns(id)).slice(1)).toHaveLength(2)
   })
 
   it('the projection shows the steer where the Robot read it, between the replies (ao-lfxt)', async () => {
     const id = await activeRobot()
     const wait = gate()
-    scripts.set(id, [{ gate: wait.promise, then: { text: 'Looking at flights.', calls: [{ name: 'my_capabilities', args: {} }] } }, { text: 'Trains, then.' }])
+    scripts.set(id, [{ gate: wait.promise, then: { calls: [{ name: 'say', args: { text: 'Looking at flights.' } }, { name: 'my_capabilities', args: {} }] } }, { calls: [{ name: 'say', args: { text: 'Trains, then.' } }] }, { text: '' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'find me a flight' } })
     await working(id, 1)
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'actually trains', clientId: 'c-steer' } })
@@ -152,9 +154,12 @@ describe('steer and follow-up (v1.14 ticket 03)', () => {
     const id = await activeRobot(['tasks'])
     const wait = gate()
     scripts.set(id, [
-      { gate: wait.promise, then: { text: 'First done.' } },
-      { text: 'All three answered.' },
-      { text: 'Task done.' },
+      { gate: wait.promise, then: { calls: [{ name: 'say', args: { text: 'First done.' } }] } },
+      { text: '' },
+      { calls: [{ name: 'say', args: { text: 'All three answered.' } }] },
+      { text: '' },
+      { calls: [{ name: 'say', args: { text: 'Task done.' } }] },
+      { text: '' },
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'first job' } })
     await working(id, 1)
@@ -166,7 +171,8 @@ describe('steer and follow-up (v1.14 ticket 03)', () => {
     wait.open()
     await settle(id)
 
-    const [, joined, taskTurn] = requestsOf(id)
+    const joined = requestsOf(id)[2]
+    const taskTurn = requestsOf(id)[4]
     // One user message holds all three, apart; the Task is its own Turn.
     const last = JSON.stringify(joined!.messages.at(-1))
     for (const text of ['later one', 'later two', 'later three']) expect(last).toContain(text)

@@ -40,11 +40,11 @@ async function taskTurns(id: string): Promise<number> {
 describe('The Home fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', () => {
   it('a scheduled Task wakes its Robot once with a Task Wake-up (mc-s1aa)', async () => {
     const id = await activeRobot()
-    scripts.set(id, [{ text: 'Report sent.' }, { text: 'unexpected second run' }])
+    scripts.set(id, [{ say: 'Report sent.' }, { text: 'unexpected second run' }])
     const task = await create({ title: 'Send the report', instructions: 'Mail the weekly report to Anna.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } })
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
-    const last = JSON.stringify(requests.get(id)!.at(-1)!.messages.at(-1))
+    const last = JSON.stringify(requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'user').at(-1))
     expect(last).toContain(`Task \\"Send the report\\" (${task.id}) is due`)
     expect(last).toContain('Mail the weekly report to Anna.')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body

@@ -49,17 +49,44 @@ const Posted = Schema.Struct({ id: Schema.String, channel_id: Schema.String, con
  * messages; only the first one quotes `replyTo` (a Discord reply, kept even if that message is gone).
  * True when Discord accepted every part.
  */
-export function discordPostMessage(fetch: typeof globalThis.fetch, token: string, channelId: string, text: string, replyTo?: string): Effect.Effect<boolean, ConnectorFailure> {
+export function discordPostMessage(fetch: typeof globalThis.fetch, token: string, channelId: string, text: string, replyTo?: string, files: readonly DiscordFile[] = []): Effect.Effect<boolean, ConnectorFailure> {
   const url = API + '/channels/' + encodeURIComponent(channelId) + '/messages'
   return Effect.as(
-    Effect.forEach(discordMessages(text), (content, index) => request(fetch, {
-      method: 'POST',
-      url,
-      headers: { authorization: 'Bot ' + token },
-      json: { content, ...(index === 0 && replyTo !== undefined ? { message_reference: { message_id: replyTo, channel_id: channelId, fail_if_not_exists: false } } : {}) },
-    }, Posted, refused)),
+    Effect.forEach(discordMessages(text), (content, index) => {
+      const payload = { content, ...(index === 0 && replyTo !== undefined ? { message_reference: { message_id: replyTo, channel_id: channelId, fail_if_not_exists: false } } : {}) }
+      // The files go with the first part of the message (v1.15, gb-s6lx).
+      return request(fetch, index === 0 && files.length > 0
+        ? { method: 'POST', url, headers: { authorization: 'Bot ' + token }, bytes: multipart(payload, files) }
+        : { method: 'POST', url, headers: { authorization: 'Bot ' + token }, json: payload }, Posted, refused)
+    }),
     true,
   )
+}
+
+/** A file to upload with a message. */
+export interface DiscordFile {
+  readonly name: string
+  readonly contentType: string
+  readonly bytes: Uint8Array
+}
+
+/** A Discord message with files as multipart/form-data: payload_json, then files[n] (Discord REST). */
+export function multipart(payload: unknown, files: readonly DiscordFile[]): { readonly data: Uint8Array; readonly contentType: string } {
+  const boundary = 'mr-robot-' + crypto.randomUUID()
+  const encoder = new TextEncoder()
+  const quoted = (value: string) => value.replace(/[\r\n"]/g, '_')
+  const parts: Uint8Array[] = [encoder.encode('--' + boundary + '\r\nContent-Disposition: form-data; name="payload_json"\r\nContent-Type: application/json\r\n\r\n' + JSON.stringify({ ...(payload as object), attachments: files.map((file, index) => ({ id: index, filename: file.name })) }) + '\r\n')]
+  files.forEach((file, index) => {
+    parts.push(encoder.encode('--' + boundary + '\r\nContent-Disposition: form-data; name="files[' + index + ']"; filename="' + quoted(file.name) + '"\r\nContent-Type: ' + file.contentType + '\r\n\r\n'), file.bytes, encoder.encode('\r\n'))
+  })
+  parts.push(encoder.encode('--' + boundary + '--'))
+  const data = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+  let at = 0
+  for (const part of parts) {
+    data.set(part, at)
+    at += part.length
+  }
+  return { data, contentType: 'multipart/form-data; boundary=' + boundary }
 }
 
 const BotUser = Schema.Struct({ id: Schema.String, username: Schema.String, global_name: Schema.optional(Schema.NullOr(Schema.String)), bot: Schema.optional(Schema.Boolean), avatar: Schema.optional(Schema.NullOr(Schema.String)) })

@@ -85,7 +85,7 @@ describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', 
     const id = await mrRobot()
     await env.ROBOT.getByName(id).updateSettings({ model: { provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'off' }, codeMode: false })
     const start = Date.now()
-    await say(id, 'what is on today?', { text: 'Your dentist at 3.' })
+    await say(id, 'what is on today?', { say: 'Your dentist at 3.' })
     const plan = await testRobot(id).idlePlanForTest()
     expect(plan.map((step) => step.action)).toEqual(['warm', 'warm', 'warm'])
     expect(plan.map((step) => Math.round((step.at - start) / MINUTE))).toEqual([54, 108, 162])

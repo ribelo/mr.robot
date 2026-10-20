@@ -49,7 +49,7 @@ const task = async (id: string) => (await api<TaskView>(ANNA, `/api/tasks/${id}`
 describe('The Turn knows its cause and subject (v1.13 ticket 03)', () => {
   it('a Task Turn writes an attempt that ends ok, and the Task stays open without task_done (mc-t4dd, mc-w4dd)', async () => {
     const id = await activeRobot()
-    scripts.set(id, [{ text: 'Shopping list sent.\nMore detail.' }])
+    scripts.set(id, [{ say: 'Shopping list sent.\nMore detail.' }])
     const shopping = await dueTask(id, 'Shopping')
     await settle(id)
     expect(await task(shopping.id)).toMatchObject({ state: 'open', overdue: false, attempts: [{ robotId: id, outcome: 'ok', firstLine: 'Shopping list sent.' }] })

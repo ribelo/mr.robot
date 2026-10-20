@@ -984,7 +984,11 @@ export const ChatItem = Schema.Union([
   }),
   /** A Thread card (ch-iy16): what happened to the Thread, with its state now. */
   Schema.Struct({ kind: Schema.Literal('thread'), ...itemFields, event: ThreadEvent, thread: ThreadView }),
-  Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String }),
+  /**
+   * What the Robot said to its owner: one say (v1.15, gb-s81e). `attachments` are Workspace files (path) and stored screenshots
+   * (path `screen:<name>`); `fallback`: the Turn said nothing and its last assistant text was shown instead (gb-7jqy).
+   */
+  Schema.Struct({ kind: Schema.Literal('reply'), ...itemFields, text: Schema.String, attachments: Schema.optional(Schema.Array(Attachment)), fallback: Schema.optional(Schema.Boolean) }),
   /** A Task card (mc-c1aa); `by` names who changed it when it was not this Robot. `taskId` is null on a card stored before v1.13 that named none. */
   Schema.Struct({ kind: Schema.Literal('task'), ...itemFields, action: TaskAction, taskId: Schema.NullOr(Schema.String), title: Schema.String, by: Schema.optional(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('question'), ...itemFields, proposal: ProposalView }),

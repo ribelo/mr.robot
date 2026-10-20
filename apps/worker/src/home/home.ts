@@ -43,6 +43,7 @@ import { connectionView, HomePlugins } from './plugins.ts'
 import { connectorOn, connectorPlugin, CONNECTOR_TITLES, disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
 import { DiscordAtHome, type BotConnection } from './discord.ts'
+import type { DiscordFile } from '../connectors/discord.ts'
 import { abandoned, answered, closed, invited, lapsed, messaged, ThreadRegistry, type AnswerOutcome, type Side, type Step, type ThreadRow } from './threads.ts'
 import type { GatewayMessage } from '../connectors/discord-gateway.ts'
 import type { PlainValue } from '../connectors/schema-form.ts'
@@ -1872,7 +1873,21 @@ export class Home extends DurableObject<Env> {
   }
 
   /** Post to a Discord channel with the Home's bot (the Channel side of a Robot's reply). */
-  discordPost(memberId: string, channelId: string, text: string, replyTo?: string): Promise<boolean> { return this.discord.post(memberId, channelId, text, replyTo) }
+  discordPost(memberId: string, channelId: string, text: string, replyTo?: string, files?: readonly DiscordFile[]): Promise<boolean> { return this.discord.post(memberId, channelId, text, replyTo, files) }
+
+  /**
+   * The address the app is served from, as the last Member who opened it saw it (v1.15): a Channel cannot carry everything
+   * (a big file, a credential form), so it links into the app.
+   */
+  appOrigin(): string | null {
+    const row = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'app-origin'").toArray()[0]
+    return row === undefined ? null : (JSON.parse(row.v) as string)
+  }
+
+  rememberOrigin(origin: string): void {
+    if (this.appOrigin() === origin) return
+    this.ctx.storage.sql.exec("INSERT INTO setting (k, v) VALUES ('app-origin', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(origin))
+  }
 
   /** The owner's Mr. Robot: where a direct message to the bot goes. */
   async mrRobotOf(ownerId: string): Promise<string | null> {

@@ -14,6 +14,8 @@ describe('a session log from DSH 0.2.0-rc.2', () => {
       const sql = state.storage.sql
       sql.exec('INSERT INTO session_log (id, header, inherited, length) VALUES (?, ?, 0, ?)', sessionId, JSON.stringify({ ...OLD_SESSION_HEADER, id: sessionId }), OLD_SESSION_EVENTS.length)
       for (const event of OLD_SESSION_EVENTS) sql.exec('INSERT INTO session_event (session_id, seq, event) VALUES (?, ?, ?)', sessionId, event.seq, JSON.stringify(event))
+      // The v1.15 upgrade marks where a Robot's Conversation had no say: its assistant text up to there is still shown as replies (gb-psyl).
+      sql.exec('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', `voice-from:${sessionId}`, String(OLD_SESSION_EVENTS.length))
     })
 
     // What the 0.2.0-rc.2 build rendered for this log.
@@ -23,7 +25,7 @@ describe('a session log from DSH 0.2.0-rc.2', () => {
     const old = await r.trajectory()
     expect(old.map((event) => event.type)).toEqual(OLD_SESSION_EVENTS.map((event) => event.type))
 
-    scripts.set('r-old-log', [{ text: 'Still here.' }])
+    scripts.set('r-old-log', [{ say: 'Still here.' }])
     await r.wake(say('Are you there?'))
     await r.settled()
     const after = await r.trajectory()
@@ -38,6 +40,6 @@ describe('a session log from DSH 0.2.0-rc.2', () => {
     const { items } = await r.conversation()
     expect(items.slice(0, before.items.length)).toEqual(before.items)
     expect(items.slice(before.items.length).map((item) => item.kind === 'message' || item.kind === 'reply' ? [item.kind, item.text] : [item.kind]))
-      .toEqual([['message', 'Are you there?'], ['reply', 'Still here.']])
+      .toEqual([['message', 'Are you there?'], ['reply', 'Still here.'], ['activity']])
   })
 })

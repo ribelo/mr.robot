@@ -30,6 +30,20 @@ export function deliveryOf(input: DeliveryInput, ownerId: string): Delivery {
   }
 }
 
+/**
+ * Whether the owner caused a Wake-up (v1.15, gb-xgd7): their message in the app or on a Channel that knows them, their answer to an Ask,
+ * the Takeover they handed back. Tasks, Robot messages (Mr. Robot's to his staff too), Subagent reports and platform notices are nobody's ask.
+ */
+export function causedByOwner(wakeup: Wakeup, ownerId: string): boolean {
+  switch (wakeup.kind) {
+    case 'member': return wakeup.sender.kind === 'member' && wakeup.sender.memberId === ownerId
+    case 'channel': return wakeup.payload['fromOwner'] === true
+    case 'takeover': return true
+    case 'platform': return wakeup.payload['byOwner'] === true
+    default: return false
+  }
+}
+
 /** A Robot message from the owner's Mr. Robot directing his staff steers (ao-8848); a Thread message never does. */
 export function robotMessageDelivery(from: { readonly robotId: string; readonly ownerId: string }, kind: 'request' | 'reply' | 'thread', ownerId: string): Delivery {
   return kind !== 'thread' && from.ownerId === ownerId && from.robotId === mrRobotIdOf(ownerId) ? 'steer' : 'followup'

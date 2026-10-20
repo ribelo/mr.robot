@@ -264,7 +264,7 @@ describe('the deputy works with the Tasks of other Robots; limits and attempts (
     const accountant = await robot(ANNA, 'Accountant')
     const task = (await api<TaskView>(ANNA, '/api/tasks', { body: { title: 'Pulse', instructions: 'Check prices.', assignee: { kind: 'robot', robotId: accountant }, timing: { kind: 'recurring', schedule: { kind: 'interval', everyMinutes: 5 } } } })).body
     for (let index = 0; index < 22; index += 1) {
-      scripts.set(accountant, [{ text: `Run ${index} done.\nWith details.` }])
+      scripts.set(accountant, [{ say: `Run ${index} done.\nWith details.` }])
       await home().backdateTasksForTest(5 * 60_000)
       await runDurableObjectAlarm(env.ROBOT.getByName(accountant))
       await settle(accountant)

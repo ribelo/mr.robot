@@ -8,12 +8,12 @@
  *    reply come back to the same place (and to the message that asked, when the channel has one);
  * 2. deliver(output) is called only for the Channels recipientsOf names. The rule is one question,
  *    "who asked for this?":
- *    - a reply goes back where the question came from: the final reply of a Turn that a Channel
- *      woke goes to that Channel; a Turn woken by a Member in the app answers in the app only;
- *    - only the final reply of a Turn leaves the app; interim replies stay in the Conversation;
- *    - what nobody asked for (the final reply of a Task's Turn, a Robot message, a takeover, the
- *      platform) and notifications other than "finished" go to the Channels that opted in to
- *      hear the Robot unasked (Discord: its own channel, when the owner allows it);
+ *    - a reply is one say of the Robot (v1.15): each goes out at once. It goes back where the question
+ *      came from: a say in a Turn that a Channel woke goes to that Channel; a Turn woken by a Member in
+ *      the app answers in the app only; a say that names a Channel goes there;
+ *    - what nobody asked for (a say in a Task's Turn, a Robot message, a takeover, the platform) and
+ *      notifications other than "finished" go to the Channels that opted in to hear the Robot unasked
+ *      (Discord: its own channel, when the owner allows it);
  *    - a "finished" notification only repeats the reply, so such Channels never get it;
  *    - the Channels in the Robot's list (the app, test doubles) hear everything;
  * 3. delivery is idempotent per output id, so a retried Turn does not post twice.
@@ -47,6 +47,16 @@ export interface InboundWakeup {
   readonly dedupeKey: string | null
 }
 
+/** A file shown with a say, as a Channel can carry it: its bytes on request, and a link into the app for the Channels that cannot (v1.15, gb-s6lx). */
+export interface ChannelFile {
+  readonly name: string
+  readonly contentType: string
+  readonly size: number
+  /** Where the owner opens it in the app; null when the app's address is not known. */
+  readonly link: string | null
+  read(): Promise<Uint8Array>
+}
+
 export type ChannelOutput =
   | {
       readonly kind: 'reply'
@@ -54,10 +64,9 @@ export type ChannelOutput =
       readonly robotId: string
       readonly robotName: string
       readonly text: string
-      /** Where the question came from; null when it came from the app, or from nobody. */
+      readonly attachments: readonly ChannelFile[]
+      /** Where the question came from, or the Channel the say names; null when it came from the app, or from nobody. */
       readonly route: ReplyRoute | null
-      /** The last reply of its Turn. */
-      readonly final: boolean
       /** Nobody asked for this Turn on any Channel: a Task, a Robot message, a takeover, the platform. */
       readonly unprompted: boolean
     }
@@ -92,8 +101,8 @@ export function channelSender(event: InboundEvent): Sender {
 export function recipientsOf(output: ChannelOutput, enabled: readonly string[], unprompted: readonly string[] = []): string[] {
   const ids = new Set(enabled)
   if (output.kind === 'reply') {
-    if (output.final && output.route !== null) ids.add(output.route.channel)
-    else if (output.final && output.unprompted) for (const id of unprompted) ids.add(id)
+    if (output.route !== null) ids.add(output.route.channel)
+    else if (output.unprompted) for (const id of unprompted) ids.add(id)
   } else if (!output.replyCopy) {
     for (const id of unprompted) ids.add(id)
   }

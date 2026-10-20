@@ -15,22 +15,21 @@ describeChannelContract('fake chat', () => new FakeChannel(), () => fakeOutbox.l
 const ANNA = 'anna@example.com'
 
 describe('Who receives an output (recipientsOf)', () => {
-  const reply = { kind: 'reply', id: 'r1', robotId: 'r', robotName: 'R', text: 'x', route: null, final: true, unprompted: false } as const
+  const reply = { kind: 'reply', id: 'r1', robotId: 'r', robotName: 'R', text: 'x', attachments: [], route: null, unprompted: false } as const
   const note = { kind: 'notification', id: 'n1', robotId: 'r', robotName: 'R', notification: 'blocked', text: 'x', memberIds: [], replyCopy: false } as const
   const discord = { channel: 'discord', address: 'C-1', messageId: 'M-1' }
 
-  it('sends a reply back to where the question came from, final replies only', () => {
+  it('sends every reply back to where the question came from', () => {
     expect(recipientsOf({ ...reply, route: discord }, ['pwa'], ['discord'])).toEqual(['pwa', 'discord'])
-    expect(recipientsOf({ ...reply, route: discord, final: false }, ['pwa'], ['discord'])).toEqual(['pwa'])
+    expect(recipientsOf({ ...reply, id: 'r2', route: discord }, ['pwa'], [])).toEqual(['pwa', 'discord'])
   })
 
   it('keeps an answer to the app in the app', () => {
     expect(recipientsOf(reply, ['pwa'], ['discord'])).toEqual(['pwa'])
   })
 
-  it('sends the final reply of an unprompted Turn to the opted-in Channels only', () => {
+  it('sends every reply of an unprompted Turn to the opted-in Channels only', () => {
     expect(recipientsOf({ ...reply, unprompted: true }, ['pwa'], ['discord'])).toEqual(['pwa', 'discord'])
-    expect(recipientsOf({ ...reply, unprompted: true, final: false }, ['pwa'], ['discord'])).toEqual(['pwa'])
     expect(recipientsOf({ ...reply, unprompted: true }, ['pwa'], [])).toEqual(['pwa'])
   })
 
@@ -68,7 +67,7 @@ describe('Channels on a Robot', () => {
 
   it('wakes the Robot from a Channel event and returns the reply there (robot-vfqd)', async () => {
     const id = await robot(['fake'])
-    scripts.set(id, [{ text: 'Hi from the Robot.' }])
+    scripts.set(id, [{ say: 'Hi from the Robot.' }])
     const route = { channel: 'fake', address: 'thread-9' }
     expect(await testRobot(id).channelEvent({ channel: 'fake', eventId: 'e1', from: 'ola', text: 'hi robot', route })).toEqual({ accepted: true })
     expect(await testRobot(id).channelEvent({ channel: 'fake', eventId: 'e1', from: 'ola', text: 'hi robot', route })).toEqual({ accepted: true })

@@ -5,13 +5,14 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Attachment, ChatItem, ToolCallView, ProposalView, Sender, TaskAction, ThreadView } from '@mr-robot/protocol'
 import { JOIN_SEPARATOR, MEMBER_TIME_LABEL } from '../agent/sources.ts'
+import { sayOf } from '../agent/say.ts'
 import type { NoticeRow, StoredRoutineCard } from './store.ts'
 
 interface ContentBlock { readonly type: string; readonly text?: string }
 interface MessageLike { readonly id: string; readonly content: readonly ContentBlock[]; readonly source?: Record<string, unknown> }
 
-/** Tools whose use the chat already shows in their own way (a 👍 on the message). */
-const HIDDEN_TOOLS = new Set(['react'])
+/** Tools whose use the chat already shows in their own way (a 👍 on the message, what was said as a reply). */
+const HIDDEN_TOOLS = new Set(['react', 'say'])
 
 /**
  * Routine tools of Conversations stored before v1.13, and the schedule tools before them: read-only, so their
@@ -60,6 +61,11 @@ export interface ProjectionInput {
   /** Tool arguments, results and thinking for Standard, Detailed and Verbose (pl-6eir). */
   readonly details?: boolean
   readonly events: readonly SessionEvent[]
+  /**
+   * Assistant text before this event is a reply (v1.15, gb-psyl): the Conversation of a Robot from before the upgrade, which
+   * had no say. From it on, only what the Robot said is a reply. Zero for a Robot that always had say; Infinity for a Subagent, which has none.
+   */
+  readonly assistantRepliesBefore: number
   readonly notices: readonly NoticeRow[]
   readonly proposal: (id: string) => ProposalView | undefined
   /** This chief's copy of a Thread (v1.9), for its card and for labelling the messages it sent. */
@@ -100,6 +106,11 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
   for (const event of input.events) {
     flushNotices(event.seq)
     const data = event.data as Record<string, unknown>
+    const said = sayOf(event)
+    if (said !== undefined) {
+      items.push({ kind: 'reply', id: said.id, seq: event.seq, at: event.time, text: said.text, ...(said.attachments.length === 0 ? {} : { attachments: said.attachments }), ...(said.fallback === true ? { fallback: true } : {}) })
+      continue
+    }
     switch (event.type) {
       case 'user/message': {
         const message = data as unknown as MessageLike
@@ -149,7 +160,7 @@ export function projectChat(input: ProjectionInput): ChatItem[] {
           if (thinking.length > 0) items.push({ kind: 'thinking', id: 'thinking-' + message.id, seq: event.seq, at: event.time, text: clip(thinking, 20_000) })
         }
         const text = (message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim()
-        if (message !== undefined && text.length > 0) items.push({ kind: 'reply', id: message.id, seq: event.seq, at: event.time, text })
+        if (message !== undefined && text.length > 0 && event.seq < input.assistantRepliesBefore) items.push({ kind: 'reply', id: message.id, seq: event.seq, at: event.time, text })
         break
       }
       case 'turn/end': {
@@ -252,9 +263,12 @@ export interface ChatText {
 }
 
 /** The searchable text of a session event, by the same rules the chat view projects it; undefined when the chat shows no words for it. */
-export function chatTextOf(event: SessionEvent): ChatText | undefined {
+export function chatTextOf(event: SessionEvent, assistantRepliesBefore: number): ChatText | undefined {
   const data = event.data as Record<string, unknown>
+  const said = sayOf(event)
+  if (said !== undefined) return { id: said.id, kind: 'reply', sender: null, text: said.text }
   if (event.type === 'assistant/message') {
+    if (event.seq >= assistantRepliesBefore) return undefined
     const message = data['message'] as MessageLike | undefined
     const text = (message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim()
     return message === undefined || text.length === 0 ? undefined : { id: message.id, kind: 'reply', sender: null, text }

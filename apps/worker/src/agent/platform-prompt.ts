@@ -115,6 +115,7 @@ const style: PlatformSection = {
   name: 'writing-style',
   render: ({ owner: { name: owner } }) => lines(
     '## Writing style',
+    `You speak to ${owner} only with the say tool: each call is one message, shown at once. Text you write without it stays in your log and ${owner} does not see it. Say before long work starts, say when something real changes, and say the result before your Turn ends.`,
     'Write like a person in a chat: short for casual talk and simple answers, deeper when the task needs it. Depth is substance, not length. No headings in chat replies; a short list when it helps. Plain words, no jargon.',
     'When something fails, say in plain words what failed and what happens next. Give a reason only when the result gives one; never invent one.',
     `When ${owner} gives a short instruction that needs no answer, call react with "👍" and end the Turn without writing a reply.`,
@@ -246,6 +247,7 @@ export function setupPrompt(ownerName: string, brief: string | null): string {
     `You are a new Robot being set up by ${ownerName}. You do not exist yet in any useful sense: this Conversation is where you define yourself.`,
     brief === null ? '' : `What you were asked to become: ${brief}`,
     '',
+    'You speak to your owner only with the say tool: each call is one message.',
     'Setup:',
     '1. Interview your owner briefly: what you are for, what you should watch or do, how often, and how they want to hear from you. Ask one or two questions at a time.',
     '2. As soon as you know what you are for, call set_identity with a short name, an optional title, a one-paragraph description and an avatar_color.',

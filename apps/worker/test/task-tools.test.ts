@@ -163,7 +163,7 @@ describe('a Robot works with Tasks through the tools (v1.13 ticket 04)', () => {
       { name: 'task_focus', args: { task_id: report.id, reason: 'Anna asked' } },
       { name: 'task_focus', args: { task_id: 'none', reason: 'Dropped for the invoice' } },
     ])
-    scripts.set(id, [{ text: 'Report written.' }])
+    scripts.set(id, [{ say: 'Report written.' }])
     expect((await api(ANNA, `/api/tasks/${report.id}/run`, { body: {} })).status).toBe(200)
     await settle(id)
     expect((await api<TaskView>(ANNA, `/api/tasks/${report.id}`)).body.attempts.map((attempt) => [attempt.outcome, attempt.firstLine])).toEqual([['ok', 'Report written.'], ['skipped', 'Dropped for the invoice']])
@@ -185,7 +185,7 @@ describe('Conversations stored with the Routine tools still show their cards, as
     at(seq + 1, 'tool/result', { message: { id: `m${seq}`, toolCallId: callId, content: [{ type: 'text', text: JSON.stringify(result) }] } }),
   ]
   const cards = (events: SessionEvent[], notices: Parameters<typeof projectChat>[0]['notices'] = []) =>
-    projectChat({ events, notices, proposal: () => undefined, avatarSeed: 'r-1' }).flatMap((item) => (item.kind === 'task' ? [[item.action, item.title]] : []))
+    projectChat({ events, assistantRepliesBefore: 0, notices, proposal: () => undefined, avatarSeed: 'r-1' }).flatMap((item) => (item.kind === 'task' ? [[item.action, item.title]] : []))
 
   it('renders schedule_create, schedule_update and schedule_delete as created, updated and cancelled', () => {
     expect(cards([

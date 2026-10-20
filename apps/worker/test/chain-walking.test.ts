@@ -48,7 +48,7 @@ async function chainRobot(): Promise<{ id: string; first: string; second: string
   const anna = (await api<Me>(ANNA, '/api/me')).body
   const first = (await api<{ id: string }>(ANNA, '/api/providers/openrouter/accounts', { body: { key: 'sk-or-first', shared: false, label: 'First' } })).body.id
   const second = (await api<{ id: string }>(ANNA, '/api/providers/openrouter/accounts', { body: { key: 'sk-or-second', shared: false, label: 'Second' } })).body.id
-  scripts.set('*', [{ text: 'Hello.' }])
+  scripts.set('*', [{ say: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
   await testRobot(body.id).activateForTest()

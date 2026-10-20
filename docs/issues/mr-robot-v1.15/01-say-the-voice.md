@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: a say call makes a reply item at once; assistant text in the same Turn makes none; the same in direct mode (gb-s81e, gb-6c8d, gb-wma6, gb-25jb)
-- [ ] Workerd test: attachments resolve to a Workspace file and a stored screenshot; a missing path fails the call with a clear error (gb-4wgm)
-- [ ] Workerd test: each say of a Turn reaches the Channel route; an explicit channel overrides; a child has no say (gb-s6lx, gb-jdzo, gb-bdwb)
-- [ ] Workerd test: an old session log renders replies from assistant text before the marker and from say after it (gb-psyl)
-- [ ] Component test: a reply with an image inline and a file card (gb-ekga)
-- [ ] Channel seam emits one reply output per say; Discord uploads a small attachment and links a large one (gb-s6lx)
+- [x] Workerd test: a say call makes a reply item at once; assistant text in the same Turn makes none; the same in direct mode (gb-s81e, gb-6c8d, gb-wma6, gb-25jb)
+- [x] Workerd test: attachments resolve to a Workspace file and a stored screenshot; a missing path fails the call with a clear error (gb-4wgm)
+- [x] Workerd test: each say of a Turn reaches the Channel route; an explicit channel overrides; a child has no say (gb-s6lx, gb-jdzo, gb-bdwb)
+- [x] Workerd test: an old session log renders replies from assistant text before the marker and from say after it (gb-psyl)
+- [x] Component test: a reply with an image inline and a file card (gb-ekga)
+- [x] Channel seam emits one reply output per say; Discord uploads a small attachment and links a large one (gb-s6lx)

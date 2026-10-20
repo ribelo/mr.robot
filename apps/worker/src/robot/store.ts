@@ -309,7 +309,19 @@ export class RobotStore {
   prepare(): void {
     this.migrate()
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
-    this.search = new ConversationIndex(this.sql)
+    this.search = new ConversationIndex(this.sql, true, (sessionId) => this.voiceFrom(sessionId))
+  }
+
+  /**
+   * From which event of a session only what the Robot said is a reply (v1.15 ticket 01, gb-psyl). Before it the Robot had no
+   * say, and its assistant text was the reply. Zero for a session that was never without say.
+   */
+  voiceFrom(sessionId: string): number {
+    return this.get<number>(`voice-from:${sessionId}`) ?? 0
+  }
+
+  setVoiceFrom(sessionId: string, seq: number): void {
+    this.set(`voice-from:${sessionId}`, seq)
   }
 
   get sql(): SqlStorage {

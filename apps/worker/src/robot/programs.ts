@@ -653,6 +653,7 @@ export const answer = (proposalId: string, revision: number, approve: boolean, a
       : approved ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
     // The chat shows what happened, not the instruction to the model.
     payload: {
+      byOwner: true,
       summary: decision !== undefined ? `Review: ${decision.approved.length} approved, ${decision.rejected.length} rejected` : approved ? (answered.kind === 'setup' ? 'Setup approved' : 'Approved') : 'Rejected',
       ...(decision === undefined ? {} : { approved: decision.approved, rejected: decision.rejected }),
     },
@@ -680,7 +681,7 @@ const answerToolCall = (pending: ProposalRow, revision: number, approve: boolean
     text: approve
       ? (text === '' ? '' : `Your owner's note: ${text}`)
       : `The call did not run.${text === '' ? ' Your owner gave no reason.' : ''} Do not repeat it unless your owner asks; tell them in one line what you do instead.`,
-    payload: { summary: `${approve ? 'Approved' : 'Rejected'}: ${tool}`, toolCallAnswer: wakeup },
+    payload: { byOwner: true, summary: `${approve ? 'Approved' : 'Rejected'}: ${tool}`, toolCallAnswer: wakeup },
   })
   return { ok: true, proposal: proposalView(answered) } as AnswerResult
 })
@@ -722,6 +723,7 @@ export const answerHelp = (requestId: string, text: string, answerer: HelpAnswer
     payload: {
       summary: override ? `${answerer.name} answered the request for help, after Mr. Robot` : `${answerer.name} answered the request for help`,
       helpAnswer: { requestId, from: answerer.name, ...(override ? { afterMrRobot: true } : {}) },
+      ...(answerer.by === 'owner' ? { byOwner: true } : {}),
     },
   })
   return { ok: true, proposal: proposalView(answered) } as HelpAnswerResult
@@ -809,6 +811,8 @@ export const rewind = (atSeq: number) => Effect.gen(function* () {
   yield* platform.releaseAgent()
   store.transaction(() => {
     store.addRewind(record)
+    // The seeded prefix keeps the voice it had (gb-psyl); what follows the rewind point is say only.
+    store.setVoiceFrom(sessionId, Math.min(store.voiceFrom(current.liveSessionId), atSeq + 1))
     store.updateConfig(() => ({ liveSessionId: sessionId }))
   })
   yield* platform.seedSession(sessionId, { events: buildForkSeed(events, SessionSeq(atSeq)), inheritedEventCount: atSeq + 1, parentSession: current.liveSessionId }, [
@@ -892,6 +896,8 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   }
   store.transaction(() => {
     store.saveConfig(config)
+    // A Robot made since v1.15 always had say: no Conversation of it shows assistant text as replies (gb-psyl).
+    store.set('voice-upgraded', true)
     store.set('owner', { id: init.ownerId, name: init.ownerName, ...(init.ownerNickname === undefined ? {} : { nickname: init.ownerNickname }) })
     if (init.brief !== undefined) store.set('brief', init.brief)
   })
@@ -905,6 +911,8 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
 
 /** The kv key of the one moment the Robot keeps of its Tasks: when its earliest due Task wakes it (mc-s1aa). */
 export const NEXT_DUE = 'next-due'
+/** The kv key of the moment an owner Turn that has said nothing gets its one steer (v1.15, gb-0skq). */
+export const QUIET_DUE = 'quiet-due'
 /** The kv key of the idle plan (idle.ts): the moments left for warming or idle compaction. */
 export const IDLE_PLAN = 'idle-plan'
 
@@ -953,11 +961,13 @@ export const rearm = Effect.gen(function* () {
   // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
   const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
   const idle = store.get<readonly IdleStep[]>(IDLE_PLAN)?.[0]?.at
+  const quiet = store.get<{ readonly at: number }>(QUIET_DUE)?.at
   // The Box stops ten minutes after its last command (ao-joux).
   const box = store.get<{ state: string; lastCommandAt?: number }>('box')
   const boxStop = box?.state === 'running' && box.lastCommandAt !== undefined ? box.lastCommandAt + 10 * 60_000 : undefined
   const candidates = [
     ...(boxStop === undefined ? [] : [boxStop]),
+    ...(quiet === undefined ? [] : [quiet]),
     ...(idle === undefined || !runnable ? [] : [idle]),
     ...(escalation === undefined ? [] : [escalation]),
     ...(taskDue === undefined ? [] : [taskDue]),

@@ -72,7 +72,7 @@ import { readStoredEvents, storedLength } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, UserMessage } from '@deepseek-ai/dsh-llm'
-import { joinable, mrRobotIdOf } from './delivery.ts'
+import { causedByOwner, joinable, mrRobotIdOf } from './delivery.ts'
 import { SubagentStore } from './subagent-store.ts'
 import { SUBAGENT_TOOL_NAMES, type SubagentHost, type SubagentStart } from '../agent/tools/subagents.ts'
 import { MAX_SUBAGENTS, Subagents } from '../plugins/subagents.ts'
@@ -80,7 +80,10 @@ import { ptcPlugin } from '../agent/ptc.ts'
 import { skillFrontmatter } from '../agent/skills.ts'
 import { type BrowserHost, type ScreenshotImage } from '../agent/tools/browser.ts'
 import { type TakeoverHost } from '../agent/tools/takeover.ts'
-import { fanOut, type ChannelAdapter, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
+import { fanOut, type ChannelAdapter, type ChannelFile, type ChannelOutput, type InboundEvent, type ReplyRoute } from '../channels/channel.ts'
+import { QUIET_STEER_MS, quietSteerNote, SAFETY_NET_STEPS, safetyNetNote, SAY_MAX_ATTACHMENTS, SAY_RECORD, sayOf, SCREEN_PREFIX, type SayRecord } from '../agent/say.ts'
+import type { SayHost } from '../agent/tools/say.ts'
+import { Say } from '../plugins/say.ts'
 import { PwaChannel } from '../channels/pwa.ts'
 import { rememberIdempotencyKey, WebhookChannel, webhookText } from '../channels/webhook.ts'
 import { DiscordChannel } from '../channels/discord.ts'
@@ -141,7 +144,7 @@ import { causeOf, LAST_WAKEUP, runningTool } from './views.ts'
 import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
-import { IDLE_PLAN, MR_ROBOT_COMPACTION, proposalView, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
+import { IDLE_PLAN, MR_ROBOT_COMPACTION, proposalView, QUIET_DUE, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
 export type { AnswerResult, HelpAnswerer, HelpAnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, storedToolCall, type ActiveTurn, type TaskCard, type ProposalRow, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
 
@@ -150,7 +153,7 @@ export { DEFAULT_CONTEXT_BUDGET } from './programs.ts'
 export type { RobotInit } from './programs.ts'
 import type { RobotInit } from './programs.ts'
 
-export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost {
+export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost, SayHost {
   protected readonly store: RobotStore
   private composition: { readonly revision: number; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
   private pumping: Promise<void> | undefined
@@ -192,6 +195,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       if (existing.compactionInstruction.trim() === '') this.store.saveConfig({ ...existing, compactionInstruction: MR_ROBOT_COMPACTION, revision: existing.revision + 1 })
       this.store.set('mr-compaction-default', true)
     }
+    this.markVoiceUpgrade()
     // The Robot's state programs (programs.ts) run on Effect; this class adapts them to RPC,
     // the alarm and DSH's agent loop.
     this.runtime = new DurableRuntime(Layer.mergeAll(
@@ -226,6 +230,18 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         }),
       }),
     ))
+  }
+
+  /**
+   * A Robot from before v1.15 had no say: its Conversations keep their assistant text as replies up to now (gb-psyl). A Robot made
+   * since is marked at creation and never gets here.
+   */
+  protected markVoiceUpgrade(): void {
+    const existing = this.store.config()
+    if (existing === undefined || this.store.get('voice-upgraded') !== undefined) return
+    const known = this.store.sql.exec<{ id: string }>("SELECT id FROM session_log WHERE id NOT LIKE 'sa-%'").toArray().map((row) => row.id)
+    for (const id of new Set([existing.liveSessionId, ...known])) if (this.store.get(`voice-from:${id}`) === undefined) this.store.setVoiceFrom(id, storedLength(this.ctx.storage.sql, id))
+    this.store.set('voice-upgraded', true)
   }
 
   /** Run one of the Robot's Effect programs; typed failures reach the caller as Errors with a status. */
@@ -403,6 +419,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async runAlarm(): Promise<void> {
     const config = this.store.config()
+    if (config !== undefined && config.status !== 'deleted') this.quietSteer(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.expireCapture(Date.now()).catch((error: unknown) => console.warn('sign-in not ended', error))
     if (config !== undefined && config.status !== 'deleted') await this.program(Programs.fireTasks(Date.now())).catch((error: unknown) => console.warn('due Tasks not fetched', error))
     // Due Tasks start at once; housekeeping below must not delay their Turns.
@@ -531,6 +548,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
       this.store.beginTurn(wakeup.id, agent.session.id, startSeq, Date.now())
       this.store.set(`turn-start:${wakeup.id}`, startSeq)
+      // The owner caused this Turn: if it runs ten minutes without a say, it gets one steer (gb-0skq).
+      if (causedByOwner(wakeup, this.store.requireConfig().ownerId)) this.store.set(QUIET_DUE, { wakeupId: wakeup.id, at: Date.now() + QUIET_STEER_MS })
       // A Task Wake-up makes the Task the Turn's subject, with an attempt at the Home (mc-t4dd).
       const taskId = wakeup.kind === 'task' && typeof wakeup.payload['taskId'] === 'string' ? wakeup.payload['taskId'] : undefined
       if (taskId !== undefined) await this.focusTask(taskId, '').catch((error: unknown) => console.warn('attempt not started', taskId, error))
@@ -561,6 +580,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       for (const message of late) agent.steer(message)
       await agent.whenIdle()
     }
+    // A Turn that ends without a say gets one bounded step to speak; an owner's gets its last words shown if the step stays silent.
+    await this.speakUp(wakeup, agent, ctx).catch((error: unknown) => console.warn('safety net failed', error))
     this.runningAgent = undefined
     await ctx.sessions.flush(agent.session)
     if (this.turnSecrets.length > 0 && this.children.size === 0) {
@@ -572,6 +593,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.blockedThisTurn.clear()
     const turn = this.store.activeTurn()
     this.store.endTurn(wakeup.id)
+    this.store.delete(QUIET_DUE)
     await this.afterTurn(wakeup, turn)
     this.planIdle()
     await this.rearm()
@@ -1051,6 +1073,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (steers.length === 0) return
     for (const steer of steers) agent.steer(this.wakeupMessageOf(steer, steer.text, undefined, true))
     this.store.consumeWakeups(steers.map((steer) => steer.id))
+    // The owner steered this Turn: it is theirs now, and they should hear from it (gb-xgd7). Mr. Robot directing his staff is not the owner.
+    if (steers.some((steer) => causedByOwner(steer, this.store.requireConfig().ownerId))) this.store.set(`owner-steered:${active.wakeupId}`, true)
     const route = steers.map((steer) => steer.payload['route'] as ReplyRoute | undefined).filter((found) => found !== undefined && found.channel !== 'webhook').at(-1)
     if (route !== undefined) this.store.set(`steer-route:${active.wakeupId}`, route)
     this.ctx.waitUntil(this.changed())
@@ -1182,7 +1206,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const firstLine = failedTurn ? 'The Turn failed.' : doneLine !== undefined ? doneLine : reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'
       await this.home().attemptFinished(turn.task.attemptId, failedTurn ? 'failed' : 'ok', firstLine).catch((error: unknown) => console.warn('attempt not finished', error))
     }
-    if (failedTurn) await this.chainFailure(startSeq).catch((error: unknown) => console.warn('model chain not advanced', error))
+    if (failedTurn) await this.chainFailure(startSeq, causedByOwner(wakeup, this.store.requireConfig().ownerId) || this.store.get(`owner-steered:${wakeup.id}`) === true).catch((error: unknown) => console.warn('model chain not advanced', error))
     else await this.chainSucceeded().catch(() => undefined)
     const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
     if (!failedTurn && wakeup.kind !== 'task' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
@@ -1191,7 +1215,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${config.identity.name} finished without a reply. If this repeats, raise its context budget in Advanced settings.`, Date.now())
     }
     await this.loadSecretMasks()
-    await this.deliverReplies(wakeup, startSeq)
+    this.store.delete(`steer-route:${wakeup.id}`)
     await this.notifyFinished(wakeup, startSeq)
     await this.checkLimits()
     const soul = (await this.run(this.workspace.readText('SOUL.md'))) ?? ''
@@ -1245,7 +1269,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.config()
     if (config !== undefined) {
       const channelId = config.discordChannel ?? ''
-      const discord = new DiscordChannel(config.ownerId, channelId === '' ? null : channelId, { post: (memberId, channel, text, replyTo) => this.home().discordPost(memberId, channel, text, replyTo) })
+      const discord = new DiscordChannel(config.ownerId, channelId === '' ? null : channelId, { post: (memberId, channel, text, replyTo, files) => this.home().discordPost(memberId, channel, text, replyTo, files) })
       channels.set(discord.id, discord)
     }
     return channels
@@ -1341,20 +1365,147 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     })
   }
 
-  /** Replies of a Turn go back out as recipientsOf decides: to where the question came from, or unasked to the opted-in Channels. */
-  private async deliverReplies(wakeup: Wakeup, startSeq: number): Promise<void> {
-    const config = this.store.requireConfig()
-    // A webhook has nobody to answer: its Turn replies like a Task's (app, and the Channels that opted in).
+  /**
+   * Where a say of the running Turn goes (recipientsOf decides the rest): back to where the question came from, else unasked to
+   * the Channels that opted in. A webhook has nobody to answer: its Turn speaks like a Task's (the app, and the Channels that opted in).
+   */
+  private turnVoice(wakeup: Wakeup): { route: ReplyRoute | null; unprompted: boolean } {
     const steered = this.store.get<ReplyRoute>(`steer-route:${wakeup.id}`)
-    this.store.delete(`steer-route:${wakeup.id}`)
     const own = (wakeup.payload['route'] as ReplyRoute | undefined) ?? null
     const stored = own === null || own.channel === 'webhook' ? steered ?? own : own
     const route = stored?.channel === 'webhook' ? null : stored
     const unprompted = steered === undefined && wakeup.kind !== 'member' && (wakeup.kind !== 'channel' || stored?.channel === 'webhook')
-    const replies = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
-    for (const item of replies) {
-      if (item.kind !== 'reply') continue
-      await this.sendToChannels({ kind: 'reply', id: item.id, robotId: config.id, robotName: config.identity.name, text: this.mask(item.text), route, final: item === replies.at(-1), unprompted })
+    return { route, unprompted }
+  }
+
+  /**
+   * The voice (v1.15 ticket 01, gb-s81e): one say is one message. A bad attachment or Channel fails the call before anything is
+   * shown. Then the record goes into the log, which is what the Conversation shows at once, and the message goes out on the
+   * Channel the Wake-up came from (or the one named). A Channel that fails never fails the Turn.
+   */
+  async say(input: { readonly text: string; readonly attachments: readonly string[]; readonly channel?: string }, exec: ToolRunContext): Promise<{ readonly said: true; readonly attachments: number }> {
+    const config = this.store.requireConfig()
+    const session = exec.agent?.session
+    if (session === undefined) throw new Error('say: only the Robot speaks; there is no Conversation to say it in')
+    if (input.attachments.length > SAY_MAX_ATTACHMENTS) throw new Error(`say: at most ${SAY_MAX_ATTACHMENTS} attachments in one message; say the rest in another`)
+    const files = await Promise.all(input.attachments.map((reference) => this.sayFile(reference)))
+    const active = this.store.activeTurn()
+    const wakeup = active === undefined ? undefined : this.store.wakeup(active.wakeupId)
+    const heard = wakeup === undefined ? { route: null, unprompted: false } : this.turnVoice(wakeup)
+    const route = input.channel === undefined ? heard.route : this.sayChannel(config, input.channel, heard.route)
+    const record: SayRecord = { id: `say-${String(exec.callId)}`, text: input.text, attachments: files.map((file) => file.attachment), ...(input.channel === undefined ? {} : { channel: input.channel }) }
+    await this.emitSay(session, record, files.map((file) => file.channelFile), route, input.channel === undefined && heard.unprompted)
+    // The owner has heard from this Turn: no steer for the quiet (gb-0skq).
+    this.store.delete(QUIET_DUE)
+    return { said: true, attachments: files.length }
+  }
+
+  /** The record is what the Conversation shows at once; the Channels follow, and one that fails never fails the Turn. */
+  private async emitSay(session: Agent['session'], record: SayRecord, files: readonly ChannelFile[], route: ReplyRoute | null, unprompted: boolean): Promise<void> {
+    const config = this.store.requireConfig()
+    appendPluginRecord(session, SAY_RECORD as never, record as never)
+    await this.loadSecretMasks()
+    await this.sendToChannels({ kind: 'reply', id: record.id, robotId: config.id, robotName: config.identity.name, text: this.mask(record.text), attachments: files, route, unprompted })
+  }
+
+  // ---------------------------------------------------------------- the safety net (v1.15 ticket 02)
+
+  /** Whether the Robot said something in these events. */
+  private said(events: readonly SessionEvent[]): boolean {
+    return events.some((event) => sayOf(event) !== undefined && sayOf(event)!.fallback !== true)
+  }
+
+  /** Whether it reacted to the owner's message (the 👍 of "needs no answer") and wrote no text at all: the reaction was its answer. */
+  private reactedOnly(events: readonly SessionEvent[]): boolean {
+    const reacted = events.some((event) => (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch') && (event.data as { name?: unknown }).name === 'react')
+    return reacted && !events.some((event) => event.type === 'assistant/message' && ((event.data as unknown as { message?: { content?: ReadonlyArray<{ type: string; text?: string }> } }).message?.content ?? []).some((block) => block.type === 'text' && (block.text ?? '').trim() !== ''))
+  }
+
+  /**
+   * A Turn that ends without a say (gb-xgd7, gb-7jqy, gb-3gp2): one bounded platform step tells the Robot to speak or end. When the
+   * owner caused the Turn and the step stays silent, the last assistant text of the Turn is shown as the reply and marked as a
+   * fallback; with no text at all nothing is sent. Turns nobody asked for (Tasks, Robot messages, Subagent reports, notices) get the
+   * step and never the fallback: silence is a result there.
+   */
+  private async speakUp(wakeup: Wakeup, agent: Agent, ctx: Composition['ctx']): Promise<void> {
+    const config = this.store.requireConfig()
+    const active = this.store.activeTurn()
+    if (active === undefined || (config.status !== 'active' && config.status !== 'setup') || this.store.get(INTERRUPTED_BY) !== undefined) return
+    await ctx.sessions.flush(agent.session)
+    const turn = readStoredEvents(this.ctx.storage.sql, config.liveSessionId, active.startSeq)
+    if (this.said(turn) || this.reactedOnly(turn) || turn.some((event) => event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')) return
+    const stepStart = storedLength(this.ctx.storage.sql, config.liveSessionId)
+    let steps = 0
+    const stop = ctx.on('session/event', (session, event) => {
+      if (session === agent.session && event.type === 'step/start' && ++steps >= SAFETY_NET_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
+    })
+    try {
+      agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: safetyNetNote(this.owner().name), summary: '' }))
+      await agent.whenIdle()
+    } finally {
+      stop()
+    }
+    await ctx.sessions.flush(agent.session)
+    const step = readStoredEvents(this.ctx.storage.sql, config.liveSessionId, stepStart)
+    if (this.said(step) || !(causedByOwner(wakeup, config.ownerId) || this.store.get(`owner-steered:${wakeup.id}`) === true)) return
+    const textOf = (events: readonly SessionEvent[]) => events.filter((event) => event.type === 'assistant/message')
+      .map((event) => ((event.data as unknown as { message?: { content?: ReadonlyArray<{ type: string; text?: string }> } }).message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim())
+      .filter((text) => text !== '').at(-1)
+    const last = textOf(turn.filter((event) => event.seq < stepStart)) ?? textOf(step)
+    if (last === undefined) return
+    const heard = this.turnVoice(wakeup)
+    await this.emitSay(agent.session, { id: `fallback-${wakeup.id}`, text: last, attachments: [], fallback: true }, [], heard.route, false)
+  }
+
+  /** The alarm: an owner Turn that has said nothing for ten minutes gets one steer, once (gb-0skq). */
+  private quietSteer(now: number): void {
+    const due = this.store.get<{ wakeupId: number; at: number }>(QUIET_DUE)
+    if (due === undefined) return
+    const active = this.store.activeTurn()
+    if (active === undefined || active.wakeupId !== due.wakeupId) return this.store.delete(QUIET_DUE)
+    if (due.at > now) return
+    this.store.delete(QUIET_DUE)
+    const agent = this.runningAgent
+    const config = this.store.requireConfig()
+    if (agent === undefined || agent.status !== 'running' || this.said(readStoredEvents(this.ctx.storage.sql, config.liveSessionId, active.startSeq))) return
+    agent.steer(wakeupMessage({ sender: { kind: 'platform' }, text: quietSteerNote(this.owner().name), summary: '' }))
+  }
+
+  /** The Channel a say names: only the Discord channel the owner enabled for this Robot, or the one the Wake-up came from. */
+  private sayChannel(config: RobotConfig, channel: string, heard: ReplyRoute | null): ReplyRoute {
+    const own = config.discordChannel ?? ''
+    if (channel === own && own !== '') return heard?.channel === 'discord' && heard.address === channel ? heard : { channel: 'discord', address: channel }
+    if (heard?.channel === 'discord' && heard.address === channel) return heard
+    throw new Error(`say: you may speak on ${own === '' ? 'no Channel but the one your Wake-up came from' : `your Discord channel (${own}) and the one your Wake-up came from`}. ${this.owner().name} enables a Discord channel for you in your profile.`)
+  }
+
+  /** One attachment of a say: a Workspace file or a stored screenshot, checked now, handed over by reference. */
+  private async sayFile(reference: string): Promise<{ attachment: Attachment; channelFile: ChannelFile }> {
+    const id = this.store.requireConfig().id
+    const origin = await this.home().appOrigin()
+    if (reference.startsWith(SCREEN_PREFIX)) {
+      const name = reference.slice(SCREEN_PREFIX.length)
+      const shot = await readScreenshot(this.env.FILES, id, name)
+      if (shot === undefined) throw new Error(`say: no screenshot "${reference}". Take one with browser_screenshot and attach it by the id it gives (screen:<name>).`)
+      const contentType = shot.contentType || 'image/png'
+      return {
+        attachment: { name, path: reference, size: shot.body.byteLength, contentType },
+        channelFile: { name, contentType, size: shot.body.byteLength, link: origin === null ? null : `${origin}/api/robots/${encodeURIComponent(id)}/attachments/${encodeURIComponent(reference)}`, read: async () => new Uint8Array(shot.body) },
+      }
+    }
+    const path = normalizePath(reference)
+    if (path === undefined || isDocsPath(path)) throw new Error(`say: "${reference}" is not a file of your Workspace. Attach a path you wrote or received, or a screenshot by its id.`)
+    const entry = await this.run(this.workspace.stat(path))
+    if (entry === undefined) throw new Error(`say: no file "${path}" in your Workspace. Write it first, then attach it.`)
+    const name = path.split('/').pop() ?? path
+    const contentType = mediaTypeOf(path)
+    return {
+      attachment: { name, path, size: entry.size, contentType },
+      channelFile: {
+        name, contentType, size: entry.size,
+        link: origin === null ? null : `${origin}/#/r/${encodeURIComponent(id)}/files/${path.split('/').map(encodeURIComponent).join('/')}`,
+        read: async () => new Uint8Array((await this.run(this.workspace.read(path)))?.body ?? new ArrayBuffer(0)),
+      },
     }
   }
 
@@ -1430,7 +1581,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** A Turn failed: a limited or broken account moves the Robot down its chain and the work goes on (pa-kvsr, pa-q0dg). */
-  private async chainFailure(startSeq: number): Promise<void> {
+  private async chainFailure(startSeq: number, byOwner: boolean): Promise<void> {
     const config = this.store.requireConfig()
     const end = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
       .filter((event) => event.seq >= startSeq && event.type === 'turn/end').at(-1)
@@ -1451,7 +1602,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.activeIndex(chain) === before) return
     // The work goes on with the next entry; the failed wake-up is not run again from the start.
     this.store.delete('failed-wakeup')
-    this.store.enqueue('platform', { kind: 'platform' }, 'The previous model call failed because its account was unavailable; the Robot now runs on the next entry of its model chain. Continue the work from where it stopped; do not redo finished steps.', {}, Date.now())
+    this.store.enqueue('platform', { kind: 'platform' }, 'The previous model call failed because its account was unavailable; the Robot now runs on the next entry of its model chain. Continue the work from where it stopped; do not redo finished steps.', byOwner ? { byOwner: true } : {}, Date.now())
   }
 
   /** A good Turn on an account marked limited or broken: it works again (pa-gqff, pa-bc78). */
@@ -1471,8 +1622,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (at === undefined || at > now) return
     this.store.delete('chain-resume-at')
     if (this.store.get('failed-wakeup') !== undefined || this.store.pendingWakeups() === 0) {
+      // The work it goes on with was the owner's, if the Wake-up that failed was.
+      const failed = this.store.get<Pick<Wakeup, 'kind' | 'sender' | 'payload'>>('failed-wakeup')
+      const byOwner = failed !== undefined && causedByOwner(failed as Wakeup, this.store.requireConfig().ownerId)
       this.store.delete('failed-wakeup')
-      this.store.enqueue('platform', { kind: 'platform' }, 'Your model chain is usable again. Continue the work from where it stopped; do not redo finished steps.', {}, now)
+      this.store.enqueue('platform', { kind: 'platform' }, 'Your model chain is usable again. Continue the work from where it stopped; do not redo finished steps.', byOwner ? { byOwner: true } : {}, now)
     }
   }
 
@@ -1660,9 +1814,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected mounts(config: RobotConfig): Mount[] {
     const mounts: Mount[] = [mount(Credentials, { source: this.credentials() })]
     if (config.status === 'setup') {
-      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
+      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
-    mounts.push(mount(ConversationPlugin, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), ...(config.kind === 'mr-robot' ? [] : [mount(Help, { host: this })]), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
+    mounts.push(mount(ConversationPlugin, { host: this }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), ...(config.kind === 'mr-robot' ? [] : [mount(Help, { host: this })]), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
     const grants = this.store.effectiveGrants()
     // Plugins the Home switched off are not mounted for anyone (cn-dbm9).
@@ -3520,7 +3674,7 @@ const RESTART_NOTE = 'Your previous Turn was interrupted by a platform restart. 
  */
 const SUBAGENT_DENIED_TOOLS = [
   ...SUBAGENT_TOOL_NAMES, 'robot_send', 'robot_directory', 'robot_reply', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list',
-  'memory_write_shared', 'propose_member_file_edit', 'propose_grants', 'propose_review', 'need_help', 'react', 'browser_request_takeover',
+  'memory_write_shared', 'propose_member_file_edit', 'propose_grants', 'propose_review', 'need_help', 'react', 'say', 'browser_request_takeover',
   'task_focus', 'task_done', 'set_identity', 'setup_complete', 'robot_propose_grants',
 ]
 /** The session record of an Auto review decision (ao-jn6z): the Trajectory shows it on the reviewed call. */

@@ -289,13 +289,13 @@ describe('the time of a Wake-up (sk-nitq)', () => {
 
   it('a Task Wake-up has the time in front of its label, on the same line', async () => {
     const id = await activeRobot({})
-    scripts.set(id, [{ text: 'Checked.' }])
+    scripts.set(id, [{ say: 'Checked.' }])
     const before = Date.now()
     await api(ANNA, '/api/tasks', { body: { title: 'Pulse', instructions: 'Check prices.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } } })
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
     const after = Date.now()
-    const wake = JSON.stringify(lastRequest(id).messages.at(-1))
+    const wake = JSON.stringify(lastRequest(id).messages.filter((message) => message.role === 'user').at(-1))
     const found = /"text":"\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) Europe\/Warsaw\] \[Task \\"Pulse\\" \([^)]+\) is due\. Nobody is watching this turn\. When the Task is finished, call task_done\.\]\\n/.exec(wake)
     expect(found, wake).not.toBeNull()
     expect([warsaw(before), warsaw(after)]).toContain(found![1])

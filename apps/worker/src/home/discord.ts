@@ -8,7 +8,7 @@
  * the bot's token after about 1000 connections in a short time).
  */
 import * as Effect from 'effect/Effect'
-import { discordPostMessage } from '../connectors/discord.ts'
+import { discordPostMessage, type DiscordFile } from '../connectors/discord.ts'
 import { closeVerdict, GATEWAY_URL, gatewayStep, heartbeat, initialGateway, nextConnectAt, readPayload, resumeAddress, type GatewayMessage, type GatewayState } from '../connectors/discord-gateway.ts'
 
 export interface BotConnection {
@@ -55,10 +55,10 @@ export class DiscordAtHome {
   }
 
   /** Post text with the Home's bot (the Channel side). */
-  async post(memberId: string, channelId: string, text: string, replyTo?: string): Promise<boolean> {
+  async post(memberId: string, channelId: string, text: string, replyTo?: string, files: readonly DiscordFile[] = []): Promise<boolean> {
     const bot = await this.bot(memberId)
     if (bot === null) return false
-    const outcome = await Effect.runPromise(Effect.result(discordPostMessage(this.fetch, bot.token, channelId, text, replyTo)))
+    const outcome = await Effect.runPromise(Effect.result(discordPostMessage(this.fetch, bot.token, channelId, text, replyTo, files)))
     if (outcome._tag === 'Failure') {
       console.warn('discord post failed', outcome.failure._tag, outcome.failure.message)
       return false

@@ -47,7 +47,8 @@ async function shopperAtLogin(): Promise<string> {
   scripts.set(body.id, [
     { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] },
     { calls: [{ name: 'browser_request_takeover', args: { reason: 'Please log in to the shop.' } }] },
-    { text: 'Waiting for you to log in.' },
+    { calls: [{ name: 'say', args: { text: 'Waiting for you to log in.' } }] },
+    { text: '' },
   ])
   await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'buy coffee' } })
   await settle(body.id)
@@ -80,7 +81,7 @@ describe('live view and takeover', () => {
     const anna = await connect(ANNA, id)
     await anna.send({ type: 'claim' })
     await vi.waitFor(() => expect(anna.received.some((message) => message['type'] === 'claimed')).toBe(true))
-    scripts.set(id, [{ text: 'Logged in; paying with the other card.' }, { text: 'nothing else' }])
+    scripts.set(id, [{ say: 'Logged in; paying with the other card.' }, { text: 'nothing else' }])
     await anna.send({ type: 'handback' })
     await vi.waitFor(async () => {
       await settle(id)
@@ -102,7 +103,7 @@ describe('live view and takeover', () => {
     await abortAllDurableObjects()
     const viewer = await connect(ANNA, id)
     await viewer.send({ type: 'live', on: true })
-    expect(browserLog).toContain('attach')
+    await vi.waitFor(() => expect(browserLog).toContain('attach'), { timeout: 10_000 })
     await vi.waitFor(() => expect(viewer.received.some((message) => message['type'] === 'frame')).toBe(true))
   })
 
@@ -159,9 +160,10 @@ describe('live view and takeover', () => {
     await anna.send({ type: 'claim' })
     scripts.set(id, [{ text: 'Continuing.' }])
     anna.socket.close()
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    await settle(id)
-    expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.takeover).toBeNull()
+    await vi.waitFor(async () => {
+      await settle(id)
+      expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.takeover).toBeNull()
+    }, { timeout: 10_000 })
 
     const ben = await connect(BEN, id)
     let closed = false

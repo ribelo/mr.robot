@@ -4,13 +4,17 @@
  * the final reply goes back to the place and the message it came from. What the Robot says unasked
  * goes to its own channel when it has one and the owner allows it (see recipientsOf in channel.ts).
  */
+import type { DiscordFile } from '../connectors/discord.ts'
 import type { ChannelAdapter, ChannelOutput, InboundEvent, InboundWakeup } from './channel.ts'
 import { channelSender } from './channel.ts'
 
 export interface DiscordSender {
   /** Post text to a Discord channel with the bot's token, as a reply to `replyTo` when given; true when it all went out. */
-  post(memberId: string, channelId: string, text: string, replyTo?: string): Promise<boolean>
+  post(memberId: string, channelId: string, text: string, replyTo?: string, files?: readonly DiscordFile[]): Promise<boolean>
 }
+
+/** The largest file uploaded to Discord; a bigger one is offered as a link into the app (v1.15, gb-s6lx). */
+export const DISCORD_UPLOAD_LIMIT = 8 * 1024 * 1024
 
 export class DiscordChannel implements ChannelAdapter {
   readonly id = 'discord'
@@ -38,7 +42,12 @@ export class DiscordChannel implements ChannelAdapter {
       const route = output.route?.channel === this.id ? output.route : null
       const address = route?.address ?? this.channelId
       if (address === null) return false
-      return this.sender.post(this.ownerId, address, output.text, route?.messageId)
+      // A small file goes up with the message; a big one is a link into the app.
+      const small = output.attachments.filter((file) => file.size <= DISCORD_UPLOAD_LIMIT)
+      const big = output.attachments.filter((file) => file.size > DISCORD_UPLOAD_LIMIT)
+      const text = [output.text, ...big.map((file) => `${file.name}: ${file.link ?? 'too big to send here; open it in Mr. Robot'}`)].join('\n')
+      const files = await Promise.all(small.map(async (file): Promise<DiscordFile> => ({ name: file.name, contentType: file.contentType, bytes: await file.read() })))
+      return this.sender.post(this.ownerId, address, text, route?.messageId, files)
     }
     // A notification has no route: it goes to the Robot's own channel.
     if (this.channelId === null) return false

@@ -4,9 +4,9 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: an owner Turn without say gets the step; a scripted say in the step ends it without a fallback; no say yields a fallback reply flagged in the item and the Trajectory; a Turn with no assistant text sends nothing (gb-xgd7, gb-7jqy)
-- [ ] Workerd test: a Task Turn without say gets the step and no fallback (gb-3gp2)
-- [ ] Workerd test: the ten-minute alarm injects one steer and not a second one in the same Turn; a say before the alarm cancels it (gb-0skq)
-- [ ] The Trajectory shows the fallback marker; the Conversation shows the reply as any other
+- [x] Workerd test: an owner Turn without say gets the step; a scripted say in the step ends it without a fallback; no say yields a fallback reply flagged in the item and the Trajectory; a Turn with no assistant text sends nothing (gb-xgd7, gb-7jqy)
+- [x] Workerd test: a Task Turn without say gets the step and no fallback (gb-3gp2)
+- [x] Workerd test: the ten-minute alarm injects one steer and not a second one in the same Turn; a say before the alarm cancels it (gb-0skq)
+- [x] The Trajectory shows the fallback marker; the Conversation shows the reply as any other

@@ -277,6 +277,36 @@ export function ReviewList({ reviews }: { reviews: readonly ReviewRow[] }) {
   )
 }
 
+/** A reply the platform showed in place of a say (v1.15 ticket 02, gb-7jqy): the Turn ended without one, and its last assistant text was shown instead. */
+export interface FallbackRow {
+  readonly seq: number
+  readonly text: string
+}
+
+/** The fallback replies among the session's events, in log order. */
+export function fallbacksOf(events: SessionEventsPage['events']): FallbackRow[] {
+  return events.flatMap((event) => {
+    if ((event.type as string) !== 'plugin:mr-robot/say') return []
+    const data = (event as unknown as { data: Record<string, unknown> }).data
+    return data['fallback'] === true ? [{ seq: event.seq, text: String(data['text'] ?? '') }] : []
+  })
+}
+
+/** Where the Robot never said it: the platform showed the last assistant text of the Turn as the reply. */
+export function FallbackList({ fallbacks }: { fallbacks: readonly FallbackRow[] }) {
+  if (fallbacks.length === 0) return null
+  return (
+    <details className="dsh-reviews">
+      <summary>Fallback replies · {fallbacks.length}</summary>
+      <ul aria-label="Fallback replies">
+        {fallbacks.map((row) => (
+          <li key={row.seq}>The Turn ended without a say; its last assistant text was shown as the reply: “{row.text.length > 200 ? `${row.text.slice(0, 200)}…` : row.text}”</li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 export function RobotTrajectory({ robotId, liveVersion, child }: { robotId: string; liveVersion: number; child?: string }) {
   const key = sourceKey(robotId, child)
   const state = useAtomValue(trajectoryStateAtom(key))
@@ -305,6 +335,7 @@ export function RobotTrajectory({ robotId, liveVersion, child }: { robotId: stri
     <div className="dsh-trajectory">
       {child === undefined ? <DelegationList robotId={robotId} /> : null}
       <ReviewList reviews={reviewsOf(windowOf(key).events)} />
+      <FallbackList fallbacks={fallbacksOf(windowOf(key).events)} />
       <TrajectoryView
         useSession={useSession}
         useTrajectory={useTrajectory}

@@ -286,7 +286,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
 
   it("a message in a robot's channel wakes it and the final reply goes back there as a reply to the message", async () => {
     const id = await discordRobot()
-    scripts.set(id, [{ text: 'The flat on Prosta is still free.' }])
+    scripts.set(id, [{ say: 'The flat on Prosta is still free.' }])
     expect(await env.HOME.getByName('home').discordReceived(incoming('M-in', 'any news?'), annaId)).toBe(id)
     await settle(id)
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
@@ -298,14 +298,17 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     expect(postsTo('C-robot')).toHaveLength(1)
   })
 
-  it('a Turn woken on Discord posts only its final reply, and no "finished" notification', async () => {
+  it('a Turn woken on Discord posts every say to the message it answers, and no "finished" notification', async () => {
     const id = await discordRobot()
-    scripts.set(id, [{ text: "I'll check the listings.", calls: [{ name: 'react', args: { emoji: '👀' } }] }, { text: 'Two flats match.' }])
+    scripts.set(id, [{ calls: [{ name: 'say', args: { text: "I'll check the listings." } }] }, { calls: [{ name: 'say', args: { text: 'Two flats match.' } }] }, { text: '' }])
     await env.HOME.getByName('home').discordReceived(incoming('M-ask', 'what is new?'), annaId)
     await settle(id)
     const replies = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'reply').slice(-2)
     expect(replies.map((item) => item.kind === 'reply' ? item.text : '')).toEqual(["I'll check the listings.", 'Two flats match.'])
-    expect(postsTo('C-robot')).toEqual([{ content: 'Two flats match.', message_reference: { message_id: 'M-ask', channel_id: 'C-robot', fail_if_not_exists: false } }])
+    expect(postsTo('C-robot')).toEqual([
+      { content: "I'll check the listings.", message_reference: { message_id: 'M-ask', channel_id: 'C-robot', fail_if_not_exists: false } },
+      { content: 'Two flats match.', message_reference: { message_id: 'M-ask', channel_id: 'C-robot', fail_if_not_exists: false } },
+    ])
   })
 
   it('a message written in the app never reaches Discord, whatever the old channel list says', async () => {
@@ -328,13 +331,13 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   const taskRobot = (settings: Record<string, unknown>): Promise<string> => discordRobot(settings)
   /** A scheduled Task of the Robot comes due: a Turn nobody asked for. */
   const runTask = async (id: string) => {
-    scripts.set(id, [{ text: 'Checked: nothing new.' }])
+    scripts.set(id, [{ say: 'Checked: nothing new.' }])
     await api(ANNA, '/api/tasks', { body: { title: 'Flat check', instructions: 'Look at the listings.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000 } } })
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
   }
 
-  it('a Task nobody asked for posts its final reply to the channel while "also send its own messages" is on', async () => {
+  it('a Task nobody asked for posts what it says to the channel while "also send its own messages" is on', async () => {
     const id = await taskRobot({})
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.discordProactive).toBe(true)
     await runTask(id)
@@ -346,7 +349,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     await runTask(id)
     expect(postsTo('C-robot')).toEqual([])
     // Replies to Discord messages still go back.
-    scripts.set(id, [{ text: 'Still nothing.' }])
+    scripts.set(id, [{ say: 'Still nothing.' }])
     await env.HOME.getByName('home').discordReceived(incoming('M-q', 'and now?'), annaId)
     await settle(id)
     expect(postsTo('C-robot')).toEqual([{ content: 'Still nothing.', message_reference: { message_id: 'M-q', channel_id: 'C-robot', fail_if_not_exists: false } }])
@@ -357,7 +360,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     const paragraphs = Array.from({ length: 12 }, (_, index) => `Paragraph ${index + 1}: ` + 'word '.repeat(70).trim() + '.')
     const long = paragraphs.join('\n\n')
     expect(long.length).toBeGreaterThan(4000)
-    scripts.set(id, [{ text: long }])
+    scripts.set(id, [{ say: long }])
     await env.HOME.getByName('home').discordReceived(incoming('M-long', 'tell me everything'), annaId)
     await settle(id)
     const posts = postsTo('C-robot')
@@ -373,7 +376,8 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     const robots = (await api<Array<{ id: string; kind: string }>>(ANNA, '/api/robots')).body
     const mrRobot = robots.find((robot) => robot.kind === 'mr-robot')!.id
     expect((await api<RobotPanel>(ANNA, `/api/robots/${mrRobot}/panel`)).body.settings.discordChannel).toBeNull()
-    scripts.set(mrRobot, [{ text: 'Hi Anna, on it.' }])
+    await api(ANNA, `/api/robots/${mrRobot}/settings`, { method: 'PATCH', body: { codeMode: false } })
+    scripts.set(mrRobot, [{ say: 'Hi Anna, on it.' }])
     expect(await env.HOME.getByName('home').discordReceived({ id: 'M-dm', channelId: 'D-anna', guildId: null, authorId: 'U-anna', authorName: 'Anna', text: 'hello from my phone', direct: true }, annaId)).toBe(mrRobot)
     await settle(mrRobot)
     expect(postsTo('D-anna')).toEqual([{ content: 'Hi Anna, on it.', message_reference: { message_id: 'M-dm', channel_id: 'D-anna', fail_if_not_exists: false } }])

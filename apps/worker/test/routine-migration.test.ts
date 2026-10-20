@@ -59,10 +59,10 @@ describe('Routines become Tasks (v1.13 ticket 05)', () => {
     await testRobot(id).seedRoutineItemsForTest('schedule-1', 'Digest')
     const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
     expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'task', action: 'created', title: 'Digest', by: 'Mr. Robot' })]))
-    scripts.set(id, [{ text: 'Digest sent again.' }])
+    scripts.set(id, [{ say: 'Digest sent again.' }])
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
-    expect(JSON.stringify(requests.get(id)!.at(-1)!.messages.at(-1))).toContain('Task \\"Digest\\" (schedule-1) is due')
+    expect(JSON.stringify(requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'user').at(-1))).toContain('Task \\"Digest\\" (schedule-1) is due')
     expect((await api<TaskPage>(ANNA, `/api/tasks?assignee=robot:${id}&state=all`)).body.tasks.find((task) => task.id === 'schedule-1')!.attempts[0]).toMatchObject({ outcome: 'ok', firstLine: 'Digest sent again.' })
 
     // Migrating again changes nothing.

@@ -182,7 +182,7 @@ describe('cascades, cost and masking (ao-qy77, ao-3pl8, ao-xl6g, ao-2fgp, ao-6bo
     await until(async () => expect((await list(id))[0]!.status).toBe('interrupted'))
 
     scripts.set(sub(id), [{ hang: true }])
-    await say(id, 'once more', [{ calls: [delegate('Second read')] }, { text: 'Started.' }])
+    await say(id, 'once more', [{ calls: [delegate('Second read')] }, { say: 'Started.' }])
     const turns = (await env.ROBOT.getByName(id).trajectory()).filter((event) => event.type === 'turn/start').length
     const rewound = await api(ANNA, `/api/robots/${id}/rewind`, { body: { beforeTurn: turns } })
     expect(rewound.status, JSON.stringify(rewound.body)).toBe(200)

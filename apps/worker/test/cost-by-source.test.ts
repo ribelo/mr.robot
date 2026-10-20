@@ -57,7 +57,8 @@ describe('cost by source (ao-zbld, ao-ef5t, ao-ypas)', () => {
     await env.ROBOT.getByName(id).recordExa(0.25)
 
     const robot = await breakdownOf(id)
-    expect(robot.model.robot - before.model.robot).toBeCloseTo(1.2, 5)
+    // Three requests at $0.60: the browser call, the reply, and the platform step that follows a Turn that said nothing.
+    expect(robot.model.robot - before.model.robot).toBeCloseTo(1.8, 5)
     expect(robot.browser).toBeCloseTo(0.09, 3)
     expect(robot.services).toBeCloseTo(0.25, 5)
     expect([robot.model.review, robot.model.subagent, robot.box]).toEqual([0, 0, 0])
@@ -81,19 +82,19 @@ describe('cost by source (ao-zbld, ao-ef5t, ao-ypas)', () => {
 
 describe('the spend limit counts every source (ao-nkkb)', () => {
   it('model cost under the limit and a service cost under the limit together block the Robot', async () => {
-    await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { robotSpendLimit: { kind: 'usd', amount: 2 } } })
+    await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { robotSpendLimit: { kind: 'usd', amount: 4 } } })
     const id = await robotWith([])
     const status = async () => (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.summary.status
-    await env.ROBOT.getByName(id).recordExa(0.9)
+    await env.ROBOT.getByName(id).recordExa(2)
     expect(await status()).toBe('active')
     scripts.set(id, [{ text: 'Done.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
     await settle(id)
     const after = await breakdownOf(id)
     // Neither the model nor the service line alone reaches the limit; their sum does.
-    expect(after.model.robot).toBeLessThan(2)
-    expect(after.services).toBeLessThan(2)
-    expect(after.total).toBeGreaterThan(2)
+    expect(after.model.robot).toBeLessThan(4)
+    expect(after.services).toBeLessThan(4)
+    expect(after.total).toBeGreaterThan(4)
     expect(await status()).toBe('blocked')
   })
 })

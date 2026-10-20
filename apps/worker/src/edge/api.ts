@@ -165,6 +165,8 @@ export const api = new Router<ApiContext>()
   // ------------------------------------------------------------ me
   .on('GET', '/api/me', (c) => call(async (): Promise<Me> => {
     const member = c.env.MEMBER.getByName(c.member.id)
+    // Channels link into the app by the address it is opened at (v1.15).
+    await home(c.env).rememberOrigin(new URL(c.request.url).origin)
     // The app tells its zone each time it opens; anything that is not a zone is ignored.
     const reported = parseTimeZone(c.request.headers.get(TIME_ZONE_HEADER) ?? '')
     const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))

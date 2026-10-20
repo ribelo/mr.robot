@@ -4,8 +4,8 @@ Spec: ../mr-robot-v1.15.md. Frontier at the start: 01, 03, 05, 06, 08, 10, 11 in
 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
-| 01 | [say](01-say-the-voice.md) | — | ready-for-agent |
-| 02 | [The safety net](02-safety-net.md) | 01 | ready-for-agent |
+| 01 | [say](01-say-the-voice.md) | — | done |
+| 02 | [The safety net](02-safety-net.md) | 01 | done |
 | 03 | [ask: one question to the owner](03-ask-the-owner.md) | — | ready-for-agent |
 | 04 | [The chief question and the end of need_help](04-chief-question.md) | 03 | ready-for-agent |
 | 05 | [request_credential](05-request-credential.md) | — | ready-for-agent |

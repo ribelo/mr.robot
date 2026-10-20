@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react'
 import { useMeasuredRows, useRowWindow } from './row-window.ts'
-import type { ChatItem, GrantLevels, ProposalView, TaskAction, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
+import type { Attachment, ChatItem, GrantLevels, ProposalView, TaskAction, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
 import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
@@ -180,7 +180,7 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
       )
     }
     case 'reply':
-      return <div className="row"><div className="bubble bubble-robot" style={robotTint(robotColor)}><Markdown text={item.text} /></div></div>
+      return <div className="row"><div className="bubble bubble-robot" style={robotTint(robotColor)}><Markdown text={item.text} />{item.attachments === undefined || item.attachments.length === 0 ? null : <ReplyAttachments attachments={item.attachments} {...(robotId === undefined ? {} : { robotId })} />}</div></div>
     case 'task':
       return (
         <div className="chat-separator task-line">
@@ -207,6 +207,34 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, level, robotId, robotCo
     case 'delegation':
       return <DelegationCard item={item} {...(robotId === undefined ? {} : { robotId })} />
   }
+}
+
+/**
+ * The files a say handed over (v1.15, gb-ekga): an image inside the message, any other file as a card to open or download.
+ * A stored screenshot has the path `screen:<name>`; a Workspace file its path.
+ */
+export function ReplyAttachments({ attachments, robotId }: { attachments: readonly Attachment[]; robotId?: string }) {
+  const url = (file: Attachment, download = false) => file.path.startsWith('screen:')
+    ? `/api/robots/${encodeURIComponent(robotId ?? '')}/attachments/${encodeURIComponent(file.path)}`
+    : `/api/robots/${encodeURIComponent(robotId ?? '')}/raw?path=${encodeURIComponent(file.path)}${download ? '&download=1' : ''}`
+  return (
+    <div className="attachments reply-attachments">
+      {attachments.map((file) => robotId === undefined
+        ? <span key={file.path} className="attachment">📎 {file.name}</span>
+        : file.contentType.startsWith('image/')
+          ? <a key={file.path} className="reply-image-link" href={url(file)} target="_blank" rel="noreferrer"><img className="reply-image" src={url(file)} alt={file.name} loading="lazy" /></a>
+          : (
+            <span key={file.path} className="attachment file-card">
+              <a href={url(file)} target="_blank" rel="noreferrer">📎 {file.name}</a> <small className="muted">{formatSize(file.size)}</small>{' '}
+              <a className="attachment-download" href={url(file, true)} download aria-label={`Download ${file.name}`}>↓</a>
+            </span>
+          ))}
+    </div>
+  )
+}
+
+function formatSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 const DELEGATION_STATES: Record<Extract<ChatItem, { kind: 'delegation' }>['status'], string> = { running: 'working', done: 'done', interrupted: 'interrupted', failed: 'failed', archived: 'archived' }

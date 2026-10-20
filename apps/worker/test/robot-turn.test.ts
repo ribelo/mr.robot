@@ -6,13 +6,14 @@ import { scripts } from './stub-llm.ts'
 
 describe('a Robot runs a Turn', () => {
   it('answers a message and keeps it in its Conversation (robot-frf5, robot-q4b2)', async () => {
-    scripts.set('r-answer', [{ text: 'Hello, owner.' }])
+    scripts.set('r-answer', [{ say: 'Hello, owner.' }])
     const r = await robot('r-answer')
     await r.wake(say('Hi'))
     await r.settled()
     const { items } = await r.conversation()
+    // The Robot runs in code mode: it said it from a program, which the chat shows as its activity.
     expect(items.map((item) => item.kind === 'message' || item.kind === 'reply' ? [item.kind, item.text] : [item.kind]))
-      .toEqual([['message', 'Hi'], ['reply', 'Hello, owner.']])
+      .toEqual([['message', 'Hi'], ['reply', 'Hello, owner.'], ['activity']])
     const types = (await r.trajectory()).map((event) => event.type)
     expect(types).toContain('user/message')
     expect(types.at(-1)).toBe('turn/end')
@@ -29,7 +30,7 @@ describe('a Robot runs a Turn', () => {
   })
 
   it('appends a second Turn after the first; the log is never rewritten', async () => {
-    scripts.set('r-append', [{ text: 'one' }, { text: 'two' }])
+    scripts.set('r-append', [{ say: 'one' }, { say: 'two' }])
     const r = await robot('r-append')
     await r.wake(say('first'))
     await r.settled()

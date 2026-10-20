@@ -104,7 +104,7 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
     const [page] = [...runningSessions.values()]
     page!.shown.push({ title: 'Order 1042', body: 'Your parcel is out for delivery', at: Date.now() })
 
-    scripts.set(id, [{ text: 'Your parcel is on its way.' }])
+    scripts.set(id, [{ say: 'Your parcel is on its way.' }])
     await testRobot(id).watchDueForTest()
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
