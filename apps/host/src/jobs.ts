@@ -8,6 +8,7 @@
  * Worker gave the job; a later ticket's PowerShell passes its processes the same way.
  */
 import { open } from 'node:fs/promises'
+import * as Data from 'effect/Data'
 import type { Context } from '@deepseek-ai/cordis'
 import type { JobId } from '@deepseek-ai/dsh-jobs'
 import type { ShellExecution } from '@deepseek-ai/dsh-shell'
@@ -17,8 +18,8 @@ import { NO_SUCH_JOB, type JobEnded, type JobInfo, type JobState } from '@mr-rob
 const KEEP_ENDED = 50
 /** The most one JobOutput answer carries. */
 const PIECE_BYTES = 256 * 1024
-/** Only an id prefix in DSH's registry; the registry does not look at it. */
-const JOB_KIND = 'bash'
+/** DSH's job registry has one kind for shell commands, "bash"; a PowerShell command is filed under it too, and nothing reads the kind. */
+const SHELL_JOB_KIND = 'bash'
 
 interface Entry {
   readonly ref: string
@@ -30,10 +31,10 @@ interface Entry {
 }
 
 /** A job call that names a job this app does not hold. */
-export class NoSuchJob extends Error {
+export class NoSuchJob extends Data.TaggedError('NoSuchJob')<{ readonly message: string }> {
   readonly code = NO_SUCH_JOB
   constructor(ref: string) {
-    super(`this computer has no job ${ref}: it never ran here, or the app restarted since`)
+    super({ message: `this computer has no job ${ref}: it never ran here, or the app restarted since` })
   }
 }
 
@@ -90,7 +91,7 @@ export class HostJobs {
   start(ref: string, command: string, process: ShellExecution): void {
     this.trim()
     const id = this.ctx.jobs.start({
-      kind: JOB_KIND,
+      kind: SHELL_JOB_KIND,
       label: command,
       run: () => ({
         cancel: () => { process.kill() },

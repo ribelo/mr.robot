@@ -7,6 +7,7 @@
  */
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Queue from 'effect/Queue'
 import * as Schema from 'effect/Schema'
 import * as Rpc from 'effect/rpc/Rpc'
@@ -41,6 +42,9 @@ export const HostAccess = Schema.Struct({
   roots: Schema.Array(Schema.String),
 })
 export type HostAccess = typeof HostAccess.Type
+
+/** The longest a run waits for its command before the command goes on as a job: the tool's limit, which the Host app and the Worker both honour. */
+export const RUN_MAX_WAIT_SECONDS = 1800
 
 /** The code of the HostError a write outside the mode and roots fails with. */
 export const SANDBOX_DENIED = 'SANDBOX_DENIED'
@@ -82,9 +86,12 @@ export const Upload = Rpc.make('Upload', {
   error: HostError,
 })
 
-/** Fetch an object from R2 in ranges of `partBytes` into a file (creating its directories); the file appears only when all of it arrived. */
+/**
+ * Fetch bytes `from` to `until` of an object of `size` bytes from R2, in ranges of `partBytes`, into a file (creating its directories). A large
+ * object comes in windows, each with a fresh link; the file appears only when a window reaches the end and all of it arrived.
+ */
 export const Download = Rpc.make('Download', {
-  payload: { path: Schema.String, url: Schema.String, size: Schema.Number, partBytes: Schema.Number, access: HostAccess },
+  payload: { path: Schema.String, url: Schema.String, size: Schema.Number, partBytes: Schema.Number, from: Schema.Number, until: Schema.Number, access: HostAccess },
   success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
   error: HostError,
 })
@@ -264,33 +271,66 @@ export const Heartbeat = Schema.Struct({
 })
 export type Heartbeat = typeof Heartbeat.Type
 
+/**
+ * A heartbeat as the Worker accepts it: the fields v1.16 added are optional, so that an app from before v1.16 still shows as online.
+ * Such an app ignores the access of a call, so the Worker refuses confined calls to it (the sandbox is unknown).
+ */
+export const ReceivedHeartbeat = Schema.Struct({
+  version: Schema.String,
+  instance: Schema.optional(Schema.String),
+  platform: Schema.String,
+  hostname: Schema.String,
+  capabilities: Schema.Struct({
+    graphical: Schema.Boolean,
+    chrome: Schema.NullOr(Schema.String),
+    sandbox: Schema.optional(Sandbox),
+    shell: Schema.optional(Shell),
+    shellProblem: Schema.optional(Schema.String),
+  }),
+})
+export type ReceivedHeartbeat = typeof ReceivedHeartbeat.Type
+
+/** The heartbeat a Host stored as JSON, or undefined when it is not one. */
+export function parseHeartbeat(json: string): ReceivedHeartbeat | undefined {
+  try {
+    return Option.getOrUndefined(Schema.decodeUnknownOption(ReceivedHeartbeat)(JSON.parse(json)))
+  } catch {
+    return undefined
+  }
+}
+
 /** How often a Host sends a heartbeat, and after how long without one it counts as offline. */
 export const HEARTBEAT_MS = 15_000
 export const OFFLINE_AFTER_MS = 45_000
 
 /** A notification for the person at this computer (v1.3, pl-b5vp): shown natively, never by Web Push. */
-export interface HostNotification {
-  readonly title: string
-  readonly body: string
+export const HostNotification = Schema.Struct({
+  title: Schema.String,
+  body: Schema.String,
   /** The app path to open on click, e.g. "/#/r/<robot>". */
-  readonly url: string
-  readonly tag: string
-}
+  url: Schema.String,
+  tag: Schema.String,
+})
+export type HostNotification = typeof HostNotification.Type
 
 /** A job ended on the Host without anyone waiting for it (v1.16 ticket 03, ob-ku5j): the Worker closes it and wakes the Robot. */
-export interface JobEnded {
+export const JobEnded = Schema.Struct({
   /** The name the Worker gave the job in Run. */
-  readonly job: string
-  readonly state: 'completed' | 'killed' | 'failed'
-  readonly exitCode: number | null
-  readonly signal: string | null
-}
+  job: Schema.String,
+  state: Schema.Literals(['completed', 'killed', 'failed']),
+  exitCode: Schema.NullOr(Schema.Number),
+  signal: Schema.NullOr(Schema.String),
+})
+export type JobEnded = typeof JobEnded.Type
 
-export type Frame =
-  | { readonly t: 'rpc'; readonly d: string }
-  | { readonly t: 'hb'; readonly d: Heartbeat }
-  | { readonly t: 'notify'; readonly d: HostNotification }
-  | { readonly t: 'job'; readonly d: JobEnded }
+/** One text frame on the Host's WebSocket; an unknown `t` is not a frame, so an older or newer peer's extra frames are dropped. */
+export const Frame = Schema.Union([
+  Schema.Struct({ t: Schema.Literal('rpc'), d: Schema.String }),
+  Schema.Struct({ t: Schema.Literal('hb'), d: ReceivedHeartbeat }),
+  Schema.Struct({ t: Schema.Literal('notify'), d: HostNotification }),
+  Schema.Struct({ t: Schema.Literal('job'), d: JobEnded }),
+])
+export type Frame = typeof Frame.Type
 
 export function frame(value: Frame): string {
   return JSON.stringify(value)
@@ -298,8 +338,7 @@ export function frame(value: Frame): string {
 
 export function parseFrame(text: string): Frame | undefined {
   try {
-    const value = JSON.parse(text) as Frame
-    return value.t === 'rpc' || value.t === 'hb' || value.t === 'notify' || value.t === 'job' ? value : undefined
+    return Option.getOrUndefined(Schema.decodeUnknownOption(Frame)(JSON.parse(text)))
   } catch {
     return undefined
   }

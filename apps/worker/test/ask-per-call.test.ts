@@ -56,7 +56,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
     expect(schema?.parameters).toMatchObject({ required: expect.arrayContaining(['reason']) })
     const [ask] = await asks(id)
     expect(ask).toMatchObject({ kind: 'tool-call', status: 'open', toolCall: { tool: 'write', reason: 'Keep the shopping list', note: null } })
-    expect(ask!.toolCall!.arguments).toEqual([{ name: 'on', value: 'workspace' }, { name: 'file_path', value: 'notes/a.md' }, { name: 'content', value: 'milk' }])
+    expect(ask!.toolCall!.arguments).toEqual([{ name: 'on', value: 'workspace' }, { name: 'file_path', value: 'notes/a.md' }, { name: 'content', value: 'milk' }, { name: 'reason', value: 'Keep the shopping list' }])
     expect(lastRequestText(id)).toContain('waiting for your owner')
     expect(await file(id, 'notes/a.md')).toBeNull()
     expect((await robots(ANNA)).find((robot) => robot.id === id)?.fleetState).toBe('waiting for you')

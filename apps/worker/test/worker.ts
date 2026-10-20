@@ -181,6 +181,11 @@ export class Robot extends ProductionRobot {
     return 5 * 1024 * 1024
   }
 
+  /** Two parts to a window, so that a few megabytes make several windows. */
+  protected override hostWindowParts(): number {
+    return 2
+  }
+
   /** The Robot as a v1.14 deploy left it: a computer grant, its running time, cost rows, state and folder name (v1.15 ticket 06). */
   async legacyComputerForTest(): Promise<void> {
     const sql = this.store.sql

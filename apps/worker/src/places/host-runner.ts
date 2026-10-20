@@ -9,34 +9,36 @@
  */
 import type { JobInfo, RunOutcome } from '@mr-robot/host-protocol'
 import type { BoxJobStatus } from '../box/backend.ts'
+import type { JobId } from './job-id.ts'
 import type { JobRunner, RunExtras, SpawnOptions } from './jobs.ts'
 
-/** What the Host answered for a command: DSH's shapes (tickets 02 and 03). */
-export type HostCommandResult = RunOutcome
 type Foreground = Extract<RunOutcome, { kind: 'foreground' }>
 
 /** The Host's job calls for one Robot on one Host, each failing as a Host call fails (offline, refused, an OS error). */
 export interface HostJobLink {
   /** Run: start the command as a job, wait for it up to `timeoutMs` (not at all for a background job). */
-  start(input: { job: string; command: string; cwd: string | undefined; timeoutMs: number; background: boolean }): Promise<HostCommandResult>
+  start(input: { job: JobId; command: string; cwd: string | undefined; timeoutMs: number; background: boolean }): Promise<RunOutcome>
   list(): Promise<readonly JobInfo[]>
-  output(job: string, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
-  kill(job: string): Promise<void>
+  output(job: JobId, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
+  kill(job: JobId): Promise<void>
 }
 
+/**
+ * What the Robot holds of a Run call it made. Once the Host holds the job itself (promoted, or started in the background) there is nothing
+ * to keep: the Host is asked. An entry goes when the registry closes its job (release), so the map holds only calls in flight and answers
+ * not yet read.
+ */
 type Entry =
   /** The Run call is pending. */
   | { state: 'running' }
   /** The command ended within its call. */
   | { state: 'done'; result: Foreground }
-  /** The Host holds the job: it was promoted or started in the background. */
-  | { state: 'continues' }
   /** The call did not run the command: the Host refused it, was offline or has no sandbox. The message says why. */
   | { state: 'refused'; message: string }
 
 /** The pending calls of every Host of one Robot, by job id. */
 export class HostRuns {
-  readonly entries = new Map<string, Entry>()
+  readonly entries = new Map<JobId, Entry>()
 }
 
 /** What the Robot is told beside a result when the sandbox denied a write (ob-vnld): the path, and how to ask for the wider reach (ob-ifak). */
@@ -48,11 +50,11 @@ export function denialNote(host: string, result: Foreground): string | undefined
   return `[sandbox: the write to ${where} was denied under ${sandbox.mode} mode: ${reach}.] If you need it, call run again with the same command, escalate: true and a reason: your owner is asked once, and when they approve the command runs without the sandbox, that one time. Otherwise change where the command writes.`
 }
 
-const cut = (name: string, output: { truncated: boolean }): string | undefined => (output.truncated ? `${name} is cut to its last part` : undefined)
+const truncationNote = (name: string, output: { truncated: boolean }): string | undefined => (output.truncated ? `${name} is cut to its last part` : undefined)
 
 /** The notes and sandbox facts a result carries to the Robot beside its output. */
 function extrasOf(host: string, result: Foreground): RunExtras {
-  const note = [denialNote(host, result), result.sandbox?.enforcement === 'partial' ? `${host} enforces its sandbox only partly` : undefined, cut('stdout', result.stdout), cut('stderr', result.stderr)].filter((part) => part !== undefined).join('. ')
+  const note = [denialNote(host, result), result.sandbox?.enforcement === 'partial' ? `${host} enforces its sandbox only partly` : undefined, truncationNote('stdout', result.stdout), truncationNote('stderr', result.stderr)].filter((part) => part !== undefined).join('. ')
   return { cwd: result.cwd, ...(result.sandbox === undefined ? {} : { sandbox: result.sandbox }), ...(note === '' ? {} : { note }) }
 }
 
@@ -65,7 +67,7 @@ export class HostRunner implements JobRunner {
     private readonly keepAlive: (pending: Promise<unknown>) => void,
   ) {}
 
-  async spawn(job: string, command: string, cwd: string | undefined, options: SpawnOptions): Promise<void> {
+  async spawn(job: JobId, command: string, cwd: string | undefined, options: SpawnOptions): Promise<void> {
     this.runs.entries.set(job, { state: 'running' })
     const call = this.link.start({ job, command, cwd, timeoutMs: options.seconds * 1000, background: options.background })
     if (options.background) {
@@ -86,25 +88,32 @@ export class HostRunner implements JobRunner {
     ))
   }
 
-  private answer(job: string, outcome: HostCommandResult): void {
+  private answer(job: JobId, outcome: RunOutcome): void {
     if (this.runs.entries.get(job)?.state !== 'running') return
-    this.runs.entries.set(job, outcome.kind === 'foreground' ? { state: 'done', result: outcome } : { state: 'continues' })
+    if (outcome.kind === 'foreground') this.runs.entries.set(job, { state: 'done', result: outcome })
+    else this.runs.entries.delete(job)
   }
 
-  async status(job: string): Promise<BoxJobStatus> {
+  release(job: JobId): void {
+    this.runs.entries.delete(job)
+  }
+
+  async status(job: JobId): Promise<BoxJobStatus> {
     const entry = this.runs.entries.get(job)
     if (entry?.state === 'running') return { state: 'running' }
     if (entry?.state === 'refused') return { state: 'gone' }
     // A command the Host stopped (a signal) left no exit code.
     if (entry?.state === 'done') return entry.result.exitCode === null ? { state: 'gone' } : { state: 'exited', exitCode: entry.result.exitCode }
-    // The Host holds the job (or the Robot restarted and forgot the call): ask it. A Host that cannot be reached is not an answer.
-    const listed = await this.link.list().then((jobs) => jobs.find((candidate) => candidate.job === job), () => 'unreachable' as const)
-    if (listed === 'unreachable' || listed?.state === 'running') return { state: 'running' }
+    // The Host holds the job (or the Robot restarted and forgot the call): ask it. A Host that is away is not an answer, and the job goes
+    // on; a Host the Robot has no access to any more (shared no more, unpaired, the grant lowered) never will be, so its job is lost.
+    const listed = await this.link.list().then((jobs) => jobs.find((candidate) => candidate.job === job), (error: unknown) => (error instanceof Error && error.name === 'HostAccessLost' ? 'lost' as const : 'away' as const))
+    if (listed === 'lost') return { state: 'gone' }
+    if (listed === 'away' || listed?.state === 'running') return { state: 'running' }
     if (listed === undefined || listed.exitCode === null) return { state: 'gone' }
     return { state: 'exited', exitCode: listed.exitCode }
   }
 
-  async output(job: string, stream: 'out' | 'err', offset: number): Promise<{ text: string; bytes: number; size: number }> {
+  async output(job: JobId, stream: 'out' | 'err', offset: number): Promise<{ text: string; bytes: number; size: number }> {
     const entry = this.runs.entries.get(job)
     if (entry?.state === 'refused' || entry?.state === 'done') {
       const text = entry.state === 'refused' ? (stream === 'err' ? entry.message : '') : stream === 'out' ? entry.result.stdout.text : entry.result.stderr.text
@@ -115,18 +124,18 @@ export class HostRunner implements JobRunner {
     return this.link.output(job, stream, offset)
   }
 
-  async kill(job: string): Promise<void> {
+  async kill(job: JobId): Promise<void> {
     const entry = this.runs.entries.get(job)
     if (entry?.state === 'refused' || entry?.state === 'done') return
     await this.link.kill(job)
   }
 
-  refusal(job: string): string | undefined {
+  refusal(job: JobId): string | undefined {
     const entry = this.runs.entries.get(job)
     return entry?.state === 'refused' ? entry.message : undefined
   }
 
-  extras(job: string): RunExtras | undefined {
+  extras(job: JobId): RunExtras | undefined {
     const entry = this.runs.entries.get(job)
     return entry?.state === 'done' ? extrasOf(this.host, entry.result) : undefined
   }

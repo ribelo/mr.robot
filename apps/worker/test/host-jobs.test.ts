@@ -247,3 +247,31 @@ describe('jobs lost when the Host goes (ob-cgn1)', () => {
     await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${jobId} failed: Desk was unpaired while it ran]`), { timeout: 10_000 })
   })
 })
+
+describe('a Host the Robot can no longer reach (S6)', () => {
+  it('marks its running jobs lost and wakes the Robot as failed when sharing ends', async () => {
+    const BEN = 'ben@example.com'
+    const desk = await fakeHost()
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    scripts.set('*', [{ text: 'Hello.' }])
+    const { body } = await api<{ id: string }>(BEN, '/api/robots', { body: {} })
+    await settle(body.id)
+    await api(BEN, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget: 32_000, grants: { tools: {}, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
+    await testRobot(body.id).activateForTest()
+    requests.delete(body.id)
+    heldCommands.add('sleep 1000')
+    scripts.set(body.id, [{ calls: [run('sleep 1000', { run_in_background: true })] }, { text: '' }])
+    await api(BEN, `/api/robots/${body.id}/messages`, { body: { text: 'go' } })
+    await settle(body.id)
+    // Still shared: the alarm finds the job running.
+    await tick(body.id)
+    expect(wakes(body.id)).toEqual([])
+    // The owner stops sharing: the Host is not Ben's to reach any more, and the job never will end.
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'private' } })
+    scripts.set(body.id, [{ text: 'I know.' }])
+    await tick(body.id)
+    expect(wakes(body.id).some((text) => text.includes('[Desk job ') && text.includes('failed') && text.includes('sleep 1000'))).toBe(true)
+  })
+})

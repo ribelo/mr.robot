@@ -13,7 +13,7 @@ export const nodeCopyIo: CopyIo = {
 /** The size of a regular file. */
 export async function fileSize(full: string): Promise<number> {
   const info = await stat(full)
-  if (!info.isFile()) throw new CopyFailed(`${full} is not a file`)
+  if (!info.isFile()) throw new CopyFailed({ message: `${full} is not a file` })
   return info.size
 }
 
@@ -34,14 +34,17 @@ export function sourceFile(full: string): SourceFile {
   }
 }
 
-/** A file written beside its place under a temporary name, and moved there when it is whole; nothing half-copied is ever at the path. */
-export function targetFile(full: string): TargetFile {
+/**
+ * A file written beside its place under a temporary name, and moved there when it is whole; nothing half-copied is ever at the path. A
+ * download that comes in windows `resume`s the temporary file after the first.
+ */
+export function targetFile(full: string, options: { readonly resume: boolean }): TargetFile {
   const partial = `${full}.mr-robot-part`
   let handle: Awaited<ReturnType<typeof open>> | undefined
   const opened = async () => {
     if (handle === undefined) {
       await mkdir(dirname(full), { recursive: true })
-      handle = await open(partial, 'w')
+      handle = await open(partial, options.resume ? 'r+' : 'w')
     }
     return handle
   }
@@ -51,6 +54,10 @@ export function targetFile(full: string): TargetFile {
       await (await opened()).close()
       handle = undefined
       await rename(partial, full)
+    },
+    release: async () => {
+      await handle?.close()
+      handle = undefined
     },
     abandon: async () => {
       await handle?.close().catch(() => undefined)

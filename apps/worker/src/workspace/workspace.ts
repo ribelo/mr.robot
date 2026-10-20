@@ -20,6 +20,17 @@ export interface WorkspaceFile extends WorkspaceEntry {
   readonly body: ArrayBuffer
 }
 
+/** A file opened for streaming: its entry and its body, which the caller must read or cancel. */
+export interface WorkspaceStream extends WorkspaceEntry {
+  readonly body: ReadableStream
+}
+
+/** One page of a listing and where the next one starts (undefined on the last). */
+export interface WorkspacePage {
+  readonly entries: WorkspaceEntry[]
+  readonly cursor: string | undefined
+}
+
 export interface WorkspaceShape {
   readonly prefix: string
   read(path: string): Effect.Effect<WorkspaceFile | undefined, WorkspaceError>
@@ -29,6 +40,12 @@ export interface WorkspaceShape {
   remove(path: string): Effect.Effect<void, WorkspaceError>
   /** Every file under a relative directory ('' for all). */
   list(directory?: string): Effect.Effect<WorkspaceEntry[], WorkspaceError>
+  /** One page of the files under a relative directory ('' for all); pass the previous page's cursor for the next. */
+  page(directory: string, cursor?: string): Effect.Effect<WorkspacePage, WorkspaceError>
+  /** A file as a stream, so that a large one is never held in memory; undefined when there is none. */
+  open(path: string): Effect.Effect<WorkspaceStream | undefined, WorkspaceError>
+  /** Delete every file under a relative directory. */
+  removeUnder(directory: string): Effect.Effect<void, WorkspaceError>
 }
 
 export class Workspace extends Context.Service<Workspace, WorkspaceShape>()('mr-robot/Workspace') {}
@@ -103,6 +120,15 @@ export function makeWorkspace(bucket: R2Bucket, robotId: string): WorkspaceShape
     },
     catch: fail(`cannot read ${path}`),
   })))
+  const bucketPage = (directory: string, cursor: string | undefined) => {
+    const normalized = directory === '' ? '' : normalizePath(directory)
+    if (normalized === undefined) throw new Error(`"${directory}" is outside your Workspace`)
+    return bucket.list({ prefix: prefix + (normalized === '' ? '' : `${normalized}/`), ...(cursor === undefined ? {} : { cursor }) })
+  }
+  const listed = async (directory: string, cursor: string | undefined): Promise<WorkspacePage> => {
+    const page = await bucketPage(directory, cursor)
+    return { entries: page.objects.map(entry), cursor: page.truncated ? page.cursor : undefined }
+  }
   return {
     prefix,
     read,
@@ -121,18 +147,35 @@ export function makeWorkspace(bucket: R2Bucket, robotId: string): WorkspaceShape
     remove: (path) => key(path).pipe(Effect.flatMap((k) => Effect.tryPromise({ try: () => bucket.delete(k), catch: fail(`cannot delete ${path}`) }))),
     list: (directory = '') => Effect.tryPromise({
       try: async () => {
-        const normalized = directory === '' ? '' : normalizePath(directory)
-        if (normalized === undefined) throw new Error(`"${directory}" is outside your Workspace`)
         const entries: WorkspaceEntry[] = []
         let cursor: string | undefined
         do {
-          const page = await bucket.list({ prefix: prefix + (normalized === '' ? '' : `${normalized}/`), ...(cursor === undefined ? {} : { cursor }) })
-          entries.push(...page.objects.map(entry))
-          cursor = page.truncated ? page.cursor : undefined
+          const page = await listed(directory, cursor)
+          entries.push(...page.entries)
+          cursor = page.cursor
         } while (cursor !== undefined)
         return entries
       },
       catch: fail(`cannot list ${directory || 'the Workspace'}`),
+    }),
+    page: (directory, cursor) => Effect.tryPromise({ try: () => listed(directory, cursor), catch: fail(`cannot list ${directory || 'the Workspace'}`) }),
+    open: (path) => key(path).pipe(Effect.flatMap((k) => Effect.tryPromise({
+      try: async () => {
+        const object = await bucket.get(k)
+        return object === null ? undefined : { ...entry(object), body: object.body }
+      },
+      catch: fail(`cannot read ${path}`),
+    }))),
+    removeUnder: (directory) => Effect.tryPromise({
+      try: async () => {
+        let cursor: string | undefined
+        do {
+          const page = await bucketPage(directory, cursor)
+          if (page.objects.length > 0) await bucket.delete(page.objects.map((object) => object.key))
+          cursor = page.truncated ? page.cursor : undefined
+        } while (cursor !== undefined)
+      },
+      catch: fail(`cannot delete ${directory}`),
     }),
   }
 }

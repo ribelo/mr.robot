@@ -5,22 +5,64 @@
  * place logic: places/places.ts checks the grants and dispatches.
  */
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import type { WaitingResult } from '../ask-gate.ts'
+import { RUN_MAX_WAIT_SECONDS } from '@mr-robot/host-protocol'
+import { isWaitingResult, type WaitingResult } from '../ask-gate.ts'
+import { isPlaceError, placeErrorText } from '../../places/errors.ts'
 import { readWindow, replaceText } from '../../places/file-ops.ts'
 import type { PlaceFiles } from '../../places/files.ts'
-import type { JobEntry, RunResult } from '../../places/jobs.ts'
-import type { CopyEnd, CopyResult, RunInput } from '../../places/places.ts'
+import { parseJobId, type JobId } from '../../places/job-id.ts'
+import type { JobEntry, JobOutputView, KillView, RunResult } from '../../places/jobs.ts'
+import type { CopyEnd, CopyResult, Escalation, FilesRequest, RunInput } from '../../places/places.ts'
+import { isTransferFailure } from '../../places/transfers.ts'
 import { tool } from './define.ts'
 
 /** What the tools ask of the Robot's places. */
 export interface PlacesHost {
+  /** The files of a place, for a call that only reads. */
   files(on: string, tool: string): Promise<PlaceFiles>
+  /** Do something on the files of a place; a call that asked to escalate waits for its owner first. */
+  withFiles<A>(request: FilesRequest, exec: ToolRunContext, action: (files: PlaceFiles) => Promise<A>): Promise<A | WaitingResult>
   run(input: RunInput, exec: ToolRunContext): Promise<RunResult | WaitingResult>
-  copy(from: CopyEnd, to: CopyEnd): Promise<CopyResult>
+  copy(from: CopyEnd, to: CopyEnd, exec: ToolRunContext, escalation?: Escalation): Promise<CopyResult | WaitingResult>
   jobList(): JobEntry[]
-  jobOutput(id: string, wait: boolean, timeoutMs: number): Promise<unknown>
-  jobKill(id: string): Promise<unknown>
+  jobOutput(id: JobId, wait: boolean, timeoutMs: number): Promise<JobOutputView>
+  jobKill(id: JobId): Promise<KillView>
 }
+
+/**
+ * The tool boundary: a refusal of the places is a tagged error (places/errors.ts, places/transfers.ts), and here it becomes the words the
+ * Robot reads. Anything else is not ours to word and goes on as it is.
+ */
+async function guarded<A>(toolName: string, run: () => Promise<A>): Promise<A> {
+  try {
+    return await run()
+  } catch (error) {
+    if (isPlaceError(error)) throw new Error(placeErrorText(error, toolName))
+    if (isTransferFailure(error)) throw new Error(`${toolName}: ${error.message}`)
+    throw error
+  }
+}
+
+/** The job a tool argument names, or the words that say there is none. */
+function jobOf(text: unknown): JobId {
+  const id = parseJobId(text)
+  if (id === undefined) throw new Error(`no job ${String(text)}; list them with job_list`)
+  return id
+}
+
+/** A call that asked to escalate, with its arguments as given; the Ask stores them and the owner's approval runs them again. */
+const escalationOf = (args: { readonly escalate?: boolean; readonly reason?: string }): Escalation | undefined =>
+  args.escalate === true ? { reason: args.reason, arguments: { ...args } } : undefined
+
+
+/** The escalation of a call, as the property a request carries when there is one. */
+const escalating = (args: { readonly escalate?: boolean; readonly reason?: string }): { escalation?: Escalation } => {
+  const escalation = escalationOf(args)
+  return escalation === undefined ? {} : { escalation }
+}
+
+const ESCALATE_PARAMETER = { type: 'boolean', description: 'Only after the sandbox of a computer denied this: ask your owner to let it run once without the sandbox. Needs reason. The call does not run now; you are woken with its result or the answer. Computers only' }
+const REASON_PARAMETER = { type: 'string', description: 'With escalate: why this needs to reach outside the sandbox, in one sentence; your owner reads it. Also required when your owner approves each use of the files grant' }
 
 /** The places the Robot holds a grant on now, to describe them to the model; each call still checks its grant. */
 export interface PlacesReach {
@@ -31,7 +73,7 @@ export interface PlacesReach {
 }
 
 export const RUN_DEFAULT_TIMEOUT = 120
-export const RUN_MAX_TIMEOUT = 1800
+export const RUN_MAX_TIMEOUT = RUN_MAX_WAIT_SECONDS
 export const JOB_WAIT_DEFAULT_SECONDS = 30
 
 const list = (names: readonly string[]): string => names.join(', ')
@@ -78,12 +120,12 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           required: ['on', 'file_path'],
         },
         concurrencySafe: true,
-        execute: async ({ on, file_path, offset, limit }) => {
+        execute: ({ on, file_path, offset, limit }) => guarded('read', async () => {
           const content = await (await host.files(on, 'read')).readFile(file_path)
           return 'text' in content ? readWindow(content.path, content.text, offset, limit) : { path: content.path, size: content.size, encoding: 'base64', base64: content.base64 }
-        },
+        }),
       }),
-      tool<{ on: string; file_path: string; content: string; encoding?: 'text' | 'base64' }>({
+      tool<{ on: string; file_path: string; content: string; encoding?: 'text' | 'base64'; escalate?: boolean; reason?: string }>({
         name: 'write',
         description: `Write a whole file, creating its folders and replacing what was there. ${filePlaces(reach)} ${PATH_RULES}`,
         parameters: {
@@ -92,16 +134,19 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
             file_path: { type: 'string', description: 'The file to write' },
             content: { type: 'string', description: 'The complete file content' },
             encoding: { type: 'string', enum: ['text', 'base64'], description: 'How content is written: text (default), or base64 for a binary file' },
+            escalate: ESCALATE_PARAMETER,
+            reason: REASON_PARAMETER,
           },
           required: ['on', 'file_path', 'content'],
         },
         emptyAllowed: ['content'],
-        execute: async ({ on, file_path, content, encoding }) => {
-          const written = await (await host.files(on, 'write')).writeFile(file_path, content, encoding ?? 'text')
-          return { on, written: written.path, bytes: written.bytes }
-        },
+        execute: (args, exec) => guarded('write', async () => {
+          const { on, file_path, content, encoding } = args
+          const done = await host.withFiles({ on, tool: 'write', ...escalating(args) }, exec, (files) => files.writeFile(file_path, content, encoding ?? 'text'))
+          return isWaitingResult(done) ? done : { on, written: done.path, bytes: done.bytes }
+        }),
       }),
-      tool<{ on: string; file_path: string; old_string: string; new_string: string; replace_all?: boolean }>({
+      tool<{ on: string; file_path: string; old_string: string; new_string: string; replace_all?: boolean; escalate?: boolean; reason?: string }>({
         name: 'edit',
         description: `Replace text in a file: old_string must occur exactly once unless replace_all is set. ${filePlaces(reach)} ${PATH_RULES}`,
         parameters: {
@@ -111,33 +156,37 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
             old_string: { type: 'string', description: 'The exact text to replace' },
             new_string: { type: 'string', description: 'The text that replaces it (empty deletes)' },
             replace_all: { type: 'boolean', description: 'Replace every occurrence; false when left out' },
+            escalate: ESCALATE_PARAMETER,
+            reason: REASON_PARAMETER,
           },
           required: ['on', 'file_path', 'old_string', 'new_string'],
         },
         emptyAllowed: ['new_string'],
-        execute: async ({ on, file_path, old_string, new_string, replace_all }) => {
-          const files = await host.files(on, 'edit')
-          const content = await files.readFile(file_path)
-          if (!('text' in content)) throw new Error(`${content.path} is not a text file, so it cannot be edited`)
-          const written = await files.writeFile(file_path, replaceText(content.text, old_string, new_string, replace_all === true), 'text')
-          return { on, edited: written.path }
-        },
+        execute: (args, exec) => guarded('edit', async () => {
+          const { on, file_path, old_string, new_string, replace_all } = args
+          const done = await host.withFiles({ on, tool: 'edit', ...escalating(args) }, exec, async (files) => {
+            const content = await files.readFile(file_path)
+            if (!('text' in content)) throw new Error(`${content.path} is not a text file, so it cannot be edited`)
+            return files.writeFile(file_path, replaceText(content.text, old_string, new_string, replace_all === true), 'text')
+          })
+          return isWaitingResult(done) ? done : { on, edited: done.path }
+        }),
       }),
-      tool<{ on: string; path: string }>({
+      tool<{ on: string; path: string; escalate?: boolean; reason?: string }>({
         name: 'delete_file',
         description: `Delete a file. ${filePlaces(reach)} ${PATH_RULES}`,
-        parameters: { properties: { on: filePlace(reach), path: { type: 'string', description: 'The file to delete' } }, required: ['on', 'path'] },
-        execute: async ({ on, path }) => {
-          const removed = await (await host.files(on, 'delete_file')).removeFile(path)
-          return { deleted: removed.path }
-        },
+        parameters: { properties: { on: filePlace(reach), path: { type: 'string', description: 'The file to delete' }, escalate: ESCALATE_PARAMETER, reason: REASON_PARAMETER }, required: ['on', 'path'] },
+        execute: (args, exec) => guarded('delete_file', async () => {
+          const done = await host.withFiles({ on: args.on, tool: 'delete_file', ...escalating(args) }, exec, (files) => files.removeFile(args.path))
+          return isWaitingResult(done) ? done : { deleted: done.path }
+        }),
       }),
       tool<{ on: string; pattern: string }>({
         name: 'glob',
         description: `List the files matching a glob (* within a segment, ** across segments, ?), as an array of paths (empty when none match). On a Box or a computer the paths are those the place prints, .git and node_modules are skipped, and a pattern starts at the directory before its first wildcard. ${filePlaces(reach)}`,
         parameters: { properties: { on: filePlace(reach), pattern: { type: 'string', description: 'The pattern to match' } }, required: ['on', 'pattern'] },
         concurrencySafe: true,
-        execute: async ({ on, pattern }) => (await host.files(on, 'glob')).glob(pattern),
+        execute: ({ on, pattern }) => guarded('glob', async () => (await host.files(on, 'glob')).glob(pattern)),
       }),
       tool<{ on: string; pattern: string; glob?: string; ignore_case?: boolean; path?: string }>({
         name: 'grep',
@@ -153,23 +202,23 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           required: ['on', 'pattern'],
         },
         concurrencySafe: true,
-        execute: async ({ on, pattern, glob, ignore_case, path }) =>
-          (await host.files(on, 'grep')).grep({ pattern, ignoreCase: ignore_case === true, ...(glob === undefined ? {} : { glob }), ...(path === undefined ? {} : { path }) }),
+        execute: ({ on, pattern, glob, ignore_case, path }) => guarded('grep', async () =>
+          (await host.files(on, 'grep')).grep({ pattern, ignoreCase: ignore_case === true, ...(glob === undefined ? {} : { glob }), ...(path === undefined ? {} : { path }) })),
       }),
-      tool<{ from: CopyEnd; to: CopyEnd }>({
+      tool<{ from: CopyEnd; to: CopyEnd; escalate?: boolean; reason?: string }>({
         name: 'copy',
         description: `Copy one file from one place to another, as it is (binary too); the content does not pass through you, so use this, not read and write, for reports, datasets, images and anything large. Both ends name their place; copy overwrites the target. There is no size limit: a file goes straight between R2 and the computer or the Box. Between two computers, or the Box and a computer, the file is parked in your Workspace under tmp/ and deleted when the copy ends. A file copied into your Workspace under box/ is on your Box at its next boot. ${filePlaces(reach)} Returns both paths, the size and the time. ${PATH_RULES}`,
-        parameters: { properties: { from: endSchema('The file to copy'), to: endSchema('Where the copy goes') }, required: ['from', 'to'] },
-        execute: async ({ from, to }) => host.copy(end(from, 'from'), end(to, 'to')),
+        parameters: { properties: { from: endSchema('The file to copy'), to: endSchema('Where the copy goes'), escalate: ESCALATE_PARAMETER, reason: REASON_PARAMETER }, required: ['from', 'to'] },
+        execute: (args, exec) => guarded('copy', async () => host.copy(end(args.from, 'from'), end(args.to, 'to'), exec, escalationOf(args))),
       }),
     )
   }
   if (anyShell) {
-    const where = [...(reach.box ? ['"box" (your Box, in /workspace)'] : []), ...(reach.hosts.shell.length > 0 ? [`one of your owner's computers by name (${list(reach.hosts.shell)}), in bash as your owner's user, starting in your own directory there; the sandbox lets a command change only your directory and the roots your grant lists (or nothing, or everything, by the mode of your grant)`] : [])].join(', ')
+    const where = [...(reach.box ? ['"box" (your Box, in /workspace)'] : []), ...(reach.hosts.shell.length > 0 ? [`one of your owner's computers by name (${list(reach.hosts.shell)}), as your owner's user in the shell its entry in the Hosts line of your runtime section names (bash, or pwsh on Windows), starting in your own directory there; the sandbox lets a command change only your directory and the roots your grant lists (or nothing, or everything, by the mode of your grant)`] : [])].join(', ')
     tools.push(
       tool<{ on: string; command: string; cwd?: string; timeout_seconds?: number; run_in_background?: boolean; escalate?: boolean; reason?: string }>({
         name: 'run',
-        description: `Run a shell command. Where: ${where}. There is no default: name the place on every call; the Workspace runs no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A job on a computer lives as long as the Mr. Robot app there runs: if the app restarts or the computer stays away for five minutes, the job is lost and you are woken as failed. When the sandbox denies a write, the result says which path and how to ask for the wider reach: run the same command again with escalate and a reason; your owner is asked once, and the call runs without the sandbox only if they approve.`,
+        description: `Run a shell command: bash on the Box, and on a computer the shell the Hosts line of your runtime section names for it. Where: ${where}. There is no default: name the place on every call; the Workspace runs no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A job on a computer lives as long as the Mr. Robot app there runs: if the app restarts or the computer stays away for five minutes, the job is lost and you are woken as failed. When the sandbox denies a write, the result says which path and how to ask for the wider reach: run the same command again with escalate and a reason; your owner is asked once, and the call runs without the sandbox only if they approve.`,
         parameters: {
           properties: {
             on: { type: 'string', description: `box or a computer's name. Where: ${where}.` },
@@ -182,8 +231,10 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           },
           required: ['on', 'command'],
         },
-        execute: async ({ on, command, cwd, timeout_seconds, run_in_background, escalate, reason }, exec) =>
-          host.run({ on, command, ...(cwd === undefined ? {} : { cwd }), seconds: Math.min(RUN_MAX_TIMEOUT, Math.max(1, Math.round(timeout_seconds ?? RUN_DEFAULT_TIMEOUT))), background: run_in_background === true, escalate: escalate === true, ...(reason === undefined ? {} : { reason }) }, exec),
+        execute: (args, exec) => guarded('run', async () => {
+          const { on, command, cwd, timeout_seconds, run_in_background } = args
+          return host.run({ on, command, ...(cwd === undefined ? {} : { cwd }), seconds: Math.min(RUN_MAX_TIMEOUT, Math.max(1, Math.round(timeout_seconds ?? RUN_DEFAULT_TIMEOUT))), background: run_in_background === true, ...escalating(args) }, exec)
+        }),
       }),
       tool<Record<string, never>>({
         name: 'job_list',
@@ -203,13 +254,13 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           },
           required: ['job_id'],
         },
-        execute: async ({ job_id, wait, timeout_seconds }) => host.jobOutput(job_id, wait === true, Math.round((timeout_seconds ?? JOB_WAIT_DEFAULT_SECONDS) * 1000)),
+        execute: ({ job_id, wait, timeout_seconds }) => guarded('job_output', async () => host.jobOutput(jobOf(job_id), wait === true, Math.round((timeout_seconds ?? JOB_WAIT_DEFAULT_SECONDS) * 1000))),
       }),
       tool<{ job_id: string }>({
         name: 'job_kill',
         description: 'Stop a running job: on the Box TERM to its whole process group, KILL five seconds later; on a computer the app stops it. Its output so far is kept in spill/jobs/.',
         parameters: { properties: { job_id: { type: 'string', description: 'The job id from run or job_list' } }, required: ['job_id'] },
-        execute: async ({ job_id }) => host.jobKill(job_id),
+        execute: ({ job_id }) => guarded('job_kill', async () => host.jobKill(jobOf(job_id))),
       }),
     )
   }

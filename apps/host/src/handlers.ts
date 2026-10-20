@@ -44,10 +44,10 @@ export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => 
       },
       catch: fail,
     }),
-    Download: ({ path, url, size, partBytes, access }) => Effect.tryPromise({
+    Download: ({ path, url, size, partBytes, from, until, access }) => Effect.tryPromise({
       try: async () => {
         const full = await disk.writable(access, path)
-        return { path: full, bytes: await downloadFile(targetFile(full), { url, size, partBytes }, copyIo) }
+        return { path: full, bytes: await downloadFile(targetFile(full, { resume: from > 0 }), { url, size, partBytes, from, until }, copyIo) }
       },
       catch: fail,
     }),

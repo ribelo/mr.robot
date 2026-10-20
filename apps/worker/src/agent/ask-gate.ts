@@ -113,11 +113,12 @@ function ownsReason(definition: ToolDefinition): boolean {
   return Object.hasOwn(properties, REASON_PARAMETER)
 }
 
+/** The parameters with a required reason: a tool's own description of it stays. */
 function withReason(parameters: ObjectSchema): ObjectSchema {
   const required = parameters.required ?? []
   return {
     ...parameters,
-    properties: { ...(parameters.properties ?? {}), [REASON_PARAMETER]: REASON_SCHEMA },
+    properties: { [REASON_PARAMETER]: REASON_SCHEMA, ...(parameters.properties ?? {}) },
     required: required.includes(REASON_PARAMETER) ? required : [...required, REASON_PARAMETER],
   }
 }
@@ -149,7 +150,8 @@ export function gateTool(definition: ToolDefinition, items: ToolItems, host: Ask
   const presentResult = definition.presentResult
   return {
     ...definition,
-    parameters: (own ? definition.parameters : withReason(definition.parameters as ObjectSchema)) as ToolDefinition['parameters'],
+    // A call that may ask needs a reason, whether the tool names the parameter itself (run, the file tools: they also take it for escalate) or not.
+    parameters: (asks ? withReason(definition.parameters as ObjectSchema) : definition.parameters) as ToolDefinition['parameters'],
     output: {
       // A waiting result is not the tool's own value, so the tool's output schema cannot hold it.
       schema: {} as ToolDefinition['output']['schema'],

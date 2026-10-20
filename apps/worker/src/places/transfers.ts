@@ -1,34 +1,74 @@
 /**
- * Files in and out of the Workspace without the Worker in the pipe (v1.16 ticket 06, ob-qshq, ob-63nt, ob-o6aw). This service mints what a Host app or
- * ws needs for one key under one Robot's prefix: a presigned GET, the presigned PUTs of a single or multipart upload, and the control calls
+ * Files in and out of the Workspace without the Worker in the pipe (v1.16 ticket 06, ob-qshq, ob-63nt, ob-o6aw). This service mints what a Host app or ws
+ * needs for one key under one Robot's prefix: a presigned GET, the presigned PUTs of a single or multipart upload, and the control calls
  * that end or abort an upload. A key outside the prefix cannot be asked for: the path is parsed into a key under the prefix first, and
- * nothing else reaches the signer. Both callers use it: the Robot's own copy (for a Host) and the Box's token door (for ws).
+ * nothing else reaches the signer. The Workspace itself (head, list, delete) is reached through the Workspace service, like every other
+ * access to it. Both callers use this: the Robot's own copy (for a Host) and the Box's token door (for ws).
+ *
+ * A link lives only as long as its holder needs it (S4): a Box link fifteen minutes (ws asks again for each part), a Host link an hour
+ * (the Worker mints the links of the next window of parts just before it sends them). Nothing is minted for a whole file at once.
  */
+import * as Data from 'effect/Data'
+import * as Schema from 'effect/Schema'
 import type { UploadPart } from '@mr-robot/host-protocol'
-import { workspacePrefix } from '../workspace/workspace.ts'
+import type { WorkspaceHost } from '../agent/host.ts'
 import type { CompletedPart, ObjectStore } from '../workspace/object-store.ts'
 import { ObjectStoreError } from '../workspace/object-store.ts'
+import { BadPath, MissingFile, ReadOnlyPath } from './errors.ts'
 import { workspaceKey, writableWorkspaceKey } from './files.ts'
 
-/** The size of one part of a multipart upload, and the longest a presigned URL lives (long enough for a slow upload of a large file). */
+/** The size of one part of a multipart upload. */
 export const PART_BYTES = 64 * 1024 * 1024
-export const URL_SECONDS = 6 * 3600
 /** R2's limit on the parts of one upload. */
 export const MAX_PARTS = 10_000
 
-/** A result the caller can pass on: its value, or the HTTP status and the words for the Robot. */
-export type Transfer<A> =
-  | { readonly ok: true; readonly value: A }
-  | { readonly ok: false; readonly status: 400 | 404 | 409 | 502 | 503; readonly error: string }
+/** Who holds a link: the Box (through ws, which asks again for each part) or a Host app. It decides how long the link lives. */
+export type LinkHolder = 'box' | 'host'
+export const LINK_SECONDS: Readonly<Record<LinkHolder, number>> = { box: 15 * 60, host: 60 * 60 }
 
-const done = <A>(value: A): Transfer<A> => ({ ok: true, value })
-const failed = (status: 400 | 404 | 409 | 502 | 503, error: string): Transfer<never> => ({ ok: false, status, error })
+/** The parts of a window a Host is handed at once: its links are minted for this window only. */
+export const HOST_WINDOW_PARTS = 16
+
+/** The request is not one the door answers. */
+export class BadTransfer extends Data.TaggedError('BadTransfer')<{ readonly message: string }> {}
+/** The upload the caller said it finished is not in the bucket. */
+export class UploadMissing extends Data.TaggedError('UploadMissing')<{ readonly message: string }> {}
+/** R2 or the signer failed. */
+export class StoreFailed extends Data.TaggedError('StoreFailed')<{ readonly message: string }> {}
+/** This deployment has no S3 credentials for the bucket (a local run). */
+export class StoreUnavailable extends Data.TaggedError('StoreUnavailable')<{ readonly message: string }> {}
+
+/** What can go wrong in a transfer; the door turns each into an HTTP status, a copy into words. */
+export type TransferFailure = BadTransfer | UploadMissing | StoreFailed | StoreUnavailable | BadPath | ReadOnlyPath | MissingFile
+
+export function isTransferFailure(error: unknown): error is TransferFailure {
+  return error instanceof BadTransfer || error instanceof UploadMissing || error instanceof StoreFailed || error instanceof StoreUnavailable
+    || error instanceof BadPath || error instanceof ReadOnlyPath || error instanceof MissingFile
+}
+
+/** The HTTP status of a failure at the Box's door. */
+export function httpStatus(error: TransferFailure): 400 | 404 | 409 | 502 | 503 {
+  switch (error._tag) {
+    case 'BadTransfer': case 'BadPath': case 'ReadOnlyPath': return 400
+    case 'MissingFile': return 404
+    case 'UploadMissing': return 409
+    case 'StoreFailed': return 502
+    case 'StoreUnavailable': return 503
+  }
+}
+
+/** One part of an upload to be made: where it starts and how long it is. */
+export interface PartPlan {
+  readonly number: number
+  readonly offset: number
+  readonly length: number
+}
 
 /** The plan of an upload: one part with no upload id when the file fits in a part, else the parts of a multipart upload. */
 export interface UploadPlan {
   readonly uploadId?: string
   readonly partBytes: number
-  readonly parts: readonly UploadPart[]
+  readonly parts: readonly PartPlan[]
 }
 
 export interface DownloadPlan {
@@ -46,8 +86,7 @@ export interface ListedFile {
 const LIST_LIMIT = 2000
 
 export interface TransfersDeps {
-  readonly robotId: string
-  readonly bucket: R2Bucket
+  readonly workspace: WorkspaceHost
   /** The S3 side of the bucket; undefined where the deployment has no S3 credentials (a local run). */
   readonly store: ObjectStore | undefined
   readonly partBytes: number
@@ -57,181 +96,156 @@ export class Transfers {
   constructor(private readonly deps: TransfersDeps) {}
 
   private get prefix(): string {
-    return workspacePrefix(this.deps.robotId)
+    return this.deps.workspace.workspace.prefix
   }
 
-  private store(): ObjectStore | Transfer<never> {
-    return this.deps.store ?? failed(503, 'files cannot be copied here: this deployment has no S3 credentials for the Files bucket (the Alchemy stack creates them)')
+  private get shape() {
+    return this.deps.workspace.workspace
   }
 
-  /** The path as a key, for a read or a write; a refused path is a 400 with the reason. */
-  private key(path: string, writable: boolean): string | Transfer<never> {
+  private store(): ObjectStore {
+    if (this.deps.store === undefined) throw new StoreUnavailable({ message: 'files cannot be copied here: this deployment has no S3 credentials for the Files bucket (the Alchemy stack creates them)' })
+    return this.deps.store
+  }
+
+  private key(path: string, writable: boolean): string {
+    return writable ? writableWorkspaceKey(path) : workspaceKey(path)
+  }
+
+  private async sign(request: { method: 'GET' | 'PUT'; key: string; query?: Record<string, string> }, holder: LinkHolder): Promise<string> {
     try {
-      return writable ? writableWorkspaceKey(path) : workspaceKey(path)
+      return await this.store().presign({ ...request, expiresSeconds: LINK_SECONDS[holder] })
     } catch (error) {
-      return failed(400, error instanceof Error ? error.message : String(error))
+      if (error instanceof StoreUnavailable) throw error
+      throw new StoreFailed({ message: error instanceof ObjectStoreError ? error.message : `could not sign a link: ${error instanceof Error ? error.message : String(error)}` })
     }
   }
 
   /** What to fetch to read one file of the Workspace: a presigned GET, the size and the range size. */
-  async download(path: string): Promise<Transfer<DownloadPlan>> {
+  async download(path: string, holder: LinkHolder): Promise<DownloadPlan> {
     const key = this.key(path, false)
-    const store = this.store()
-    if (typeof key !== 'string') return key
-    if ('ok' in store) return store
-    const object = await this.deps.bucket.head(this.prefix + key)
-    if (object === null) return failed(404, `no file "${key}" in your Workspace`)
-    const url = await this.sign(store, { method: 'GET', key: this.prefix + key })
-    return url.ok ? done({ url: url.value, size: object.size, partBytes: this.deps.partBytes }) : url
+    this.store()
+    const object = await this.deps.workspace.run(this.shape.stat(key))
+    if (object === undefined) throw new MissingFile({ place: 'your Workspace', path: key, message: `no file "${key}" in your Workspace` })
+    return { url: await this.sign({ method: 'GET', key: this.prefix + key }, holder), size: object.size, partBytes: this.deps.partBytes }
   }
 
-  /** What to send to write one file of the Workspace: a presigned PUT, or the presigned parts of a multipart upload. */
-  async upload(path: string, size: number): Promise<Transfer<UploadPlan>> {
+  /** How to send one file of `size` bytes into the Workspace: the parts, and the upload id of a multipart upload. No link is minted yet (partLink). */
+  async upload(path: string, size: number): Promise<UploadPlan> {
     const key = this.key(path, true)
     const store = this.store()
-    if (typeof key !== 'string') return key
-    if ('ok' in store) return store
-    if (!Number.isSafeInteger(size) || size < 0) return failed(400, `"${size}" is not a file size`)
-    const full = this.prefix + key
+    if (!Number.isSafeInteger(size) || size < 0) throw new BadTransfer({ message: `"${size}" is not a file size` })
     // A file with more parts than R2 allows gets larger parts, in whole MiB.
     const partBytes = Math.max(this.deps.partBytes, Math.ceil(size / MAX_PARTS / 1_048_576) * 1_048_576)
-    if (size <= partBytes) {
-      const url = await this.sign(store, { method: 'PUT', key: full })
-      return url.ok ? done({ partBytes, parts: [{ number: 1, url: url.value, offset: 0, length: size }] }) : url
-    }
+    if (size <= partBytes) return { partBytes, parts: [{ number: 1, offset: 0, length: size }] }
     let uploadId: string
     try {
-      uploadId = await store.startMultipart(full)
+      uploadId = await store.startMultipart(this.prefix + key)
     } catch (error) {
-      return failed(502, error instanceof Error ? error.message : String(error))
+      throw new StoreFailed({ message: error instanceof Error ? error.message : String(error) })
     }
-    const parts: UploadPart[] = []
-    for (let number = 1; (number - 1) * partBytes < size; number++) {
-      const signed = await this.sign(store, { method: 'PUT', key: full, query: { partNumber: String(number), uploadId } })
-      if (!signed.ok) {
-        await store.abortMultipart(full, uploadId).catch(() => undefined)
-        return signed
-      }
-      parts.push({ number, url: signed.value, offset: (number - 1) * partBytes, length: Math.min(partBytes, size - (number - 1) * partBytes) })
-    }
-    return done({ uploadId, partBytes, parts })
+    const parts: PartPlan[] = []
+    for (let number = 1; (number - 1) * partBytes < size; number++) parts.push({ number, offset: (number - 1) * partBytes, length: Math.min(partBytes, size - (number - 1) * partBytes) })
+    return { uploadId, partBytes, parts }
+  }
+
+  /** The link to put one part (the only part of a single PUT when there is no upload id). */
+  async partLink(path: string, part: { readonly uploadId?: string | undefined; readonly number: number }, holder: LinkHolder): Promise<string> {
+    const key = this.key(path, true)
+    if (part.uploadId === undefined && part.number !== 1) throw new BadTransfer({ message: 'a single upload has one part, number 1' })
+    return this.sign({ method: 'PUT', key: this.prefix + key, ...(part.uploadId === undefined ? {} : { query: { partNumber: String(part.number), uploadId: part.uploadId } }) }, holder)
+  }
+
+  /** The parts of one window with their links, for a Host app to send. */
+  async linkedParts(path: string, plan: UploadPlan, window: readonly PartPlan[]): Promise<UploadPart[]> {
+    return Promise.all(window.map(async (part) => ({ ...part, url: await this.partLink(path, { uploadId: plan.uploadId, number: part.number }, 'host') })))
   }
 
   /** The upload arrived: complete a multipart one with the ETags the client got; for a single PUT, check the object is there. Returns the size. */
-  async finish(path: string, uploadId: string | undefined, parts: readonly CompletedPart[]): Promise<Transfer<{ size: number }>> {
+  async finish(path: string, uploadId: string | undefined, parts: readonly CompletedPart[]): Promise<{ size: number }> {
     const key = this.key(path, true)
     const store = this.store()
-    if (typeof key !== 'string') return key
-    if ('ok' in store) return store
     if (uploadId !== undefined) {
       try {
         await store.completeMultipart(this.prefix + key, uploadId, parts)
       } catch (error) {
-        return failed(502, error instanceof Error ? error.message : String(error))
+        throw new StoreFailed({ message: error instanceof Error ? error.message : String(error) })
       }
     }
-    const object = await this.deps.bucket.head(this.prefix + key)
-    return object === null ? failed(409, `the upload of "${key}" did not arrive`) : done({ size: object.size })
+    const object = await this.deps.workspace.run(this.shape.stat(key))
+    if (object === undefined) throw new UploadMissing({ message: `the upload of "${key}" did not arrive` })
+    return { size: object.size }
   }
 
   /** An upload that failed: R2 drops the parts it holds. */
-  async abort(path: string, uploadId: string): Promise<Transfer<null>> {
+  async abort(path: string, uploadId: string): Promise<null> {
     const key = this.key(path, true)
-    const store = this.store()
-    if (typeof key !== 'string') return key
-    if ('ok' in store) return store
     try {
-      await store.abortMultipart(this.prefix + key, uploadId)
-      return done(null)
+      await this.store().abortMultipart(this.prefix + key, uploadId)
+      return null
     } catch (error) {
-      return failed(502, error instanceof Error ? error.message : String(error))
+      if (error instanceof StoreUnavailable) throw error
+      throw new StoreFailed({ message: error instanceof Error ? error.message : String(error) })
     }
   }
 
   /** The files under a directory of the Workspace (all of it when empty): the objects in R2, not the platform's own files. */
-  async list(directory: string): Promise<Transfer<{ files: ListedFile[]; truncated: boolean }>> {
+  async list(directory: string): Promise<{ files: ListedFile[]; truncated: boolean }> {
     const under = directory === '' || directory === '.' ? '' : this.key(directory, false)
-    if (typeof under !== 'string') return under
     const files: ListedFile[] = []
     let cursor: string | undefined
     let more = false
     do {
-      const page = await this.deps.bucket.list({ prefix: this.prefix + (under === '' ? '' : `${under}/`), ...(cursor === undefined ? {} : { cursor }) })
-      files.push(...page.objects.map((object) => ({ path: object.key.slice(this.prefix.length), size: object.size, uploaded: object.uploaded.getTime() })))
-      more = page.truncated
-      cursor = page.truncated && files.length < LIST_LIMIT ? page.cursor : undefined
+      const page = await this.deps.workspace.run(this.shape.page(under, cursor))
+      files.push(...page.entries.map((entry) => ({ path: entry.path, size: entry.size, uploaded: entry.uploaded })))
+      more = page.cursor !== undefined
+      cursor = page.cursor !== undefined && files.length < LIST_LIMIT ? page.cursor : undefined
     } while (cursor !== undefined)
-    return done({ files: files.slice(0, LIST_LIMIT), truncated: more || files.length > LIST_LIMIT })
+    return { files: files.slice(0, LIST_LIMIT), truncated: more || files.length > LIST_LIMIT }
   }
 
-  async remove(path: string): Promise<Transfer<{ path: string }>> {
+  async remove(path: string): Promise<{ path: string }> {
     const key = this.key(path, true)
-    if (typeof key !== 'string') return key
-    if ((await this.deps.bucket.head(this.prefix + key)) === null) return failed(404, `no file "${key}" in your Workspace; nothing was deleted`)
-    await this.deps.bucket.delete(this.prefix + key)
-    return done({ path: key })
+    if ((await this.deps.workspace.run(this.shape.stat(key))) === undefined) throw new MissingFile({ place: 'your Workspace', path: key, message: `no file "${key}" in your Workspace; nothing was deleted` })
+    await this.deps.workspace.run(this.shape.remove(key))
+    return { path: key }
   }
 
   /** Everything under one staging directory (copy between two Hosts, or the Box and a Host, passes through the Workspace): deleted. */
   async removeStaged(directory: string): Promise<void> {
-    const key = this.key(directory, true)
-    if (typeof key !== 'string') return
-    let cursor: string | undefined
-    do {
-      const page = await this.deps.bucket.list({ prefix: `${this.prefix}${key}/`, ...(cursor === undefined ? {} : { cursor }) })
-      if (page.objects.length > 0) await this.deps.bucket.delete(page.objects.map((object) => object.key))
-      cursor = page.truncated ? page.cursor : undefined
-    } while (cursor !== undefined)
-  }
-
-  private async sign(store: ObjectStore, request: { method: 'GET' | 'PUT'; key: string; query?: Record<string, string> }): Promise<Transfer<string>> {
-    try {
-      return done(await store.presign({ ...request, expiresSeconds: URL_SECONDS }))
-    } catch (error) {
-      return failed(502, error instanceof ObjectStoreError ? error.message : `could not sign a link: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    await this.deps.workspace.run(this.shape.removeUnder(this.key(directory, true)))
   }
 }
 
-/** A request of ws to the presign endpoint, parsed: nothing else reaches the service. */
-export type TransferRequest =
-  | { readonly op: 'ls'; readonly path: string }
-  | { readonly op: 'get'; readonly path: string }
-  | { readonly op: 'put'; readonly path: string; readonly size: number }
-  | { readonly op: 'complete'; readonly path: string; readonly uploadId?: string; readonly parts: readonly CompletedPart[] }
-  | { readonly op: 'abort'; readonly path: string; readonly uploadId: string }
-  | { readonly op: 'rm'; readonly path: string }
+const Path = Schema.String.check(Schema.isMinLength(1))
+const PartNumber = Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: MAX_PARTS }))
 
-/** The body of a request as a TransferRequest, or the reason it is not one. */
-export function parseTransferRequest(body: unknown): TransferRequest | string {
-  const record = body !== null && typeof body === 'object' ? (body as Record<string, unknown>) : {}
-  const path = typeof record['path'] === 'string' ? record['path'] : undefined
-  const op = record['op']
-  if (op === 'ls') return { op, path: path ?? '' }
-  if (path === undefined || path === '') return 'a path is required'
-  if (op === 'get' || op === 'rm') return { op, path }
-  if (op === 'put') return typeof record['size'] === 'number' && Number.isSafeInteger(record['size']) && record['size'] >= 0 ? { op, path, size: record['size'] } : 'put needs the size of the file in bytes'
-  if (op === 'abort') return typeof record['uploadId'] === 'string' && record['uploadId'] !== '' ? { op, path, uploadId: record['uploadId'] } : 'abort needs the upload id'
-  if (op === 'complete') {
-    const uploadId = typeof record['uploadId'] === 'string' && record['uploadId'] !== '' ? record['uploadId'] : undefined
-    const parts = Array.isArray(record['parts']) ? record['parts'] : []
-    const listed: CompletedPart[] = []
-    for (const part of parts) {
-      const entry = part !== null && typeof part === 'object' ? (part as Record<string, unknown>) : {}
-      if (typeof entry['number'] !== 'number' || typeof entry['etag'] !== 'string') return 'every part needs its number and its etag'
-      listed.push({ number: entry['number'], etag: entry['etag'] })
-    }
-    return { op, path, ...(uploadId === undefined ? {} : { uploadId }), parts: listed }
-  }
-  return 'op must be ls, get, put, complete, abort or rm'
+/** A request of ws to the presign endpoint, as the door accepts it: nothing else reaches the service. */
+export const TransferRequest = Schema.Union([
+  Schema.Struct({ op: Schema.Literal('ls'), path: Schema.optional(Schema.String) }),
+  Schema.Struct({ op: Schema.Literal('get'), path: Path }),
+  Schema.Struct({ op: Schema.Literal('rm'), path: Path }),
+  Schema.Struct({ op: Schema.Literal('put'), path: Path, size: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)) }),
+  Schema.Struct({ op: Schema.Literal('part'), path: Path, uploadId: Schema.optional(Path), number: PartNumber }),
+  Schema.Struct({ op: Schema.Literal('abort'), path: Path, uploadId: Path }),
+  Schema.Struct({ op: Schema.Literal('complete'), path: Path, uploadId: Schema.optional(Path), parts: Schema.Array(Schema.Struct({ number: PartNumber, etag: Schema.String })) }),
+])
+export type TransferRequest = typeof TransferRequest.Type
+
+/** The body of a request as a TransferRequest. @throws BadTransfer when it is not one. */
+export function parseTransferRequest(body: unknown): TransferRequest {
+  const parsed = Schema.decodeUnknownOption(TransferRequest)(body)
+  if (parsed._tag === 'None') throw new BadTransfer({ message: 'op must be ls, get, put, part, complete, abort or rm, each with its path (and the size, upload id, part number or numbered ETags it needs; part numbers are whole numbers from 1)' })
+  return parsed.value
 }
 
-/** Carry a parsed request out: the reply ws gets. */
-export async function carryOut(transfers: Transfers, request: TransferRequest): Promise<Transfer<unknown>> {
+/** Carry a parsed request out for the Box: the reply ws gets. */
+export async function answer(transfers: Transfers, request: TransferRequest): Promise<unknown> {
   switch (request.op) {
-    case 'ls': return transfers.list(request.path)
-    case 'get': return transfers.download(request.path)
+    case 'ls': return transfers.list(request.path ?? '')
+    case 'get': return transfers.download(request.path, 'box')
     case 'put': return transfers.upload(request.path, request.size)
+    case 'part': return { url: await transfers.partLink(request.path, { uploadId: request.uploadId, number: request.number }, 'box') }
     case 'complete': return transfers.finish(request.path, request.uploadId, request.parts)
     case 'abort': return transfers.abort(request.path, request.uploadId)
     case 'rm': return transfers.remove(request.path)

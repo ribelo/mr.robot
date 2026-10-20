@@ -18,7 +18,7 @@ export const TOOL_GROUPS = {
   exa: 'Exa research: web search, page crawling and code context, paid per call from the Home\'s Exa key.',
   'exa-agent': 'Exa agent runs: long research jobs that can cost dollars each. Grant separately.',
   subagents: 'Hand work to Subagents: fresh or forked contexts on the models you allow, at most three at once.',
-  box: 'A Box: run commands (Python with NumPy and Pandas, Node, Bun, git) and move files; its running time costs money.',
+  box: 'A Box: run commands and move files on a Linux computer of its own (its tools are listed in docs/box.md); its running time costs money.',
 } as const
 
 export type ToolGroup = keyof typeof TOOL_GROUPS

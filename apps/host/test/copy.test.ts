@@ -52,10 +52,28 @@ describe('the Host app copies a file over presigned URLs', () => {
     objects.clear()
     objects.set('https://r2.test/obj', bytes)
     const target = join(dir, 'deep', 'er', 'copy.bin')
-    expect(await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/obj', size: bytes.length, partBytes, access: full }))).toEqual({ path: target, bytes: bytes.length })
+    expect(await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/obj', size: bytes.length, partBytes, from: 0, until: bytes.length, access: full }))).toEqual({ path: target, bytes: bytes.length })
     expect(new Uint8Array(await readFile(target))).toEqual(bytes)
     // Nothing but the file itself is left beside it.
     expect(await readdir(join(dir, 'deep', 'er'))).toEqual(['copy.bin'])
+    await close()
+  })
+
+  it('downloads in windows with a fresh link each, and the file appears only when the last window arrived', async () => {
+    const bytes = Uint8Array.from({ length: 3_000_000 }, (_, index) => (index * 13 + (index >> 9)) & 255)
+    const { io, objects } = r2()
+    objects.set('https://r2.test/first', bytes)
+    objects.set('https://r2.test/second', bytes)
+    const { rpc, close } = await connected(dir, io)
+    const full = access({ mode: 'full' })
+    const target = join(dir, 'windowed', 'copy.bin')
+    const partBytes = 1_000_000
+    await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/first', size: bytes.length, partBytes, from: 0, until: 2_000_000, access: full }))
+    // Half-way, nothing is at the path yet.
+    expect(await readdir(join(dir, 'windowed'))).toEqual(['copy.bin.mr-robot-part'])
+    await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/second', size: bytes.length, partBytes, from: 2_000_000, until: bytes.length, access: full }))
+    expect(new Uint8Array(await readFile(target))).toEqual(bytes)
+    expect(await readdir(join(dir, 'windowed'))).toEqual(['copy.bin'])
     await close()
   })
 
@@ -70,7 +88,7 @@ describe('the Host app copies a file over presigned URLs', () => {
     const changed = await Effect.runPromise(Effect.flip(rpc['Upload']!({ path: small, size: 99, parts: [], access: full }))) as { message: string }
     expect(changed.message).toBe('the file changed while it was copied')
     const target = join(dir, 'failed.bin')
-    const failed = await Effect.runPromise(Effect.flip(rpc['Download']!({ path: target, url: 'https://r2.test/none', size: 10, partBytes: 10, access: full }))) as { message: string }
+    const failed = await Effect.runPromise(Effect.flip(rpc['Download']!({ path: target, url: 'https://r2.test/none', size: 10, partBytes: 10, from: 0, until: 10, access: full }))) as { message: string }
     expect(failed.message).toContain('R2 answered 404')
     expect(await readdir(dir)).not.toContain('failed.bin')
     expect(await readdir(dir)).not.toContain('failed.bin.mr-robot-part')

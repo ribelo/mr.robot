@@ -8,8 +8,10 @@ import { MEMBER_FILE_NAMES, type MemberFileName } from '../member/member.ts'
 import type { BoxBackend } from '../box/backend.ts'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { normalizePath } from '../workspace/workspace.ts'
-import { globToRegExp, grepText, MAX_GREP_MATCHES, skipped, type GrepMatch } from './file-ops.ts'
-import { OWNED_ON_WORKSPACE, ownedPath } from './place.ts'
+import { BadPath, FileTooLarge, MissingFile, ReadOnlyPath } from './errors.ts'
+import { globToRegExp, GREP_MAX_MATCHES, skipped } from '@mr-robot/host-protocol'
+import { grepText, type GrepMatch } from './file-ops.ts'
+import { refuseOwned } from './place.ts'
 
 export const WORKSPACE_ROOT = '/workspace'
 export const BOX_ROOT = '/workspace'
@@ -70,20 +72,20 @@ const stored = <T extends { path: string }>(entries: readonly T[]): T[] => entri
 
 const memberName = (key: string): MemberFileName | undefined => MEMBER_FILE_NAMES.find((name) => name === key)
 
-/** The key of a path in the Workspace: relative, or under /workspace. */
+/** The key of a path in the Workspace: relative, or under /workspace. @throws BadPath when the path is not a file path inside the Workspace. */
 export function workspaceKey(path: string): string {
-  if (path.startsWith('/') && path !== WORKSPACE_ROOT && !path.startsWith(`${WORKSPACE_ROOT}/`)) throw new Error(`${path} is outside your Workspace (${WORKSPACE_ROOT})`)
+  if (path.startsWith('/') && path !== WORKSPACE_ROOT && !path.startsWith(`${WORKSPACE_ROOT}/`)) throw new BadPath({ path, message: `${path} is outside your Workspace (${WORKSPACE_ROOT})` })
   const key = normalizePath(path.replace(/^\/workspace\/?/, ''))
-  if (key === undefined) throw new Error(/(^|[/\\])\.\.([/\\]|$)/.test(path) ? `${path} is outside your Workspace (${WORKSPACE_ROOT})` : `"${path}" is not a file path inside your Workspace`)
+  if (key === undefined) throw new BadPath({ path, message: /(^|[/\\])\.\.([/\\]|$)/.test(path) ? `${path} is outside your Workspace (${WORKSPACE_ROOT})` : `"${path}" is not a file path inside your Workspace` })
   return key
 }
 
-/** The key of a path the Robot may write: not an owner's file and not under docs/. */
+/** The key of a path the Robot may write: not an owner's file and not under docs/. @throws ReadOnlyPath for those, BadPath for a bad path. */
 export function writableWorkspaceKey(path: string): string {
   const key = workspaceKey(path)
   const member = memberName(key)
-  if (member !== undefined) throw new Error(READ_ONLY_MEMBER(member))
-  if (isDocsPath(key)) throw new Error(docsReadOnlyMessage(key))
+  if (member !== undefined) throw new ReadOnlyPath({ path: key, message: READ_ONLY_MEMBER(member) })
+  if (isDocsPath(key)) throw new ReadOnlyPath({ path: key, message: docsReadOnlyMessage(key) })
   return key
 }
 
@@ -93,8 +95,24 @@ export async function ownedBytes(host: WorkspaceHost, key: string): Promise<Uint
   if (member !== undefined) return new TextEncoder().encode(await host.memberFile(member))
   if (!isDocsPath(key)) return undefined
   const doc = productDoc(key)
-  if (doc === undefined) throw new Error(`${WORKSPACE_ROOT}/${key} does not exist`)
+  if (doc === undefined) throw new MissingFile({ place: 'your Workspace', path: key, message: `${WORKSPACE_ROOT}/${key} does not exist` })
   return new TextEncoder().encode(doc.text)
+}
+
+/** A file's text when it is text; undefined for a binary file, one with a NUL, or one that cannot be read. */
+function searchableText(read: FileContent | undefined): string | undefined {
+  return read === undefined || !('text' in read) || read.text.includes('\u0000') ? undefined : read.text
+}
+
+/** The matches of a regular expression over the files at `paths`, read one by one; stops at the match limit and at MAX_GREP_FILES files. */
+async function grepFiles(paths: readonly string[], readOne: (path: string) => Promise<FileContent | undefined>, regex: RegExp): Promise<GrepMatch[]> {
+  const matches: GrepMatch[] = []
+  for (const path of paths.slice(0, MAX_GREP_FILES)) {
+    if (matches.length >= GREP_MAX_MATCHES) break
+    const text = searchableText(await readOne(path))
+    if (text !== undefined) matches.push(...grepText(path, text, regex, GREP_MAX_MATCHES - matches.length))
+  }
+  return matches
 }
 
 export class WorkspaceFiles implements PlaceFiles {
@@ -102,83 +120,54 @@ export class WorkspaceFiles implements PlaceFiles {
 
   constructor(private readonly host: WorkspaceHost) {}
 
-  private memberName(key: string): MemberFileName | undefined {
-    return memberName(key)
-  }
-
-  key(path: string): string {
-    return workspaceKey(path)
-  }
-
-  private writable(key: string): void {
-    writableWorkspaceKey(key)
-  }
-
-  /** The key of a path the Robot may write. */
-  writableKey(path: string): string {
-    return writableWorkspaceKey(path)
-  }
-
-  /** The bytes of a file the platform owns, or undefined when the key is an ordinary object of the Workspace. */
-  owned(key: string): Promise<Uint8Array | undefined> {
-    return ownedBytes(this.host, key)
-  }
-
   async readFile(path: string): Promise<FileContent> {
-    const key = this.key(path)
+    const key = workspaceKey(path)
     const display = `${WORKSPACE_ROOT}/${key}`
-    const member = this.memberName(key)
+    const member = memberName(key)
     if (member !== undefined) return { path: display, text: await this.host.memberFile(member) }
     if (isDocsPath(key)) {
       const doc = productDoc(key)
-      if (doc === undefined) throw new Error(`${display} does not exist`)
+      if (doc === undefined) throw new MissingFile({ place: this.label, path: display, message: `${display} does not exist` })
       return { path: display, text: doc.text }
     }
     const entry = await this.host.run(this.host.workspace.stat(key))
-    if (entry === undefined) throw new Error(`${display} does not exist`)
-    if (entry.size > MAX_READ_BYTES) throw new Error(`${display} is ${entry.size} bytes; read opens files up to ${MAX_READ_BYTES / 1024 / 1024} MB. Use grep, or copy it to your Box and work on it there.`)
+    if (entry === undefined) throw new MissingFile({ place: this.label, path: display, message: `${display} does not exist` })
+    if (entry.size > MAX_READ_BYTES) throw new FileTooLarge({ path: display, size: entry.size, message: `${display} is ${entry.size} bytes; read opens files up to ${MAX_READ_BYTES / 1024 / 1024} MB. Use grep, or copy it to your Box and work on it there.` })
     const file = await this.host.run(this.host.workspace.read(key))
-    if (file === undefined) throw new Error(`${display} does not exist`)
+    if (file === undefined) throw new MissingFile({ place: this.label, path: display, message: `${display} does not exist` })
     return contentOf(display, new Uint8Array(file.body))
   }
 
   async writeFile(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ path: string; bytes: number }> {
-    const key = this.key(path)
-    this.writable(key)
+    const key = writableWorkspaceKey(path)
     const body = encoding === 'base64' ? bytesOfBase64(content) : content
     await this.host.run(this.host.workspace.write(key, body))
     return { path: `${WORKSPACE_ROOT}/${key}`, bytes: typeof body === 'string' ? new TextEncoder().encode(body).length : body.length }
   }
 
   async removeFile(path: string): Promise<{ path: string }> {
-    const key = this.key(path)
-    this.writable(key)
-    if ((await this.host.run(this.host.workspace.stat(key))) === undefined) throw new Error(`No file "${key}" in your Workspace; nothing was deleted.`)
+    const key = writableWorkspaceKey(path)
+    if ((await this.host.run(this.host.workspace.stat(key))) === undefined) throw new MissingFile({ place: this.label, path: key, message: `No file "${key}" in your Workspace; nothing was deleted.` })
     await this.host.run(this.host.workspace.remove(key))
     return { path: key }
   }
 
+  /** The paths of the Workspace a search or a listing sees: the owner's files, the docs and the objects of R2 (not the docs the bucket might hold). */
+  private async visible(maxBytes?: number): Promise<string[]> {
+    const entries = await this.host.run(this.host.workspace.list())
+    return [...MEMBER_FILE_NAMES, ...DOCS_PATHS, ...stored(entries).filter((entry) => maxBytes === undefined || entry.size <= maxBytes).map((entry) => entry.path)]
+  }
+
   async glob(pattern: string): Promise<string[]> {
     const matcher = globToRegExp(pattern.replace(/^\/workspace\//, ''))
-    const entries = await this.host.run(this.host.workspace.list())
-    return [...MEMBER_FILE_NAMES, ...DOCS_PATHS, ...stored(entries).map((entry) => entry.path)].filter((path) => matcher.test(path)).sort()
+    return (await this.visible()).filter((path) => matcher.test(path)).sort()
   }
 
   async grep(input: GrepInput): Promise<GrepMatch[]> {
-    const regex = regexOf(input)
     const files = input.glob === undefined ? undefined : globToRegExp(input.glob)
-    const under = input.path === undefined ? undefined : this.key(input.path)
-    const entries = await this.host.run(this.host.workspace.list())
-    const paths = [...MEMBER_FILE_NAMES, ...DOCS_PATHS, ...stored(entries).filter((entry) => entry.size <= MAX_GREP_FILE_BYTES).map((entry) => entry.path)]
-      .filter((path) => (files === undefined || files.test(path)) && (under === undefined || path === under || path.startsWith(`${under}/`)))
-    const matches: GrepMatch[] = []
-    for (const path of paths) {
-      if (matches.length >= MAX_GREP_MATCHES) break
-      const read = await this.readFile(path).catch(() => undefined)
-      if (read === undefined || !('text' in read) || read.text.includes('\u0000')) continue
-      matches.push(...grepText(path, read.text, regex, MAX_GREP_MATCHES - matches.length))
-    }
-    return matches
+    const under = input.path === undefined ? undefined : workspaceKey(input.path)
+    const paths = (await this.visible(MAX_GREP_FILE_BYTES)).filter((path) => (files === undefined || files.test(path)) && (under === undefined || path === under || path.startsWith(`${under}/`)))
+    return grepFiles(paths, (path) => this.readFile(path).catch(() => undefined), regexOf(input))
   }
 }
 
@@ -190,16 +179,12 @@ export interface BoxAccess {
   touch(): Promise<void>
 }
 
-/** A path on the Box: relative to its /workspace, or under it. */
+/** A path on the Box: relative to its /workspace, or under it. @throws BadPath when it leaves /workspace. */
 export function boxPath(path: string): string {
   const relative = path.startsWith(`${BOX_ROOT}/`) ? path.slice(BOX_ROOT.length + 1) : path.startsWith('/') ? undefined : path
   const normalized = relative === undefined ? undefined : normalizePath(relative)
-  if (normalized === undefined) throw new Error(`${path} is outside your Box's ${BOX_ROOT}`)
+  if (normalized === undefined) throw new BadPath({ path, message: `${path} is outside your Box's ${BOX_ROOT}` })
   return `${BOX_ROOT}/${normalized}`
-}
-
-const refuseOwned = (path: string): void => {
-  if (ownedPath(path)) throw new Error(OWNED_ON_WORKSPACE(path))
 }
 
 export class BoxFiles implements PlaceFiles {
@@ -207,7 +192,8 @@ export class BoxFiles implements PlaceFiles {
 
   constructor(private readonly box: BoxAccess) {}
 
-  private async used<A>(action: (backend: BoxBackend) => Promise<A>): Promise<A> {
+  /** Run `action` on the booted Box and tell the Robot the Box was used. */
+  private async onBox<A>(action: (backend: BoxBackend) => Promise<A>): Promise<A> {
     const backend = await this.box.boot()
     try {
       return await action(backend)
@@ -219,9 +205,9 @@ export class BoxFiles implements PlaceFiles {
   async readFile(path: string): Promise<FileContent> {
     refuseOwned(path)
     const target = boxPath(path)
-    return this.used(async (backend) => {
+    return this.onBox(async (backend) => {
       const bytes = await backend.read(target)
-      if (bytes === null) throw new Error(`${target} does not exist on your Box`)
+      if (bytes === null) throw new MissingFile({ place: this.label, path: target, message: `${target} does not exist on your Box` })
       return contentOf(target, bytes)
     })
   }
@@ -230,7 +216,7 @@ export class BoxFiles implements PlaceFiles {
     refuseOwned(path)
     const target = boxPath(path)
     const bytes = encoding === 'base64' ? bytesOfBase64(content) : new TextEncoder().encode(content)
-    return this.used(async (backend) => {
+    return this.onBox(async (backend) => {
       await backend.write(target, bytes)
       return { path: target, bytes: bytes.byteLength }
     })
@@ -239,8 +225,8 @@ export class BoxFiles implements PlaceFiles {
   async removeFile(path: string): Promise<{ path: string }> {
     refuseOwned(path)
     const target = boxPath(path)
-    return this.used(async (backend) => {
-      if ((await backend.read(target)) === null) throw new Error(`No file ${target} on your Box; nothing was deleted.`)
+    return this.onBox(async (backend) => {
+      if ((await backend.read(target)) === null) throw new MissingFile({ place: this.label, path: target, message: `No file ${target} on your Box; nothing was deleted.` })
       await backend.remove(target)
       return { path: target }
     })
@@ -253,26 +239,20 @@ export class BoxFiles implements PlaceFiles {
 
   async glob(pattern: string): Promise<string[]> {
     const matcher = globToRegExp(pattern.replace(/^\/workspace\//, ''))
-    return this.used(async (backend) => (await this.listing(backend)).map((file) => file.path).filter((path) => matcher.test(path)).sort())
+    return this.onBox(async (backend) => (await this.listing(backend)).map((file) => file.path).filter((path) => matcher.test(path)).sort())
   }
 
   async grep(input: GrepInput): Promise<GrepMatch[]> {
-    const regex = regexOf(input)
     const files = input.glob === undefined ? undefined : globToRegExp(input.glob)
     const under = input.path === undefined ? undefined : boxPath(input.path).slice(BOX_ROOT.length + 1)
-    return this.used(async (backend) => {
+    return this.onBox(async (backend) => {
       const paths = (await this.listing(backend))
         .filter((file) => file.size <= MAX_GREP_FILE_BYTES && (files === undefined || files.test(file.path)) && (under === undefined || file.path === under || file.path.startsWith(`${under}/`)))
-        .slice(0, MAX_GREP_FILES)
-      const matches: GrepMatch[] = []
-      for (const { path } of paths) {
-        if (matches.length >= MAX_GREP_MATCHES) break
+        .map((file) => file.path)
+      return grepFiles(paths, async (path) => {
         const bytes = await backend.read(`${BOX_ROOT}/${path}`)
-        const read = bytes === null ? undefined : contentOf(path, bytes)
-        if (read === undefined || !('text' in read) || read.text.includes('\u0000')) continue
-        matches.push(...grepText(path, read.text, regex, MAX_GREP_MATCHES - matches.length))
-      }
-      return matches
+        return bytes === null ? undefined : contentOf(path, bytes)
+      }, regexOf(input))
     })
   }
 }
@@ -291,8 +271,8 @@ export interface HostFileLink {
 }
 
 /** A relative path on a Host starts in the Robot's directory there; the Workspace's own names are not a Host's. */
-const refuseOwnedOnHost = (path: string): void => {
-  if (!path.startsWith('/') && ownedPath(path)) throw new Error(OWNED_ON_WORKSPACE(path))
+export const refuseOwnedOnHost = (path: string): void => {
+  if (!path.startsWith('/')) refuseOwned(path)
 }
 
 export class HostFiles implements PlaceFiles {

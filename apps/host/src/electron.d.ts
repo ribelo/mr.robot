@@ -36,6 +36,8 @@ declare module 'electron' {
       getURL(): string
       executeJavaScript(code: string): Promise<unknown>
       setWindowOpenHandler(handler: (details: { url: string }) => { action: 'deny' | 'allow' }): void
+      /** A navigation the app can stop before it happens (a sign-in elsewhere goes to the system browser). */
+      on(event: 'will-navigate' | 'will-redirect', listener: (event: { preventDefault(): void }, url: string) => void): void
       on(event: string, listener: (...args: unknown[]) => void): void
     }
   }

@@ -5,6 +5,7 @@
  */
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
 import type { HostAccessByFacet, NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch } from '@mr-robot/protocol'
 import { HOST_ACCESS, parseHostAccess } from './host-access.ts'
@@ -472,12 +473,16 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
     if (refusal !== null) return yield* invalid(refusal)
   }
   const hostAccess = patch.hostAccess === undefined ? undefined : parseHostAccess(patch.hostAccess)
-  if (hostAccess !== undefined && 'invalid' in hostAccess) return yield* invalid(hostAccess.invalid)
+  if (hostAccess !== undefined && Result.isFailure(hostAccess)) return yield* invalid(hostAccess.failure.message)
   const nextActive = patch.chain !== undefined ? 0 : active
   store.transaction(() => {
     if (chain !== undefined) store.set('chain-active', nextActive)
     if (patch.grants !== undefined) store.setGrants(grantSetFrom(patch.grants))
-    if (hostAccess !== undefined) store.set(HOST_ACCESS, hostAccess.access)
+    if (hostAccess !== undefined && Result.isSuccess(hostAccess)) {
+      store.set(HOST_ACCESS, hostAccess.success)
+      // A mode and roots for a facet that is not usable are not kept.
+      store.pruneHostAccess()
+    }
     // The subagents grant carries the routes its Subagents may run on (ao-2z4n).
     if (patch.subagentModels !== undefined) store.setGrantPayload('tool', 'subagents', { allowedModels: [...new Map(patch.subagentModels.map((entry) => [`${entry.provider}/${entry.model}`, { provider: entry.provider, model: entry.model }])).values()] })
     store.updateConfig((current) => ({
@@ -1033,13 +1038,18 @@ const failWithoutTurn = (task: ParkedTask, gate: Extract<TaskGate, { kind: 'fail
   yield* platform.notifyMembers('needs you', `did not run the Task "${task.title}": ${gate.line} Start the Mr. Robot app on that computer.`)
 })
 
+/** A due Task becomes a Wake-up that starts its Turn. */
+const enqueueScheduled = (store: RobotStore, task: ParkedTask, now: number): void => {
+  store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
+}
+
 /** One due Task: it starts a Turn, ends failed, or waits for its Host. */
 const startOrHold = (task: ParkedTask & { readonly recurring: boolean }, now: number) => Effect.gen(function* () {
   const store = yield* RobotState
   const gate = yield* gateOf(task, now)
   switch (gate.kind) {
     case 'run':
-      store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
+      enqueueScheduled(store, task, now)
       return
     case 'fail':
       return yield* failWithoutTurn(task, gate)
@@ -1073,7 +1083,7 @@ export const releaseParked = (now: number) => Effect.gen(function* () {
     if (gate.kind === 'run' && task.deadline !== null && now >= task.deadline) yield* failWithoutTurn(task, { kind: 'fail', line: 'The deadline passed before the Task could run.', offline: [] })
     else if (gate.kind === 'park') waiting.push(task)
     else if (gate.kind === 'fail') yield* failWithoutTurn(task, gate)
-    else if (!store.taskQueued(task.id)) store.enqueue('task', { kind: 'task', taskId: task.id, name: task.title }, task.instructions, { taskId: task.id, by: 'schedule' }, now)
+    else if (!store.taskQueued(task.id)) enqueueScheduled(store, task, now)
   }
   if (waiting.length === 0) store.delete(PARKED_TASKS)
   else store.set(PARKED_TASKS, waiting)

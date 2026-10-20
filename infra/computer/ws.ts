@@ -8,7 +8,7 @@ import { main, type WsIo } from './ws-core.ts'
 
 const io: WsIo = {
   fetch: (input, init) => fetch(input, init),
-  env: process.env,
+  now: () => Date.now(),
   size: async (path) => {
     const info = await stat(path).catch(() => undefined)
     return info?.isFile() === true ? info.size : undefined

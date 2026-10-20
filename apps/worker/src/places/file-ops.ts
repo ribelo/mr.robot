@@ -2,9 +2,6 @@
  * The pure part of the file tools (v1.16 ticket 01): the same read window, edit and glob on every place.
  * Nothing here knows a place; the backends in files.ts bring the bytes.
  */
-import { GREP_MAX_MATCHES } from '@mr-robot/host-protocol'
-
-
 /** The most lines one read returns, the longest line it shows and the most bytes of lines (as the DSH read tool did). */
 export const READ_LIMIT = 2000
 const READ_MAX_LINE = 2000
@@ -51,8 +48,6 @@ export function replaceText(before: string, oldString: string, newString: string
   return replaceAll ? before.split(oldString).join(newString) : before.replace(oldString, () => newString)
 }
 
-export { globBase, globToRegExp, skipped, SKIPPED_DIRECTORIES } from '@mr-robot/host-protocol'
-
 /** One argument for a POSIX shell, in single quotes (the Box's commands). */
 export function shellQuote(text: string): string {
   return `'${text.replaceAll("'", "'\\''")}'`
@@ -63,8 +58,6 @@ export interface GrepMatch {
   readonly line: number
   readonly text: string
 }
-
-export const MAX_GREP_MATCHES = GREP_MAX_MATCHES
 
 /** The matches of a regular expression in a text. */
 export function grepText(path: string, text: string, regex: RegExp, room: number): GrepMatch[] {

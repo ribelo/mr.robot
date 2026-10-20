@@ -18,13 +18,13 @@ import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, type SandboxExecutionPo
 import Sandbox, { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
-import { SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
+import { RUN_MAX_WAIT_SECONDS, SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
 import { ensureRobotDirectory, expandPath, writeRoots } from './access.ts'
 import { HostJobs } from './jobs.ts'
 import { aclRunnerWorks, findInstalledPwsh7, startRunnersAsNode, withoutElectronSwitch } from './windows.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
-const MAX_TIMEOUT_MS = 600_000
+const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
 const DEFAULT_TIMEOUT_MS = 120_000
 
 /** DSH's word for each of ours. */
@@ -48,6 +48,8 @@ class ManyRootsSandbox extends LocalSandboxProvider {
     const grants = runner.endsWith('bwrap') ? extra.flatMap((root) => ['--bind', root, root]) : runner.endsWith('landlock-run') ? extra.flatMap((root) => ['--rw', root]) : undefined
     if (grants === undefined) throw Object.assign(new Error('This computer\'s sandbox confines one directory, so a grant with more write roots cannot run commands here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
     const separator = confined.argv.indexOf('--')
+    // Without the separator the grants cannot be put where the runner reads them: run nothing rather than run with fewer roots.
+    if (separator < 0) throw Object.assign(new Error('This computer\'s sandbox runner has an argument list this app cannot add write roots to, so a grant with more write roots cannot run commands here. Give the grant no extra roots, or full access.'), { code: DSH_SANDBOX_UNAVAILABLE })
     return { ...confined, argv: [...confined.argv.slice(0, separator), ...grants, ...confined.argv.slice(separator)] }
   }
 }

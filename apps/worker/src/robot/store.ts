@@ -6,7 +6,10 @@
 import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
-import type { StoredPlace } from '../places/place.ts'
+import * as Schema from 'effect/Schema'
+import { StoredPlace } from '../places/host-facet.ts'
+import { HOST_ACCESS, mrRobotHostLevel } from './host-access.ts'
+import { JobId } from '../places/job-id.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
 import { isRemovedBrowserBackend } from '../browser/removed-backends.ts'
@@ -112,7 +115,7 @@ export interface ActiveTurn {
 
 /** One command that goes on by itself, on the Box or on a Host (v1.15 ticket 07, gb-lnph; v1.16 ticket 01). */
 export interface JobRow {
-  readonly id: string
+  readonly id: JobId
   /** Where it runs: "box" or "host:<id>". */
   readonly place: StoredPlace
   /** The Host's name when it started; null for the Box. */
@@ -134,7 +137,7 @@ export interface JobRow {
 type JobSql = { id: string; place: string; place_name: string | null; command: string; started_at: number; finished_at: number | null; exit_code: number | null; status: JobRow['status']; out_offset: number; err_offset: number; foreground: number; spill: string | null }
 
 function jobFromSql(row: JobSql): JobRow {
-  return { id: row.id, place: row.place as StoredPlace, placeName: row.place_name, command: row.command, startedAt: row.started_at, finishedAt: row.finished_at, exitCode: row.exit_code, status: row.status, outOffset: row.out_offset, errOffset: row.err_offset, foreground: row.foreground === 1, spill: row.spill }
+  return { id: Schema.decodeUnknownSync(JobId)(row.id), place: Schema.decodeUnknownSync(StoredPlace)(row.place), placeName: row.place_name, command: row.command, startedAt: row.started_at, finishedAt: row.finished_at, exitCode: row.exit_code, status: row.status, outOffset: row.out_offset, errOffset: row.err_offset, foreground: row.foreground === 1, spill: row.spill }
 }
 
 export interface ProposalRow extends ProposalView {
@@ -472,7 +475,8 @@ export class RobotStore {
   setGrants(grants: GrantSet): void {
     const mrRobot = this.config()?.kind === 'mr-robot'
     // Mr. Robot holds a group he reaches without a row, except the groups everyone holds only when granted (ao-zzga).
-    const kept = (kind: GrantKind, name: string, level: GrantLevel) => mrRobot && kind !== 'recipient' && !(kind === 'tool' && EXPLICIT_TOOL_GROUPS.includes(name)) ? level !== 'allow' : usableLevel(level)
+    // His files and shell on a Host start at ask (ob-2k5x), so there it is a raise to allow that needs a row, and ask needs none.
+    const kept = (kind: GrantKind, name: string, level: GrantLevel) => mrRobot && kind === 'host' ? level !== mrRobotHostLevel(name) : mrRobot && kind !== 'recipient' && !(kind === 'tool' && EXPLICIT_TOOL_GROUPS.includes(name)) ? level !== 'allow' : usableLevel(level)
     // A payload (the subagents grant's model list) stays with its item through any change of level.
     const payloads = this.sql.exec<{ kind: GrantKind; name: string; payload: string }>('SELECT kind, name, payload FROM grant_item WHERE payload IS NOT NULL').toArray()
     this.transaction(() => {
@@ -487,7 +491,34 @@ export class RobotStore {
       for (const row of payloads) {
         this.sql.exec("INSERT INTO grant_item (kind, name, level, payload) VALUES (?, ?, 'deny', ?) ON CONFLICT (kind, name) DO UPDATE SET payload = excluded.payload", row.kind, row.name, row.payload)
       }
+      this.pruneHostAccess()
     })
+  }
+
+  /**
+   * The level of one Host facet as the owner set it, else what the Robot starts at: Mr. Robot's files and shell at ask and his browser at
+   * allow (ob-2k5x); any other Robot at deny. It does not depend on what the Robot reaches now, so a Host can ask it at any time.
+   */
+  hostLevel(facet: string): GrantLevel {
+    const stored = this.grants().hosts[facet]
+    if (stored !== undefined) return stored
+    return this.config()?.kind === 'mr-robot' ? mrRobotHostLevel(facet) : 'deny'
+  }
+
+  /** The mode and roots of a Host facet that is no longer usable are forgotten: they would come back with the next grant. */
+  pruneHostAccess(): void {
+    const access = this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS)
+    if (access === undefined) return
+    const kept = Object.entries(access).filter(([facet]) => usableLevel(this.hostLevel(facet)))
+    if (kept.length !== Object.keys(access).length) this.set(HOST_ACCESS, Object.fromEntries(kept))
+  }
+
+  /** Forget the mode and roots of the Hosts that are no longer among those the owner reaches (unpaired, or no longer shared). */
+  forgetHostAccessExcept(hostIds: readonly string[]): void {
+    const access = this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS)
+    if (access === undefined) return
+    const kept = Object.entries(access).filter(([facet]) => hostIds.some((id) => facet.startsWith(`${id}:`)))
+    if (kept.length !== Object.keys(access).length) this.set(HOST_ACCESS, Object.fromEntries(kept))
   }
 
   /** The payload of one grant item, parsed; undefined when it has none. */
@@ -510,8 +541,8 @@ export class RobotStore {
 
   /**
    * The levels that apply (sk-br7y): an ordinary Robot's stored rows; for Mr. Robot every tool group
-   * (also of a plugin added later) and everything his owner reaches at allow, under the rows his owner
-   * stored to lower an item. Recipients are stored rows for both.
+   * (also of a plugin added later) and everything his owner reaches at allow (his files and shell on a Host at ask), under the rows his
+   * owner stored to change an item. Recipients are stored rows for both.
    */
   effectiveGrants(): GrantSet {
     const stored = this.grants()
@@ -522,7 +553,7 @@ export class RobotStore {
       skills: allow(this.reach.skills),
       recipients: {},
       secrets: allow(this.reach.secrets),
-      hosts: allow((this.reach.hosts ?? []).flatMap((id) => [`${id}:browser`, `${id}:files`, `${id}:shell`])),
+      hosts: Object.fromEntries((this.reach.hosts ?? []).flatMap((id) => [`${id}:browser`, `${id}:files`, `${id}:shell`]).map((facet) => [facet, mrRobotHostLevel(facet)])),
       // Mr. Robot reaches every connection his owner can use, writing included (cn-xezx).
       connections: allow((this.reach.connections ?? []).flatMap((id) => [id, `${id}:write`])),
     }
@@ -644,11 +675,11 @@ export class RobotStore {
 
   // ------------------------------------------------------------ Jobs (v1.15 ticket 07, v1.16 ticket 01)
 
-  addJob(id: string, place: StoredPlace, placeName: string | null, command: string, now: number): void {
+  addJob(id: JobId, place: StoredPlace, placeName: string | null, command: string, now: number): void {
     this.sql.exec("INSERT INTO job (id, place, place_name, command, started_at, status) VALUES (?, ?, ?, ?, ?, 'running')", id, place, place === 'box' ? null : placeName, command, now)
   }
 
-  job(id: string): JobRow | undefined {
+  job(id: JobId): JobRow | undefined {
     const row = this.sql.exec<JobSql>('SELECT * FROM job WHERE id = ?', id).toArray()[0]
     return row === undefined ? undefined : jobFromSql(row)
   }
@@ -667,7 +698,7 @@ export class RobotStore {
   }
 
   /** Close a running job; false when it was closed already (one close per job). */
-  closeJob(id: string, status: 'completed' | 'killed' | 'lost', exitCode: number | null, now: number, spill: string | null): boolean {
+  closeJob(id: JobId, status: 'completed' | 'killed' | 'lost', exitCode: number | null, now: number, spill: string | null): boolean {
     const cursor = this.sql.exec("UPDATE job SET status = ?, exit_code = ?, finished_at = ?, spill = ? WHERE id = ? AND status = 'running'", status, exitCode, now, spill, id)
     if (cursor.rowsWritten !== 1) return false
     this.sql.exec("DELETE FROM job WHERE status <> 'running' AND id NOT IN (SELECT id FROM job WHERE status <> 'running' ORDER BY started_at DESC LIMIT 50)")
@@ -675,11 +706,11 @@ export class RobotStore {
   }
 
   /** The job went on past the foreground wait or was started in the background: its end wakes the Robot. */
-  promoteJob(id: string): void {
+  promoteJob(id: JobId): void {
     this.sql.exec('UPDATE job SET foreground = 0 WHERE id = ?', id)
   }
 
-  setJobOffsets(id: string, outOffset: number, errOffset: number): void {
+  setJobOffsets(id: JobId, outOffset: number, errOffset: number): void {
     this.sql.exec('UPDATE job SET out_offset = ?, err_offset = ? WHERE id = ?', outOffset, errOffset, id)
   }
 

@@ -19,6 +19,8 @@ const open: WebSocket[] = []
 let runs = 0
 /** The fake host's disk (v1.15, copy): path → bytes. */
 export const hostDisk = new Map<string, Uint8Array>()
+/** Downloads that came in windows and are not whole yet. */
+const downloading = new Map<string, Uint8Array>()
 /** What the fake app did to copy: each Upload and Download it was handed, with the URLs' keys. */
 export const hostCopies: Array<{ rpc: 'Upload' | 'Download'; path: string; size: number; parts: number }> = []
 /** The copy engine's network is R2 played from the bucket, and its pauses between attempts are instant. */
@@ -36,11 +38,16 @@ export const heldCommands = new Set<string>()
 export const hostJobCalls: string[] = []
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
 
+/** The app refuses a change in read-only mode, with the code the Worker looks for. */
+const readOnly = (access: HostAccess, path: string) => access.mode === 'read-only'
+  ? Effect.fail(new HostError({ message: `${path} was not written: this grant is read-only, so nothing on this computer may be changed.`, code: 'SANDBOX_DENIED' }))
+  : undefined
+
 const skippedPath = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
 
 
 /** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). Its notifications (notify frames) are kept in `notices`. */
-export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell } = {}) {
+export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell; legacy?: boolean } = {}) {
   const platform = options.platform ?? 'linux'
   const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform }) })
   const { code, approveUrl } = (await start.json()) as { code: string; approveUrl: string }
@@ -70,12 +77,14 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
         return Effect.succeed({ path, size: bytes.length, text: null, base64: btoa(String.fromCharCode(...bytes)) })
       }
     },
-    Write: ({ path, text, base64, access }) => Effect.sync(() => {
+    Write: ({ path, text, base64, access }) => {
       hostFileCalls.push({ rpc: 'Write', path, access })
+      return readOnly(access, path) ?? Effect.sync(() => {
       const bytes = base64 === undefined ? new TextEncoder().encode(text ?? '') : Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
       hostDisk.set(path, bytes)
       return { path, bytes: bytes.length }
-    }),
+      })
+    },
     CopyStat: ({ path }) => {
       const bytes = hostDisk.get(path)
       return bytes === undefined ? Effect.fail(new HostError({ message: `no such file: ${path}`, code: 'ENOENT' })) : Effect.succeed({ path, size: bytes.length })
@@ -85,16 +94,23 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       try: async () => {
         hostCopies.push({ rpc: 'Upload', path, size, parts: parts.length })
         const bytes = hostDisk.get(path)
-        if (bytes === undefined) throw new CopyFailed(`no such file: ${path}`)
+        if (bytes === undefined) throw new CopyFailed({ message: `no such file: ${path}` })
         return { path, size, etags: await uploadFile({ size: async () => bytes.length, read: async (offset, length) => bytes.subarray(offset, offset + length) }, size, parts, copyIo()) }
       },
       catch: hostError,
     }),
-    Download: ({ path, url, size, partBytes }) => Effect.tryPromise({
+    Download: ({ path, url, size, partBytes, from, until, access }) => readOnly(access, path) ?? Effect.tryPromise({
       try: async () => {
-        hostCopies.push({ rpc: 'Download', path, size, parts: Math.ceil(size / partBytes) })
-        const received = new Uint8Array(size)
-        const written = await downloadFile({ write: async (offset, bytes) => { received.set(bytes, offset) }, finish: async () => { hostDisk.set(path, received) }, abandon: async () => undefined }, { url, size, partBytes }, copyIo())
+        hostFileCalls.push({ rpc: 'Download', path, access })
+        hostCopies.push({ rpc: 'Download', path, size, parts: Math.ceil((Math.min(until, size) - from) / partBytes) })
+        // A download in windows keeps what arrived until the last window puts the file in place.
+        const received = from > 0 ? downloading.get(path) ?? new Uint8Array(size) : new Uint8Array(size)
+        const written = await downloadFile({
+          write: async (offset, bytes) => { received.set(bytes, offset) },
+          finish: async () => { downloading.delete(path); hostDisk.set(path, received) },
+          release: async () => { downloading.set(path, received) },
+          abandon: async () => { downloading.delete(path) },
+        }, { url, size, partBytes, from, until }, copyIo())
         return { path, bytes: written }
       },
       catch: hostError,
@@ -114,6 +130,8 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     }),
     Delete: ({ path, access }) => {
       hostFileCalls.push({ rpc: 'Delete', path, access })
+      const denied = readOnly(access, path)
+      if (denied !== undefined) return denied
       if (!hostDisk.delete(path)) return Effect.fail(new HostError({ message: `No file ${path}; nothing was deleted.`, code: 'ENOENT' }))
       return Effect.succeed({ path })
     },
@@ -168,7 +186,10 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
   let current = socket
   const notices: HostNotification[] = []
   let instance = `app-run-${++runs}`
-  const beat = (as = instance) => current.send(frame({ t: 'hb', d: { version: '0.1.0', instance: as, platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full', shell: options.shell ?? 'bash' } } }))
+  // An app from before v1.16 says nothing of its sandbox, shell or run, and ignores the access of a call.
+  const beat = (as = instance) => current.send(frame({ t: 'hb', d: options.legacy === true
+    ? { version: '0.1.0', platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome' } }
+    : { version: '0.1.0', instance: as, platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full', shell: options.shell ?? 'bash' } } }))
   /** The app serves the Host RPCs on a socket: its first connection, and each time it comes back. */
   const serve = (on: WebSocket) => {
     current = on

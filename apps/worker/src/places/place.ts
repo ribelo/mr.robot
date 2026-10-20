@@ -3,37 +3,42 @@
  * the Robot's Box, or one of its owner's Hosts by name. A Host is found among the Hosts the Robot's owner reaches; a call to a place
  * the Robot holds no grant on is refused with the grant named (ob-dyg4, ob-qnf7).
  */
+import type { HostView } from '@mr-robot/protocol'
 import { MEMBER_FILE_NAMES } from '../member/member.ts'
 import { docsChildren, isDocsPath, productDoc } from '../docs/index.ts'
 import { normalizePath } from '../workspace/workspace.ts'
+import { BadCall, OwnedPath } from './errors.ts'
+import { hostPlace, type StoredPlace } from './host-facet.ts'
+
+export type { Reach } from './host-facet.ts'
 
 export const WORKSPACE_PLACE = 'workspace'
 export const BOX_PLACE = 'box'
 
-/** A place a call resolved to, after its grant was checked. */
+/** A place a call resolved to, after its grant was checked. A Host is the one the Robot's owner reaches, as the Home lists it. */
 export type Place =
   | { readonly kind: 'workspace' }
   | { readonly kind: 'box' }
-  | { readonly kind: 'host'; readonly id: string; readonly name: string }
+  | { readonly kind: 'host'; readonly host: HostView }
+
+/** A place that runs commands and holds jobs. */
+export type JobsPlace = Exclude<Place, { kind: 'workspace' }>
 
 /** What a Host facet lets a tool do: files for the file tools and copy, shell for run and the jobs. */
 export type PlaceFacet = 'files' | 'shell'
 
-/** The name of a job's place as the store keeps it: "box" or "host:<id>". */
-export type StoredPlace = 'box' | `host:${string}`
-
-export function storedPlace(place: Exclude<Place, { kind: 'workspace' }>): StoredPlace {
-  return place.kind === 'box' ? 'box' : `host:${place.id}`
+export function storedPlace(place: JobsPlace): StoredPlace {
+  return place.kind === 'box' ? 'box' : hostPlace(place.host.id)
 }
 
 /** What the Robot sees of a place in a result: workspace, box or the Host's name. */
 export function placeName(place: Place): string {
-  return place.kind === 'host' ? place.name : place.kind
+  return place.kind === 'host' ? place.host.name : place.kind
 }
 
 /** The `on` of a call: a non-empty string. Whether it names a place the Robot may use is decided against its grants (Places.resolve). */
 export function parseOn(on: unknown, tool: string): string {
-  if (typeof on !== 'string' || on.trim() === '') throw new Error(`${tool}: parameter "on" is required: workspace, box or the name of one of your owner's computers.`)
+  if (typeof on !== 'string' || on.trim() === '') throw new BadCall({ tool, message: `${tool}: parameter "on" is required: workspace, box or the name of one of your owner's computers.` })
   return on.trim()
 }
 
@@ -50,5 +55,7 @@ export function ownedPath(path: string): boolean {
   return isDocsPath(key) && (productDoc(key) !== undefined || docsChildren(key) !== undefined)
 }
 
-export const OWNED_ON_WORKSPACE = (path: string): string =>
-  `${path} is a file the platform keeps in your Workspace (your owner's files, the product docs and the platform skills). It is reachable only with on "workspace".`
+/** Refuse a path the platform owns, for a place that is not the Workspace. */
+export function refuseOwned(path: string): void {
+  if (ownedPath(path)) throw new OwnedPath({ path, message: `${path} is a file the platform keeps in your Workspace (your owner's files, the product docs and the platform skills). It is reachable only with on "workspace".` })
+}

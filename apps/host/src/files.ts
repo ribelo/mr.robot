@@ -3,11 +3,11 @@
  * same on every OS and do not depend on a shell. Relative paths start in the Robot's directory; reads are as wide as the OS user;
  * every write obeys the grant's mode and roots (access.ts).
  */
-import { lstat, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
+import { lstat, readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, SKIPPED_DIRECTORIES, type HostAccess } from '@mr-robot/host-protocol'
-import { assertMayWrite, ensureRobotDirectory, expandPath } from './access.ts'
+import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, removeWithin, writeWithin } from './access.ts'
 
 const MAX_READ = 10 * 1024 * 1024
 /** The most files a listing returns, and the most a search looks into. */
@@ -50,7 +50,7 @@ export class HostDisk {
     return expandPath(this.home, await ensureRobotDirectory(this.home, access), path)
   }
 
-  async read(access: HostAccess, path: string) {
+  async read(access: HostAccess, path: string): Promise<{ path: string; size: number; text: string | null; base64: string | null }> {
     const full = await this.full(access, path)
     const info = await stat(full)
     if (info.size > MAX_READ) throw failure(`${full} is ${info.size} bytes; files over 10 MB are not read`, 'EFBIG')
@@ -62,12 +62,10 @@ export class HostDisk {
     }
   }
 
-  async write(access: HostAccess, path: string, input: { text?: string | undefined; base64?: string | undefined }) {
+  async write(access: HostAccess, path: string, input: { text?: string | undefined; base64?: string | undefined }): Promise<{ path: string; bytes: number }> {
     const full = await this.full(access, path)
-    await assertMayWrite(this.home, access, full)
     const body = input.base64 !== undefined ? Buffer.from(input.base64, 'base64') : Buffer.from(input.text ?? '', 'utf8')
-    await mkdir(dirname(full), { recursive: true })
-    await writeFile(full, body)
+    await writeWithin(this.home, access, full, body)
     return { path: full, bytes: body.length }
   }
 
@@ -76,14 +74,12 @@ export class HostDisk {
     return this.full(access, path)
   }
 
-  /** A file to write as a copy's target: the path as the app resolves it, after the mode and roots allowed a write there. */
+  /** A file to write as a copy's target: its real path (symbolic links resolved), after the mode and roots allowed a write there. */
   async writable(access: HostAccess, path: string): Promise<string> {
-    const full = await this.full(access, path)
-    await assertMayWrite(this.home, access, full)
-    return full
+    return assertMayWrite(this.home, access, await this.full(access, path))
   }
 
-  async glob(access: HostAccess, pattern: string) {
+  async glob(access: HostAccess, pattern: string): Promise<{ paths: string[]; truncated: boolean }> {
     const base = globBase(pattern)
     const matcher = globToRegExp(pattern)
     const root = await this.full(access, base)
@@ -127,13 +123,14 @@ export class HostDisk {
     return { matches }
   }
 
-  async remove(access: HostAccess, path: string) {
+  async remove(access: HostAccess, path: string): Promise<{ path: string }> {
     const full = await this.full(access, path)
-    await assertMayWrite(this.home, access, full)
+    await assertMayRemove(this.home, access, full)
     const info = await lstat(full).catch(() => undefined)
     if (info === undefined) throw failure(`No file ${full}; nothing was deleted.`, 'ENOENT')
     if (!info.isFile() && !info.isSymbolicLink()) throw failure(`${full} is not a file; only files are deleted.`, 'EISDIR')
-    await unlink(full)
+    // The unlink acts on the resolved directory the check saw.
+    if (!(await removeWithin(this.home, access, full))) throw failure(`No file ${full}; nothing was deleted.`, 'ENOENT')
     return { path: full }
   }
 }

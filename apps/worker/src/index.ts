@@ -30,9 +30,8 @@ export const PRESIGN_PATH = '/api/files/presign'
 async function boxChannel(request: Request, env: Env): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
   const token = bearerToken(request.headers.get('authorization'))
-  const robotId = token === undefined ? undefined : robotOfToken(token)
-  if (token === undefined || robotId === undefined) return json({ error: 'a Box token is required' }, 401)
-  const reply = await env.ROBOT.getByName(robotId).boxTransfer(token, await request.text())
+  if (token === undefined) return json({ error: 'a Box token is required' }, 401)
+  const reply = await env.ROBOT.getByName(robotOfToken(token)).boxTransfer(token, await request.text())
   return new Response(reply.json, { status: reply.status, headers: { 'content-type': 'application/json' } })
 }
 

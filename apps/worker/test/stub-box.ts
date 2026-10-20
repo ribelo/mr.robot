@@ -102,7 +102,7 @@ export class StubBox implements BoxBackend {
     let stderr = ''
     const io: WsIo = {
       fetch: (input, init) => this.network(String(input), init),
-      env: {},
+      now: () => Date.now(),
       size: async (path) => disk.get(at(path))?.bytes.length,
       read: async (path, offset, length) => (disk.get(at(path))?.bytes ?? new Uint8Array()).slice(offset, offset + length),
       text: async (path) => { const file = disk.get(at(path)); return file === undefined ? undefined : new TextDecoder().decode(file.bytes) },

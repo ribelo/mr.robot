@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { HostNotification } from '@mr-robot/host-protocol'
 import type { Conversation, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { closeHosts, fakeHost } from './fake-host.ts'
+import { closeHosts, fakeHost, ran } from './fake-host.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -78,5 +78,24 @@ describe('the Hosts line of the runtime section (ob-gjp9, ob-vyyg)', () => {
     const id = await robotWith({})
     const platform = (await api<{ sections: Array<{ name: string; text: string }> }>(ANNA, `/api/robots/${id}/prompt`)).body.sections.find((section) => section.name === 'Platform')!.text
     expect(platform).toContain('\n- Hosts: Desk · online · bash on linux · sandbox full; Laptop · online · pwsh on Windows · sandbox partial.\n')
+  })
+})
+
+describe('a shared Host (S3)', () => {
+  it("starts every Member's Mr. Robot at ask for files and shell, and at allow for the browser, and asks before it runs", async () => {
+    const BEN = 'ben@example.com'
+    const desk = await fakeHost('Desk')
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    const bensMr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    expect((await env.ROBOT.getByName(bensMr).settings()).grants.hosts).toEqual({ [`${desk.hostId}:files`]: 'ask', [`${desk.hostId}:shell`]: 'ask', [`${desk.hostId}:browser`]: 'allow' })
+    await api(BEN, `/api/robots/${bensMr}/settings`, { method: 'PATCH', body: { codeMode: false } })
+    scripts.set(bensMr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'uptime', reason: 'Check the load' } }] }, { calls: [{ name: 'write', args: { on: 'Desk', file_path: 'a.txt', content: 'x', reason: 'Note it' } }] }, { text: 'Waiting.' }])
+    await api(BEN, `/api/robots/${bensMr}/messages`, { body: { text: 'go' } })
+    await settle(bensMr)
+    const results = requests.get(bensMr)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
+    expect(results.filter((text) => text.includes('waiting for your owner'))).toHaveLength(2)
+    expect(ran).not.toContain('uptime')
   })
 })

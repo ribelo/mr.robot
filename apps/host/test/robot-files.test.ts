@@ -50,7 +50,7 @@ describe('writes obey the mode and the roots of the grant', () => {
 
   it('refuses every write in read-only, also in the Robot directory, and allows every write in full', async () => {
     expect((await failure('Write', { path: 'ro.txt', text: 'no', access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
-    expect((await failure('Download', { path: 'ro.bin', url: 'https://r2.test/x', size: 1, partBytes: 1, access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
+    expect((await failure('Download', { path: 'ro.bin', url: 'https://r2.test/x', size: 1, partBytes: 1, from: 0, until: 1, access: access({ mode: 'read-only' }) })).code).toBe('SANDBOX_DENIED')
     const anywhere = join(home, 'anywhere.txt')
     await call('Write', { path: anywhere, text: 'full', access: access({ mode: 'full' }) })
     expect(await readFile(anywhere, 'utf8')).toBe('full')
@@ -63,6 +63,19 @@ describe('writes obey the mode and the roots of the grant', () => {
     await symlink(target, join(robotDir(), 'door'))
     expect((await failure('Write', { path: 'door/x.txt', text: 'no', access: access() })).code).toBe('SANDBOX_DENIED')
     await expect(stat(join(target, 'x.txt'))).rejects.toThrow()
+  })
+
+  it('does not write through a link left in the Robot directory that points out of it, even when its target is not there yet', async () => {
+    const outside = join(home, 'not-yet-there.txt')
+    await mkdir(robotDir(), { recursive: true })
+    await symlink(outside, join(robotDir(), 'dangling'))
+    expect((await failure('Write', { path: 'dangling', text: 'no', access: access() })).code).toBe('SANDBOX_DENIED')
+    await expect(stat(outside)).rejects.toThrow()
+    // A link to a file inside the Robot directory is a way to that file, and the write lands there.
+    await writeFile(join(robotDir(), 'real.txt'), 'old')
+    await symlink(join(robotDir(), 'real.txt'), join(robotDir(), 'inside'))
+    await call('Write', { path: 'inside', text: 'new', access: access() })
+    expect(await readFile(join(robotDir(), 'real.txt'), 'utf8')).toBe('new')
   })
 
   it('reads anything the OS user can read, in every mode', async () => {

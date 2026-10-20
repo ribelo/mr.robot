@@ -279,3 +279,43 @@ describe('old events still render (ob-j9nx)', () => {
     expect(trajectory).toContain('host_read')
   })
 })
+
+describe('a Robot in setup reaches its Workspace (S1)', () => {
+  it('writes its persona file with write on workspace although it holds no files grant yet', async () => {
+    scripts.set('*', [{ text: 'Hello.' }])
+    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+    await settle(body.id)
+    const [written, outside] = await calls(body.id, [
+      { name: 'write', args: { on: 'workspace', file_path: 'SOUL.md', content: 'I am calm.' } },
+      { name: 'run', args: { on: 'box', command: 'ls' } },
+    ])
+    expect(json(written)).toMatchObject({ on: 'workspace', written: '/workspace/SOUL.md', bytes: 10 })
+    expect(await workspaceText(body.id, 'SOUL.md')).toBe('I am calm.')
+    // Setup opens the Workspace and nothing else.
+    expect(outside).toBeDefined()
+    expect(boxLog.get(body.id)).toBeUndefined()
+  })
+})
+
+describe('copy keeps the owned paths in the Workspace (S5)', () => {
+  it('refuses an owned name on the Host end, and copies an owner\'s file or a doc from the Workspace to a Host through its real source', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { files: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
+    hostDisk.set('USER.md', new TextEncoder().encode('not the owner\'s file'))
+    const results = await calls(id, [
+      { name: 'copy', args: { from: { on: 'Desk', path: 'USER.md' }, to: { on: 'workspace', path: 'inbox/user.md' } } },
+      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/none.md' }, to: { on: 'Desk', path: 'docs/box.md' } } },
+      { name: 'copy', args: { from: { on: 'workspace', path: 'docs/box.md' }, to: { on: 'Desk', path: '/home/anna/box.md' } } },
+      { name: 'copy', args: { from: { on: 'workspace', path: 'USER.md' }, to: { on: 'Desk', path: '/home/anna/user.md' } } },
+      { name: 'copy', args: { from: { on: 'workspace', path: 'docs/none.md' }, to: { on: 'Desk', path: '/home/anna/none.md' } } },
+    ])
+    expect(results[0]).toContain('reachable only with on "workspace"')
+    expect(await workspaceText(id, 'inbox/user.md')).toBeNull()
+    expect(results[1]).toContain('reachable only with on "workspace"')
+    expect(json(results[2])).toMatchObject({ from: { on: 'workspace', path: '/workspace/docs/box.md' }, to: { on: 'Desk', path: '/home/anna/box.md' } })
+    expect(new TextDecoder().decode(hostDisk.get('/home/anna/box.md'))).toContain('# The Box')
+    expect(json(results[3])).toMatchObject({ to: { on: 'Desk', path: '/home/anna/user.md' } })
+    expect(hostDisk.has('/home/anna/user.md')).toBe(true)
+    expect(results[4]).toContain('does not exist')
+  })
+})

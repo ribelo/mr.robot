@@ -4,7 +4,7 @@
  * computer without a sandbox fails closed. Driven through the edge API with the scripted model and the fake Host app, which stands for
  * the app (the sandbox itself is checked on the app's side, in apps/host).
  */
-import { reset } from 'cloudflare:test'
+import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, HostView, ProposalView, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -115,7 +115,8 @@ describe('escalate (ob-ifak)', () => {
     expect(asked).toContain('waiting for your owner')
     expect(hostRuns).toEqual([])
     const [ask] = await asks(id)
-    expect(ask).toMatchObject({ kind: 'tool-call', status: 'open', toolCall: { tool: 'run', reason: 'Install the hosts file' } })
+    // The owner reads first that the command runs without the sandbox (S8).
+    expect(ask).toMatchObject({ kind: 'tool-call', status: 'open', purpose: 'run without the sandbox: Install the hosts file', toolCall: { tool: 'run', reason: 'This runs without the sandbox, once. Install the hosts file' } })
     expect(ask!.toolCall!.arguments).toContainEqual({ name: 'escalate', value: 'true' })
     scripts.set(id, [{ text: 'It ran.' }])
     expect((await api<ProposalView>(ANNA, `/api/robots/${id}/proposals/${ask!.id}`, { body: { revision: ask!.revision, approve: true } })).status).toBe(200)
@@ -148,6 +149,8 @@ describe('escalate (ob-ifak)', () => {
     await calls(id, [{ name: 'run', args: { on: 'Desk', command: 'rm /etc/x', escalate: true, reason: 'Clean up' } }])
     const open = (await asks(id)).filter((ask) => ask.status === 'open')
     expect(open).toHaveLength(1)
+    // The Ask the gate stores says it too, whichever path made it (S8).
+    expect(open[0]!.purpose).toBe('run without the sandbox: Clean up')
     scripts.set(id, [{ text: 'Done.' }])
     await api(ANNA, `/api/robots/${id}/proposals/${open[0]!.id}`, { body: { revision: open[0]!.revision, approve: true } })
     await settle(id)
@@ -175,5 +178,124 @@ describe('a computer without a sandbox (ob-n72n, ob-he20)', () => {
     const id = await robotWith(bare)
     const [written] = await calls(id, [{ name: 'write', args: { on: 'Nas', file_path: 'a.txt', content: 'x' } }])
     expect(written).toContain('"written"')
+  })
+})
+
+/** The open tool-call Ask of a Robot is approved and the Robot wakes with the result. */
+async function approveOpen(id: string): Promise<ProposalView> {
+  const open = (await asks(id)).filter((ask) => ask.status === 'open')
+  expect(open).toHaveLength(1)
+  scripts.set(id, [{ text: 'Done.' }])
+  expect((await api<ProposalView>(ANNA, `/api/robots/${id}/proposals/${open[0]!.id}`, { body: { revision: open[0]!.revision, approve: true } })).status).toBe(200)
+  await settle(id)
+  return open[0]!
+}
+
+describe('escalate on the tools that change a computer (Sa1)', () => {
+  it('names the path of a denied write and says escalate is possible; a one-call Ask runs it once in full mode, and the next write is denied again', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk, { files: 'allow', shell: 'allow' }, { [`${desk.hostId}:files`]: { mode: 'read-only', roots: [] } })
+    const [denied] = await calls(id, [{ name: 'write', args: { on: 'Desk', file_path: '/etc/motd', content: 'hello' } }])
+    expect(denied).toContain('/etc/motd was not written')
+    expect(denied).toContain('call write again with escalate: true and a reason')
+    expect(hostDisk.has('/etc/motd')).toBe(false)
+
+    const [waiting] = await calls(id, [{ name: 'write', args: { on: 'Desk', file_path: '/etc/motd', content: 'hello', escalate: true, reason: 'Set the message of the day' } }])
+    expect(waiting).toContain('waiting for your owner')
+    expect(hostDisk.has('/etc/motd')).toBe(false)
+    const ask = await approveOpen(id)
+    expect(ask.purpose).toBe('write without the sandbox: Set the message of the day')
+    expect(new TextDecoder().decode(hostDisk.get('/etc/motd'))).toBe('hello')
+    expect(hostFileCalls.filter((call) => call.rpc === 'Write').map((call) => call.access.mode)).toEqual(['read-only', 'full'])
+    const [again] = await calls(id, [{ name: 'write', args: { on: 'Desk', file_path: '/etc/motd', content: 'again' } }])
+    expect(again).toContain('was not written')
+  })
+
+  it('takes escalate on edit, delete_file and copy to a Host, each needing a reason and the owner\'s answer', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk, { files: 'allow', shell: 'allow' }, { [`${desk.hostId}:files`]: { mode: 'read-only', roots: [] } }, { files: 'allow', box: 'allow' })
+    hostDisk.set('/etc/motd', new TextEncoder().encode('old text'))
+    hostDisk.set('/etc/gone', new TextEncoder().encode('bye'))
+    const [noReason, onBox] = await calls(id, [
+      { name: 'delete_file', args: { on: 'Desk', path: '/etc/gone', escalate: true } },
+      { name: 'write', args: { on: 'box', file_path: 'a.txt', content: 'x', escalate: true, reason: 'Need it' } },
+    ])
+    expect(noReason).toContain('escalate needs a reason')
+    expect(onBox).toContain('Your Box has none to lift')
+
+    await calls(id, [{ name: 'edit', args: { on: 'Desk', file_path: '/etc/motd', old_string: 'old', new_string: 'new', escalate: true, reason: 'Fix the text' } }])
+    await approveOpen(id)
+    expect(new TextDecoder().decode(hostDisk.get('/etc/motd'))).toBe('new text')
+
+    await calls(id, [{ name: 'delete_file', args: { on: 'Desk', path: '/etc/gone', escalate: true, reason: 'Remove it' } }])
+    await approveOpen(id)
+    expect(hostDisk.has('/etc/gone')).toBe(false)
+
+    await env.FILES.put(`robots/${id}/out/report.txt`, 'the report')
+    await calls(id, [{ name: 'copy', args: { from: { on: 'workspace', path: 'out/report.txt' }, to: { on: 'Desk', path: '/etc/report.txt' }, escalate: true, reason: 'Publish the report' } }])
+    const ask = await approveOpen(id)
+    expect(ask.purpose).toBe('copy without the sandbox: Publish the report')
+    expect(new TextDecoder().decode(hostDisk.get('/etc/report.txt'))).toBe('the report')
+    expect(hostFileCalls.filter((call) => call.rpc === 'Download').map((call) => call.access.mode)).toEqual(['full'])
+    // A copy to the Workspace has no computer to write on.
+    const [toWorkspace] = await calls(id, [{ name: 'copy', args: { from: { on: 'Desk', path: '/etc/motd' }, to: { on: 'workspace', path: 'x.txt' }, escalate: true, reason: 'No' } }])
+    expect(toWorkspace).toContain('the destination is not a computer')
+  })
+
+  it('says in the description of run which shell a computer runs (Sa2)', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith(desk)
+    await calls(id, [{ name: 'run', args: { on: 'Desk', command: 'ls' } }])
+    const run = requests.get(id)!.at(-1)!.tools!.find((definition) => definition.name === 'run')!
+    expect(run.description).toContain('bash on the Box')
+    expect(run.description).toContain('Hosts line of your runtime section')
+    expect(run.description).toContain('pwsh on Windows')
+    expect(run.description).not.toContain('in bash as your owner')
+  })
+})
+
+describe('an app from before v1.16 (S2)', () => {
+  it('is sent no confined call: the Robot is told to update the app; full access still runs', async () => {
+    const old = await fakeHost('Old', { legacy: true })
+    expect((await api<HostView[]>(ANNA, '/api/hosts')).body.find((host) => host.id === old.hostId)).toMatchObject({ online: true, version: '0.1.0' })
+    const id = await robotWith(old, { files: 'allow', shell: 'allow' })
+    const [run, write, read] = await calls(id, [
+      { name: 'run', args: { on: 'Old', command: 'ls' } },
+      { name: 'write', args: { on: 'Old', file_path: 'a.txt', content: 'x' } },
+      { name: 'read', args: { on: 'Old', file_path: 'a.txt' } },
+    ])
+    expect(run).toContain('update the Mr. Robot app on Old')
+    expect(write).toContain('update the Mr. Robot app on Old')
+    expect(read).toContain('update the Mr. Robot app on Old')
+    expect(ran).toEqual([])
+    expect(hostFileCalls).toEqual([])
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { hostAccess: { [`${old.hostId}:shell`]: { mode: 'full', roots: [] } } } })
+    const [full] = await calls(id, [{ name: 'run', args: { on: 'Old', command: 'ls' } }])
+    expect(json(full)).toMatchObject({ kind: 'foreground', exitCode: 0 })
+  })
+})
+
+describe('the mode and roots of a facet are forgotten with the facet', () => {
+  it('when the facet goes to deny, and when the Host is unpaired', async () => {
+    const desk = await fakeHost('Desk')
+    const laptop = await fakeHost('Laptop')
+    const id = await robotWith(desk)
+    const stored = async () => Object.keys((await env.ROBOT.getByName(id).settings()).hostAccess ?? {}).sort()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: {
+      grants: { tools: {}, hosts: { [`${desk.hostId}:files`]: 'allow', [`${desk.hostId}:shell`]: 'allow', [`${laptop.hostId}:files`]: 'allow' } },
+      hostAccess: {
+        [`${desk.hostId}:shell`]: { mode: 'read-only', roots: [] },
+        [`${desk.hostId}:files`]: { mode: 'full', roots: [] },
+        [`${laptop.hostId}:files`]: { mode: 'full', roots: [] },
+      },
+    } })
+    expect(await stored()).toEqual([`${desk.hostId}:files`, `${desk.hostId}:shell`, `${laptop.hostId}:files`].sort())
+    // The shell of Desk goes to deny: its mode goes with it.
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${desk.hostId}:files`]: 'allow', [`${laptop.hostId}:files`]: 'allow' } } } })
+    expect(await stored()).toEqual([`${desk.hostId}:files`, `${laptop.hostId}:files`].sort())
+    // Laptop is unpaired: at the Robot's next look at its Hosts its mode is gone.
+    await api(ANNA, `/api/hosts/${laptop.hostId}`, { method: 'DELETE' })
+    await calls(id, [{ name: 'read', args: { on: 'Desk', file_path: 'a.txt' } }])
+    expect(await stored()).toEqual([`${desk.hostId}:files`])
   })
 })

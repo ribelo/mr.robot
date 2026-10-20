@@ -56,6 +56,7 @@ import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } fro
 import { modelRefusal } from '../robot/model-choice.ts'
 import type { AnswerResult, HelpAnswerResult, SessionCaptureStart } from '../robot/robot.ts'
 import { parseTimeZone } from '../robot/time-zone.ts'
+import { parseJobId } from '../places/job-id.ts'
 import { badRequest, call, conflict, decodeBody, forbidden, notFound, Router, type ApiError } from './http.ts'
 import { actsAsPerson, pluginByName } from '../plugins/catalog.ts'
 import { connectPastedValues, sharingRefusal } from '../member/connect-pasted.ts'
@@ -639,7 +640,11 @@ export const api = new Router<ApiContext>()
   // Stop the Robot's Box from its panel (ao-9q18): its kept folder is synced first.
   .on('POST', '/api/robots/:id/box/stop', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopBox()))))
   // Stop one job of the Box from the panel (v1.15 ticket 07, gb-66kh); the Robot is told.
-  .on('POST', '/api/robots/:id/box/jobs/:job/stop', (c, { id, job }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopBoxJob(decodeURIComponent(job), c.member.name)))))
+  .on('POST', '/api/robots/:id/box/jobs/:job/stop', (c, { id, job }) => owner(c, id).pipe(Effect.andThen(Effect.gen(function* () {
+    const jobId = parseJobId(decodeURIComponent(job))
+    if (jobId === undefined) return yield* Effect.fail(notFound('no such job'))
+    return yield* call(() => robot(c, id).stopBoxJob(jobId, c.member.name))
+  }))))
   .on('POST', '/api/robots/:id/pause', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).pause()))))
   .on('POST', '/api/robots/:id/resume', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).resume()))))
   .on('DELETE', '/api/robots/:id', (c, { id }) => Effect.gen(function* () {

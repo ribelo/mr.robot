@@ -1,7 +1,8 @@
 /**
  * ws (v1.16 ticket 06, ob-fgyk, ob-63nt): the Box's way to its Robot's Workspace. A script on the Box runs `ws get`, `ws put`, `ws ls` or
  * `ws rm`; ws asks the Worker for presigned R2 URLs with the token written into the container at boot, and moves the bytes between the
- * disk and R2 itself, in parts of 64 MB with retries. The token reaches one Robot's prefix only and dies with the Box.
+ * disk and R2 itself, in parts of 64 MB with retries. The token reaches one Robot's prefix only and dies with the Box. A link lives fifteen
+ * minutes, so ws asks for the link of each part just before it sends it, and for a new download link when the last one is ten minutes old.
  *
  * This file is the whole program and touches no operating system: files, the network and the clock come in through `WsIo` (ws.ts gives the
  * real ones), so that the Worker's tests can run this very code against the stub Box and the real presign endpoint.
@@ -14,7 +15,8 @@ export interface WsFile {
 
 export interface WsIo {
   readonly fetch: typeof fetch
-  readonly env: Readonly<Record<string, string | undefined>>
+  /** The time in milliseconds, for the age of a link. */
+  now(): number
   /** The size of a file, or undefined when there is none. */
   size(path: string): Promise<number | undefined>
   read(path: string, offset: number, length: number): Promise<Uint8Array>
@@ -33,6 +35,8 @@ export const TOKEN_PATH = '/run/mr-robot/token'
 export const ORIGIN_PATH = '/run/mr-robot/origin'
 const ATTEMPTS = 4
 const BACKOFF_MS = 500
+/** A download link is asked for again when it is this old (it lives fifteen minutes). */
+const LINK_REFRESH_MS = 10 * 60_000
 
 /** A failure with words for the person at the keyboard (or the Robot's script log). */
 class WsError extends Error {}
@@ -47,8 +51,8 @@ Paths in the Workspace are relative to it (for example inbox/video.mp4). Any siz
 type Json = Record<string, unknown>
 
 async function configuration(io: WsIo): Promise<{ origin: string; token: string }> {
-  const token = (io.env['MR_ROBOT_TOKEN'] ?? (await io.text(TOKEN_PATH)) ?? '').trim()
-  const origin = (io.env['MR_ROBOT_URL'] ?? (await io.text(ORIGIN_PATH)) ?? '').trim().replace(/\/+$/, '')
+  const token = ((await io.text(TOKEN_PATH)) ?? '').trim()
+  const origin = ((await io.text(ORIGIN_PATH)) ?? '').trim().replace(/\/+$/, '')
   if (token === '') throw new WsError(`no token at ${TOKEN_PATH}: this Box started before ws existed. Stop it and let it boot again.`)
   if (origin === '') throw new WsError(`no address of Mr. Robot at ${ORIGIN_PATH}. Your owner has to open the app once; then stop the Box and let it boot again.`)
   return { origin, token }
@@ -96,7 +100,7 @@ const number = (value: unknown, what: string): number => {
   return value
 }
 
-interface PlannedPart { readonly number: number; readonly url: string; readonly offset: number; readonly length: number }
+interface PlannedPart { readonly number: number; readonly offset: number; readonly length: number }
 
 async function put(io: WsIo, file: string, path: string): Promise<string> {
   const size = await io.size(file)
@@ -110,8 +114,9 @@ async function put(io: WsIo, file: string, path: string): Promise<string> {
     for (const part of parts) {
       const bytes = await io.read(file, part.offset, part.length)
       if (bytes.length !== part.length) throw new WsError(`${file} changed while it was sent`)
+      const url = text((await ask(io, { op: 'part', path, ...(uploadId === undefined ? {} : { uploadId }), number: part.number }))['url'], 'link')
       const response = await attempts(`part ${part.number}`, async () => {
-        const reply = await io.fetch(part.url, { method: 'PUT', body: bytes })
+        const reply = await io.fetch(url, { method: 'PUT', body: bytes })
         return classify(reply, reply.ok ? '' : `R2 refused the part`)
       }, io)
       etags.push({ number: part.number, etag: response.headers.get('etag') ?? '' })
@@ -126,7 +131,8 @@ async function put(io: WsIo, file: string, path: string): Promise<string> {
 
 async function get(io: WsIo, path: string, dest: string): Promise<string> {
   const plan = await ask(io, { op: 'get', path })
-  const url = text(plan['url'], 'link')
+  let url = text(plan['url'], 'link')
+  let issued = io.now()
   const size = number(plan['size'], 'size')
   const partBytes = number(plan['partBytes'], 'part size')
   const target = await io.create(dest)
@@ -134,6 +140,10 @@ async function get(io: WsIo, path: string, dest: string): Promise<string> {
     if (size === 0) await target.write(0, new Uint8Array())
     for (let offset = 0; offset < size; offset += partBytes) {
       const length = Math.min(partBytes, size - offset)
+      if (io.now() - issued > LINK_REFRESH_MS) {
+        url = text((await ask(io, { op: 'get', path }))['url'], 'link')
+        issued = io.now()
+      }
       const body = await attempts(`bytes ${offset}-${offset + length - 1}`, async () => {
         const reply = await io.fetch(url, { method: 'GET', headers: { range: `bytes=${offset}-${offset + length - 1}` } })
         if (!reply.ok) return classify(reply, 'R2 refused the range')
