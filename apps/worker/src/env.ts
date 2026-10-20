@@ -17,6 +17,8 @@ export interface Env {
   readonly LOADER: WorkerLoader
   readonly HOME_NAME: string
   readonly DATA_KEY: string
+  /** Signs the Box tokens (box/token.ts), so the edge refuses a made-up token before it reaches a Robot. */
+  readonly BOX_TOKEN_KEY: string
   readonly VAPID_PRIVATE_KEY: string
   readonly VAPID_PUBLIC_KEY: string
   /** Subscription OAuth client ids (the providers' public CLI clients by default). */

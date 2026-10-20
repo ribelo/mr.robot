@@ -3,7 +3,7 @@
  * Driven through the edge API with the scripted model, the stub Box (which runs the real ws program), the fake Host app (which runs the real
  * copy engine) and R2 played by the FILES binding behind the URLs the Worker's real signer made (fake-r2.ts).
  */
-import { env, reset, SELF } from 'cloudflare:test'
+import { env, listDurableObjectIds, reset, SELF } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
@@ -136,6 +136,28 @@ describe('the Box token and the presign door (ob-qshq, ob-o6aw)', () => {
     expect(tokenOf(one)).not.toBe(token)
     expect((await presign(token, { op: 'get', path: 'private.txt' })).status).toBe(401)
     expect((await presign(tokenOf(one), { op: 'get', path: 'private.txt' })).status).toBe(200)
+  })
+
+  it('refuses a forged token at the edge, and no Robot is made for it', async () => {
+    const one = await robotWith({ tools: { box: 'allow', files: 'allow' } })
+    await calls(one, [{ name: 'run', args: { on: 'box', command: 'echo up' } }])
+    const hex = (bytes: number) => [...crypto.getRandomValues(new Uint8Array(bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+    const stranger = `r-${crypto.randomUUID()}`
+    const before = (await listDurableObjectIds(env.ROBOT)).length
+    const forged = [
+      // A Robot that does not exist, in the shape of a real token and of the earlier one.
+      `${stranger}.${hex(32)}.${hex(32)}`,
+      `${stranger}.${hex(32)}`,
+      // A name that is no Robot id at all.
+      `x-${hex(8)}.${hex(32)}.${hex(32)}`,
+      // A real Robot with a signature that is not the Worker's.
+      `${one}.${hex(32)}.${hex(32)}`,
+      `${tokenOf(one).slice(0, -64)}${hex(32)}`,
+    ]
+    for (const token of forged) expect((await presign(token, { op: 'ls', path: '' })).status).toBe(401)
+    expect((await listDurableObjectIds(env.ROBOT)).length).toBe(before)
+    expect((await listDurableObjectIds(env.ROBOT)).map((id) => id.toString())).not.toContain(env.ROBOT.idFromName(stranger).toString())
+    expect((await presign(tokenOf(one), { op: 'ls', path: '' })).status).toBe(200)
   })
 })
 

@@ -104,7 +104,7 @@ import { boxTransfer as boxDoor } from '../places/box-door.ts'
 import type { PermitSecret } from '../places/copy-permit.ts'
 import { hostJobPlace, hostLink, type HostCaller } from '../places/host-links.ts'
 import { parseS3Credentials, s3ObjectStore, type ObjectStore } from '../workspace/object-store.ts'
-import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, newBoxToken, type BoxToken } from '../box/token.ts'
+import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, mintBoxToken, type BoxToken } from '../box/token.ts'
 import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRuns } from '../places/host-runner.ts'
 import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
@@ -644,7 +644,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A Box that is not up holds no job: what still ran in the old one is lost (gb-aafm).
     await this.jobs().loseAll('the Box was restarted').catch((error: unknown) => console.warn('jobs not closed', error))
     // The token ws uses is made before the Box starts and dies with this record (v1.16 ticket 06).
-    const token = newBoxToken(this.store.requireConfig().id)
+    const token = await mintBoxToken(this.env.BOX_TOKEN_KEY, this.store.requireConfig().id)
     this.store.set(BOX, { state: 'booting', since: now, lastCommandAt: now, baseline: {}, token } satisfies BoxState)
     await this.changed()
     try {

@@ -9,7 +9,7 @@ import { call, forbidden, json, notFound, respond, type ApiError } from './edge/
 import { hookChannel, isHookPath } from './edge/hooks.ts'
 import { GOOGLE_CALLBACK_PATH, googleCallback } from './edge/google-callback.ts'
 import { identityEmail } from './edge/identity.ts'
-import { bearerToken, robotOfToken } from './box/token.ts'
+import { signedBoxToken } from './box/token.ts'
 import { PERMIT_HEADER, permitSecret } from './places/copy-permit.ts'
 import { HOME_ID, type Env } from './env.ts'
 import type { SignIn } from './home/home.ts'
@@ -26,13 +26,14 @@ export const PRESIGN_PATH = '/api/files/presign'
 
 /**
  * The Box channel: outside the Access login (a bypass application in infra/stack.ts) and open only to a token that names a Robot whose Box
- * is up. The Robot checks the token; this function only finds the Robot.
+ * is up. This function checks the Worker's signature on the token before it names a Robot, so a made-up token reaches no Durable Object;
+ * the Robot checks that the token is its Box's live one.
  */
 async function boxChannel(request: Request, env: Env): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
-  const token = bearerToken(request.headers.get('authorization'))
-  if (token === undefined) return json({ error: 'a Box token is required' }, 401)
-  const reply = await env.ROBOT.getByName(robotOfToken(token)).boxTransfer(token, permitSecret(request.headers.get(PERMIT_HEADER)), await request.text())
+  const signed = await signedBoxToken(env.BOX_TOKEN_KEY, request.headers.get('authorization'))
+  if (signed === undefined) return json({ error: 'a Box token is required' }, 401)
+  const reply = await env.ROBOT.getByName(signed.robotId).boxTransfer(signed.token, permitSecret(request.headers.get(PERMIT_HEADER)), await request.text())
   return new Response(reply.json, { status: reply.status, headers: { 'content-type': 'application/json' } })
 }
 
