@@ -25,7 +25,7 @@ At most 3 Subagents run at once. The tool refuses a fourth.
 
 ## What a Subagent has
 
-- The Robot's Workspace, its browser and its computer when the Robot has one. Logins and secrets are the Robot's; secret values are masked in the Subagent's log.
+- The Robot's Workspace, its browser and its Box when the Robot has one. Logins and secrets are the Robot's; secret values are masked in the Subagent's log.
 - The Robot's grants, except: delegation, Robot messages, Threads, shared-file edits, Asks and reactions.
 - A call that needs the owner's answer (an item at ask) fails in a Subagent. The Subagent says so in its report. Then the Robot asks the owner itself.
 - Auto review checks a Subagent's calls with the Robot's setting.

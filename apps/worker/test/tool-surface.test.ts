@@ -121,7 +121,7 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await settle(mr)
     const shown = await grantsOf(mr)
-    // Subagents and the computer are held only when granted, by Mr. Robot too (v1.14, ao-zzga).
+    // Subagents and the Box are held only when granted, by Mr. Robot too (v1.14, ao-zzga).
     expect(shown.tools).toEqual(Object.fromEntries(TOOL_GROUP_NAMES.filter((group) => !EXPLICIT_TOOL_GROUPS.includes(group)).map((group) => [group, 'allow'])))
     expect(shown.secrets).toEqual({ shop: 'allow' })
     expect(await registered(mr)).toEqual(expect.arrayContaining(['web_search_exa', 'browser_open', 'robot_list']))

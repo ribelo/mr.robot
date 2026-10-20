@@ -199,7 +199,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .subagent-line { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; font-size: 12.5px; }
 .delegation-line a { color: inherit; text-decoration: none; }
 .delegation-result { display: block; font-size: 12.5px; }
-.computer-state { display: flex; align-items: center; gap: 10px; }
+.box-state { display: flex; align-items: center; gap: 10px; }
 .cost-robots { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; }
 
 .settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }

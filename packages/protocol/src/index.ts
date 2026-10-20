@@ -1110,15 +1110,15 @@ export const ModelOption = Schema.Struct({
 })
 export type ModelOption = typeof ModelOption.Type
 
-/** Where a cost comes from (v1.14, ao-zbld): the model (the Robot, its reviewer, its Subagents), the browser, the computer, paid services. */
-export const UsageSource = Schema.Literals(['robot', 'review', 'subagent', 'browser', 'computer', 'services'])
+/** Where a cost comes from (v1.14, ao-zbld): the model (the Robot, its reviewer, its Subagents), the browser, the Box, paid services. */
+export const UsageSource = Schema.Literals(['robot', 'review', 'subagent', 'browser', 'box', 'services'])
 export type UsageSource = typeof UsageSource.Type
 
 /** A month's cost by source, in USD, with the total (ao-zbld, ao-nkkb). */
 export const CostBreakdown = Schema.Struct({
   model: Schema.Struct({ robot: Schema.Number, review: Schema.Number, subagent: Schema.Number }),
   browser: Schema.Number,
-  computer: Schema.Number,
+  box: Schema.Number,
   services: Schema.Number,
   total: Schema.Number,
 })
@@ -1128,8 +1128,8 @@ export type CostBreakdown = typeof CostBreakdown.Type
 export function costBreakdown(rows: ReadonlyArray<{ readonly source: UsageSource; readonly costUsd: number }>): CostBreakdown {
   const of = (source: UsageSource) => rows.filter((row) => row.source === source).reduce((sum, row) => sum + row.costUsd, 0)
   const model = { robot: of('robot'), review: of('review'), subagent: of('subagent') }
-  const [browser, computer, services] = [of('browser'), of('computer'), of('services')]
-  return { model, browser, computer, services, total: model.robot + model.review + model.subagent + browser + computer + services }
+  const [browser, box, services] = [of('browser'), of('box'), of('services')]
+  return { model, browser, box, services, total: model.robot + model.review + model.subagent + browser + box + services }
 }
 
 export const UsageView = Schema.Struct({
@@ -1145,8 +1145,8 @@ export const UsageView = Schema.Struct({
   services: Schema.optional(Schema.Array(Schema.Struct({ service: Schema.String, calls: Schema.Number, costUsd: Schema.Number }))),
   /** This month's cost by source; its total is costUsd (ao-zbld). */
   breakdown: CostBreakdown,
-  /** The computer's running minutes this month (ao-54j2). */
-  computerMinutes: Schema.optional(Schema.Number),
+  /** The Box's running minutes this month (ao-54j2). */
+  boxMinutes: Schema.optional(Schema.Number),
 })
 export type UsageView = typeof UsageView.Type
 
@@ -1167,13 +1167,13 @@ export interface UsageRow extends UsageView {
   readonly name: string
 }
 
-/** A Robot's computer as its panel shows it (ao-9q18). */
-export const ComputerView = Schema.Struct({
+/** A Robot's Box as its panel shows it (ao-9q18). */
+export const BoxView = Schema.Struct({
   state: Schema.Literals(['off', 'booting', 'running', 'stopping']),
   since: Schema.NullOr(Schema.Number),
   lastCommandAt: Schema.NullOr(Schema.Number),
 })
-export type ComputerView = typeof ComputerView.Type
+export type BoxView = typeof BoxView.Type
 
 export const RobotPanel = Schema.Struct({
   summary: RobotSummary,
@@ -1189,8 +1189,8 @@ export const RobotPanel = Schema.Struct({
   threads: Schema.optional(Schema.Array(ThreadView)),
   /** Open requests for help, oldest first (sk-fmvh). */
   help: Schema.optional(Schema.Array(HelpRequestView)),
-  /** Its computer, when it holds the computer grant (ao-9q18). */
-  computer: Schema.optional(ComputerView),
+  /** Its Box, when it holds the box grant (ao-9q18). */
+  box: Schema.optional(BoxView),
 })
 export type RobotPanel = typeof RobotPanel.Type
 

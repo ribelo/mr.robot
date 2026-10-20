@@ -20,6 +20,8 @@ export class HomePlugins {
     sql.exec('CREATE TABLE IF NOT EXISTS connection_note (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, note TEXT NOT NULL, created_at INTEGER NOT NULL)')
     // The Routines plugin became Tasks (v1.13, mc-r1aa): the admin's switch keeps its state.
     sql.exec("UPDATE OR IGNORE plugin SET name = 'tasks' WHERE name = 'routines'")
+    // The Computer plugin became the Box (v1.15 ticket 06): the admin's switch keeps its state.
+    sql.exec("UPDATE OR IGNORE plugin SET name = 'box' WHERE name = 'computer'")
   }
 
   // ---------------------------------------------------------------- plugins

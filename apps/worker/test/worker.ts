@@ -3,8 +3,8 @@ import { Robot as ProductionRobot } from '../src/robot/robot.ts'
 import type { ProviderCredential, ProviderId } from '../src/agent/providers.ts'
 import { scriptedProviders, StubLlm } from './stub-llm.ts'
 import { StubDriver } from './stub-browser.ts'
-import { StubComputer } from './stub-computer.ts'
-import type { ComputerBackend } from '../src/computer/backend.ts'
+import { StubBox } from './stub-box.ts'
+import type { BoxBackend } from '../src/box/backend.ts'
 import { FakeChannel } from './fake-channel.ts'
 import { fakeConnectors, fakeService } from './fake-connector.ts'
 import { connectorFixtures } from './connector-fixtures.ts'
@@ -149,14 +149,41 @@ export class Robot extends ProductionRobot {
     return new StubDriver(backend)
   }
 
-  protected override computerBackend(): ComputerBackend {
-    return new StubComputer(this.store.requireConfig().id)
+  protected override boxBackend(): BoxBackend {
+    return new StubBox(this.store.requireConfig().id)
   }
 
-  /** The computer's last command was `ms` ago, and the alarm is due. */
-  async backdateComputerForTest(ms: number): Promise<void> {
-    const state = this.store.get<{ state: string; since?: number; lastCommandAt?: number }>('computer')
-    if (state?.lastCommandAt !== undefined) this.store.set('computer', { ...state, since: state.since! - ms, lastCommandAt: state.lastCommandAt - ms })
+  /** The Robot as a v1.14 deploy left it: a computer grant, its running time, cost rows, state and folder name (v1.15 ticket 06). */
+  async legacyComputerForTest(): Promise<void> {
+    const sql = this.store.sql
+    sql.exec("DELETE FROM grant_item WHERE kind = 'tool' AND name = 'box'")
+    sql.exec("INSERT INTO grant_item (kind, name, level) VALUES ('tool', 'computer', 'allow')")
+    sql.exec('DROP TABLE IF EXISTS computer_usage')
+    sql.exec('CREATE TABLE computer_usage (month TEXT PRIMARY KEY, ms INTEGER NOT NULL, cost_usd REAL NOT NULL) WITHOUT ROWID')
+    sql.exec("INSERT INTO computer_usage (month, ms, cost_usd) VALUES ('2026-09', 60000, 0.5)")
+    sql.exec("INSERT INTO usage (month, source, input_tokens, output_tokens, cost_usd) VALUES ('2026-09', 'computer', 0, 0, 0.5)")
+    sql.exec("DELETE FROM kv WHERE k = 'box-folder-moved'")
+    sql.exec("INSERT INTO kv (k, v) VALUES ('computer', ?)", JSON.stringify({ state: 'off' }))
+    sql.exec('UPDATE schema_version SET version = 16')
+    this.store.prepare()
+    this.store.updateConfig(() => ({}))
+  }
+
+  /** The Box's cost rows and running time per month, as stored (v1.15 ticket 06). */
+  async boxRowsForTest(): Promise<{ usage: Array<{ month: string; source: string; costUsd: number }>; running: Array<{ month: string; ms: number }>; oldTable: boolean; grants: string[] }> {
+    const sql = this.store.sql
+    return {
+      usage: sql.exec<{ month: string; source: string; cost_usd: number }>("SELECT month, source, cost_usd FROM usage WHERE source IN ('box', 'computer') ORDER BY month").toArray().map((row) => ({ month: row.month, source: row.source, costUsd: row.cost_usd })),
+      running: sql.exec<{ month: string; ms: number }>('SELECT month, ms FROM box_usage ORDER BY month').toArray(),
+      oldTable: sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'computer_usage'").toArray().length > 0,
+      grants: sql.exec<{ name: string }>("SELECT name FROM grant_item WHERE kind = 'tool' ORDER BY name").toArray().map((row) => row.name),
+    }
+  }
+
+  /** The Box's last command was `ms` ago, and the alarm is due. */
+  async backdateBoxForTest(ms: number): Promise<void> {
+    const state = this.store.get<{ state: string; since?: number; lastCommandAt?: number }>('box')
+    if (state?.lastCommandAt !== undefined) this.store.set('box', { ...state, since: state.since! - ms, lastCommandAt: state.lastCommandAt - ms })
     await this.ctx.storage.setAlarm(Date.now() + 1)
   }
 

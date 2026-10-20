@@ -1,6 +1,6 @@
 /**
- * A Robot's computer in a Cloudflare Container (v1.14 ticket 10): one container per Robot, keyed by its id, on the
- * image of infra/computer/Dockerfile. The Robot drives it through ComputerBackend (backend.ts); the container
+ * A Robot's Box in a Cloudflare Container (v1.14 ticket 10): one container per Robot, keyed by its id, on the
+ * image of infra/computer/Dockerfile. The Robot drives it through BoxBackend (backend.ts); the container
  * runs commands with the Container exec API and keeps no state the Robot needs: its disk is scratch.
  */
 import { Container } from '@cloudflare/containers'
@@ -9,7 +9,7 @@ import type { Env } from '../env.ts'
 const text = new TextDecoder()
 
 export class ComputerContainer extends Container<Env> {
-  /** A backstop only: the Robot stops its computer ten minutes after the last command (ao-joux). */
+  /** A backstop only: the Robot stops its Box ten minutes after the last command (ao-joux). */
   override sleepAfter = '30m'
   /** setup.sh installs packages (ao-ia4z). */
   override enableInternet = true

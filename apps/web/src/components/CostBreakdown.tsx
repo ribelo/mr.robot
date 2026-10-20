@@ -10,7 +10,7 @@ export function costLines(breakdown: CostBreakdown): Array<{ label: string; amou
     ...(breakdown.model.review > 0 ? [{ label: 'Auto review', amount: breakdown.model.review, sub: true as const }] : []),
     ...(breakdown.model.subagent > 0 ? [{ label: 'Subagents', amount: breakdown.model.subagent, sub: true as const }] : []),
     { label: 'Browser', amount: breakdown.browser },
-    { label: 'Computer', amount: breakdown.computer },
+    { label: 'Box', amount: breakdown.box },
     { label: 'Services', amount: breakdown.services },
   ]
 }

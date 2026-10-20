@@ -57,8 +57,9 @@ export const Edge = Effect.gen(function* () {
         instanceType: 'standard-1',
         maxInstances: 10,
       }),
-      // A Robot's computer (v1.14 ticket 10): one container per Robot on the image of infra/computer/Dockerfile,
-      // which the deploy builds and pushes (Docker).
+      // A Robot's Box (v1.14 ticket 10, the Computer until v1.15): one container per Robot on the image of infra/computer/Dockerfile,
+      // which the deploy builds and pushes (Docker). The binding, the class and the directory keep their v1.14 names:
+      // renaming a Durable Object class needs a migration, and the plan test asserts them.
       COMPUTER: Cloudflare.Container<ComputerContainer>('ComputerContainer', {
         className: 'ComputerContainer',
         context: './infra/computer',

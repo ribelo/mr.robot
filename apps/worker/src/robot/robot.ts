@@ -125,9 +125,9 @@ import { PRODUCT_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../do
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, normalizePath, type WorkspaceShape } from '../workspace/workspace.ts'
-import { computerCost, containerComputer, type ComputerBackend } from '../computer/backend.ts'
-import type { ComputerHost } from '../agent/tools/computer.ts'
-import { Computer } from '../plugins/computer.ts'
+import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
+import type { BoxHost } from '../agent/tools/box.ts'
+import { Box } from '../plugins/box.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
@@ -267,7 +267,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.children.clear()
     await this.releaseComposition().catch(() => undefined)
     await this.closeBrowser().catch(() => undefined)
-    if (this.store.config() !== undefined && this.computerState().state !== 'off') await this.computerBackend().stop().catch(() => undefined)
+    if (this.store.config() !== undefined && this.boxState().state !== 'off') await this.boxBackend().stop().catch(() => undefined)
     for (const socket of this.ctx.getWebSockets()) {
       try { socket.close(1000, 'robot deleted') } catch { /* closing */ }
     }
@@ -409,7 +409,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (config !== undefined) await this.deliverOutbox()
     if (config !== undefined && config.status !== 'deleted') this.resumeChain(Date.now())
     if (config !== undefined && config.status !== 'deleted') await this.escalateHelp(Date.now()).catch((error: unknown) => console.warn('help not escalated', error))
-    if (config !== undefined && config.status !== 'deleted') await this.idleComputer(Date.now()).catch((error: unknown) => console.warn('computer not stopped', error))
+    if (config !== undefined && config.status !== 'deleted') await this.idleBox(Date.now()).catch((error: unknown) => console.warn('Box not stopped', error))
     if (config !== undefined && config.status === 'active') await this.resumeChildren().catch((error: unknown) => console.warn('subagents not resumed', error))
     if (config !== undefined && config.status === 'active') await this.runIdle(Date.now()).catch((error: unknown) => console.warn('idle work failed', error))
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
@@ -575,39 +575,39 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.changed()
   }
 
-  // ---------------------------------------------------------------- the computer (v1.14 ticket 10)
+  // ---------------------------------------------------------------- the Box (v1.14 ticket 10, renamed in v1.15)
 
-  /** The computer runtime; tests override it with a stub (ao-33fs). */
-  protected computerBackend(): ComputerBackend {
-    return containerComputer(this.env, this.store.requireConfig().id)
+  /** The Box runtime; tests override it with a stub (ao-33fs). */
+  protected boxBackend(): BoxBackend {
+    return containerBox(this.env, this.store.requireConfig().id)
   }
 
-  private computerState(): ComputerState {
-    return this.store.get<ComputerState>(COMPUTER) ?? { state: 'off' }
+  private boxState(): BoxState {
+    return this.store.get<BoxState>(BOX) ?? { state: 'off' }
   }
 
-  /** Boot (ao-7ptt, ao-ia4z): the Workspace's computer/ folder is copied in, then computer/setup.sh runs when present. */
-  private async bootComputer(): Promise<ComputerBackend> {
-    const backend = this.computerBackend()
-    const current = this.computerState()
+  /** Boot (ao-7ptt, ao-ia4z): the Workspace's box/ folder is copied in, then box/setup.sh runs when present. */
+  private async bootBox(): Promise<BoxBackend> {
+    const backend = this.boxBackend()
+    const current = this.boxState()
     if (current.state === 'running' && (await backend.running())) return backend
     const now = Date.now()
-    this.store.set(COMPUTER, { state: 'booting', since: now, lastCommandAt: now, baseline: {} } satisfies ComputerState)
+    this.store.set(BOX, { state: 'booting', since: now, lastCommandAt: now, baseline: {} } satisfies BoxState)
     await this.changed()
     try {
       await backend.start()
       const ws = this.workspace
-      const files = (await this.run(ws.list(COMPUTER_FOLDER))).filter((entry) => entry.path.startsWith(`${COMPUTER_FOLDER}/`))
+      const files = (await this.run(ws.list(BOX_FOLDER))).filter((entry) => entry.path.startsWith(`${BOX_FOLDER}/`))
       for (const entry of files) {
         const file = await this.run(ws.read(entry.path))
-        if (file !== undefined) await backend.write(`${COMPUTER_ROOT}/${entry.path}`, new Uint8Array(file.body))
+        if (file !== undefined) await backend.write(`${BOX_ROOT}/${entry.path}`, new Uint8Array(file.body))
       }
-      if (files.some((entry) => entry.path === `${COMPUTER_FOLDER}/setup.sh`)) await backend.run('bash setup.sh', `${COMPUTER_ROOT}/${COMPUTER_FOLDER}`, 900)
-      const baseline = manifestOf(await backend.list(`${COMPUTER_ROOT}/${COMPUTER_FOLDER}`))
-      this.store.set(COMPUTER, { state: 'running', since: now, lastCommandAt: Date.now(), baseline } satisfies ComputerState)
+      if (files.some((entry) => entry.path === `${BOX_FOLDER}/setup.sh`)) await backend.run('bash setup.sh', `${BOX_ROOT}/${BOX_FOLDER}`, 900)
+      const baseline = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`))
+      this.store.set(BOX, { state: 'running', since: now, lastCommandAt: Date.now(), baseline } satisfies BoxState)
       return backend
     } catch (error) {
-      this.store.set(COMPUTER, { state: 'off' } satisfies ComputerState)
+      this.store.set(BOX, { state: 'off' } satisfies BoxState)
       await backend.stop().catch(() => undefined)
       throw error
     } finally {
@@ -615,46 +615,46 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** Changed and new files under /workspace/computer go back to the Workspace's computer/ (ao-7ptt). */
-  private async syncComputer(backend: ComputerBackend): Promise<void> {
-    const current = this.computerState()
+  /** Changed and new files under /workspace/box go back to the Workspace's box/ (ao-7ptt). */
+  private async syncBox(backend: BoxBackend): Promise<void> {
+    const current = this.boxState()
     if (current.state !== 'running' && current.state !== 'stopping') return
-    const now = manifestOf(await backend.list(`${COMPUTER_ROOT}/${COMPUTER_FOLDER}`))
+    const now = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`))
     const ws = this.workspace
     for (const [path, stamp] of Object.entries(now)) {
       if (current.baseline[path] === stamp) continue
-      const bytes = await backend.read(`${COMPUTER_ROOT}/${COMPUTER_FOLDER}/${path}`)
-      if (bytes !== null && bytes.byteLength <= COMPUTER_SYNC_MAX_BYTES) await this.run(ws.write(`${COMPUTER_FOLDER}/${path}`, bytes))
+      const bytes = await backend.read(`${BOX_ROOT}/${BOX_FOLDER}/${path}`)
+      if (bytes !== null && bytes.byteLength <= BOX_SYNC_MAX_BYTES) await this.run(ws.write(`${BOX_FOLDER}/${path}`, bytes))
     }
-    this.store.set(COMPUTER, { ...current, baseline: now } satisfies ComputerState)
+    this.store.set(BOX, { ...current, baseline: now } satisfies BoxState)
   }
 
-  /** Bill the running time since the last account (ao-54j2): the computer line, counted toward the spend limit. */
-  private async accountComputer(): Promise<void> {
-    const current = this.computerState()
+  /** Bill the running time since the last account (ao-54j2): the Box line, counted toward the spend limit. */
+  private async accountBox(): Promise<void> {
+    const current = this.boxState()
     if (current.state === 'off') return
     const now = Date.now()
     const ms = now - current.since
     if (ms <= 0) return
-    const cost = computerCost(ms)
-    this.store.addComputerUsage(currentMonth(), ms, cost)
-    this.store.set(COMPUTER, { ...current, since: now } satisfies ComputerState)
-    await this.recordUsage('computer', 0, 0, cost)
+    const cost = boxCost(ms)
+    this.store.addBoxUsage(currentMonth(), ms, cost)
+    this.store.set(BOX, { ...current, since: now } satisfies BoxState)
+    await this.recordUsage('box', 0, 0, cost)
   }
 
   /** Sync back, stop, bill (ao-joux, ao-9q18). */
-  async stopComputer(): Promise<{ stopped: boolean }> {
-    const current = this.computerState()
+  async stopBox(): Promise<{ stopped: boolean }> {
+    const current = this.boxState()
     if (current.state === 'off') return { stopped: false }
-    const backend = this.computerBackend()
-    this.store.set(COMPUTER, { ...current, state: 'stopping' } satisfies ComputerState)
+    const backend = this.boxBackend()
+    this.store.set(BOX, { ...current, state: 'stopping' } satisfies BoxState)
     await this.changed()
     try {
-      await this.syncComputer(backend).catch((error: unknown) => console.warn('computer not synced', error))
+      await this.syncBox(backend).catch((error: unknown) => console.warn('Box not synced', error))
       await backend.stop()
     } finally {
-      await this.accountComputer()
-      this.store.set(COMPUTER, { state: 'off' } satisfies ComputerState)
+      await this.accountBox()
+      this.store.set(BOX, { state: 'off' } satisfies BoxState)
       await this.rearm()
       await this.changed()
     }
@@ -662,37 +662,37 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { stopped: true }
   }
 
-  private computerHost(): ComputerHost {
+  private boxHost(): BoxHost {
     const touch = async () => {
-      const current = this.computerState()
-      if (current.state !== 'off') this.store.set(COMPUTER, { ...current, lastCommandAt: Date.now() } satisfies ComputerState)
+      const current = this.boxState()
+      if (current.state !== 'off') this.store.set(BOX, { ...current, lastCommandAt: Date.now() } satisfies BoxState)
       await this.rearm()
     }
     return {
-      computerRun: async (command, timeoutSeconds) => {
-        const backend = await this.bootComputer()
+      boxRun: async (command, timeoutSeconds) => {
+        const backend = await this.bootBox()
         try {
-          return await backend.run(command, COMPUTER_ROOT, timeoutSeconds)
+          return await backend.run(command, BOX_ROOT, timeoutSeconds)
         } finally {
           await touch()
         }
       },
-      computerRead: async (path) => {
-        const backend = await this.bootComputer()
+      boxRead: async (path) => {
+        const backend = await this.bootBox()
         try {
-          const bytes = await backend.read(computerPath(path))
-          if (bytes === null) throw new Error(`${computerPath(path)} does not exist on your computer`)
+          const bytes = await backend.read(boxPath(path))
+          if (bytes === null) throw new Error(`${boxPath(path)} does not exist on your Box`)
           return new TextDecoder().decode(bytes)
         } finally {
           await touch()
         }
       },
-      computerWrite: async (path, content) => {
-        const backend = await this.bootComputer()
+      boxWrite: async (path, content) => {
+        const backend = await this.bootBox()
         try {
           const bytes = new TextEncoder().encode(content)
-          await backend.write(computerPath(path), bytes)
-          return { written: computerPath(path), bytes: bytes.byteLength }
+          await backend.write(boxPath(path), bytes)
+          return { written: boxPath(path), bytes: bytes.byteLength }
         } finally {
           await touch()
         }
@@ -700,11 +700,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** The alarm's computer duty: ten minutes after the last command it stops (ao-joux). */
-  private async idleComputer(now: number): Promise<void> {
-    const current = this.computerState()
-    if (current.state !== 'running' || current.lastCommandAt + COMPUTER_IDLE_MS > now) return
-    await this.stopComputer()
+  /** The alarm's Box duty: ten minutes after the last command it stops (ao-joux). */
+  private async idleBox(now: number): Promise<void> {
+    const current = this.boxState()
+    if (current.state !== 'running' || current.lastCommandAt + BOX_IDLE_MS > now) return
+    await this.stopBox()
   }
 
   // ---------------------------------------------------------------- Subagents (v1.14 ticket 06)
@@ -1158,10 +1158,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
     await this.accountTurn(startSeq)
-    // What the Turn kept under /workspace/computer is in the Workspace now (ao-7ptt); the time so far is billed.
-    if (this.computerState().state === 'running') {
-      await this.syncComputer(this.computerBackend()).catch((error: unknown) => console.warn('computer not synced', error))
-      await this.accountComputer()
+    // What the Turn kept under /workspace/box is in the Workspace now (ao-7ptt); the time so far is billed.
+    if (this.boxState().state === 'running') {
+      await this.syncBox(this.boxBackend()).catch((error: unknown) => console.warn('Box not synced', error))
+      await this.accountBox()
     }
     if (interruptedBy !== undefined) {
       // An interrupted Turn is over: its Wake-up is used up, not kept for Try again (mc-w5ee).
@@ -1678,7 +1678,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }, gate((tool) => fixedItems({ kind: 'tool', name: tool.startsWith('exa_agent_') ? 'exa-agent' : 'exa' }))))
     if (granted.has('web')) mounts.push(mount(Web, {}, gate(group('web'))))
     if (granted.has('subagents')) mounts.push(mount(Subagents, { host: this.subagentHost() }, gate(group('subagents'))))
-    if (granted.has('computer')) mounts.push(mount(Computer, { host: this.computerHost() }, gate(group('computer'))))
+    if (granted.has('box')) mounts.push(mount(Box, { host: this.boxHost() }, gate(group('box'))))
     if (granted.has('tasks')) mounts.push(mount(Tasks, { host: tasksHost((program) => this.program(program), this.taskTurn()) }, gate(group('tasks'))))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
@@ -2186,6 +2186,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         if ((await this.run(ws.readText(path))) === template) await this.run(ws.remove(path))
       }
       this.store.set('bank-retired', true)
+    }
+    // The Computer became the Box (v1.15 ticket 06, gb-ao8m): what a Robot kept in computer/ moves to box/. A file already in box/ stays.
+    if (this.store.get('box-folder-moved') === undefined) {
+      const ws = this.workspace
+      for (const entry of await this.run(ws.list('computer'))) {
+        const target = `${BOX_FOLDER}/${entry.path.slice('computer/'.length)}`
+        const file = await this.run(ws.read(entry.path))
+        if (file !== undefined && (await this.run(ws.stat(target))) === undefined) await this.run(ws.write(target, file.body))
+        await this.run(ws.remove(entry.path))
+      }
+      this.store.set('box-folder-moved', true)
     }
     if (this.store.get('screen') !== undefined && this.store.get('screens-sweep-next') === undefined) {
       this.store.set('screens-sweep-next', Date.now() + SCREEN_SWEEP_EVERY_MS)
@@ -3469,14 +3480,14 @@ const DONE_LINE = 'task-done-line'
 
 /** The kv key of who interrupted the running Turn, until the Turn has ended. */
 const INTERRUPTED_BY = 'interrupted-by'
-/** The computer's state in the Robot's storage; the container's disk is scratch (v1.14 ticket 10). */
-const COMPUTER = 'computer'
-const COMPUTER_ROOT = '/workspace'
-/** The Workspace folder kept on the computer, and the computer's folder kept in the Workspace (ao-7ptt). */
-const COMPUTER_FOLDER = 'computer'
-const COMPUTER_IDLE_MS = 10 * 60_000
-const COMPUTER_SYNC_MAX_BYTES = 20 * 1024 * 1024
-type ComputerState =
+/** The Box's state in the Robot's storage; the container's disk is scratch (v1.14 ticket 10). */
+const BOX = 'box'
+const BOX_ROOT = '/workspace'
+/** The Workspace folder kept on the Box, and the Box's folder kept in the Workspace (ao-7ptt). */
+const BOX_FOLDER = 'box'
+const BOX_IDLE_MS = 10 * 60_000
+const BOX_SYNC_MAX_BYTES = 20 * 1024 * 1024
+type BoxState =
   | { readonly state: 'off' }
   | { readonly state: 'booting' | 'running' | 'stopping'; readonly since: number; readonly lastCommandAt: number; readonly baseline: Readonly<Record<string, string>> }
 
@@ -3485,12 +3496,12 @@ function manifestOf(files: ReadonlyArray<{ path: string; size: number; mtime: nu
   return Object.fromEntries(files.map((file) => [file.path, `${file.size}:${file.mtime}`]))
 }
 
-/** A path on the computer, under its /workspace: absolute, or relative to it; never outside. */
-function computerPath(path: string): string {
-  const relative = path.startsWith(`${COMPUTER_ROOT}/`) ? path.slice(COMPUTER_ROOT.length + 1) : path.startsWith('/') ? undefined : path
+/** A path on the Box, under its /workspace: absolute, or relative to it; never outside. */
+function boxPath(path: string): string {
+  const relative = path.startsWith(`${BOX_ROOT}/`) ? path.slice(BOX_ROOT.length + 1) : path.startsWith('/') ? undefined : path
   const normalized = relative === undefined ? undefined : normalizePath(relative)
-  if (normalized === undefined) throw new Error(`${path} is outside your computer's ${COMPUTER_ROOT}`)
-  return `${COMPUTER_ROOT}/${normalized}`
+  if (normalized === undefined) throw new Error(`${path} is outside your Box's ${BOX_ROOT}`)
+  return `${BOX_ROOT}/${normalized}`
 }
 /** The usage of one model response, as the session event carries it. */
 type ChildUsage = { readonly inputTokens?: number; readonly outputTokens?: number; readonly cacheReadTokens?: number }

@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: the grant, the three tools, the box/ folder at boot and the usage source carry the new names; the migration renames an old computer grant, a computer/ folder and old usage rows (gb-ao8m)
-- [ ] The Alchemy plan test still passes, with its assertion updated if a binding name changed (gb-ao8m)
-- [ ] The PWA shows Box in the Robot panel and settings; docs/box.md replaces docs/computer.md
+- [x] Workerd test: the grant, the three tools, the box/ folder at boot and the usage source carry the new names; the migration renames an old computer grant, a computer/ folder and old usage rows (gb-ao8m)
+- [x] The Alchemy plan test still passes, with its assertion updated if a binding name changed (gb-ao8m)
+- [x] The PWA shows Box in the Robot panel and settings; docs/box.md replaces docs/computer.md

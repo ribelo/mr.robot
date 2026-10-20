@@ -636,8 +636,8 @@ export const api = new Router<ApiContext>()
     const { interrupted } = yield* call(() => robot(c, id).interruptSubagent(child))
     return interrupted ? { ok: true } : yield* Effect.fail(conflict('this Subagent is not running'))
   }))
-  // Stop the Robot's computer from its panel (ao-9q18): its kept folder is synced first.
-  .on('POST', '/api/robots/:id/computer/stop', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopComputer()))))
+  // Stop the Robot's Box from its panel (ao-9q18): its kept folder is synced first.
+  .on('POST', '/api/robots/:id/box/stop', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopBox()))))
   .on('POST', '/api/robots/:id/pause', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).pause()))))
   .on('POST', '/api/robots/:id/resume', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).resume()))))
   .on('DELETE', '/api/robots/:id', (c, { id }) => Effect.gen(function* () {

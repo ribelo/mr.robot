@@ -16,7 +16,7 @@ import { PROVIDERS } from './providers.ts'
 import { ROBOTS } from './robots.ts'
 import { TASKS } from './tasks.ts'
 import { SUBAGENTS } from './subagents.ts'
-import { COMPUTER } from './computer.ts'
+import { BOX } from './box.ts'
 import { AUTO_REVIEW } from './auto-review.ts'
 
 export const DOCS_DIRECTORY = 'docs'
@@ -44,7 +44,7 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('browser', 'The browser: backends, logins, Live view, Takeover, payments, screenshots.', BROWSER),
   doc('providers', 'Providers: accounts, model chains, account states, the Workers AI switch, usage, Spend limits (the Home\'s, no limit, an amount).', PROVIDERS),
   doc('subagents', 'Subagents: the grant and its models, subagent and subagent_fork, what a Subagent cannot do, reports, limits and cost.', SUBAGENTS),
-  doc('computer', 'The computer: the tools, the kept computer/ folder and setup.sh, starting and stopping, cost.', COMPUTER),
+  doc('box', 'The Box: the tools, the kept box/ folder and setup.sh, starting and stopping, cost.', BOX),
   doc('auto-review', 'Auto review: the reviewer model, risk levels, a denied call becomes an Ask, the reviewer setting.', AUTO_REVIEW),
 ]
 

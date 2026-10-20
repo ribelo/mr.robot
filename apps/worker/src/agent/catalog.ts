@@ -18,14 +18,14 @@ export const TOOL_GROUPS = {
   exa: 'Exa research: web search, page crawling and code context, paid per call from the Home\'s Exa key.',
   'exa-agent': 'Exa agent runs: long research jobs that can cost dollars each. Grant separately.',
   subagents: 'Hand work to Subagents: fresh or forked contexts on the models you allow, at most three at once.',
-  computer: 'A computer: run commands (Python with NumPy and Pandas, Node, Bun, git) and move files; its running time costs money.',
+  box: 'A Box: run commands (Python with NumPy and Pandas, Node, Bun, git) and move files; its running time costs money.',
 } as const
 
 export type ToolGroup = keyof typeof TOOL_GROUPS
 export const TOOL_GROUP_NAMES = Object.keys(TOOL_GROUPS) as ToolGroup[]
 
-/** Groups nobody holds until granted, Mr. Robot included (v1.14: Subagents, the computer). */
-export const EXPLICIT_TOOL_GROUPS: readonly string[] = ['subagents', 'computer']
+/** Groups nobody holds until granted, Mr. Robot included (v1.14: Subagents, the Box). */
+export const EXPLICIT_TOOL_GROUPS: readonly string[] = ['subagents', 'box']
 
 /** Groups only Mr. Robot holds: never offered to an ordinary Robot's settings. */
 export const MR_ROBOT_ONLY_GROUPS: readonly string[] = ['robots', 'deputy']

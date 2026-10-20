@@ -698,6 +698,9 @@ export class Member extends DurableObject<Env> {
       sql.exec('DROP TABLE usage')
       sql.exec('ALTER TABLE usage_v14 RENAME TO usage')
     }
+    // The Computer became the Box (v1.15 ticket 06): its cost rows carry the new source.
+    sql.exec("INSERT INTO usage (month, robot_id, source, input_tokens, output_tokens, cost_usd) SELECT month, robot_id, 'box', input_tokens, output_tokens, cost_usd FROM usage WHERE source = 'computer' ON CONFLICT (month, robot_id, source) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd")
+    sql.exec("DELETE FROM usage WHERE source = 'computer'")
     sql.exec('CREATE TABLE IF NOT EXISTS push_device (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, device TEXT NOT NULL, created_at INTEGER NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS pending_notification (id INTEGER PRIMARY KEY AUTOINCREMENT, deliver_at INTEGER NOT NULL, notification TEXT NOT NULL)')
     sql.exec(`CREATE TABLE IF NOT EXISTS credential (

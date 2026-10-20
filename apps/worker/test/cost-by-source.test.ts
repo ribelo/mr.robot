@@ -30,7 +30,7 @@ async function robotWith(tools: string[]): Promise<string> {
 }
 
 const breakdownOf = async (id: string) => (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.usage.breakdown
-const sum = (breakdown: CostBreakdown) => breakdown.model.robot + breakdown.model.review + breakdown.model.subagent + breakdown.browser + breakdown.computer + breakdown.services
+const sum = (breakdown: CostBreakdown) => breakdown.model.robot + breakdown.model.review + breakdown.model.subagent + breakdown.browser + breakdown.box + breakdown.services
 
 /** A gate the scripted model waits at: the Turn is working until the test opens it. */
 function gate(): { promise: Promise<void>; open: () => void } {
@@ -60,7 +60,7 @@ describe('cost by source (ao-zbld, ao-ef5t, ao-ypas)', () => {
     expect(robot.model.robot - before.model.robot).toBeCloseTo(1.2, 5)
     expect(robot.browser).toBeCloseTo(0.09, 3)
     expect(robot.services).toBeCloseTo(0.25, 5)
-    expect([robot.model.review, robot.model.subagent, robot.computer]).toEqual([0, 0, 0])
+    expect([robot.model.review, robot.model.subagent, robot.box]).toEqual([0, 0, 0])
     expect(robot.total).toBeCloseTo(sum(robot), 9)
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.usage.costUsd).toBeCloseTo(robot.total, 9)
 

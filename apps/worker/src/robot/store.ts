@@ -152,7 +152,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 16
+const SCHEMA_VERSION = 17
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -166,6 +166,36 @@ function typedSpendLimit(sql: SqlStorage): void {
   sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, spendLimit: legacyRobotSpendLimit(spendLimitUsd) }))
 }
 
+/**
+ * What the Robot stored under the name Computer, under the name Box (v1.15 ticket 06, gb-ao8m). Idempotent: a store
+ * that never had the old names has nothing to move. The Workspace folder is moved by the Robot itself (robot.ts).
+ */
+function renameComputerToBox(sql: SqlStorage): void {
+  sql.exec("UPDATE OR REPLACE grant_item SET name = 'box' WHERE kind = 'tool' AND name = 'computer'")
+  const has = (table: string) => sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).toArray().length > 0
+  if (has('computer_usage')) {
+    sql.exec('CREATE TABLE IF NOT EXISTS box_usage (month TEXT PRIMARY KEY, ms INTEGER NOT NULL, cost_usd REAL NOT NULL) WITHOUT ROWID')
+    sql.exec('INSERT INTO box_usage (month, ms, cost_usd) SELECT month, ms, cost_usd FROM computer_usage WHERE true ON CONFLICT (month) DO UPDATE SET ms = ms + excluded.ms, cost_usd = cost_usd + excluded.cost_usd')
+    sql.exec('DROP TABLE computer_usage')
+  }
+  sql.exec("INSERT INTO usage (month, source, input_tokens, output_tokens, cost_usd) SELECT month, 'box', input_tokens, output_tokens, cost_usd FROM usage WHERE source = 'computer' ON CONFLICT (month, source) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens, cost_usd = cost_usd + excluded.cost_usd")
+  sql.exec("DELETE FROM usage WHERE source = 'computer'")
+  sql.exec("INSERT OR REPLACE INTO kv (k, v) SELECT 'box', v FROM kv WHERE k = 'computer'")
+  sql.exec("DELETE FROM kv WHERE k = 'computer'")
+  // An open Ask that names the grant or the tools (a proposal, a stored call waiting for its answer).
+  const renamed = (value: unknown): unknown => {
+    if (typeof value === 'string') return value === 'computer_run' || value === 'computer_read' || value === 'computer_write' ? value.replace('computer', 'box') : value
+    if (Array.isArray(value)) return value.map(renamed)
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, inner]) => [key === 'computer' && typeof inner === 'string' && ['allow', 'ask', 'deny'].includes(inner) ? 'box' : key, renamed(inner)]))
+    }
+    return value
+  }
+  for (const row of sql.exec<{ id: string; payload: string }>("SELECT id, payload FROM proposal WHERE payload LIKE '%computer%'").toArray()) {
+    sql.exec('UPDATE proposal SET payload = ? WHERE id = ?', JSON.stringify(renamed(JSON.parse(row.payload))), row.id)
+  }
+}
+
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
 function addColumns(sql: SqlStorage, table: string, columns: readonly string[]): void {
   const present = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((column) => column.name))
@@ -173,8 +203,10 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
-  // The computer's running time per month (v1.14 ticket 10, ao-54j2).
-  16: ['CREATE TABLE IF NOT EXISTS computer_usage (month TEXT PRIMARY KEY, ms INTEGER NOT NULL, cost_usd REAL NOT NULL) WITHOUT ROWID'],
+  // The Computer became the Box (v1.15 ticket 06, gb-ao8m): its grant, its running time, its cost rows, its state and its open Asks.
+  17: [renameComputerToBox],
+  // The Box's running time per month (v1.14 ticket 10, ao-54j2); the computer's until v1.15.
+  16: ['CREATE TABLE IF NOT EXISTS box_usage (month TEXT PRIMARY KEY, ms INTEGER NOT NULL, cost_usd REAL NOT NULL) WITHOUT ROWID'],
   // Subagents (v1.14 ticket 06): a grant item carries a payload (the subagents grant's model list); the child sessions.
   15: [
     (sql) => addColumns(sql, 'grant_item', ['payload TEXT']),
@@ -355,8 +387,8 @@ export class RobotStore {
       this.sql.exec('DELETE FROM grant_item')
       for (const [kind, field] of Object.entries(GRANT_FIELDS) as Array<[GrantKind, keyof GrantSet]>) {
         for (const [given, level] of Object.entries(grants[field])) {
-          // A proposal made before v1.13 names the group by its old name (mc-r1aa).
-          const name = kind === 'tool' && given === 'routines' ? 'tasks' : given
+          // A proposal made before v1.13 names the group by its old name (mc-r1aa); one made before v1.15 calls the Box the computer.
+          const name = kind === 'tool' && given === 'routines' ? 'tasks' : kind === 'tool' && given === 'computer' ? 'box' : given
           if (kept(kind, name, level)) this.sql.exec('INSERT INTO grant_item (kind, name, level) VALUES (?, ?, ?)', kind, name, level)
         }
       }
@@ -690,12 +722,12 @@ export class RobotStore {
     )
   }
 
-  addComputerUsage(month: string, ms: number, costUsd: number): void {
-    this.sql.exec('INSERT INTO computer_usage (month, ms, cost_usd) VALUES (?, ?, ?) ON CONFLICT (month) DO UPDATE SET ms = ms + excluded.ms, cost_usd = cost_usd + excluded.cost_usd', month, Math.max(0, Math.round(ms)), costUsd)
+  addBoxUsage(month: string, ms: number, costUsd: number): void {
+    this.sql.exec('INSERT INTO box_usage (month, ms, cost_usd) VALUES (?, ?, ?) ON CONFLICT (month) DO UPDATE SET ms = ms + excluded.ms, cost_usd = cost_usd + excluded.cost_usd', month, Math.max(0, Math.round(ms)), costUsd)
   }
 
-  computerUsage(month: string): { ms: number; costUsd: number } {
-    const row = this.sql.exec<{ ms: number; cost_usd: number }>('SELECT ms, cost_usd FROM computer_usage WHERE month = ?', month).toArray()[0]
+  boxUsage(month: string): { ms: number; costUsd: number } {
+    const row = this.sql.exec<{ ms: number; cost_usd: number }>('SELECT ms, cost_usd FROM box_usage WHERE month = ?', month).toArray()[0]
     return { ms: row?.ms ?? 0, costUsd: row?.cost_usd ?? 0 }
   }
 

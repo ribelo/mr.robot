@@ -11,7 +11,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const breakdown: CostBreakdown = { model: { robot: 1.2, review: 0.1, subagent: 0.3 }, browser: 0.09, computer: 0.05, services: 0.25, total: 1.99 }
+const breakdown: CostBreakdown = { model: { robot: 1.2, review: 0.1, subagent: 0.3 }, browser: 0.09, box: 0.05, services: 0.25, total: 1.99 }
 const identity = { name: 'Sales', title: '', description: '', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }
 const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity, lastLine: '', lastAt: 0, unread: false } as const
 const usage = { month: '2026-10', inputTokens: 1000, outputTokens: 100, costUsd: 1.99, breakdown, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } } as const
@@ -26,7 +26,7 @@ const costs: MemberCosts = { month: '2026-10', breakdown, limit: { kind: 'usd', 
 /** The rows of a breakdown table as [label, amount]. */
 const rowsOf = (table: HTMLElement) => within(table).getAllByRole('row').map((row) => [within(row).getByRole('rowheader').textContent, row.querySelector('td')?.textContent])
 
-const EXPECTED = [['Model', '$1.60'], ['Robot', '$1.20'], ['Auto review', '$0.10'], ['Subagents', '$0.30'], ['Browser', '$0.09'], ['Computer', '$0.05'], ['Services', '$0.25'], ['Total', '$1.99']]
+const EXPECTED = [['Model', '$1.60'], ['Robot', '$1.20'], ['Auto review', '$0.10'], ['Subagents', '$0.30'], ['Browser', '$0.09'], ['Box', '$0.05'], ['Services', '$0.25'], ['Total', '$1.99']]
 
 describe('cost by source in the PWA (ao-zbld, ao-ef5t, ao-ypas)', () => {
   it('the Robot panel shows each source and the total', () => {
@@ -59,7 +59,7 @@ describe('cost by source in the PWA (ao-zbld, ao-ef5t, ao-ypas)', () => {
       return path === '/api/admin' ? Response.json(view) : path === '/api/home-memory' ? Response.json({ content: '' }) : Response.json([])
     }))
     render(<RegistryProvider><Admin /></RegistryProvider>)
-    const lines = await screen.findAllByText('model $1.60 · browser $0.09 · computer $0.05 · services $0.25')
+    const lines = await screen.findAllByText('model $1.60 · browser $0.09 · box $0.05 · services $0.25')
     expect(lines).toHaveLength(2)
     expect(screen.getAllByText('$1.99')).toHaveLength(2)
   })
