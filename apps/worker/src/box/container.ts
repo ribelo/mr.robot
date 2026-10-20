@@ -22,10 +22,10 @@ export class ComputerContainer extends Container<Env> {
     return this.ctx.container?.running === true
   }
 
-  /** One command under bash, killed after its time limit (exit code 124). */
-  async run(command: string, cwd: string, seconds: number): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  /** One command under bash, killed after its time limit (exit code 124); `env` adds variables to its environment. */
+  async run(command: string, cwd: string, seconds: number, env: Readonly<Record<string, string>> = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     this.renewActivityTimeout()
-    const process = await this.ctx.container!.exec(['timeout', '--kill-after=5', String(seconds), 'bash', '-lc', command], { cwd, env: { HOME: '/root', PATH: '/usr/local/python/bin:/usr/local/bin:/usr/bin:/bin' } })
+    const process = await this.ctx.container!.exec(['timeout', '--kill-after=5', String(seconds), 'bash', '-lc', command], { cwd, env: { ...env, HOME: '/root', PATH: '/usr/local/python/bin:/usr/local/bin:/usr/bin:/bin' } })
     const out = await process.output()
     return { stdout: text.decode(out.stdout), stderr: text.decode(out.stderr), exitCode: out.exitCode }
   }

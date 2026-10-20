@@ -10,6 +10,7 @@ import { hookChannel, isHookPath } from './edge/hooks.ts'
 import { GOOGLE_CALLBACK_PATH, googleCallback } from './edge/google-callback.ts'
 import { identityEmail } from './edge/identity.ts'
 import { bearerToken, robotOfToken } from './box/token.ts'
+import { PERMIT_HEADER, permitSecret } from './places/copy-permit.ts'
 import { HOME_ID, type Env } from './env.ts'
 import type { SignIn } from './home/home.ts'
 
@@ -31,7 +32,7 @@ async function boxChannel(request: Request, env: Env): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
   const token = bearerToken(request.headers.get('authorization'))
   if (token === undefined) return json({ error: 'a Box token is required' }, 401)
-  const reply = await env.ROBOT.getByName(robotOfToken(token)).boxTransfer(token, await request.text())
+  const reply = await env.ROBOT.getByName(robotOfToken(token)).boxTransfer(token, permitSecret(request.headers.get(PERMIT_HEADER)), await request.text())
   return new Response(reply.json, { status: reply.status, headers: { 'content-type': 'application/json' } })
 }
 

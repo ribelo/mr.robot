@@ -27,7 +27,8 @@ export interface BoxBackend {
   output(job: string, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
   /** TERM to the job's whole session, KILL five seconds later. */
   kill(job: string): Promise<void>
-  run(command: string, cwd: string, timeoutSeconds: number): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>
+  /** One command; `env` adds variables to its environment only (a copy's permit for ws: never in the command line). */
+  run(command: string, cwd: string, timeoutSeconds: number, env?: Readonly<Record<string, string>>): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>
   read(path: string): Promise<Uint8Array | null>
   write(path: string, bytes: Uint8Array): Promise<void>
   /** Delete a file; one that is not there is not an error. */
@@ -54,7 +55,7 @@ export function containerBox(env: Env, robotId: string): BoxBackend {
     status: (job) => stub.status(job),
     output: (job, stream, offset) => stub.output(job, stream, offset),
     kill: (job) => stub.killJob(job),
-    run: (command, cwd, seconds) => stub.run(command, cwd, seconds),
+    run: (command, cwd, seconds, env) => stub.run(command, cwd, seconds, env),
     read: (path) => stub.read(path),
     write: (path, bytes) => stub.write(path, bytes),
     remove: (path) => stub.remove(path),

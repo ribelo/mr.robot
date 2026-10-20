@@ -101,6 +101,7 @@ import { Places as PlacesCapability } from '../plugins/places.ts'
 import { Places } from '../places/places.ts'
 import { HOST_WINDOW_PARTS, PART_BYTES, Transfers } from '../places/transfers.ts'
 import { boxTransfer as boxDoor } from '../places/box-door.ts'
+import type { PermitSecret } from '../places/copy-permit.ts'
 import { hostJobPlace, hostLink, type HostCaller } from '../places/host-links.ts'
 import { parseS3Credentials, s3ObjectStore, type ObjectStore } from '../workspace/object-store.ts'
 import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, newBoxToken, type BoxToken } from '../box/token.ts'
@@ -818,9 +819,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return usableLevel(this.groupLevel(group))
   }
 
-  /** The level of a tool group now: deny when the Home has its plugin off. */
-  private groupLevel(group: 'files' | 'box'): GrantLevel {
-    return disabledToolGroups(this.pluginsOn).has(group) ? 'deny' : this.store.levelOf('tool', group)
+  /** The level of a tool group now: deny when the Home has its plugin off (in `plugins`, the switches the last Turn read by default). */
+  private groupLevel(group: 'files' | 'box', plugins: Readonly<Record<string, boolean>> = this.pluginsOn): GrantLevel {
+    return disabledToolGroups(plugins).has(group) ? 'deny' : this.store.levelOf('tool', group)
   }
 
   /** The S3 side of the Files bucket (v1.16 ticket 06); tests give a recorded one. */
@@ -847,17 +848,21 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The Box's door to its Workspace (v1.16 ticket 06): ws calls it with the token written into the container at boot (places/box-door.ts). */
-  async boxTransfer(token: BoxToken, body: string): Promise<{ readonly status: number; readonly json: string }> {
+  async boxTransfer(token: BoxToken, permit: PermitSecret | undefined, body: string): Promise<{ readonly status: number; readonly json: string }> {
     return boxDoor({
       liveToken: () => {
         const box = this.boxState()
         return box.state === 'booting' || box.state === 'running' ? box.token : undefined
       },
       containerUp: async () => this.boxState().state === 'booting' || (await this.boxBackend().running().catch(() => false)),
-      filesAccess: () => (this.groupUsable('files') ? (this.store.levelOf('tool', 'files') === 'allow' ? 'allow' : 'ask') : 'none'),
-      permitted: (path) => this.places().isPermitted(path),
+      // The Home's switches as they are now: the Robot's own copy (pluginsOn) is the last Turn's, and empty in a cold isolate.
+      levels: async () => {
+        const plugins = await this.home().pluginsEnabled()
+        return { files: this.groupLevel('files', plugins), box: this.groupLevel('box', plugins) }
+      },
+      permit: (secret) => this.places().permit(secret),
       transfers: this.transfers(),
-    }, token, body)
+    }, token, permit, body)
   }
 
   /** The owner's Stop on one job in the panel; the Robot is told (gb-66kh). */

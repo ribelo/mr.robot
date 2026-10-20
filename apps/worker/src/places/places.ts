@@ -12,6 +12,7 @@ import { copyTimeoutMs, type UploadPart } from '@mr-robot/host-protocol'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
 import type { BoxBackend } from '../box/backend.ts'
+import { CopyPermits, PERMIT_ENV, type CopyPermit, type PermitSecret } from './copy-permit.ts'
 import { BadCall, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
 import { shellQuote } from './file-ops.ts'
 import { BoxFiles, boxPath, BOX_ROOT, HostFiles, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
@@ -145,8 +146,8 @@ const sameItem = (a: GrantItem, b: GrantItem): boolean => a.kind === b.kind && a
 
 export class Places {
   private readonly workspaceFiles: WorkspaceFiles
-  /** The Workspace paths a copy in flight has opened to ws on the Box, with how many copies hold each. */
-  private readonly permits = new Map<string, number>()
+  /** The permits of the copies in flight that run ws on the Box, one per run of ws. */
+  private readonly permits = new CopyPermits()
 
   constructor(private readonly deps: PlacesDeps) {
     this.workspaceFiles = new WorkspaceFiles(deps.workspace)
@@ -337,20 +338,19 @@ export class Places {
     return { from: `/workspace/${from}`, to: `/workspace/${to}`, bytes: object.size }
   }
 
-  /** Whether a copy in flight has opened this Workspace path to ws: the Box's door lets it through even when the files group is at ask. */
-  isPermitted(path: string): boolean {
-    return (this.permits.get(path) ?? 0) > 0
+  /** The permit of a copy in flight, by the secret its ws sent: the Box's door lets that ws through for its one key and direction. */
+  permit(secret: PermitSecret): CopyPermit | undefined {
+    return this.permits.find(secret)
   }
 
-  /** ws inside the Box moves the file between the Box's disk and R2; its token and the Worker's address were written when the Box booted. The Workspace `key` is open to it for the length of the call. */
-  private async ws(backend: BoxBackend, key: string, args: string, bytes: number): Promise<void> {
+  /**
+   * ws inside the Box moves the file between the Box's disk and R2; its token and the Worker's address were written when the Box booted.
+   * This run of ws gets a permit for `key` in direction `op`, in its environment; the permit ends with the run.
+   */
+  private async ws(backend: BoxBackend, op: 'get' | 'put', key: string, args: string, bytes: number): Promise<void> {
     const seconds = Math.ceil(copyTimeoutMs(bytes) / 1000)
-    this.permits.set(key, (this.permits.get(key) ?? 0) + 1)
-    const result = await backend.run(`ws ${args}`, BOX_ROOT, seconds).finally(() => {
-      const left = (this.permits.get(key) ?? 1) - 1
-      if (left > 0) this.permits.set(key, left)
-      else this.permits.delete(key)
-    })
+    const permit = this.permits.issue(op, key)
+    const result = await backend.run(`ws ${op} ${args}`, BOX_ROOT, seconds, { [PERMIT_ENV]: permit.secret }).finally(() => permit.end())
     if (result.exitCode !== 0) throw new CopyRefused({ message: `copy: ws ${result.exitCode === 124 ? `ran out of time (${seconds} s)` : 'failed'}: ${(result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`).slice(0, 500)}` })
   }
 
@@ -369,7 +369,7 @@ export class Places {
         return { from: `/workspace/${key}`, to: target, bytes: owned.byteLength }
       }
       const size = object?.size ?? 0
-      await this.ws(backend, key, `get ${shellQuote(key)} ${shellQuote(target)}`, size)
+      await this.ws(backend, 'get', key, `${shellQuote(key)} ${shellQuote(target)}`, size)
       return { from: `/workspace/${key}`, to: target, bytes: size }
     } finally {
       await this.deps.box.touch()
@@ -385,7 +385,7 @@ export class Places {
       const sized = await backend.run(`stat -c %s ${shellQuote(source)}`, BOX_ROOT, 10).catch(() => ({ stdout: '', exitCode: 1 }))
       const bytes = Number(sized.stdout.trim())
       if (sized.exitCode !== 0 || !Number.isSafeInteger(bytes)) throw new MissingFile({ place: 'your Box', path: source, message: `copy: ${source} does not exist on your Box` })
-      await this.ws(backend, key, `put ${shellQuote(source)} ${shellQuote(key)}`, bytes)
+      await this.ws(backend, 'put', key, `${shellQuote(source)} ${shellQuote(key)}`, bytes)
       return { from: source, to: `/workspace/${key}`, bytes }
     } finally {
       await this.deps.box.touch()

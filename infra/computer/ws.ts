@@ -4,7 +4,7 @@
  */
 import { mkdir, open, readFile, rm, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { main, type WsIo } from './ws-core.ts'
+import { main, PERMIT_ENV, type WsIo } from './ws-core.ts'
 
 const io: WsIo = {
   fetch: (input, init) => fetch(input, init),
@@ -36,6 +36,7 @@ const io: WsIo = {
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   out: (line) => console.log(line),
   err: (line) => console.error(line),
+  permit: process.env[PERMIT_ENV] || undefined,
 }
 
 process.exit(await main(process.argv.slice(2), io))

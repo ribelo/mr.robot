@@ -1,5 +1,5 @@
 import type { BoxBackend, BoxFile, BoxJobStatus } from '../src/box/backend.ts'
-import { main as ws, type WsIo } from '../../../infra/computer/ws-core.ts'
+import { main as ws, PERMIT_ENV, type WsIo } from '../../../infra/computer/ws-core.ts'
 
 /** What a stub Box did, per Robot: boots, commands with their directory, stops. */
 export const boxLog = new Map<string, string[]>()
@@ -81,6 +81,9 @@ function shellWords(line: string): string[] {
 /** The Box's network: where ws's requests go (the Worker's presign endpoint, and R2 by presigned URL). */
 export type BoxNetwork = (url: string, init?: RequestInit) => Promise<Response>
 
+/** A test's look at each request of ws as it goes out, per Robot: it may act as another script on the Box at that moment, over the Box's network. */
+export const wsTaps = new Map<string, (url: string, init: RequestInit | undefined, network: BoxNetwork) => Promise<void>>()
+
 /** The Box seam over memory (ao-33fs): no container, the same behaviour the Robot relies on. */
 export class StubBox implements BoxBackend {
   constructor(private readonly robotId: string, private readonly network: BoxNetwork = async () => { throw new Error('this stub Box has no network') }) {}
@@ -89,7 +92,7 @@ export class StubBox implements BoxBackend {
    * Commands the stub Box really runs: ws (the program of the image, ws-core.ts, over this disk and this network) and the stat the Robot
    * asks for sizes. Anything else is scripted or echoed.
    */
-  private async builtin(command: string, cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
+  private async builtin(command: string, cwd: string, env: Readonly<Record<string, string>> = {}): Promise<{ stdout: string; stderr: string; exitCode: number } | undefined> {
     const words = shellWords(command)
     const disk = this.disk()
     const at = (path: string): string => (path.startsWith('/') ? path : `${cwd}/${path}`)
@@ -101,7 +104,10 @@ export class StubBox implements BoxBackend {
     let stdout = ''
     let stderr = ''
     const io: WsIo = {
-      fetch: (input, init) => this.network(String(input), init),
+      fetch: async (input, init) => {
+        await wsTaps.get(this.robotId)?.(String(input), init, this.network)
+        return this.network(String(input), init)
+      },
       now: () => Date.now(),
       size: async (path) => disk.get(at(path))?.bytes.length,
       read: async (path, offset, length) => (disk.get(at(path))?.bytes ?? new Uint8Array()).slice(offset, offset + length),
@@ -122,6 +128,7 @@ export class StubBox implements BoxBackend {
       sleep: async () => undefined,
       out: (line) => { stdout += `${line}\n` },
       err: (line) => { stderr += `${line}\n` },
+      permit: env[PERMIT_ENV],
     }
     const exitCode = await ws(words.slice(1), io)
     return { stdout, stderr, exitCode }
@@ -189,10 +196,10 @@ export class StubBox implements BoxBackend {
     this.log(`kill ${job}`)
   }
 
-  async run(command: string, cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  async run(command: string, cwd: string, _seconds?: number, env?: Readonly<Record<string, string>>): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (!running.has(this.robotId)) throw new Error('the Box is not running')
     this.log(`run ${cwd}: ${command}`)
-    const answer = (await this.builtin(command, cwd)) ?? boxScripts.get(this.robotId)?.(command, new StubDisk(this.disk()))
+    const answer = (await this.builtin(command, cwd, env)) ?? boxScripts.get(this.robotId)?.(command, new StubDisk(this.disk()))
     return { stdout: answer?.stdout ?? `ran: ${command}`, stderr: answer?.stderr ?? '', exitCode: answer?.exitCode ?? 0 }
   }
 
