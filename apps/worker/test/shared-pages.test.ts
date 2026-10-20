@@ -94,6 +94,23 @@ describe('shared Pages (dp-hf7v, dp-jl3d, dp-zq16, dp-62di, dp-p5yn)', () => {
     expect((await open(site.url)).status).toBe(404)
   })
 
+  it('renders a shared Markdown Page once per content version: a view of an unchanged Page reads the cache, a change of the file or of an image is served at once', async () => {
+    const id = await robotWithPages()
+    const robot = env.ROBOT.getByName(id)
+    await robot.saveFile('pages/plan.md', '# Plan\n\n![Map](img/map.png)\n')
+    await env.FILES.put(`robots/${id}/pages/img/map.png`, new Uint8Array([137, 80, 78, 71, 1]), { httpMetadata: { contentType: 'image/png' } })
+    const { url } = (await api<SharedPageView>(ANNA, `/api/robots/${id}/page/share`, { body: { path: 'pages/plan.md' } })).body
+    const first = await (await open(url)).text()
+    expect(first).toContain('src="data:image/png;base64,iVBORwE="')
+    const cached = (await env.FILES.list({ prefix: `page-cache/${id}/` })).objects.map((object) => object.key)
+    expect(cached).toHaveLength(1)
+    expect(await (await open(url)).text()).toBe(first)
+    await env.FILES.put(`robots/${id}/pages/img/map.png`, new Uint8Array([137, 80, 78, 71, 2]), { httpMetadata: { contentType: 'image/png' } })
+    expect(await (await open(url)).text()).toContain('src="data:image/png;base64,iVBORwI="')
+    await robot.saveFile('pages/plan.md', '# Plan\n\nNo map any more.\n')
+    expect(await (await open(url)).text()).toContain('No map any more.')
+  })
+
   it('sharing is the owner\'s act: another Member cannot, and no Robot tool shares', async () => {
     const id = await robotWithPages()
     expect([403, 404]).toContain((await api(BEN, `/api/robots/${id}/page/share`, { body: { path: 'pages/report.md' } })).status)

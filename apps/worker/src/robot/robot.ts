@@ -89,6 +89,7 @@ import { draftText } from '../agent/draft.ts'
 import { PAGE_TITLES, PAGES_DIRECTORY, pageExcerpt, pageFormat, pageTitle, renamedPage, type PageFormat } from '../pages/page.ts'
 import { pageDocument } from '../pages/page-html.ts'
 import { printPdf } from '../pages/page-pdf.ts'
+import { cachedDocument, deletePageCache, storeDocument, versionOf, type PageDocument } from '../pages/page-cache.ts'
 
 /** Pages larger than this are listed by their file name: their text is not read for a title. */
 const PAGE_READ_BYTES = 1024 * 1024
@@ -316,6 +317,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     await clearWorkspace(this.env.FILES, robotId)
     await deleteScreenshots(this.env.FILES, robotId)
+    await deletePageCache(this.env.FILES, robotId)
     await this.ctx.storage.deleteAlarm()
     await this.ctx.storage.deleteAll()
     this.store.prepare()
@@ -359,6 +361,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.clearHistory()
     await clearWorkspace(this.env.FILES, this.store.requireConfig().id)
     await deleteScreenshots(this.env.FILES, this.store.requireConfig().id)
+    await deletePageCache(this.env.FILES, this.store.requireConfig().id)
     this.store.delete('screens-sweep-next')
     await this.seedWorkspace()
     await this.rearm()
@@ -3464,14 +3467,32 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return page
   }
 
-  /** The Page as one HTML document: what the PDF prints and a share link serves (dp-239c, dp-jl3d). */
-  async pageHtml(path: string): Promise<{ readonly title: string; readonly html: string; readonly format: PageFormat }> {
-    const { page, text } = await this.pageContent(path)
-    const html = await pageDocument(path, page.title, text, async (image) => {
-      const file = await this.run(this.workspace.read(image))
-      return file === undefined ? undefined : { bytes: new Uint8Array(file.body), contentType: mediaTypeOf(image) }
+  /**
+   * The Page as one HTML document: what the PDF prints and a share link serves (dp-239c, dp-jl3d). It is rendered once per content version and
+   * kept (page-cache.ts): a view of an unchanged Page reads the cache and checks the etags of the file and its images.
+   */
+  async pageHtml(path: string): Promise<PageDocument> {
+    const id = this.store.requireConfig().id
+    const format = pageFormat(path)
+    const entry = format === undefined ? undefined : await this.run(this.workspace.stat(path))
+    if (format === undefined || entry === undefined) throw Object.assign(new Error(format === undefined ? `"${path}" is not a Page` : `no Page "${path}"`), { name: 'NotFound', status: 404 })
+    const imageEtag = async (image: string) => (await this.run(this.workspace.stat(image)))?.etag ?? null
+    const hit = await cachedDocument(this.env.FILES, id, path, { pageEtag: entry.etag, salt: '', imageEtag })
+    if (hit !== undefined) return hit
+    const file = await this.run(this.workspace.read(path))
+    if (file === undefined) throw Object.assign(new Error(`no Page "${path}"`), { name: 'NotFound', status: 404 })
+    const text = new TextDecoder().decode(file.body)
+    const title = pageTitle(path, text)
+    const images: Array<{ path: string; etag: string | null }> = []
+    const html = await pageDocument(path, title, text, async (image) => {
+      const found = await this.run(this.workspace.read(image))
+      images.push({ path: image, etag: found?.etag ?? null })
+      return found === undefined ? undefined : { bytes: new Uint8Array(found.body), contentType: mediaTypeOf(image) }
     })
-    return { title: page.title, html, format: page.format }
+    const sources = { pageEtag: file.etag, images, salt: '' }
+    const document: PageDocument = { title, html, format, version: await versionOf(sources) }
+    await storeDocument(this.env.FILES, id, path, sources, document).catch((error: unknown) => console.warn('page not cached', error))
+    return document
   }
 
   /** The Page as a PDF, printed by Browser Rendering (dp-239c). */
