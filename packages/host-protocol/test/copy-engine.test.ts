@@ -134,7 +134,8 @@ describe('download', () => {
 describe('copy timeout', () => {
   it('allows two minutes and a second per megabyte, at most six hours', () => {
     expect(copyTimeoutMs(0)).toBe(120_000)
-    expect(copyTimeoutMs(2_000_000_000)).toBe(120_000 + 2000_000)
-    expect(copyTimeoutMs(10 ** 12)).toBe(6 * 3600_000)
+    // 2 GB is 2000 MB: 120 s and 2000 s, in milliseconds.
+    expect(copyTimeoutMs(2_000_000_000)).toBe(2_120_000)
+    expect(copyTimeoutMs(10 ** 12)).toBe(21_600_000)
   })
 })

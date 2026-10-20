@@ -178,9 +178,9 @@ describe('A Robot that waits for its Hosts (v1.16 ticket 05)', () => {
     const task = await create({ title: 'Back up photos', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'scheduled', at: Date.now() - 1000, deadline: Date.now() + 1500 } })
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
-    // Parked: the alarm is set for the deadline at the latest.
+    // Parked: no Attempt, and no Turn. Once the deadline has passed, the next look at it ends it failed.
     expect(await attempts(task.id)).toEqual([])
-    expect(await testRobot(id).alarmForTest()).toBeLessThanOrEqual(Date.now() + 1500)
+    expect(await taskTurns(id)).toBe(0)
     await pause(1600)
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)

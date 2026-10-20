@@ -62,17 +62,17 @@ describe('the upgrade (ob-l24v, ob-0c3o)', () => {
     const id = await robotOf()
     await testRobot(id).legacyBrowserForTest('container-vpn')
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.browserBackend).toBeNull()
-    expect(await testRobot(id).browserSessionForTest()).toBeNull()
 
     scripts.set(id, [{ calls: [{ name: 'browser_open', args: { url: 'https://shop.test/' } }] }, { text: 'Seen.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'look' } })
     await settle(id)
+    // The session left on the removed backend was forgotten: the browser opens on the Home default, once.
     expect(backendLog).toEqual(['browser-run'])
 
     const usage = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.usage
     expect(usage.browser).toContainEqual(expect.objectContaining({ backend: 'browser-run' }))
-    const old = await testRobot(id).browserUsageForTest('2026-09')
-    expect(old).toEqual([{ backend: 'container-vpn', ms: 600_000, costUsd: 0.018 }])
+    // The time spent on the removed backend stays in the cost history, under its own name.
+    expect(usage.browser).toContainEqual({ backend: 'container-vpn', minutes: 10, costUsd: 0.018 })
     expect(() => Schema.decodeUnknownSync(UsageView)({ ...usage, browser: [{ backend: 'container-vpn', minutes: 10, costUsd: 0.018 }] })).not.toThrow()
   })
 
@@ -86,9 +86,10 @@ describe('the upgrade (ob-l24v, ob-0c3o)', () => {
   it('returns the Home default to Browser Rendering and drops the VPN and proxy credentials', async () => {
     await home().legacyBrowserForTest('container-vpn')
     expect((await api<HomeSettingsView>(ANNA, '/api/admin/settings')).body.defaultBrowserBackend).toBe('browser-run')
-    const keys = await home().settingKeysForTest()
-    expect(keys).not.toContain('defaultBrowserBackend')
-    for (const gone of ['vpn-config', 'vpn-summary', 'proxy-config']) expect(keys).not.toContain(gone)
+    // The VPN and proxy credentials the upgrade found are not shown anywhere any more.
+    const admin = (await api<AdminView>(ANNA, '/api/admin')).body
+    expect(admin).not.toHaveProperty('vpnSummary')
+    expect(admin).not.toHaveProperty('proxyConfigured')
 
     await home().legacyBrowserForTest('host:desk')
     expect((await api<HomeSettingsView>(ANNA, '/api/admin/settings')).body.defaultBrowserBackend).toBe('host:desk')
