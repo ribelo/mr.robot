@@ -706,6 +706,13 @@ const allHosts = Effect.gen(function* () {
   return yield* hostViews(yield* sql.all<HostSql>('SELECT * FROM host ORDER BY name'), null)
 })
 
+/** Which of these Hosts are paired still, whoever owns them and whether they are shared (deep review P13). */
+const pairedHosts = (ids: readonly string[]) => Effect.gen(function* () {
+  const sql = yield* Sql
+  const rows = yield* sql.all<{ id: string }>('SELECT id FROM host WHERE id IN (SELECT value FROM json_each(?))', JSON.stringify(ids))
+  return rows.map((row) => row.id)
+})
+
 const hostOwner = (id: string) => Effect.gen(function* () {
   const sql = yield* Sql
   return (yield* sql.first<{ owner_id: string }>('SELECT owner_id FROM host WHERE id = ?', id))?.owner_id ?? null
@@ -1653,6 +1660,7 @@ export class Home extends DurableObject<Env> {
   }
   hostsFor(memberId: string): Promise<HostView[]> { return this.run(hostsFor(memberId)) }
   hostOwner(id: string): Promise<string | null> { return this.run(hostOwner(id)) }
+  pairedHosts(ids: readonly string[]): Promise<string[]> { return this.run(pairedHosts(ids)) }
   startPairing(name: string, platform: string): Promise<{ code: string }> { return this.run(startPairing(name, platform)) }
   pairingView(code: string): Promise<{ name: string; platform: string; approved: boolean }> { return this.run(pairingView(code)) }
   approvePairing(code: string, memberId: string): Promise<{ hostId: string; name: string }> { return this.run(approvePairing(code, memberId)) }

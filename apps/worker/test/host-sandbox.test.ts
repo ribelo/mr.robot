@@ -326,10 +326,36 @@ describe('the mode and roots of a facet are forgotten with the facet', () => {
     // The shell of Desk goes to deny: its mode goes with it.
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${desk.hostId}:files`]: 'allow', [`${laptop.hostId}:files`]: 'allow' } } } })
     expect(await stored()).toEqual([`${desk.hostId}:files`, `${laptop.hostId}:files`].sort())
-    // Laptop is unpaired: at the Robot's next look at its Hosts its mode is gone.
+    // Laptop is unpaired: at the Robot's next look at its Hosts its mode is gone, and so are its grant rows (deep review P13).
     await api(ANNA, `/api/hosts/${laptop.hostId}`, { method: 'DELETE' })
     await calls(id, [{ name: 'read', args: { on: 'Desk', file_path: 'a.txt' } }])
     expect(await stored()).toEqual([`${desk.hostId}:files`])
+    expect((await env.ROBOT.getByName(id).settings()).grants.hosts).toEqual({ [`${desk.hostId}:files`]: 'allow' })
+  })
+
+  // Deep review P13: a shared Host that left a Member's reach lost its mode and roots but kept its grant row, so when it was shared again
+  // the grant came back at the wider default (workspace-write) instead of read-only.
+  it('not when a shared Host is out of reach for a while: it comes back read-only', async () => {
+    const BEN = 'ben@example.com'
+    const desk = await fakeHost('Desk')
+    const share = (sharing: 'home' | 'private') => api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing } })
+    await share('home')
+    await api(ANNA, '/api/admin/members', { body: { email: BEN } })
+    await api(BEN, '/api/me')
+    const mr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
+    const facet = `${desk.hostId}:shell`
+    await api(BEN, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: {}, hosts: { [facet]: 'allow' } }, hostAccess: { [facet]: { mode: 'read-only', roots: [] } } } })
+    const turn = async (call: Call) => {
+      scripts.set(mr, [{ calls: [call] }, { text: 'Done.' }])
+      await api(BEN, `/api/robots/${mr}/messages`, { body: { text: 'go' } })
+      await settle(mr)
+    }
+    await share('private')
+    await turn({ name: 'my_capabilities', args: {} })
+    await share('home')
+    await turn({ name: 'run', args: { on: 'Desk', command: 'touch a' } })
+    expect(hostRuns.at(-1)).toMatchObject({ command: 'touch a', access: { mode: 'read-only' } })
+    expect((await env.ROBOT.getByName(mr).settings()).hostAccess).toEqual({ [facet]: { mode: 'read-only', roots: [] } })
   })
 })
 

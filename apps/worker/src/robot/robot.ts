@@ -2587,8 +2587,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     ;[this.knownHosts, this.knownConnections, this.pluginsOn, this.knownOrigin] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled(), this.home().appOrigin()])
     const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), config.kind === 'mr-robot' ? this.home().skills(config.ownerId) : Promise.resolve([])])
     this.knownCatalog = catalog
-    // The mode and roots of a Host that is gone (unpaired, no longer shared) are not kept.
-    this.store.forgetHostAccessExcept(this.knownHosts.map((host) => host.id))
+    // An unpaired Host's grant rows, mode and roots are not kept; a Host shared no more keeps them for its return (deep review P13).
+    const unreached = this.store.keptHostIds().filter((id) => !this.knownHosts.some((host) => host.id === id))
+    if (unreached.length > 0) {
+      const paired = await this.home().pairedHosts(unreached)
+      this.store.forgetUnpairedHosts(unreached.filter((id) => !paired.includes(id)))
+    }
     if (config.kind !== 'mr-robot') return
     this.store.setReach({ secrets: catalog.secrets.map((secret) => secret.name), skills: skills.map((skill) => skill.name), hosts: this.knownHosts.map((host) => host.id), connections: this.knownConnections.map((connection) => connection.id) })
   }

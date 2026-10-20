@@ -7,7 +7,7 @@ import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import * as Schema from 'effect/Schema'
-import { HOST_FACETS, hostFacetKey, StoredPlace } from '../places/host-facet.ts'
+import { HOST_FACETS, hostFacetKey, splitHostFacet, StoredPlace } from '../places/host-facet.ts'
 import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName, unsharedMrRobotDirectory } from './host-access.ts'
 import { JobId } from '../places/job-id.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
@@ -539,12 +539,27 @@ export class RobotStore {
     if (kept.length !== Object.keys(access).length) this.set(HOST_ACCESS, Object.fromEntries(kept))
   }
 
-  /** Forget the mode and roots of the Hosts that are no longer among those the owner reaches (unpaired, or no longer shared). */
-  forgetHostAccessExcept(hostIds: readonly string[]): void {
-    const access = this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS)
-    if (access === undefined) return
-    const kept = Object.entries(access).filter(([facet]) => hostIds.some((id) => facet.startsWith(`${id}:`)))
-    if (kept.length !== Object.keys(access).length) this.set(HOST_ACCESS, Object.fromEntries(kept))
+  /** The Hosts this Robot keeps a grant row or a mode and roots for, reachable now or not. */
+  keptHostIds(): string[] {
+    const rows = this.sql.exec<{ name: string }>("SELECT name FROM grant_item WHERE kind = 'host'").toArray().map((row) => row.name)
+    const facets = [...rows, ...Object.keys(this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS) ?? {})]
+    return [...new Set(facets.flatMap((facet) => splitHostFacet(facet)?.hostId ?? []))]
+  }
+
+  /**
+   * Forget unpaired Hosts: their grant rows and their modes and roots. A Host that is only out of reach (no longer shared) keeps both, so
+   * that it comes back with the access its owner set, not the wider default (deep review P13).
+   */
+  forgetUnpairedHosts(hostIds: readonly string[]): void {
+    if (hostIds.length === 0) return
+    const gone = (facet: string) => hostIds.includes(splitHostFacet(facet)?.hostId ?? '')
+    this.transaction(() => {
+      for (const row of this.sql.exec<{ name: string }>("SELECT name FROM grant_item WHERE kind = 'host'").toArray()) {
+        if (gone(row.name)) this.sql.exec("DELETE FROM grant_item WHERE kind = 'host' AND name = ?", row.name)
+      }
+      const access = this.get<Readonly<Record<string, unknown>>>(HOST_ACCESS)
+      if (access !== undefined && Object.keys(access).some(gone)) this.set(HOST_ACCESS, Object.fromEntries(Object.entries(access).filter(([facet]) => !gone(facet))))
+    })
   }
 
   /** The payload of one grant item, parsed; undefined when it has none. */
