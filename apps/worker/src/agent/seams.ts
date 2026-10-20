@@ -1,7 +1,7 @@
 /**
  * Mr. Robot's Cordis adapters for DSH seams that only need a thin bridge: credentials over the
- * Member/Home DOs (read-only inside a Robot: people manage keys in the PWA), the fs seam over R2
- * with DSH's file tools, and the browser-use provider registration for Browser Rendering.
+ * Member/Home DOs (read-only inside a Robot: people manage keys in the PWA), the working directory,
+ * and the browser-use provider registration for Browser Rendering.
  */
 import { Service, type Context } from '@deepseek-ai/cordis'
 import BrowserUseRegistry from '@deepseek-ai/dsh-browser-use'
@@ -15,10 +15,7 @@ import {
   type CredentialRef,
   type ResolvedCredential,
 } from '@deepseek-ai/dsh-credentials'
-import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
-import type { MemberFileName } from '../member/member.ts'
-import { R2FileSystem, WORKSPACE_ROOT } from '../workspace/r2-filesystem.ts'
-import type { WorkspaceShape } from '../workspace/workspace.ts'
+import { WORKSPACE_ROOT } from '../places/files.ts'
 import type { CredentialSource, ProviderId } from './providers.ts'
 
 /** Environment-style names DSH packages ask for, mapped to Providers. */
@@ -72,13 +69,6 @@ export function credentialsPlugin(source: CredentialSource): (ctx: Context) => P
   }
   return async (ctx) => {
     await ctx.plugin(RobotCredentials)
-  }
-}
-
-export function filesPlugin(workspace: WorkspaceShape, memberFile: (name: MemberFileName) => Promise<string>): (ctx: Context) => Promise<void> {
-  return async (ctx) => {
-    await ctx.plugin(R2FileSystem, { workspace, memberFile })
-    await ctx.plugin(ToolFs, {})
   }
 }
 

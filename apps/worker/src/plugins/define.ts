@@ -62,10 +62,8 @@ export function capability<C>(spec: CapabilitySpec<C>): CapabilityPlugin<C> {
     ...(spec.seams === undefined ? {} : { seams: spec.seams }),
     async apply(ctx, config) {
       for (const tool of spec.tools?.(config) ?? []) ctx.tools.register(tool)
-      if (spec.prompt !== undefined) {
-        const text = spec.prompt(config)
-        ctx.systemPrompt.section({ name: `mr-robot:${spec.name}`, order: 50, text: () => text })
-      }
+      const text = spec.prompt?.(config) ?? ''
+      if (text !== '') ctx.systemPrompt.section({ name: `mr-robot:${spec.name}`, order: 50, text: () => text })
     },
   }
 }

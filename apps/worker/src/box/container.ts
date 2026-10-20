@@ -84,6 +84,12 @@ export class ComputerContainer extends Container<Env> {
     if (out.exitCode !== 0) throw new Error(`cannot write ${path}: ${text.decode(out.stderr)}`)
   }
 
+  async remove(path: string): Promise<void> {
+    const process = await this.ctx.container!.exec(['bash', '-lc', 'rm -f -- "$0"', path], {})
+    const out = await process.output()
+    if (out.exitCode !== 0) throw new Error(`cannot delete ${path}: ${text.decode(out.stderr)}`)
+  }
+
   /** Every file under a directory with its size and change time: the manifest the sync compares. */
   async list(directory: string): Promise<Array<{ path: string; size: number; mtime: number }>> {
     const process = await this.ctx.container!.exec(['bash', '-lc', 'test -d "$0" && find "$0" -type f -printf "%P\\t%s\\t%T@\\n"', directory], {})

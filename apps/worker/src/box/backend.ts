@@ -31,6 +31,8 @@ export interface BoxBackend {
   run(command: string, cwd: string, timeoutSeconds: number): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>
   read(path: string): Promise<Uint8Array | null>
   write(path: string, bytes: Uint8Array): Promise<void>
+  /** Delete a file; one that is not there is not an error. */
+  remove(path: string): Promise<void>
   list(directory: string): Promise<readonly BoxFile[]>
   stop(): Promise<void>
 }
@@ -56,6 +58,7 @@ export function containerBox(env: Env, robotId: string): BoxBackend {
     run: (command, cwd, seconds) => stub.run(command, cwd, seconds),
     read: (path) => stub.read(path),
     write: (path, bytes) => stub.write(path, bytes),
+    remove: (path) => stub.remove(path),
     list: (directory) => stub.list(directory),
     stop: () => stub.end(),
   }

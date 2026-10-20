@@ -952,6 +952,10 @@ export class Member extends DurableObject<Env> {
   hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number }) {
     return this.hosts.run(id, robotId, 'shell', (client) => client.Run(input), Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000, { action: 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})`, exitCode: (result) => result.exitCode })
   }
+  /** What the file RPCs lack (listing, searching, deleting) as a command under the Host's files grant: the file tools build the command, never the Robot. */
+  hostFileCommand(id: string, robotId: string, input: { command: string; timeoutMs?: number }) {
+    return this.hosts.run(id, robotId, 'files', (client) => client.Run({ command: input.command, timeoutMs: input.timeoutMs ?? 60_000 }), Math.min(input.timeoutMs ?? 60_000, 600_000) + 10_000, { action: 'files', detail: input.command })
+  }
   hostActions(id: string): HostAction[] { return this.hosts.actions(id) }
   hostBrowserOpen(id: string, robotId: string, robotName: string): Promise<string> { return this.hosts.openBrowser(id, robotId, robotName) }
   hostBrowserClose(id: string, robotId: string, session: string): Promise<void> { return this.hosts.closeBrowser(id, robotId, session) }

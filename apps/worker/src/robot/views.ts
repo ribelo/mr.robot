@@ -361,7 +361,7 @@ export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly T
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
     ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),
-    ...(store.mayUse('tool', 'box') ? { box: boxView(store.get<StoredBox>('box'), store.runningBoxJobs().filter((job) => !job.foreground)) } : {}),
+    ...(store.mayUse('tool', 'box') ? { box: boxView(store.get<StoredBox>('box'), store.runningJobs('box').filter((job) => !job.foreground)) } : {}),
     // Requests for help still waiting, oldest first (sk-fmvh).
     help: store.proposals('open').flatMap((row) => row.kind === 'help' && row.help !== undefined ? [{ id: row.id, text: row.help.need, urgent: row.help.urgent, created: row.help.created, escalated: row.help.escalated }] : []),
   } as RobotPanel

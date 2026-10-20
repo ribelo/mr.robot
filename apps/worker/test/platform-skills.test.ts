@@ -108,12 +108,12 @@ describe('read-only, and not in the Home library (gb-n6by, gb-8wx5)', () => {
   it('are files under docs/skills/ that every Robot reads and none changes', async () => {
     const id = await robotWith({ tools: { files: 'allow' } })
     scripts.set(id, [{ calls: [
-      { name: 'read', args: { file_path: 'docs/skills/asking/SKILL.md' } },
-      { name: 'glob', args: { pattern: 'docs/skills/**' } },
-      { name: 'write', args: { file_path: 'docs/skills/asking/SKILL.md', content: 'mine' } },
-      { name: 'edit', args: { file_path: 'docs/skills/asking/SKILL.md', old_string: '# Asking', new_string: '# Mine' } },
-      { name: 'delete_file', args: { path: 'docs/skills/tasks-cadence/SKILL.md' } },
-      { name: 'write', args: { file_path: 'docs/skills/mine/SKILL.md', content: 'x' } },
+      { name: 'read', args: { on: 'workspace', file_path: 'docs/skills/asking/SKILL.md' } },
+      { name: 'glob', args: { on: 'workspace', pattern: 'docs/skills/**' } },
+      { name: 'write', args: { on: 'workspace', file_path: 'docs/skills/asking/SKILL.md', content: 'mine' } },
+      { name: 'edit', args: { on: 'workspace', file_path: 'docs/skills/asking/SKILL.md', old_string: '# Asking', new_string: '# Mine' } },
+      { name: 'delete_file', args: { on: 'workspace', path: 'docs/skills/tasks-cadence/SKILL.md' } },
+      { name: 'write', args: { on: 'workspace', file_path: 'docs/skills/mine/SKILL.md', content: 'x' } },
     ] }, { text: '' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'try' } })
     await settle(id)

@@ -1,0 +1,281 @@
+/**
+ * The one execution surface (v1.16 ticket 01): run, the file tools, copy and the job tools, each with a mandatory `on`: workspace, box or a
+ * Host's name. Driven through the edge API with the scripted model, the stub Box and the fake Host app.
+ */
+import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Conversation } from '@mr-robot/protocol'
+import { api, settle, stubModels, testRobot } from './api.ts'
+import { closeHosts, fakeHost, hostCommands, hostDisk } from './fake-host.ts'
+import { boxDisks, boxLog, boxScripts, holdBoxJob } from './stub-box.ts'
+import { requests, scripts, type StubReply } from './stub-llm.ts'
+
+const ANNA = 'anna@example.com'
+
+beforeEach(async () => {
+  await reset()
+  scripts.clear()
+  requests.clear()
+  boxLog.clear()
+  boxDisks.clear()
+  boxScripts.clear()
+  hostDisk.clear()
+  hostCommands.length = 0
+  await stubModels()
+  await api(ANNA, '/api/me')
+})
+
+afterEach(closeHosts)
+
+async function robotWith(grants: { tools?: Record<string, string>; hosts?: Record<string, string> }): Promise<string> {
+  scripts.set('*', [{ text: 'Hello.' }])
+  const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
+  await settle(body.id)
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget: 32_000, grants: { tools: grants.tools ?? {}, hosts: grants.hosts ?? {} } } })
+  await testRobot(body.id).activateForTest()
+  requests.delete(body.id)
+  return body.id
+}
+
+type Call = { name: string; args: Record<string, unknown> }
+/** The calls go one after the other, one step each; the results come back in the same order. */
+async function calls(id: string, list: Call[]): Promise<string[]> {
+  scripts.set(id, [...list.map((call): StubReply => ({ calls: [call] })), { text: 'Done.' }])
+  await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'go' } })
+  await settle(id)
+  return requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join('')).slice(-list.length)
+}
+const json = (text: string | undefined) => JSON.parse(text!) as Record<string, unknown>
+const workspaceText = async (id: string, path: string) => (await (await env.FILES.get(`robots/${id}/${path}`))?.text()) ?? null
+
+describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
+  it('works the Workspace, the Box and a Host with the same tools', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { files: 'allow', box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow', [`${desk.hostId}:shell`]: 'allow' } })
+    boxScripts.set(id, (command) => (command === 'pwd' ? { stdout: '/workspace\n' } : undefined))
+    hostCommands.push(
+      (command) => (command.startsWith('find ') ? { stdout: 'docs/a.md\ndocs/b.txt\nREADME.md\n' } : undefined),
+      (command) => (command.startsWith('grep ') ? { stdout: './docs/a.md:2:beta\n./notes/z.md:9:beta again\n' } : undefined),
+      (command) => (command.startsWith('if [ -f ') ? { stdout: 'deleted\n' } : undefined),
+    )
+    const results = await calls(id, [
+      // The Workspace
+      { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'alpha\nbeta\n' } },
+      { name: 'read', args: { on: 'workspace', file_path: 'notes/a.md' } },
+      { name: 'edit', args: { on: 'workspace', file_path: 'notes/a.md', old_string: 'beta', new_string: 'gamma' } },
+      { name: 'glob', args: { on: 'workspace', pattern: 'notes/**' } },
+      { name: 'grep', args: { on: 'workspace', pattern: 'gamma' } },
+      // The Box
+      { name: 'write', args: { on: 'box', file_path: 'work/b.txt', content: 'one\ntwo\n' } },
+      { name: 'read', args: { on: 'box', file_path: '/workspace/work/b.txt' } },
+      { name: 'edit', args: { on: 'box', file_path: 'work/b.txt', old_string: 'two', new_string: 'three' } },
+      { name: 'glob', args: { on: 'box', pattern: 'work/*' } },
+      { name: 'grep', args: { on: 'box', pattern: 'three' } },
+      { name: 'run', args: { on: 'box', command: 'pwd' } },
+      { name: 'delete_file', args: { on: 'box', path: 'work/b.txt' } },
+      // A Host
+      { name: 'write', args: { on: 'Desk', file_path: '/home/anna/h.txt', content: 'host text' } },
+      { name: 'read', args: { on: 'Desk', file_path: '/home/anna/h.txt' } },
+      { name: 'edit', args: { on: 'Desk', file_path: '/home/anna/h.txt', old_string: 'text', new_string: 'words' } },
+      { name: 'glob', args: { on: 'Desk', pattern: 'docs/*.md' } },
+      { name: 'grep', args: { on: 'Desk', pattern: 'beta', glob: 'docs/*' } },
+      { name: 'run', args: { on: 'Desk', command: 'uptime' } },
+      { name: 'delete_file', args: { on: 'Desk', path: '/home/anna/h.txt' } },
+      // The Workspace to a Host and back, to the Box and back, inside the Workspace
+      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/a.md' }, to: { on: 'Desk', path: '/home/anna/copy.md' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/copy.md' }, to: { on: 'workspace', path: 'inbox/copy.md' } } },
+      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/a.md' }, to: { on: 'box', path: 'box/in.md' } } },
+      { name: 'copy', args: { from: { on: 'box', path: 'box/in.md' }, to: { on: 'workspace', path: 'inbox/from-box.md' } } },
+      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/a.md' }, to: { on: 'workspace', path: 'notes/b.md' } } },
+    ])
+    const [wWrite, wRead, wEdit, wGlob, wGrep, bWrite, bRead, bEdit, bGlob, bGrep, bRun, bDelete, hWrite, hRead, hEdit, hGlob, hGrep, hRun, hDelete, c1, c2, c3, c4, c5] = results
+    expect(json(wWrite)).toMatchObject({ on: 'workspace', written: '/workspace/notes/a.md', bytes: 11 })
+    expect(wRead).toContain('2: beta')
+    expect(json(wEdit)).toMatchObject({ on: 'workspace', edited: '/workspace/notes/a.md' })
+    expect(JSON.parse(wGlob!)).toEqual(['notes/a.md'])
+    expect(JSON.parse(wGrep!)).toEqual([{ path: 'notes/a.md', line: 2, text: 'gamma' }])
+    expect(json(bWrite)).toMatchObject({ on: 'box', written: '/workspace/work/b.txt', bytes: 8 })
+    expect(bRead).toContain('2: two')
+    expect(json(bEdit)).toMatchObject({ on: 'box', edited: '/workspace/work/b.txt' })
+    expect(JSON.parse(bGlob!)).toEqual(['work/b.txt'])
+    expect(JSON.parse(bGrep!)).toEqual([{ path: 'work/b.txt', line: 2, text: 'three' }])
+    expect(json(bRun)).toEqual({ kind: 'foreground', stdout: '/workspace\n', stderr: '', exitCode: 0 })
+    expect(json(bDelete)).toEqual({ deleted: '/workspace/work/b.txt' })
+    expect(boxDisks.get(id)!.has('/workspace/work/b.txt')).toBe(false)
+    expect(json(hWrite)).toMatchObject({ on: 'Desk', written: '/home/anna/h.txt', bytes: 9 })
+    expect(hRead).toContain('1: host text')
+    expect(json(hEdit)).toMatchObject({ on: 'Desk', edited: '/home/anna/h.txt' })
+    expect(new TextDecoder().decode(hostDisk.get('/home/anna/h.txt'))).toBe('host words')
+    expect(JSON.parse(hGlob!)).toEqual(['docs/a.md'])
+    expect(JSON.parse(hGrep!)).toEqual([{ path: 'docs/a.md', line: 2, text: 'beta' }])
+    expect(json(hRun)).toMatchObject({ kind: 'foreground', stdout: 'ran: uptime', exitCode: 0 })
+    expect(json(hDelete)).toEqual({ deleted: '/home/anna/h.txt' })
+    expect(json(c1)).toMatchObject({ from: { on: 'workspace', path: '/workspace/notes/a.md' }, to: { on: 'Desk', path: '/home/anna/copy.md' }, bytes: 12 })
+    expect(new TextDecoder().decode(hostDisk.get('/home/anna/copy.md'))).toBe('alpha\ngamma\n')
+    expect(json(c2)).toMatchObject({ to: { on: 'workspace', path: '/workspace/inbox/copy.md' }, bytes: 12 })
+    expect(await workspaceText(id, 'inbox/copy.md')).toBe('alpha\ngamma\n')
+    expect(json(c3)).toMatchObject({ to: { on: 'box', path: '/workspace/box/in.md' } })
+    expect(new TextDecoder().decode(boxDisks.get(id)!.get('/workspace/box/in.md')!.bytes)).toBe('alpha\ngamma\n')
+    expect(json(c4)).toMatchObject({ to: { on: 'workspace', path: '/workspace/inbox/from-box.md' } })
+    expect(await workspaceText(id, 'inbox/from-box.md')).toBe('alpha\ngamma\n')
+    expect(json(c5)).toMatchObject({ bytes: 12 })
+    expect(await workspaceText(id, 'notes/b.md')).toBe('alpha\ngamma\n')
+  })
+
+  it('has no default place: a call without on is refused, as is a copy end without one', async () => {
+    const id = await robotWith({ tools: { files: 'allow', box: 'allow' } })
+    const [read, run, copy] = await calls(id, [
+      { name: 'read', args: { file_path: 'SOUL.md' } },
+      { name: 'run', args: { command: 'ls' } },
+      { name: 'copy', args: { from: { path: 'SOUL.md' }, to: { on: 'box', path: 'x' } } },
+    ])
+    expect(read).toContain('parameter "on" is required')
+    expect(run).toContain('parameter "on" is required')
+    expect(copy).toContain('from.on is required')
+    expect(boxLog.get(id)).toBeUndefined()
+  })
+
+  it('does not run commands on the Workspace', async () => {
+    const id = await robotWith({ tools: { files: 'allow', box: 'allow' } })
+    const [run] = await calls(id, [{ name: 'run', args: { on: 'workspace', command: 'ls' } }])
+    expect(run).toContain('the Workspace holds files, it runs no commands')
+  })
+})
+
+describe('the grants gate the places (ob-dyg4, ob-qnf7)', () => {
+  it('refuses a place the Robot holds no grant on and names the grant; an unknown Host is refused with the Hosts it could name', async () => {
+    const desk = await fakeHost()
+    await fakeHost('Laptop')
+    // The Box, and the files of Desk: no files group, no Desk shell.
+    const id = await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
+    const results = await calls(id, [
+      { name: 'read', args: { on: 'workspace', file_path: 'SOUL.md' } },
+      { name: 'run', args: { on: 'Desk', command: 'id' } },
+      { name: 'read', args: { on: 'Laptop', file_path: '/etc/hostname' } },
+      { name: 'read', args: { on: 'Nowhere', file_path: '/etc/hostname' } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'workspace', path: 'x' } } },
+      { name: 'read', args: { on: 'Desk', file_path: '/etc/hostname' } },
+    ])
+    expect(results[0]).toContain('you hold no grant on your Workspace files (the tool group "files")')
+    expect(results[1]).toContain('the grant "Desk · shell"')
+    expect(results[2]).toContain('the grant "Laptop · files"')
+    expect(results[3]).toContain('there is no such place')
+    expect(results[3]).toContain('Desk, Laptop')
+    expect(results[4]).toContain('the tool group "files"')
+    expect(results[5]).toContain('1: hello')
+    expect(hostCommands.length).toBe(0)
+  })
+
+  it('refuses the Box without the box grant even when the Robot holds a Host shell', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { files: 'allow' }, hosts: { [`${desk.hostId}:shell`]: 'allow' } })
+    const [read, run] = await calls(id, [
+      { name: 'read', args: { on: 'box', file_path: 'a.txt' } },
+      { name: 'run', args: { on: 'box', command: 'ls' } },
+    ])
+    expect(read).toContain('you hold no grant on your Box (the tool group "box")')
+    expect(run).toContain('the tool group "box"')
+    expect(boxLog.get(id)).toBeUndefined()
+  })
+
+  it('puts a call to a place at ask to the owner by that place, not by the others', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { files: 'allow', box: 'ask' }, hosts: { [`${desk.hostId}:shell`]: 'allow' } })
+    const [workspace, box, host] = await calls(id, [
+      { name: 'write', args: { on: 'workspace', file_path: 'a.md', content: 'x' } },
+      { name: 'run', args: { on: 'box', command: 'ls', reason: 'List the Box' } },
+      { name: 'run', args: { on: 'Desk', command: 'uptime', reason: 'Check it' } },
+    ])
+    expect(workspace).toContain('"written"')
+    expect(box).toContain('waiting for your owner')
+    expect(host).toContain('ran: uptime')
+    expect(boxLog.get(id)).toBeUndefined()
+  })
+})
+
+describe('only the Workspace reaches the owned files (ob-pfcu)', () => {
+  it('reads the Member files, the docs and the platform skills on workspace; the Box and a Host refuse them', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { files: 'allow', box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
+    const results = await calls(id, [
+      { name: 'read', args: { on: 'workspace', file_path: 'USER.md' } },
+      { name: 'read', args: { on: 'workspace', file_path: 'docs/box.md' } },
+      { name: 'read', args: { on: 'box', file_path: 'USER.md' } },
+      { name: 'read', args: { on: 'box', file_path: '/workspace/docs/box.md' } },
+      { name: 'write', args: { on: 'box', file_path: 'docs/skills/asking/SKILL.md', content: 'x' } },
+      { name: 'read', args: { on: 'Desk', file_path: 'USER.md' } },
+      { name: 'delete_file', args: { on: 'Desk', path: 'docs/robots.md' } },
+      // A name that only looks like an owned file is the place's own.
+      { name: 'write', args: { on: 'box', file_path: 'docs/mine.md', content: 'mine' } },
+      { name: 'read', args: { on: 'Desk', file_path: '/docs/box.md' } },
+      // And the Workspace refuses to change them.
+      { name: 'write', args: { on: 'workspace', file_path: 'docs/box.md', content: 'mine' } },
+    ])
+    expect(results[0]).toContain('<path>/workspace/USER.md</path>')
+    expect(results[1]).toContain('# The Box')
+    for (const refused of results.slice(2, 7)) expect(refused).toContain('reachable only with on "workspace"')
+    expect(json(results[7])).toMatchObject({ on: 'box', written: '/workspace/docs/mine.md' })
+    expect(results[8]).toContain('1: hello')
+    expect(results[9]).toContain('docs/')
+    expect(results[9]).toContain('read-only')
+  })
+})
+
+describe('one job registry for the Box and the Hosts (ob-rc3b)', () => {
+  it('lists a Box job and a Host job together with their place; the Host job ends and wakes the Robot', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:shell`]: 'allow' } })
+    holdBoxJob(id, 'python3 serve.py')
+    const [box, host, list] = await calls(id, [
+      { name: 'run', args: { on: 'box', command: 'python3 serve.py', run_in_background: true } },
+      { name: 'run', args: { on: 'Desk', command: 'backup --all', run_in_background: true } },
+      { name: 'job_list', args: {} },
+    ])
+    expect(json(box)).toMatchObject({ kind: 'background', jobId: expect.stringMatching(/^j-/) })
+    expect(json(host)).toMatchObject({ kind: 'background', jobId: expect.stringMatching(/^j-/) })
+    const listed = (json(list).jobs as Array<{ id: string; place: string; command: string }>).map((job) => [job.place, job.command]).sort()
+    expect(listed).toEqual([['Desk', 'backup --all'], ['box', 'python3 serve.py']])
+    // The Host's command ended; the alarm looks at the jobs and wakes the Robot with its place named.
+    scripts.set(id, [{ text: '' }])
+    await runDurableObjectAlarm(env.ROBOT.getByName(id))
+    await settle(id)
+    const wakes = [...new Set(requests.get(id)!.flatMap((request) => request.messages.filter((message) => message.role === 'user').map((message) => JSON.stringify(message))).filter((text) => text.includes('job ')))]
+    expect(wakes.some((text) => text.includes('[Desk job ') && text.includes('finished: exit 0') && text.includes('ran: backup --all'))).toBe(true)
+    const [, after] = await calls(id, [
+      { name: 'job_output', args: { job_id: (json(host).jobId as string) } },
+      { name: 'job_list', args: {} },
+    ])
+    expect((json(after).jobs as Array<{ place: string; status: string }>).find((job) => job.place === 'Desk')).toMatchObject({ status: 'completed' })
+  })
+
+  it('refuses job_output and job_kill for a job on a place the Robot no longer holds', async () => {
+    const desk = await fakeHost()
+    const id = await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:shell`]: 'allow' } })
+    const [host] = await calls(id, [{ name: 'run', args: { on: 'Desk', command: 'sleep 1', run_in_background: true } }])
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { box: 'allow' }, hosts: {} } } })
+    const [out, kill] = await calls(id, [
+      { name: 'job_output', args: { job_id: json(host).jobId } },
+      { name: 'job_kill', args: { job_id: json(host).jobId } },
+    ])
+    expect(out).toContain('the grant "Desk · shell"')
+    expect(kill).toContain('the grant "Desk · shell"')
+  })
+})
+
+describe('old events still render (ob-j9nx)', () => {
+  it('shows the calls of the removed box_ and host_ tools in a Conversation that holds them', async () => {
+    const id = await robotWith({ tools: { files: 'allow' } })
+    const [boxRun, hostRead] = await calls(id, [
+      { name: 'box_run', args: { command: 'echo old' } },
+      { name: 'host_read', args: { host: 'Desk', path: '/etc/hostname' } },
+    ])
+    expect(boxRun).toBeDefined()
+    expect(hostRead).toBeDefined()
+    const detailed = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation?details=1`)).body.items.filter((item) => item.kind === 'activity')
+    const named = detailed.flatMap((item) => (item.kind === 'activity' ? (item.calls ?? []).map((call) => call.name) : []))
+    expect(named).toEqual(expect.arrayContaining(['box_run', 'host_read']))
+    const trajectory = JSON.stringify((await api(ANNA, `/api/robots/${id}/trajectory`)).body)
+    expect(trajectory).toContain('box_run')
+    expect(trajectory).toContain('host_read')
+  })
+})

@@ -43,7 +43,7 @@ describe('the product docs (v1.11 ticket 02)', () => {
   it('are readable, listed by glob and grep, and not stored in R2 (sk-cqc5)', async () => {
     const id = await activeRobot()
     await turn(id, [
-      { calls: [{ name: 'read', args: { file_path: 'docs/robots.md' } }, { name: 'read', args: { file_path: '/workspace/docs/grants.md' } }, { name: 'glob', args: { pattern: 'docs/*' } }, { name: 'grep', args: { pattern: 'need_help', glob: 'docs/*.md' } }, { name: 'glob', args: { pattern: '**' } }] },
+      { calls: [{ name: 'read', args: { on: 'workspace', file_path: 'docs/robots.md' } }, { name: 'read', args: { on: 'workspace', file_path: '/workspace/docs/grants.md' } }, { name: 'glob', args: { on: 'workspace', pattern: 'docs/*' } }, { name: 'grep', args: { on: 'workspace', pattern: 'need_help', glob: 'docs/*.md' } }, { name: 'glob', args: { on: 'workspace', pattern: '**' } }] },
       { text: 'done' },
     ])
     const [robots, grants, glob, grep, everything] = toolResults(id)
@@ -59,11 +59,11 @@ describe('the product docs (v1.11 ticket 02)', () => {
     const id = await activeRobot()
     await turn(id, [
       { calls: [
-        { name: 'write', args: { file_path: 'docs/robots.md', content: 'mine' } },
-        { name: 'edit', args: { file_path: 'docs/robots.md', old_string: '# Robots', new_string: '# Mine' } },
-        { name: 'delete_file', args: { path: 'docs/robots.md' } },
-        { name: 'write', args: { file_path: 'docs/new.md', content: 'x' } },
-        { name: 'delete_file', args: { path: '/workspace/docs/grants.md' } },
+        { name: 'write', args: { on: 'workspace', file_path: 'docs/robots.md', content: 'mine' } },
+        { name: 'edit', args: { on: 'workspace', file_path: 'docs/robots.md', old_string: '# Robots', new_string: '# Mine' } },
+        { name: 'delete_file', args: { on: 'workspace', path: 'docs/robots.md' } },
+        { name: 'write', args: { on: 'workspace', file_path: 'docs/new.md', content: 'x' } },
+        { name: 'delete_file', args: { on: 'workspace', path: '/workspace/docs/grants.md' } },
       ] },
       { text: 'done' },
     ])
@@ -71,7 +71,7 @@ describe('the product docs (v1.11 ticket 02)', () => {
     expect(results).toHaveLength(5)
     for (const result of results) expect(result).toContain('platform owns')
     expect((await env.FILES.list({ prefix: `robots/${id}/docs` })).objects).toHaveLength(0)
-    await turn(id, [{ calls: [{ name: 'read', args: { file_path: 'docs/robots.md' } }] }, { text: 'done' }])
+    await turn(id, [{ calls: [{ name: 'read', args: { on: 'workspace', file_path: 'docs/robots.md' } }] }, { text: 'done' }])
     expect(toolResults(id).at(-1)).toContain('# Robots')
   })
 
@@ -105,7 +105,7 @@ describe('the product docs (v1.11 ticket 02)', () => {
 
   it('a Robot answers a question about Subagents from subagents.md (ao-cetv)', async () => {
     const id = await activeRobot()
-    scripts.set(id, [{ calls: [{ name: 'read', args: { file_path: '/workspace/docs/subagents.md' } }] }, { text: 'At most 3 Subagents run at once.' }])
+    scripts.set(id, [{ calls: [{ name: 'read', args: { on: 'workspace', file_path: '/workspace/docs/subagents.md' } }] }, { text: 'At most 3 Subagents run at once.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'how many Subagents can you run?' } })
     await settle(id)
     expect(JSON.stringify(requests.get(id)![0]!.messages)).toContain('docs/subagents.md')

@@ -18,10 +18,10 @@ A Host belongs to the Member who paired it. It is private or shared with the Hom
 
 A Host offers three facets. Each is a separate grant item for a Robot:
 - browser: the Host browser, which is Chrome installed on that computer. Read browser.md.
-- files: host_read, host_write and host_copy. host_read and host_write read and write files on the Host through the model. host_copy copies one file, up to 100 MB and binary too, between the Host and your Workspace in either direction; the content does not pass through the model. A file copied into box/ is on your Box at its next boot.
-- shell: host_run. It runs a shell command on the Host.
+- files: read, write, edit, glob, grep, delete_file and copy with on set to the name of the Host. read and write pass the content through the model. copy moves one file, up to 100 MB and binary too, between the Host and your Workspace in either direction; the content does not pass through the model. A file copied into box/ is on your Box at its next boot. A relative path on a Host is relative to its home directory.
+- shell: run with on set to the name of the Host. It runs a shell command in the login shell of the OS user. A command that is still going at its time limit goes on as a job, as on the Box (job_list, job_output and job_kill), for at most 600 seconds.
 
-These are the Host tools. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one.
+The tools take a mandatory \`on\`: "workspace", "box" or the name of a Host. There is no default. A call to a Host that the Robot holds no facet on, or to a name that is no Host, is refused and names the grant. These are the Host tools. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one.
 
 In the Advanced settings of a Robot, the Hosts section has one heading per Host with its state, online or offline. The facets files, shell and browser are under it.
 

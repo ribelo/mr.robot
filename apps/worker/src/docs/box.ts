@@ -4,12 +4,13 @@ A Robot with the box grant has a Box: a container in Cloudflare with Python 3.11
 
 ## The tools
 
-- box_run: run a bash command in /workspace on the Box. It waits in the foreground up to timeoutSeconds (default 120, maximum 1800) and returns stdout, stderr and the exit code. A command that is still going then is not killed: it goes on as a job (read Jobs below). A long output arrives cut, with the path of the whole output under spill/ in the Workspace.
-- box_read: read a text file on the Box.
-- box_write: write a text file on the Box.
-- job_list, job_output and job_kill: manage jobs.
+The Box has no tools of its own. The tools of every place take a mandatory \`on\`; the Box is on "box". There is no default.
+- run with on "box": run a bash command in /workspace on the Box. It waits in the foreground up to timeout_seconds (default 120, maximum 1800) and returns stdout, stderr and the exit code. A command that is still going then is not killed: it goes on as a job (read Jobs below). A long output arrives cut, with the path of the whole output under spill/ in the Workspace.
+- read, write, edit, glob, grep and delete_file with on "box": work on files of the Box.
+- copy moves a file between the Box and the Workspace, up to 32 MB for now. Name both ends: from: { on, path } and to: { on, path }.
+- job_list, job_output and job_kill: manage jobs. They work the same for a job on the Box and a job on a Host.
 
-The paths are on the Box, under its /workspace. This is not the /workspace of the file tools: that one is the Robot's Workspace.
+The paths are on the Box, under its /workspace. This is not the /workspace of on "workspace": that one is the Robot's Workspace. The owner's files, the product docs and the platform skills are in the Workspace only; the Box refuses their names.
 
 ## What is kept
 
@@ -24,8 +25,8 @@ Keep scripts, data and results that you need again under /workspace/box.
 
 A job is a command that goes on by itself. It has an id, for example j-3fa9c1d2.
 
-- A box_run that is still going at its time limit becomes a job. You get { kind: "promoted", jobId, stdout, stderr } with what it printed so far.
-- box_run with run_in_background starts a job at once and returns { kind: "background", jobId }. Use it for a server, a watcher or a long script.
+- A run on the Box that is still going at its time limit becomes a job. You get { kind: "promoted", jobId, stdout, stderr } with what it printed so far.
+- run with run_in_background starts a job at once and returns { kind: "background", jobId }. Use it for a server, a watcher or a long script.
 - job_list lists the jobs: status (running, completed, killed or lost), start, end and exit code.
 - job_output returns what a job printed since you last looked. With wait it waits until the job ends, or for timeout_seconds (default 30, maximum 600). Wait only when you need the result now.
 - job_kill sends TERM to the whole job and KILL five seconds later.
@@ -45,5 +46,5 @@ The running time costs money at Cloudflare's container rate. It is the Box line 
 
 ## Auto review
 
-When Auto review is on, a reviewer model checks each box_run before it runs. Read auto-review.md.
+When Auto review is on, a reviewer model checks each run before it runs. Read auto-review.md.
 `

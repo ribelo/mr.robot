@@ -11,15 +11,13 @@ import { clearWorkspace } from '../workspace/workspace.ts'
 import { SPILL_SWEEP_EVERY_MS, sweepSpill } from '../workspace/spill.ts'
 import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCREEN_SWEEP_EVERY_MS, sweepScreenshots } from '../workspace/screens.ts'
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
-import { COPY_CHUNK_BYTES, COPY_MAX_BYTES } from '@mr-robot/host-protocol'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
 import { createUserMessage, LlmError, ReasoningEffortId, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { readDecision, REVIEW_POLICY, reviewHistory, reviewUserText } from '../agent/auto-review.ts'
-import { WORKSPACE_ROOT } from '../workspace/r2-filesystem.ts'
-import { workspacePrefix } from '../workspace/workspace.ts'
+import { BOX_ROOT, WORKSPACE_ROOT } from '../places/files.ts'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
 import { IDLE_MEMORY_NOTE, IDLE_MEMORY_STEPS, idlePlan, idleSettings, type IdleStep } from './idle.ts'
@@ -100,11 +98,16 @@ import { Browser } from '../plugins/browser.ts'
 import { Conversation as ConversationPlugin } from '../plugins/conversation.ts'
 import { Credentials } from '../plugins/credentials.ts'
 import { Exa } from '../plugins/exa.ts'
-import { Files } from '../plugins/files.ts'
+import { Places as PlacesCapability } from '../plugins/places.ts'
+import { Places } from '../places/places.ts'
+import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
+import { HostRunner, HostRuns } from '../places/host-runner.ts'
+import type { Place, StoredPlace } from '../places/place.ts'
+import type { PlacesReach } from '../agent/tools/places.ts'
+import type { HostLink } from '../places/places.ts'
 import { GrantProposals } from '../plugins/grant-proposals.ts'
 import { Ask } from '../plugins/ask.ts'
 import { IdentityTools } from '../plugins/identity.ts'
-import { Host } from '../plugins/host.ts'
 import { connectorCapability } from '../plugins/connector.ts'
 import { connectorOn, disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
@@ -135,9 +138,6 @@ import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, normalizePath, type WorkspaceShape } from '../workspace/workspace.ts'
 import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
-import type { BoxHost } from '../agent/tools/box.ts'
-import { Box } from '../plugins/box.ts'
-import { BoxJobs } from '../box/jobs.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { projectChat } from './projection.ts'
@@ -684,7 +684,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.changed()
     try {
       // What still runs ends with the Box; its output so far is saved and the Robot is told (gb-aafm).
-      await this.jobs().loseAll('the Box was stopped', backend).catch((error: unknown) => console.warn('jobs not closed', error))
+      await this.jobs().loseAll('the Box was stopped', boxRunner(backend)).catch((error: unknown) => console.warn('jobs not closed', error))
       await this.syncBox(backend).catch((error: unknown) => console.warn('Box not synced', error))
       await backend.stop()
     } finally {
@@ -697,60 +697,70 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return { stopped: true }
   }
 
-  private boxHost(): BoxHost {
-    const touch = async () => {
-      const current = this.boxState()
-      if (current.state !== 'off') this.store.set(BOX, { ...current, lastCommandAt: Date.now() } satisfies BoxState)
-      await this.rearm()
-    }
+  /** The Box has been used just now: the idle stop counts from here. */
+  private async touchBox(): Promise<void> {
+    const current = this.boxState()
+    if (current.state !== 'off') this.store.set(BOX, { ...current, lastCommandAt: Date.now() } satisfies BoxState)
+    await this.rearm()
+  }
+
+  /** The Box as a place for jobs (v1.16 ticket 01): booted on the first command, up while its record says so and its container runs. */
+  private boxJobPlace(): JobPlace {
     return {
-      boxRun: (command, timeoutSeconds, background, signal) => this.jobs().run(command, timeoutSeconds, background, signal),
-      boxJobs: async () => this.jobs().list(),
-      boxJobOutput: (jobId, wait, timeoutMs) => this.jobs().output(jobId, wait, timeoutMs),
-      boxJobKill: (jobId) => this.jobs().kill(jobId),
-      boxRead: async (path) => {
-        const backend = await this.bootBox()
-        try {
-          const bytes = await backend.read(boxPath(path))
-          if (bytes === null) throw new Error(`${boxPath(path)} does not exist on your Box`)
-          return new TextDecoder().decode(bytes)
-        } finally {
-          await touch()
-        }
-      },
-      boxWrite: async (path, content) => {
-        const backend = await this.bootBox()
-        try {
-          const bytes = new TextEncoder().encode(content)
-          await backend.write(boxPath(path), bytes)
-          return { written: boxPath(path), bytes: bytes.byteLength }
-        } finally {
-          await touch()
-        }
-      },
+      place: 'box',
+      label: 'Box',
+      start: async () => boxRunner(await this.bootBox()),
+      runner: () => boxRunner(this.boxBackend()),
+      alive: async () => this.boxState().state === 'running' && (await this.boxBackend().running().catch(() => false)),
+      touch: () => this.touchBox(),
     }
   }
 
-  /** The jobs of the Box (v1.15 ticket 07), made on first use. */
-  private boxJobs: BoxJobs | undefined
-  private jobs(): BoxJobs {
-    this.boxJobs ??= new BoxJobs({
+  /** A Host as a place for jobs, for as long as the Host side runs one command per call (HostRunner). */
+  private hostJobPlace(host: { readonly id: string; readonly name: string }): JobPlace {
+    const robotId = this.store.requireConfig().id
+    const runner = new HostRunner(
+      this.hostRuns,
+      (command, cwd, timeoutMs) => this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs })),
+      (pending) => this.ctx.waitUntil(pending),
+    )
+    return { place: `host:${host.id}`, label: host.name, start: async () => runner, runner: () => runner, alive: async () => true, touch: async () => undefined }
+  }
+
+  /** The pending calls of the Robot's Host jobs (HostRunner); lost with the isolate. */
+  private readonly hostRuns = new HostRuns()
+
+  /** The jobs of every place (v1.15 ticket 07, v1.16 ticket 01), made on first use. */
+  private jobRegistry: Jobs | undefined
+  private jobs(): Jobs {
+    this.jobRegistry ??= new Jobs({
       store: this.store,
-      boot: () => this.bootBox(),
-      backend: () => this.boxBackend(),
-      up: () => this.boxState().state === 'running',
+      place: (stored: StoredPlace, name) => stored === 'box' ? this.boxJobPlace() : this.hostJobPlace({ id: stored.slice('host:'.length), name: name ?? stored.slice('host:'.length) }),
       saveLog: async (path, text) => { await this.run(this.workspace.write(path, text, 'text/plain')) },
       wake: async (text, summary) => { await this.wake({ kind: 'platform', sender: { kind: 'platform' }, text, payload: { summary } }) },
-      touch: async () => {
-        const current = this.boxState()
-        if (current.state !== 'off') this.store.set(BOX, { ...current, lastCommandAt: Date.now() } satisfies BoxState)
-        await this.rearm()
-      },
       changed: () => this.changed(),
       now: () => Date.now(),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     })
-    return this.boxJobs
+    return this.jobRegistry
+  }
+
+  /** The Robot's places (v1.16 ticket 01): the grants decide, per call, which of workspace, box and its owner's Hosts a tool may act on. */
+  private placeService: Places | undefined
+  private places(): Places {
+    this.placeService ??= new Places({
+      workspace: this,
+      bucket: this.env.FILES,
+      robotId: () => this.store.requireConfig().id,
+      groupUsable: (group) => !disabledToolGroups(this.pluginsOn).has(group) && this.store.mayUse('tool', group),
+      hostUsable: (hostId, facet) => this.store.mayUse('host', `${hostId}:${facet}`),
+      hosts: () => this.home().hostsFor(this.store.requireConfig().ownerId),
+      box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
+      link: (host) => this.hostLink(host),
+      jobPlace: (place) => place.kind === 'box' ? this.boxJobPlace() : this.hostJobPlace(place),
+      jobs: this.jobs(),
+    })
+    return this.placeService
   }
 
   /** The owner's Stop on one job in the panel; the Robot is told (gb-66kh). */
@@ -761,7 +771,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The alarm's Box duty: look at the jobs; ten minutes after the last command or job it stops, never while a job runs (ao-joux, gb-5bfw). */
   private async idleBox(now: number): Promise<void> {
     await this.jobs().check().catch((error: unknown) => console.warn('jobs not checked', error))
-    if (this.store.runningBoxJobs().length > 0) return
+    if (this.store.runningJobs('box').length > 0) return
     const current = this.boxState()
     if (current.state !== 'running' || current.lastCommandAt + BOX_IDLE_MS > now) return
     await this.stopBox()
@@ -1784,7 +1794,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       },
       prompt,
       mounts,
-      spill: { workspace: this.workspace, fileTools: mounts.some((entry) => (entry.plugin as unknown) === Files) },
+      spill: { workspace: this.workspace, fileTools: mounts.some((entry) => (entry.plugin as unknown) === PlacesCapability && (entry.config as { reach: PlacesReach }).reach.workspace) },
       extraAdapters: await this.subagentAdapters(config),
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
     }))).catch(async (error: unknown) => {
@@ -1853,7 +1863,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected mounts(config: RobotConfig): Mount[] {
     const mounts: Mount[] = [mount(Credentials, { source: this.credentials() })]
     if (config.status === 'setup') {
-      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
+      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(PlacesCapability, { host: this.places(), reach: { workspace: true, box: false, hosts: { files: [], shell: [] } } satisfies PlacesReach }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
     mounts.push(mount(ConversationPlugin, { host: this }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), mount(Ask, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
@@ -1864,7 +1874,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const items = this.mountItems(grants)
     const gate = (itemsOf: ItemsOf) => askGate(this.askGateHost(), itemsOf)
     const group = (name: string): ItemsOf => () => fixedItems({ kind: 'tool', name })
-    if (granted.has('files')) mounts.push(mount(Files, { host: this, workspace: this.workspace, memberFile: (name) => this.memberFile(name) }, gate(group('files'))))
     if (granted.has('notify')) mounts.push(mount(Notify, { host: this }, gate(group('notify'))))
     if (granted.has('secrets')) mounts.push(mount(Logins, { host: this, granted: usableNames(grants.secrets) }, gate(items.logins)))
     if (granted.has('messaging')) mounts.push(mount(Messaging, { host: this }, gate(items.messaging)))
@@ -1874,7 +1883,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (granted.has('exa') || granted.has('exa-agent')) mounts.push(mount(Exa, { research: granted.has('exa'), agentRuns: granted.has('exa-agent'), host: this }, gate((tool) => fixedItems({ kind: 'tool', name: tool.startsWith('exa_agent_') ? 'exa-agent' : 'exa' }))))
     if (granted.has('web')) mounts.push(mount(Web, {}, gate(group('web'))))
     if (granted.has('subagents')) mounts.push(mount(Subagents, { host: this.subagentHost() }, gate(group('subagents'))))
-    if (granted.has('box')) mounts.push(mount(Box, { host: this.boxHost() }, gate(group('box'))))
     if (granted.has('tasks')) mounts.push(mount(Tasks, { host: tasksHost((program) => this.program(program), this.taskTurn()) }, gate(group('tasks'))))
     // Connector skills come with the connector grant, not with an ordinary skill grant (cn-go3s).
     const connectorSkills = this.connectorSkillNames()
@@ -1894,7 +1902,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
     const hostGrants = usableNames(grants.hosts)
     const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
-    if (names('files').length > 0 || names('shell').length > 0) mounts.push(mount(Host, { host: this, files: names('files'), shell: names('shell') }, gate(items.hosts)))
+    // One capability for the Workspace, the Box and the Hosts: its tools exist when the Robot holds any of them (v1.16 ticket 01).
+    const reach: PlacesReach = { workspace: granted.has('files'), box: granted.has('box'), hosts: { files: names('files'), shell: names('shell') } }
+    if (reach.workspace || reach.box || reach.hosts.files.length > 0 || reach.hosts.shell.length > 0) mounts.push(mount(PlacesCapability, { host: this.places(), reach }, gate(items.places)))
     for (const [kind, plugin] of Object.entries(this.connectorPlugins()) as Array<[ConnectorKind, ConnectorPlugin]>) {
       if (!connectorOn(this.pluginsOn, kind)) continue
       const accounts = this.grantedConnections(kind)
@@ -1913,7 +1923,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     readonly messaging: ItemsOf
     readonly browser: ItemsOf
     readonly skills: (group: boolean) => ItemsOf
-    readonly hosts: ItemsOf
+    readonly places: ItemsOf
   } {
     const tool = (name: string): GrantItem => ({ kind: 'tool', name })
     const named = (kind: GrantItem['kind'], names: readonly string[], parameter: string): ToolItems => ({
@@ -1921,15 +1931,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       used: async (args) => (typeof args[parameter] === 'string' ? [{ kind, name: args[parameter] }] : []),
     })
     const hostFacets = (facet: string) => usableNames(grants.hosts).filter((name) => name.endsWith(`:${facet}`)).map((name): GrantItem => ({ kind: 'host', name }))
-    const hostFacet = (facet: 'files' | 'shell'): ToolItems => ({
-      possible: hostFacets(facet),
+    /** The grant item of the place a call names (`on`): the files group, the box group, or the Host's facet. An unknown place is the tool's own refusal; the gate then has nothing to ask about. */
+    const placeItem = async (on: unknown, facet: 'files' | 'shell'): Promise<GrantItem[]> => {
+      if (typeof on !== 'string') return []
+      const name = on.trim()
+      if (name === 'workspace') return facet === 'files' ? [tool('files')] : []
+      if (name === 'box') return [tool('box')]
+      const host = await this.resolveHost(name).catch(() => undefined)
+      return host === undefined ? [] : [{ kind: 'host', name: `${host.id}:${facet}` }]
+    }
+    const everywhere = (facet: 'files' | 'shell'): readonly GrantItem[] => [...(facet === 'files' ? [tool('files')] : []), tool('box'), ...hostFacets(facet)]
+    const onItems = (facet: 'files' | 'shell'): ToolItems => ({ possible: everywhere(facet), used: (args) => placeItem(args['on'], facet) })
+    const jobItems: ToolItems = {
+      possible: everywhere('shell'),
       used: async (args) => {
-        if (typeof args['host'] !== 'string') return []
-        // An unknown host is the tool's own error; the gate then has nothing to ask about.
-        const host = await this.resolveHost(args['host']).catch(() => undefined)
-        return host === undefined ? [] : [{ kind: 'host', name: `${host.id}:${facet}` }]
+        const stored = typeof args['job_id'] === 'string' ? this.jobs().placeOfJob(args['job_id']) : undefined
+        return stored === undefined ? [] : stored === 'box' ? [tool('box')] : [{ kind: 'host', name: `${stored.slice('host:'.length)}:shell` }]
       },
-    })
+    }
     return {
       logins: (name) => bothItems(fixedItems(tool('secrets')), name === 'login_fill' || name === 'secret_get' ? named('secret', usableNames(grants.secrets), 'name') : NO_ITEMS),
       messaging: (name) => bothItems(fixedItems(tool('messaging')), name === 'robot_send' ? named('recipient', usableNames(grants.recipients), 'to') : NO_ITEMS),
@@ -1945,7 +1964,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         possible: usableNames(grants.skills).map((skill): GrantItem => ({ kind: 'skill', name: skill })),
         used: async (args) => (typeof args['name'] === 'string' && Object.hasOwn(grants.skills, args['name']) ? [{ kind: 'skill', name: args['name'] }] : []),
       } : NO_ITEMS),
-      hosts: (name) => (name === 'host_run' ? hostFacet('shell') : name === 'host_read' || name === 'host_write' || name === 'host_copy' ? hostFacet('files') : NO_ITEMS),
+      places: (name) => {
+        if (name === 'run') return onItems('shell')
+        if (name === 'job_output' || name === 'job_kill') return jobItems
+        if (name === 'job_list') return NO_ITEMS
+        if (name === 'copy') return { possible: everywhere('files'), used: async (args) => [...(await placeItem(copyEnd(args['from']), 'files')), ...(await placeItem(copyEnd(args['to']), 'files'))] }
+        return onItems('files')
+      },
     }
   }
 
@@ -2084,90 +2109,20 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  async hostRead(name: string, path: string): Promise<unknown> {
-    const host = await this.resolveHost(name)
-    const result = await this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRead(host.id, this.store.requireConfig().id, path))
-    return { host: host.name, ...result }
-  }
-
-  async hostWrite(name: string, path: string, content: string, encoding: 'text' | 'base64'): Promise<unknown> {
-    const host = await this.resolveHost(name)
-    const result = await this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostWrite(host.id, this.store.requireConfig().id, encoding === 'base64' ? { path, base64: content } : { path, text: content }))
-    return { host: host.name, ...result }
-  }
-
-  /**
-   * Copy a file between a Host and the Workspace in pieces (v1.15 ticket 09, gb-iw01, gb-rvj5, gb-mcnc). The bytes go from one to the other
-   * through this object and never through the model; at most one piece is held, and the Workspace file is streamed to R2.
-   */
-  async hostCopy(name: string, direction: 'to_workspace' | 'to_host', hostPath: string, workspacePath: string): Promise<unknown> {
-    const host = await this.resolveHost(name)
+  /** One Host as the Robot's places reach it (v1.16 ticket 01): every call under the Robot's grant for the facet, failing as Host calls fail (hs-bfr8). */
+  private hostLink(host: HostView): HostLink {
     const robotId = this.store.requireConfig().id
-    const path = normalizePath(workspacePath)
-    if (path === undefined || isDocsPath(path)) throw new Error(`host_copy: "${workspacePath}" is not a path in your Workspace`)
-    const member = await this.hostOwnerStub(host.id)
-    const detail = direction === 'to_workspace' ? `${hostPath} → ${path}` : `${path} → ${hostPath}`
-    try {
-      const result = direction === 'to_workspace' ? await this.copyToWorkspace(member, host.id, robotId, hostPath, path) : await this.copyToHost(member, host.id, robotId, hostPath, path)
-      await member.recordHostCopy(host.id, robotId, detail, 'done')
-      return { host: host.name, direction, ...result }
-    } catch (error) {
-      await member.recordHostCopy(host.id, robotId, detail, error instanceof Error ? error.message : String(error)).catch(() => undefined)
-      throw error instanceof Error && error.name === 'HostOffline' ? new Error(`${error.message}. Tell your owner the computer needs to be on with the Mr. Robot app running.`) : error
+    const owner = () => this.hostOwnerStub(host.id)
+    return {
+      name: host.name,
+      read: (path) => this.hostCall(async () => (await owner()).hostRead(host.id, robotId, path)),
+      write: (path, content, encoding) => this.hostCall(async () => (await owner()).hostWrite(host.id, robotId, encoding === 'base64' ? { path, base64: content } : { path, text: content })),
+      command: (command, timeoutMs) => this.hostCall(async () => (await owner()).hostFileCommand(host.id, robotId, { command, timeoutMs })),
+      readChunk: (input) => this.hostCall(async () => (await owner()).hostReadChunk(host.id, robotId, input)),
+      writeChunk: (input) => this.hostCall(async () => (await owner()).hostWriteChunk(host.id, robotId, input)),
+      recordCopy: async (detail, outcome) => (await owner()).recordHostCopy(host.id, robotId, detail, outcome),
+      run: (command, cwd, timeoutMs) => this.hostCall(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs })),
     }
-  }
-
-  private async copyToWorkspace(member: Awaited<ReturnType<Robot['hostOwnerStub']>>, hostId: string, robotId: string, hostPath: string, path: string): Promise<{ hostPath: string; workspacePath: string; bytes: number }> {
-    const first = await this.hostCall(() => member.hostReadChunk(hostId, robotId, { path: hostPath, offset: 0, length: COPY_CHUNK_BYTES }))
-    if (first.size > COPY_MAX_BYTES) throw new Error(`host_copy: ${first.path} is ${first.size} bytes; files over ${COPY_MAX_BYTES / 1024 / 1024} MB are not copied. Cut it on the computer first.`)
-    const fixed = new FixedLengthStream(first.size)
-    const writing = this.run(this.workspace.write(path, fixed.readable))
-    const writer = fixed.writable.getWriter()
-    try {
-      let offset = 0
-      let chunk = first
-      for (;;) {
-        const bytes = Uint8Array.from(atob(chunk.base64), (char) => char.charCodeAt(0))
-        if (bytes.length === 0 && offset < first.size) throw new Error(`host_copy: ${first.path} changed while it was copied`)
-        if (bytes.length > 0) await writer.write(bytes)
-        offset += bytes.length
-        if (offset >= first.size) break
-        chunk = await this.hostCall(() => member.hostReadChunk(hostId, robotId, { path: hostPath, offset, length: COPY_CHUNK_BYTES }))
-      }
-      await writer.close()
-    } catch (error) {
-      await writer.abort(error).catch(() => undefined)
-      await writing.catch(() => undefined)
-      throw error
-    }
-    await writing
-    return { hostPath: first.path, workspacePath: path, bytes: first.size }
-  }
-
-  private async copyToHost(member: Awaited<ReturnType<Robot['hostOwnerStub']>>, hostId: string, robotId: string, hostPath: string, path: string): Promise<{ hostPath: string; workspacePath: string; bytes: number }> {
-    const key = `${workspacePrefix(robotId)}${path}`
-    const head = await this.env.FILES.head(key)
-    if (head === null) throw new Error(`host_copy: no file "${path}" in your Workspace`)
-    if (head.size > COPY_MAX_BYTES) throw new Error(`host_copy: ${path} is ${head.size} bytes; files over ${COPY_MAX_BYTES / 1024 / 1024} MB are not copied.`)
-    let offset = 0
-    let written = hostPath
-    do {
-      const length = Math.min(COPY_CHUNK_BYTES, head.size - offset)
-      const body = length === 0 ? new Uint8Array() : new Uint8Array(await (await this.env.FILES.get(key, { range: { offset, length } }))!.arrayBuffer())
-      let binary = ''
-      for (let at = 0; at < body.length; at += 0x8000) binary += String.fromCharCode(...body.subarray(at, at + 0x8000))
-      const result = await this.hostCall(() => member.hostWriteChunk(hostId, robotId, { path: hostPath, offset, base64: btoa(binary) }))
-      written = result.path
-      offset += body.length
-    } while (offset < head.size)
-    return { hostPath: written, workspacePath: path, bytes: head.size }
-  }
-
-  async hostRun(name: string, command: string, cwd: string | undefined, timeoutSeconds: number | undefined): Promise<unknown> {
-    const host = await this.resolveHost(name)
-    const timeoutMs = Math.min(Math.max(timeoutSeconds ?? 120, 1), 600) * 1000
-    const result = await this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRun(host.id, this.store.requireConfig().id, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs }))
-    return { host: host.name, command, ...result }
   }
 
   /** This Robot's backend: its own choice, else the Home default (rb-ybt4). */
@@ -3794,7 +3749,6 @@ const DONE_LINE = 'task-done-line'
 const INTERRUPTED_BY = 'interrupted-by'
 /** The Box's state in the Robot's storage; the container's disk is scratch (v1.14 ticket 10). */
 const BOX = 'box'
-const BOX_ROOT = '/workspace'
 /** The Workspace folder kept on the Box, and the Box's folder kept in the Workspace (ao-7ptt). */
 const BOX_FOLDER = 'box'
 const BOX_IDLE_MS = 10 * 60_000
@@ -3808,12 +3762,19 @@ function manifestOf(files: ReadonlyArray<{ path: string; size: number; mtime: nu
   return Object.fromEntries(files.map((file) => [file.path, `${file.size}:${file.mtime}`]))
 }
 
-/** A path on the Box, under its /workspace: absolute, or relative to it; never outside. */
-function boxPath(path: string): string {
-  const relative = path.startsWith(`${BOX_ROOT}/`) ? path.slice(BOX_ROOT.length + 1) : path.startsWith('/') ? undefined : path
-  const normalized = relative === undefined ? undefined : normalizePath(relative)
-  if (normalized === undefined) throw new Error(`${path} is outside your Box's ${BOX_ROOT}`)
-  return `${BOX_ROOT}/${normalized}`
+/** The Box backend as the runner of its jobs: a command with no directory starts in /workspace. */
+function boxRunner(backend: BoxBackend): JobRunner {
+  return {
+    spawn: (job, command, cwd) => backend.spawn(job, command, cwd ?? BOX_ROOT),
+    status: (job) => backend.status(job),
+    output: (job, stream, offset) => backend.output(job, stream, offset),
+    kill: (job) => backend.kill(job),
+  }
+}
+
+/** The `on` of one end of a copy call, when the call is well formed. */
+function copyEnd(end: unknown): unknown {
+  return end !== null && typeof end === 'object' ? (end as { on?: unknown }).on : undefined
 }
 /** The usage of one model response, as the session event carries it. */
 type ChildUsage = { readonly inputTokens?: number; readonly outputTokens?: number; readonly cacheReadTokens?: number }

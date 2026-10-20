@@ -50,9 +50,9 @@ async function file(id: string, path: string): Promise<string | null> {
 const asks = async (id: string): Promise<ProposalView[]> => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
   .flatMap((item) => (item.kind === 'proposal' && item.proposal.kind === 'tool-call' ? [item.proposal] : []))
 const reviewerRequests = (id: string) => (requests.get(id) ?? []).filter((request) => request.system === REVIEW_POLICY)
-const pending = (request: GenerateOptions) => JSON.parse(JSON.stringify(request.messages[0]).match(/PENDING_ACTION\\n\\n(.*)"}\]/)![1]!.replaceAll('\\n', '\n').replaceAll('\\"', '"')) as { name: string; arguments: unknown }
+const pending = (request: GenerateOptions) => JSON.parse(request.messages[0]!.content.map((block) => ('text' in block ? block.text : '')).join('').match(/PENDING_ACTION\n\n([\s\S]*)$/)![1]!) as { name: string; arguments: unknown }
 const reviews = async (id: string) => (await env.ROBOT.getByName(id).trajectory()).filter((event) => event.type === 'plugin:mr-robot/review').map((event) => (typeof event.data === 'string' ? JSON.parse(event.data) : event.data) as Record<string, unknown>)
-const write = (path: string, content: string) => ({ name: 'write', args: { file_path: path, content } })
+const write = (path: string, content: string) => ({ name: 'write', args: { on: 'workspace', file_path: path, content } })
 
 describe('Auto review (ao-wkpt, ao-gf33, ao-c8k9, ao-6m9i, ao-hfni, ao-jn6z)', () => {
   it('an allowed call runs after the reviewer, on the reviewer route, with the owner\'s words as instructions', async () => {
@@ -104,7 +104,7 @@ describe('Auto review (ao-wkpt, ao-gf33, ao-c8k9, ao-6m9i, ao-hfni, ao-jn6z)', (
 
   it('an item at ask keeps asking the owner and is not reviewed', async () => {
     const id = await reviewedRobot('ask')
-    await say(id, 'save the list', [{ calls: [{ name: 'write', args: { file_path: 'notes/list.md', content: 'milk', reason: 'Keep the list' } }] }, { text: 'Waiting.' }])
+    await say(id, 'save the list', [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'notes/list.md', content: 'milk', reason: 'Keep the list' } }] }, { text: 'Waiting.' }])
     expect(await asks(id)).toEqual([expect.objectContaining({ toolCall: expect.objectContaining({ tool: 'write', reason: 'Keep the list' }) })])
     expect(reviewerRequests(id)).toEqual([])
   })

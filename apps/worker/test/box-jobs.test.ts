@@ -1,5 +1,5 @@
 /**
- * Box jobs (v1.15 ticket 07): box_run waits in the foreground up to its limit and then lets the command go on as a job; run_in_background
+ * Box jobs (v1.15 ticket 07): run on the Box waits in the foreground up to its limit and then lets the command go on as a job; run_in_background
  * starts one at once; job_list, job_output and job_kill manage jobs; a finished job wakes the Robot; the Box stays up while a job runs.
  */
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
@@ -32,7 +32,7 @@ async function robot(): Promise<string> {
   return body.id
 }
 
-const run = (command: string, extra: Record<string, unknown> = {}) => ({ name: 'box_run', args: { command, ...extra } })
+const run = (command: string, extra: Record<string, unknown> = {}) => ({ name: 'run', args: { on: 'box', command, ...extra } })
 async function say(id: string, text: string, script: StubReply[]): Promise<void> {
   scripts.set(id, script)
   await api(ANNA, `/api/robots/${id}/messages`, { body: { text } })
@@ -49,13 +49,13 @@ const tick = async (id: string) => {
   await settle(id)
 }
 
-describe('box_run goes on as a job (gb-lnph, gb-lco0)', () => {
+describe('run on the Box goes on as a job (gb-lnph, gb-lco0)', () => {
   it('a command that ends in time returns as before; one past the limit is not killed: it is promoted with its output so far', async () => {
     const id = await robot()
     holdBoxJob(id, 'python3 train.py')
     // The program prints once the job exists, however long the Robot takes to start it.
     const printer = setInterval(() => { try { printBoxJob(id, 'python3 train.py', 'epoch 1\n'); clearInterval(printer) } catch { /* not started yet */ } }, 50)
-    await say(id, 'train it', [{ calls: [run('echo quick'), run('python3 train.py', { timeoutSeconds: 1 })] }, { text: '' }])
+    await say(id, 'train it', [{ calls: [run('echo quick'), run('python3 train.py', { timeout_seconds: 1 })] }, { text: '' }])
     const [quick, slow] = lastResults(id, 2)
     expect(quick).toEqual({ kind: 'foreground', stdout: 'ran: echo quick', stderr: '', exitCode: 0 })
     expect(slow).toMatchObject({ kind: 'promoted', stdout: 'epoch 1\n', stderr: '', jobId: expect.stringMatching(/^j-/) })
@@ -170,7 +170,7 @@ describe('a finished job wakes the Robot (gb-pptr)', () => {
   it('a job promoted from the foreground wakes the Robot too', async () => {
     const id = await robot()
     holdBoxJob(id, 'sleep 30 && echo ok')
-    await say(id, 'go', [{ calls: [run('sleep 30 && echo ok', { timeoutSeconds: 1 })] }, { text: '' }])
+    await say(id, 'go', [{ calls: [run('sleep 30 && echo ok', { timeout_seconds: 1 })] }, { text: '' }])
     const jobId = lastResults(id, 1)[0]!.jobId as string
     finishBoxJob(id, 'sleep 30 && echo ok', { stdout: 'ok\n' })
     await tick(id)

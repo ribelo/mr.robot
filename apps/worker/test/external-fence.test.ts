@@ -59,9 +59,9 @@ describe('the external fence', () => {
       { name: 'gmail_thread', args: { threadId: 't-1' } },
       { name: 'browser_open', args: { url: 'https://page.test/welcome' } },
       { name: 'browser_observe', args: {} },
-      { name: 'write', args: { file_path: 'notes/a.md', content: 'my own note' } },
-      { name: 'read', args: { file_path: 'notes/a.md' } },
-      { name: 'box_run', args: { command: 'echo hello' } },
+      { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'my own note' } },
+      { name: 'read', args: { on: 'workspace', file_path: 'notes/a.md' } },
+      { name: 'run', args: { on: 'box', command: 'echo hello' } },
     ])
     const [fetched, thread, opened, observed, , read, ran] = results
     expect(fetched).toMatch(/^<external source="web_fetch">\n/)

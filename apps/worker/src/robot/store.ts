@@ -6,6 +6,7 @@
 import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
+import type { StoredPlace } from '../places/place.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
 import { mrRobotIdOf } from './delivery.ts'
 import { legacyRobotSpendLimit } from '../platform/spend-limit-migration.ts'
@@ -106,9 +107,13 @@ export interface ActiveTurn {
   readonly task: { readonly id: string; readonly title: string; readonly attemptId: number } | null
 }
 
-/** One command of the Box that goes on by itself (v1.15 ticket 07, gb-lnph). */
-export interface BoxJobRow {
+/** One command that goes on by itself, on the Box or on a Host (v1.15 ticket 07, gb-lnph; v1.16 ticket 01). */
+export interface JobRow {
   readonly id: string
+  /** Where it runs: "box" or "host:<id>". */
+  readonly place: StoredPlace
+  /** The Host's name when it started; null for the Box. */
+  readonly placeName: string | null
   readonly command: string
   readonly startedAt: number
   readonly finishedAt: number | null
@@ -117,16 +122,16 @@ export interface BoxJobRow {
   /** How much of each stream the Robot has read (job_output). */
   readonly outOffset: number
   readonly errOffset: number
-  /** Still the foreground wait of a box_run: its end does not wake the Robot, which is waiting for it. */
+  /** Still the foreground wait of a run: its end does not wake the Robot, which is waiting for it. */
   readonly foreground: boolean
   /** The Workspace path of the whole output once the job ended. */
   readonly spill: string | null
 }
 
-type BoxJobSql = { id: string; command: string; started_at: number; finished_at: number | null; exit_code: number | null; status: BoxJobRow['status']; out_offset: number; err_offset: number; foreground: number; spill: string | null }
+type JobSql = { id: string; place: string; place_name: string | null; command: string; started_at: number; finished_at: number | null; exit_code: number | null; status: JobRow['status']; out_offset: number; err_offset: number; foreground: number; spill: string | null }
 
-function boxJobFromSql(row: BoxJobSql): BoxJobRow {
-  return { id: row.id, command: row.command, startedAt: row.started_at, finishedAt: row.finished_at, exitCode: row.exit_code, status: row.status, outOffset: row.out_offset, errOffset: row.err_offset, foreground: row.foreground === 1, spill: row.spill }
+function jobFromSql(row: JobSql): JobRow {
+  return { id: row.id, place: row.place as StoredPlace, placeName: row.place_name, command: row.command, startedAt: row.started_at, finishedAt: row.finished_at, exitCode: row.exit_code, status: row.status, outOffset: row.out_offset, errOffset: row.err_offset, foreground: row.foreground === 1, spill: row.spill }
 }
 
 export interface ProposalRow extends ProposalView {
@@ -178,7 +183,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 19
+const SCHEMA_VERSION = 20
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -244,6 +249,16 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Jobs run in a place, the Box or a Host (v1.16 ticket 01, ob-rc3b): the Box's job table keeps its rows and learns where they ran.
+  20: [
+    (sql) => {
+      const has = (table: string) => sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).toArray().length > 0
+      // A store opened again at an older version has both tables: the one step 19 just made is empty, the renamed one is the Robot's.
+      if (has('box_job') && has('job')) sql.exec('DROP TABLE box_job')
+      else if (has('box_job')) sql.exec('ALTER TABLE box_job RENAME TO job')
+    },
+    (sql) => addColumns(sql, 'job', ["place TEXT NOT NULL DEFAULT 'box'", 'place_name TEXT']),
+  ],
   // The Box's jobs (v1.15 ticket 07, gb-lnph): commands that go on by themselves, with the offsets of what the Robot has read.
   19: ["CREATE TABLE IF NOT EXISTS box_job (id TEXT PRIMARY KEY, command TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, exit_code INTEGER, status TEXT NOT NULL, out_offset INTEGER NOT NULL DEFAULT 0, err_offset INTEGER NOT NULL DEFAULT 0, foreground INTEGER NOT NULL DEFAULT 1, spill TEXT) WITHOUT ROWID"],
   // Every Robot can ask its chief (v1.15 ticket 04, gb-qmnc): the recipient Grant to its owner's Mr. Robot and the messaging group, given once to the Robots that exist.
@@ -607,41 +622,45 @@ export class RobotStore {
     return cursor.rowsWritten === 1 ? this.proposal(id) : undefined
   }
 
-  // ------------------------------------------------------------ Box jobs (v1.15 ticket 07)
+  // ------------------------------------------------------------ Jobs (v1.15 ticket 07, v1.16 ticket 01)
 
-  addBoxJob(id: string, command: string, now: number): void {
-    this.sql.exec("INSERT INTO box_job (id, command, started_at, status) VALUES (?, ?, ?, 'running')", id, command, now)
+  addJob(id: string, place: StoredPlace, placeName: string | null, command: string, now: number): void {
+    this.sql.exec("INSERT INTO job (id, place, place_name, command, started_at, status) VALUES (?, ?, ?, ?, ?, 'running')", id, place, place === 'box' ? null : placeName, command, now)
   }
 
-  boxJob(id: string): BoxJobRow | undefined {
-    const row = this.sql.exec<BoxJobSql>('SELECT * FROM box_job WHERE id = ?', id).toArray()[0]
-    return row === undefined ? undefined : boxJobFromSql(row)
+  job(id: string): JobRow | undefined {
+    const row = this.sql.exec<JobSql>('SELECT * FROM job WHERE id = ?', id).toArray()[0]
+    return row === undefined ? undefined : jobFromSql(row)
   }
 
   /** The newest jobs first; the table keeps the last 50 finished ones. */
-  boxJobs(): BoxJobRow[] {
-    return this.sql.exec<BoxJobSql>('SELECT * FROM box_job ORDER BY started_at DESC, id').toArray().map(boxJobFromSql)
+  jobs(): JobRow[] {
+    return this.sql.exec<JobSql>('SELECT * FROM job ORDER BY started_at DESC, id').toArray().map(jobFromSql)
   }
 
-  runningBoxJobs(): BoxJobRow[] {
-    return this.sql.exec<BoxJobSql>("SELECT * FROM box_job WHERE status = 'running' ORDER BY started_at").toArray().map(boxJobFromSql)
+  /** The jobs running now, of one place or of every place. */
+  runningJobs(place?: StoredPlace): JobRow[] {
+    const rows = place === undefined
+      ? this.sql.exec<JobSql>("SELECT * FROM job WHERE status = 'running' ORDER BY started_at").toArray()
+      : this.sql.exec<JobSql>("SELECT * FROM job WHERE status = 'running' AND place = ? ORDER BY started_at", place).toArray()
+    return rows.map(jobFromSql)
   }
 
   /** Close a running job; false when it was closed already (one close per job). */
-  closeBoxJob(id: string, status: 'completed' | 'killed' | 'lost', exitCode: number | null, now: number, spill: string | null): boolean {
-    const cursor = this.sql.exec("UPDATE box_job SET status = ?, exit_code = ?, finished_at = ?, spill = ? WHERE id = ? AND status = 'running'", status, exitCode, now, spill, id)
+  closeJob(id: string, status: 'completed' | 'killed' | 'lost', exitCode: number | null, now: number, spill: string | null): boolean {
+    const cursor = this.sql.exec("UPDATE job SET status = ?, exit_code = ?, finished_at = ?, spill = ? WHERE id = ? AND status = 'running'", status, exitCode, now, spill, id)
     if (cursor.rowsWritten !== 1) return false
-    this.sql.exec("DELETE FROM box_job WHERE status <> 'running' AND id NOT IN (SELECT id FROM box_job WHERE status <> 'running' ORDER BY started_at DESC LIMIT 50)")
+    this.sql.exec("DELETE FROM job WHERE status <> 'running' AND id NOT IN (SELECT id FROM job WHERE status <> 'running' ORDER BY started_at DESC LIMIT 50)")
     return true
   }
 
   /** The job went on past the foreground wait or was started in the background: its end wakes the Robot. */
-  promoteBoxJob(id: string): void {
-    this.sql.exec('UPDATE box_job SET foreground = 0 WHERE id = ?', id)
+  promoteJob(id: string): void {
+    this.sql.exec('UPDATE job SET foreground = 0 WHERE id = ?', id)
   }
 
-  setBoxJobOffsets(id: string, outOffset: number, errOffset: number): void {
-    this.sql.exec('UPDATE box_job SET out_offset = ?, err_offset = ? WHERE id = ?', outOffset, errOffset, id)
+  setJobOffsets(id: string, outOffset: number, errOffset: number): void {
+    this.sql.exec('UPDATE job SET out_offset = ?, err_offset = ? WHERE id = ?', outOffset, errOffset, id)
   }
 
   closeProposal(id: string, now: number): void {

@@ -48,9 +48,9 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
   it('delete_file on a missing file fails instead of reporting a deletion (ts-6z2k)', async () => {
     const id = await robotWith({ tools: ['files'] })
     const [missing, existing, deleted] = await say(id, [
-      { name: 'delete_file', args: { path: 'notes/nope.md' } },
-      { name: 'write', args: { file_path: 'notes/a.md', content: 'a' } },
-      { name: 'delete_file', args: { path: 'notes/a.md' } },
+      { name: 'delete_file', args: { on: 'workspace', path: 'notes/nope.md' } },
+      { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'a' } },
+      { name: 'delete_file', args: { on: 'workspace', path: 'notes/a.md' } },
     ])
     expect(missing).toContain('No file "notes/nope.md" in your Workspace')
     expect(missing).not.toContain('"deleted"')
@@ -61,10 +61,10 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
   it('glob and grep return arrays (ts-uy4d)', async () => {
     const id = await robotWith({ tools: ['files'] })
     const results = await say(id, [
-      { name: 'write', args: { file_path: 'notes/a.md', content: 'alpha\nbeta' } },
-      { name: 'glob', args: { pattern: 'notes/**' } },
-      { name: 'grep', args: { pattern: 'beta' } },
-      { name: 'glob', args: { pattern: 'nothing/**' } },
+      { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'alpha\nbeta' } },
+      { name: 'glob', args: { on: 'workspace', pattern: 'notes/**' } },
+      { name: 'grep', args: { on: 'workspace', pattern: 'beta' } },
+      { name: 'glob', args: { on: 'workspace', pattern: 'nothing/**' } },
     ])
     expect(JSON.parse(results[1]!)).toEqual(['notes/a.md'])
     expect(JSON.parse(results[2]!)).toEqual([{ path: 'notes/a.md', line: 2, text: 'beta' }])
@@ -261,7 +261,7 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     await say(id, [])
     const offered = lastTools(id)
     const names = offered.map((tool) => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'task_list', 'task_create', 'task_update', 'task_assign', 'task_focus', 'task_done', 'task_cancel', 'task_pause', 'drive_replace', 'browser_wait', 'discord_accounts', 'host_write', 'host_run', 'login_fill', 'propose_member_file_edit']))
+    expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'task_list', 'task_create', 'task_update', 'task_assign', 'task_focus', 'task_done', 'task_cancel', 'task_pause', 'drive_replace', 'browser_wait', 'discord_accounts', 'copy', 'run', 'login_fill', 'propose_member_file_edit']))
     expect(names).not.toContain('web_search')
     expect(names).not.toContain('drive_import')
     expect(contractProblems(offered)).toEqual([])
@@ -287,7 +287,7 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     await testRobot(mr).activateForTest()
     await say(mr, [])
     const offered = lastTools(mr)
-    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'host_write', 'robot_list', 'robot_settings_set', 'task_create', 'conversation_search', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
+    expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'copy', 'robot_list', 'robot_settings_set', 'task_create', 'conversation_search', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
     expect(contractProblems(offered)).toEqual([])
     expect(await returnedWithoutArguments(mr, offered)).toEqual([])
   })

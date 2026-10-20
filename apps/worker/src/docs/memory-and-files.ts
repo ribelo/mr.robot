@@ -40,7 +40,7 @@ Screenshots are not in the Workspace. They are stored apart and kept for 7 days.
 
 ## File tools
 
-The file tools are read, write, edit, delete_file, glob and grep. They work on the Workspace. Paths are relative or start with /workspace. They list the docs and the Member files too. A write, edit or delete on a read-only path returns an error that says who owns the file.
+The file tools are read, write, edit, delete_file, glob and grep, and copy moves a file between places. Each takes a mandatory \`on\`: "workspace" (this Workspace), "box" or the name of a Host. There is no default. With on "workspace", paths are relative or start with /workspace, and the tools list the docs and the Member files too. The Member files, the docs and the platform skills are reachable only with on "workspace": the Box and a Host refuse their names. A write, edit or delete on a read-only path returns an error that says who owns the file. A call needs the grant of its place: the files group for the Workspace, the box group for the Box, the files facet of a Host.
 
 ## Files view
 

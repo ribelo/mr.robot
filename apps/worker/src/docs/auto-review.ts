@@ -18,7 +18,7 @@ Auto review is a Robot setting. When it is on, a reviewer model checks each tool
 - When the review fails (the reviewer answers something else than its strict format, or cannot be reached), the call fails with the error and does not run.
 - Items at ask are not reviewed: they ask the owner anyway.
 - A call the owner approved is not reviewed again.
-- A Subagent's calls are reviewed with its Robot's setting. box_run is reviewed like every other call.
+- A Subagent's calls are reviewed with its Robot's setting. run is reviewed like every other call.
 
 ## The reviewer's model
 

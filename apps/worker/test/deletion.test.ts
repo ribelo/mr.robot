@@ -35,7 +35,7 @@ const mrRobot = async () => (await robots()).find((entry) => entry.kind === 'mr-
 describe('delete, clear and reset (v1.3 ticket 06)', () => {
   it('deletes a robot for good only with its name typed: storage, files, recipient grants (pl-3uoy, pl-kehf)', async () => {
     const id = await robot('New robot')
-    await say(id, 'note it', [{ calls: [{ name: 'write', args: { file_path: 'notes.md', content: 'x' } }] }, { text: 'Noted.' }])
+    await say(id, 'note it', [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'notes.md', content: 'x' } }] }, { text: 'Noted.' }])
     const mr = (await mrRobot()).id
     await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { grants: { tools: ['messaging'], skills: [], recipients: [id], secrets: [], hosts: [] } } })
     expect((await env.FILES.list({ prefix: `robots/${id}/` })).objects.length).toBeGreaterThan(0)

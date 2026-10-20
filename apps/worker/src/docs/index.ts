@@ -43,7 +43,7 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('asks-and-help', 'Asks and their kinds; ask, request_credential, asking your chief.', ASKS_AND_HELP),
   doc('memory-and-files', 'Memory files and whose they are, the Workspace layout, the file tools.', MEMORY_AND_FILES),
   doc('connections', 'Connectors and Connections: Google, Slack, Discord; connecting, sharing, grants, instructions.', CONNECTIONS),
-  doc('hosts', 'Hosts: the desktop app, pairing, host_read, host_write, host_copy, host_run, the Host browser.', HOSTS),
+  doc('hosts', 'Hosts: the desktop app, pairing, the tools with on set to a Host, the Host browser.', HOSTS),
   doc('browser', 'The browser: backends, logins, Live view, Takeover, payments, screenshots.', BROWSER),
   doc('providers', 'Providers: accounts, model chains, usage, Spend limits.', PROVIDERS),
   doc('subagents', 'Subagents: the grant, subagent and subagent_fork, limits, reports, cost.', SUBAGENTS),

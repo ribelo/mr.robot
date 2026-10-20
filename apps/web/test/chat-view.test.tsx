@@ -135,6 +135,23 @@ describe('ChatView (robot-q4b2)', () => {
   })
 })
 
+describe('tool cards name the place of a call (v1.16 ticket 01)', () => {
+  it('puts the place before the path, and both ends of a copy; a call from before the places has none', () => {
+    const calls: ChatItem[] = [{
+      kind: 'activity', id: 'ac', seq: 1, at, tools: ['read', 'copy', 'box_run'],
+      calls: [
+        { id: 'c1', name: 'read', args: '{"on": "Desk", "file_path": "/etc/hostname"}', result: 'x', error: false, inner: [] },
+        { id: 'c2', name: 'copy', args: '{"from": {"on": "Desk", "path": "/a.bin"}, "to": {"on": "workspace", "path": "in/a.bin"}}', result: 'x', error: false, inner: [] },
+        { id: 'c3', name: 'box_run', args: '{"command": "echo old"}', result: 'x', error: false, inner: [] },
+      ],
+    }]
+    const { container } = render(<ChatView items={calls} meId="m-1" working={false} canAnswer={false} now={at} workDetails="detailed" />)
+    expect(container.textContent).toContain('read Desk: /etc/hostname')
+    expect(container.textContent).toContain('copy Desk: /a.bin → workspace: in/a.bin')
+    expect(container.textContent).toContain('box run echo old')
+  })
+})
+
 describe('Thread Asks and the Thread card (ch-vrl7, ch-hikl, ch-iy16)', () => {
   const invitation: ProposalView = {
     id: 'p-t', kind: 'thread', revision: 1, status: 'open', purpose: 'Ben\'s Mr. Robot wants to talk about "Dinner on Friday"', grants: null, file: null, skill: null,

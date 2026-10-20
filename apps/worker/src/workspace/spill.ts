@@ -6,7 +6,7 @@
 import { type Context } from '@deepseek-ai/cordis'
 import SpillStore, { SpillLocator, type SaveTextSpill, type SpillRef } from '@deepseek-ai/dsh-spill'
 import * as Effect from 'effect/Effect'
-import { WORKSPACE_ROOT } from './r2-filesystem.ts'
+import { WORKSPACE_ROOT } from '../places/files.ts'
 import { workspacePrefix, type WorkspaceShape } from './workspace.ts'
 
 export const SPILL_DIRECTORY = 'spill'

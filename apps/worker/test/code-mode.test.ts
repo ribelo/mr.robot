@@ -36,9 +36,9 @@ describe('code mode (robot-5ewr, robot-ax7s)', () => {
   it('runs three tool calls as one executed program', async () => {
     const id = await activeRobot(['files'], true)
     const program = [
-      "await tools.write({ file_path: 'notes/a.md', content: 'alpha' })",
-      "const text = await tools.read({ file_path: 'notes/a.md' })",
-      "const listing = await tools.glob({ pattern: 'notes/**' })",
+      "await tools.write({ on: 'workspace', file_path: 'notes/a.md', content: 'alpha' })",
+      "const text = await tools.read({ on: 'workspace', file_path: 'notes/a.md' })",
+      "const listing = await tools.glob({ on: 'workspace', pattern: 'notes/**' })",
       'return { text, listing }',
     ].join('\n')
     await say(id, 'do three things', [{ calls: [{ name: 'run_code', args: { code: program, description: 'write, read, list' } }] }, { text: 'Done.' }])
@@ -63,7 +63,7 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
   it('keeps an ungranted tool out of the catalog and out of the executor', async () => {
     const id = await activeRobot([], true)
     await say(id, 'try files', [
-      { calls: [{ name: 'run_code', args: { code: "return await tools.read({ file_path: 'SOUL.md' })", description: 'read soul' } }] },
+      { calls: [{ name: 'run_code', args: { code: "return await tools.read({ on: 'workspace', file_path: 'SOUL.md' })", description: 'read soul' } }] },
       { text: 'I cannot.' },
     ])
     const system = JSON.stringify(lastRequest(id).messages.filter((message) => message.role === 'system'))

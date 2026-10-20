@@ -56,7 +56,7 @@ export function hostHandlers(chrome: HostChrome, relay: () => Relay, onSessions:
       },
       catch: fail,
     }),
-    // A file in pieces (v1.15, host_copy): the piece at offset 0 truncates, later ones write at their offset.
+    // A file in pieces (v1.15, copy): the piece at offset 0 truncates, later ones write at their offset.
     ReadChunk: ({ path, offset, length }) => Effect.tryPromise({
       try: async () => {
         const full = resolve(path)

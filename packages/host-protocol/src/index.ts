@@ -37,7 +37,7 @@ export const Write = Rpc.make('Write', {
 })
 
 /**
- * One piece of a file (v1.15, gb-iw01): host_copy moves a file in pieces so that no frame holds it whole and no piece passes through the
+ * One piece of a file (v1.15, gb-iw01): copy moves a file in pieces so that no frame holds it whole and no piece passes through the
  * model. A read at the end of the file returns an empty piece; `size` is the size of the whole file.
  */
 export const ReadChunk = Rpc.make('ReadChunk', {
@@ -74,7 +74,7 @@ export const BrowserClose = Rpc.make('BrowserClose', {
 
 export class HostRpcs extends RpcGroup.make(Read, Write, ReadChunk, WriteChunk, Run, BrowserOpen, BrowserClose) {}
 
-/** The size of one piece of a copy, and the largest file host_copy moves (v1.15, gb-rvj5). */
+/** The size of one piece of a copy, and the largest file copy moves between a Host and the Workspace (v1.15, gb-rvj5). */
 export const COPY_CHUNK_BYTES = 1024 * 1024
 export const COPY_MAX_BYTES = 100 * 1024 * 1024
 

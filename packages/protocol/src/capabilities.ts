@@ -51,8 +51,8 @@ export const CAPABILITY_SECTIONS: ReadonlyArray<{ readonly field: CapabilityFiel
 
 const HOST_FACET_TEXT: Readonly<Record<HostFacet, string>> = {
   browser: "Its Chrome, when chosen as this Robot's browser",
-  files: 'host_read, host_write as the host owner',
-  shell: "host_run as the host owner, in their shell",
+  files: 'Read, write, edit, search and copy files on the host as the host owner',
+  shell: 'Run commands on the host as the host owner, in their shell',
 }
 
 /** The level an item holds: what the set names, deny when it names nothing. */

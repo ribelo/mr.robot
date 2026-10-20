@@ -115,7 +115,7 @@ describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', 
     const id = await staff({ idleCompactionFloorTokens: 0 })
     await say(id, 'I like green tea.', { text: 'Noted.' })
     scripts.set(id, [
-      { calls: [{ name: 'write', args: { file_path: 'MEMORY.md', content: '# MEMORY.md\n- Anna likes green tea.\n' } }] },
+      { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'MEMORY.md', content: '# MEMORY.md\n- Anna likes green tea.\n' } }] },
       { text: '' },
       { text: 'SUMMARY: Anna said she likes green tea; it is in MEMORY.md.' },
     ])

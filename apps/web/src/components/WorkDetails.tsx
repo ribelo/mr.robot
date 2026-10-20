@@ -17,7 +17,7 @@ import {
 /** The DSH conversation's icon for a tool, by what it does. */
 function toolIcon(name: string): ReactNode {
   if (name === 'run_code') return <IconCodeOutlineRegular />
-  if (/^(read|glob|grep|ls|host_read)$/.test(name)) return <IconFolderOpenOutlineRegular />
+  if (/^(read|glob|grep|ls|copy|delete_file|host_read)$/.test(name)) return <IconFolderOpenOutlineRegular />
   if (/^(write|edit|host_write|skill_write|memory_write_shared)$/.test(name)) return <IconEditOutlineRegular />
   if (/search/.test(name)) return <IconSearchOutlineRegular />
   if (/^(web_fetch|crawling_exa)$/.test(name) || name.startsWith('browser_')) return <IconGlobeOutlineRegular />
@@ -27,11 +27,25 @@ function toolIcon(name: string): ReactNode {
   return <IconSparkleRegular />
 }
 
+/** The place a call names (v1.16 \`on\`: workspace, box or a Host), in front of its main argument. Calls recorded before it have none. */
+function placed(args: Record<string, unknown>, main: unknown): unknown {
+  return typeof args['on'] === 'string' && main !== undefined && !Array.isArray(main) ? `${args['on']}: ${String(main)}` : main
+}
+
+function copyLine(args: Record<string, unknown>): string | undefined {
+  const end = (value: unknown): string | undefined => {
+    const record = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+    return typeof record['on'] === 'string' && typeof record['path'] === 'string' ? `${record['on']}: ${record['path']}` : undefined
+  }
+  const [from, to] = [end(args['from']), end(args['to'])]
+  return from === undefined || to === undefined ? undefined : `${from} → ${to}`
+}
+
 /** A tool call's one-line title, as the DSH cards phrase it: the tool and its main argument. */
 function title(call: ToolCallView): string {
   let args: Record<string, unknown> = {}
   try { args = JSON.parse(call.args) as Record<string, unknown> } catch { /* truncated */ }
-  const main = args['file_path'] ?? args['path'] ?? args['url'] ?? args['pattern'] ?? args['query'] ?? args['command'] ?? args['queries'] ?? args['name'] ?? args['to']
+  const main = call.name === 'copy' ? copyLine(args) : placed(args, args['file_path'] ?? args['path'] ?? args['url'] ?? args['pattern'] ?? args['query'] ?? args['command'] ?? args['queries'] ?? args['name'] ?? args['to'])
   const label = call.name === 'run_code' ? 'Code program' : call.name.replace(/_/g, ' ')
   const detail = main === undefined ? '' : ` ${Array.isArray(main) ? main.join(', ') : String(main)}`
   return `${label}${detail.length > 80 ? detail.slice(0, 80) + '…' : detail}${call.error ? ' (failed)' : ''}`

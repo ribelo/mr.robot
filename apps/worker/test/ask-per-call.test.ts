@@ -46,7 +46,7 @@ async function file(id: string, path: string): Promise<string | null> {
 }
 
 const lastRequestText = (id: string) => JSON.stringify(requests.get(id)!.at(-1)!.messages)
-const write = (content: string) => ({ name: 'write', args: { file_path: 'notes/a.md', content, reason: 'Keep the shopping list' } })
+const write = (content: string) => ({ name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content, reason: 'Keep the shopping list' } })
 
 describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
   it('stores an Ask for an ask-level call, does not run the tool, and waits for the owner', async () => {
@@ -56,7 +56,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
     expect(schema?.parameters).toMatchObject({ required: expect.arrayContaining(['reason']) })
     const [ask] = await asks(id)
     expect(ask).toMatchObject({ kind: 'tool-call', status: 'open', toolCall: { tool: 'write', reason: 'Keep the shopping list', note: null } })
-    expect(ask!.toolCall!.arguments).toEqual([{ name: 'file_path', value: 'notes/a.md' }, { name: 'content', value: 'milk' }])
+    expect(ask!.toolCall!.arguments).toEqual([{ name: 'on', value: 'workspace' }, { name: 'file_path', value: 'notes/a.md' }, { name: 'content', value: 'milk' }])
     expect(lastRequestText(id)).toContain('waiting for your owner')
     expect(await file(id, 'notes/a.md')).toBeNull()
     expect((await robots(ANNA)).find((robot) => robot.id === id)?.fleetState).toBe('waiting for you')
@@ -93,7 +93,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
 
   it('gives a code-mode program the waiting result; approval runs the call without running the program again', async () => {
     const id = await askingRobot(true)
-    const program = "const saved = await tools.write({ file_path: 'notes/a.md', content: 'milk', reason: 'Keep the shopping list' })\nreturn saved"
+    const program = "const saved = await tools.write({ on: 'workspace', file_path: 'notes/a.md', content: 'milk', reason: 'Keep the shopping list' })\nreturn saved"
     await say(id, 'save the list', [{ calls: [{ name: 'run_code', args: { code: program, description: 'save' } }] }, { text: 'Waiting.' }])
     const result = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body.events.find((event) => event.type === 'tool/result')!
     expect(result.data).toContain('waiting for your owner')

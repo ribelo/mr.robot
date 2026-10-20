@@ -57,7 +57,7 @@ describe('Robot settings: Connections and Hosts (ux-5g3w, ux-q8o6)', () => {
     expect(within(desk).getByRole('heading').textContent).toBe('Desk · online')
     expect(within(desk).getAllByRole('radiogroup').map((group) => group.getAttribute('aria-label'))).toEqual(['Desk · files', 'Desk · shell', 'Desk · browser'])
     expect(within(desk).getByText('files')).toBeTruthy()
-    expect(within(desk).getByText('host_run as the host owner, in their shell')).toBeTruthy()
+    expect(within(desk).getByText('Run commands on the host as the host owner, in their shell')).toBeTruthy()
     expect(within(screen.getByRole('region', { name: 'Studio' })).getByRole('heading').textContent).toBe("Studio · offline · Ben's")
     expect(levelOf('Desk · files')).toBe('ask')
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Studio · shell' })).getByRole('radio', { name: 'allow' }))

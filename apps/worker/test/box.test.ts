@@ -49,11 +49,11 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
   it('its tools exist only with the box grant', async () => {
     const without = await robotWith({ files: 'allow' })
     await say(without, 'hi', [{ text: 'Hi.' }])
-    expect(requests.get(without)![0]!.tools!.map((tool) => tool.name)).not.toContain('box_run')
+    expect(requests.get(without)![0]!.tools!.map((tool) => tool.name)).not.toContain('run')
     expect((await panel(without)).box).toBeUndefined()
     const granted = await robotWith({ box: 'allow' })
     await say(granted, 'hi', [{ text: 'Hi.' }])
-    expect(requests.get(granted)![0]!.tools!.map((tool) => tool.name)).toEqual(expect.arrayContaining(['box_run', 'box_read', 'box_write']))
+    expect(requests.get(granted)![0]!.tools!.map((tool) => tool.name)).toEqual(expect.arrayContaining(['run', 'read', 'write']))
     expect((await panel(granted)).box).toEqual({ state: 'off', since: null, lastCommandAt: null })
   })
 
@@ -71,8 +71,8 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
       return undefined
     })
     await say(id, 'add it up', [
-      { calls: [{ name: 'box_run', args: { command: 'python3 sum.py' } }, { name: 'box_run', args: { command: 'false' } }, { name: 'box_run', args: { command: 'seq 1 5000' } }] },
-      { calls: [{ name: 'box_write', args: { path: '/workspace/box/notes.md', content: 'kept' } }, { name: 'box_write', args: { path: 'scratch.txt', content: 'gone' } }, { name: 'box_read', args: { path: 'box/data.csv' } }] },
+      { calls: [{ name: 'run', args: { on: 'box', command: 'python3 sum.py' } }, { name: 'run', args: { on: 'box', command: 'false' } }, { name: 'run', args: { on: 'box', command: 'seq 1 5000' } }] },
+      { calls: [{ name: 'write', args: { on: 'box', file_path: '/workspace/box/notes.md', content: 'kept' } }, { name: 'write', args: { on: 'box', file_path: 'scratch.txt', content: 'gone' } }, { name: 'read', args: { on: 'box', file_path: 'box/data.csv' } }] },
       { text: 'The sum is 3.' },
     ])
     const log = boxLog.get(id)!
@@ -91,7 +91,7 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
 
   it('stops ten minutes after the last command, bills its time, and boots again on the next command', async () => {
     const id = await robotWith({ box: 'allow' })
-    await say(id, 'run it', [{ calls: [{ name: 'box_run', args: { command: 'echo hi' } }] }, { text: 'Done.' }])
+    await say(id, 'run it', [{ calls: [{ name: 'run', args: { on: 'box', command: 'echo hi' } }] }, { text: 'Done.' }])
     const due = await testRobot(id).alarmForTest()
     expect(due).toBeLessThanOrEqual(Date.now() + 10 * MINUTE)
     // Nine minutes on: nothing stops.
@@ -107,14 +107,14 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     expect(stopped.box?.state).toBe('off')
     expect(stopped.usage.breakdown.box).toBeGreaterThan(0)
     expect(stopped.usage.boxMinutes).toBeGreaterThanOrEqual(10)
-    await say(id, 'again', [{ calls: [{ name: 'box_run', args: { command: 'echo again' } }] }, { text: 'Done.' }])
+    await say(id, 'again', [{ calls: [{ name: 'run', args: { on: 'box', command: 'echo again' } }] }, { text: 'Done.' }])
     expect(boxLog.get(id)!.filter((entry) => entry === 'boot')).toHaveLength(2)
   })
 
   it('its running time counts toward the spend limit; the owner stops it from the panel', async () => {
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { robotSpendLimit: { kind: 'usd', amount: 1 } } })
     const id = await robotWith({ box: 'allow' })
-    await say(id, 'run it', [{ calls: [{ name: 'box_run', args: { command: 'echo hi' } }] }, { text: 'Done.' }])
+    await say(id, 'run it', [{ calls: [{ name: 'run', args: { on: 'box', command: 'echo hi' } }] }, { text: 'Done.' }])
     // Ten hours of running time at the container rate cross a dollar.
     await testRobot(id).backdateBoxForTest(600 * MINUTE)
     expect((await api(ANNA, `/api/robots/${id}/box/stop`, { body: {} })).status).toBe(200)
@@ -142,13 +142,13 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     expect(await workspaceText(id, 'box/data.csv')).toBe('new\n')
     expect(await workspaceText(id, 'computer/setup.sh')).toBeNull()
     expect(await workspaceText(id, 'computer/data.csv')).toBeNull()
-    expect(requests.get(id)![0]!.tools!.map((tool) => tool.name)).toEqual(expect.arrayContaining(['box_run']))
+    expect(requests.get(id)![0]!.tools!.map((tool) => tool.name)).toEqual(expect.arrayContaining(['run']))
   })
 
-  it('with Auto review on, box_run is reviewed before it runs', async () => {
+  it('with Auto review on, run on the Box is reviewed before it runs', async () => {
     const id = await robotWith({ box: 'allow' }, { autoReview: true })
     await say(id, 'delete everything', [
-      { calls: [{ name: 'box_run', args: { command: 'rm -rf /workspace/box' } }] },
+      { calls: [{ name: 'run', args: { on: 'box', command: 'rm -rf /workspace/box' } }] },
       { text: '{"risk":"medium","decision":"deny","reason":"deletes kept files the owner did not name"}' },
       { text: 'Waiting for you.' },
     ])

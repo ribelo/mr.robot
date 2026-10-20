@@ -6,6 +6,6 @@
 
 **Status:** ready-for-agent
 
-- [ ] Workerd test: each tool with each on; refused without the grant; refused for an unknown Host; owned paths only on workspace (ob-5fjs, ob-ff4g, ob-9afl, ob-dyg4, ob-qnf7, ob-pfcu)
-- [ ] Workerd test: Box jobs and Host-stub jobs in one job_list with the place; old box_*/host_* events render (ob-rc3b, ob-j9nx)
-- [ ] The old tools, their plugins and their docs mentions are gone; the grants and their UI are unchanged
+- [x] Workerd test: each tool with each on; refused without the grant; refused for an unknown Host; owned paths only on workspace (ob-5fjs, ob-ff4g, ob-9afl, ob-dyg4, ob-qnf7, ob-pfcu)
+- [x] Workerd test: Box jobs and Host-stub jobs in one job_list with the place; old box_*/host_* events render (ob-rc3b, ob-j9nx)
+- [x] The old tools, their plugins and their docs mentions are gone; the grants and their UI are unchanged (the product docs in apps/worker/src/docs follow; GLOSSARY.md still names Host tools and the Job of the Box, which ticket 10 rewrites)

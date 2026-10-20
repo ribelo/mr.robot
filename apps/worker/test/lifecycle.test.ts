@@ -54,8 +54,8 @@ describe('creating a Robot', () => {
   it('in setup may only ask, propose and write its own persona: no world-facing tools (robot-cobv)', async () => {
     const id = await newRobot(ANNA)
     const tools = await env.ROBOT.getByName(id).toolNames()
-    // Plus DSH's read, write and edit from the fs seam over its own Workspace.
-    expect(tools.sort()).toEqual(['delete_file', 'glob', 'grep', 'react', 'say', 'set_identity', 'setup_complete'])
+    // Plus the file tools and copy, on its own Workspace only.
+    expect(tools.sort()).toEqual(['copy', 'delete_file', 'edit', 'glob', 'grep', 'react', 'read', 'say', 'set_identity', 'setup_complete', 'write'])
   })
 
   it('asks for Grants in one summary; approval is a compare-and-swap that applies exactly that set (robot-cobv)', async () => {

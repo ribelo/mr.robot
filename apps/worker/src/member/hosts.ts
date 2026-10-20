@@ -281,7 +281,7 @@ export class HostHub {
 
   private readonly robotNames = new Map<string, string>()
 
-  /** A copy is one line in the host's log, not one per piece (v1.15, host_copy). */
+  /** A copy is one line in the host's log, not one per piece (v1.15, copy). */
   recordCopy(entry: { hostId: string; robotId: string; detail: string; outcome: string }): void {
     this.record({ ...entry, action: 'copy', exitCode: null })
   }
