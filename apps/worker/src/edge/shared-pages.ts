@@ -41,6 +41,8 @@ export async function sharedPageChannel(request: Request, env: Env): Promise<Res
   const match = SHARED_PATH.exec(request.url)
   if (match === null) return notFound()
   const { token: given = '', part } = match.pathname.groups
+  // Only these three addresses exist under /p; anything else is not found before a token is even checked.
+  if (part !== undefined && part !== 'content' && part !== 'pdf') return notFound()
   const signed = await signedShareToken(env.DATA_KEY, given)
   if (signed === undefined) return notFound()
   const shared = await env.MEMBER.getByName(signed.memberId).sharedPageOf(signed.token).catch(() => null)
@@ -63,7 +65,6 @@ export async function sharedPageChannel(request: Request, env: Env): Promise<Res
     }
     const page = await robot.pageHtml(shared.path, origin)
     if (part === 'content') return page.format === 'html' ? html(page.html, SANDBOX + '; ' + HTML_PAGE_CSP) : notFound()
-    if (part !== undefined) return notFound()
     if (page.format === 'html') return html(frameDocument(page.title, signed.token), "default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'")
     const withBar = page.html.replace('<body>', '<body><p style="text-align:right;margin:0 0 1rem"><a href="/p/' + signed.token + '/pdf">PDF</a></p>')
     return html(withBar, SANDBOX + '; ' + markdownPageCsp("'self'"))
