@@ -101,10 +101,11 @@ import { Places as PlacesCapability } from '../plugins/places.ts'
 import { Places } from '../places/places.ts'
 import { HOST_WINDOW_PARTS, PART_BYTES, Transfers } from '../places/transfers.ts'
 import { boxTransfer as boxDoor } from '../places/box-door.ts'
-import type { PermitSecret } from '../places/copy-permit.ts'
+import { CopyPermits, type PermitSecret } from '../places/copy-permit.ts'
 import { hostJobPlace, hostLink, type HostCaller } from '../places/host-links.ts'
 import { parseS3Credentials, s3ObjectStore, type ObjectStore } from '../workspace/object-store.ts'
 import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, mintBoxToken, type BoxToken } from '../box/token.ts'
+import { BOX_CACHE_FOLDER, BOX_CACHE_KEY, inBoxCache, restoreBoxCache, saveBoxCache } from '../box/box-cache.ts'
 import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRuns } from '../places/host-runner.ts'
 import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
@@ -635,7 +636,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.store.get<BoxState>(BOX) ?? { state: 'off' }
   }
 
-  /** Boot (ao-7ptt, ao-ia4z): the Workspace's box/ folder is copied in, then box/setup.sh runs when present. */
+  /**
+   * Boot (ao-7ptt, ao-ia4z): the Workspace's box/ folder is copied in, the uv and Bun caches come back from their archive
+   * (box/box-cache.ts), then box/setup.sh runs when present.
+   */
   private async bootBox(): Promise<BoxBackend> {
     const backend = this.boxBackend()
     const current = this.boxState()
@@ -654,13 +658,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const origin = await this.home().appOrigin()
       if (origin !== null) await backend.write(BOX_ORIGIN_PATH, encode.encode(origin))
       const ws = this.workspace
-      const files = (await this.run(ws.list(BOX_FOLDER))).filter((entry) => entry.path.startsWith(`${BOX_FOLDER}/`))
+      const files = (await this.run(ws.list(BOX_FOLDER))).filter((entry) => entry.path.startsWith(`${BOX_FOLDER}/`) && !inBoxCache(entry.path))
       for (const entry of files) {
         const file = await this.run(ws.read(entry.path))
         if (file !== undefined) await backend.write(`${BOX_ROOT}/${entry.path}`, new Uint8Array(file.body))
       }
+      // The caches come back whole before setup.sh, which may use them; a failure is a cold cache, not a failed boot (deep review P7).
+      const archive = await this.run(ws.stat(BOX_CACHE_KEY))
+      const caches = await restoreBoxCache(backend, this.wsPermits, archive?.size)
+      if (caches._tag === 'Cold') console.warn('Box caches not restored', caches.reason)
       if (files.some((entry) => entry.path === `${BOX_FOLDER}/setup.sh`)) await backend.run('bash setup.sh', `${BOX_ROOT}/${BOX_FOLDER}`, 900)
-      const baseline = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`))
+      const baseline = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`, [BOX_CACHE_FOLDER]))
       this.store.set(BOX, { state: 'running', since: now, lastCommandAt: Date.now(), baseline, token } satisfies BoxState)
       return backend
     } catch (error) {
@@ -672,11 +680,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** Changed and new files under /workspace/box go back to the Workspace's box/ (ao-7ptt). */
+  /** Changed and new files under /workspace/box go back to the Workspace's box/ (ao-7ptt); the caches go whole, at the stop. */
   private async syncBox(backend: BoxBackend): Promise<void> {
     const current = this.boxState()
     if (current.state !== 'running' && current.state !== 'stopping') return
-    const now = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`))
+    const now = manifestOf(await backend.list(`${BOX_ROOT}/${BOX_FOLDER}`, [BOX_CACHE_FOLDER]))
     const ws = this.workspace
     for (const [path, stamp] of Object.entries(now)) {
       if (current.baseline[path] === stamp) continue
@@ -710,6 +718,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // What still runs ends with the Box; its output so far is saved and the Robot is told (gb-aafm).
       await this.jobs().loseAll('the Box was stopped', boxRunner(backend)).catch((error: unknown) => console.warn('jobs not closed', error))
       await this.syncBox(backend).catch((error: unknown) => console.warn('Box not synced', error))
+      const caches = await saveBoxCache(backend, this.wsPermits)
+      if (caches._tag === 'NotSaved') console.warn('Box caches not saved', caches.reason)
       await backend.stop()
     } finally {
       await this.accountBox()
@@ -804,6 +814,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       asks: { approved: (callId) => this.approvedCalls.has(callId), ask: (request, exec) => this.askGateHost().askToolCall(request, exec) },
       jobs: this.jobs(),
       transfers: this.transfers(),
+      permits: this.wsPermits,
       windowParts: this.hostWindowParts(),
     })
     return this.placeService
@@ -840,6 +851,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return HOST_WINDOW_PARTS
   }
 
+  /** The permits of the runs of ws this Robot starts on its Box (a copy, the caches' archive); the door finds them by secret. */
+  private readonly wsPermits = new CopyPermits()
+
   /** The Workspace as presigned URLs, for Hosts and for ws (v1.16 ticket 06). */
   private transferService: Transfers | undefined
   private transfers(): Transfers {
@@ -850,9 +864,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The Box's door to its Workspace (v1.16 ticket 06): ws calls it with the token written into the container at boot (places/box-door.ts). */
   async boxTransfer(token: BoxToken, permit: PermitSecret | undefined, body: string): Promise<{ readonly status: number; readonly json: string }> {
     return boxDoor({
+      // A stopping Box still sends its caches to the Workspace (box/box-cache.ts).
       liveToken: () => {
         const box = this.boxState()
-        return box.state === 'booting' || box.state === 'running' ? box.token : undefined
+        return box.state === 'off' ? undefined : box.token
       },
       containerUp: async () => this.boxState().state === 'booting' || (await this.boxBackend().running().catch(() => false)),
       // The Home's switches as they are now: the Robot's own copy (pluginsOn) is the last Turn's, and empty in a cold isolate.
@@ -860,7 +875,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         const plugins = await this.home().pluginsEnabled()
         return { files: this.groupLevel('files', plugins), box: this.groupLevel('box', plugins) }
       },
-      permit: (secret) => this.places().permit(secret),
+      permit: (secret) => this.wsPermits.find(secret),
       transfers: this.transfers(),
     }, token, permit, body)
   }

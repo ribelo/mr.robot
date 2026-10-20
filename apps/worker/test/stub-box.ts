@@ -215,9 +215,11 @@ export class StubBox implements BoxBackend {
     this.disk().delete(path)
   }
 
-  async list(directory: string): Promise<readonly BoxFile[]> {
+  async list(directory: string, pruned: readonly string[] = []): Promise<readonly BoxFile[]> {
     const prefix = `${directory}/`
-    return [...this.disk().entries()].filter(([path]) => path.startsWith(prefix)).map(([path, file]) => ({ path: path.slice(prefix.length), size: file.bytes.byteLength, mtime: file.mtime }))
+    return [...this.disk().entries()]
+      .filter(([path]) => path.startsWith(prefix) && !pruned.some((folder) => path.startsWith(`${prefix}${folder}/`)))
+      .map(([path, file]) => ({ path: path.slice(prefix.length), size: file.bytes.byteLength, mtime: file.mtime }))
   }
 
   async stop(): Promise<void> {

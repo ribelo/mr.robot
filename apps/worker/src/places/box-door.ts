@@ -1,13 +1,14 @@
 /**
  * The Box's door to its Workspace (v1.16 ticket 06, ob-63nt, ob-o6aw): ws calls it with the token written into the container at boot. The
- * token is good while the Robot's record says the Box is booting or running and its container is up; after a stop there is no token, and the
- * Workspace is out of reach again.
+ * token is good while the Robot's record says the Box is booting, running or stopping (it sends its caches then) and its container is up;
+ * after a stop there is no token, and the Workspace is out of reach again.
  *
  * The door is open only while the Robot holds its Box (the box group usable, with the Home's plugin switches as they are now). A script in
  * the Box has no owner to ask, so the door applies the Workspace rules of the tools the Robot's own calls meet (D1): the files group must be
  * usable at allow (at ask, a call waits for its owner and a script cannot; the door says so), and the same keys are writable. The one
- * exception is a copy the Robot made: it runs ws on the Box with a permit for its one key and its one direction (copy-permit.ts), checked
- * before the files group, since a copy between the Box and a Host needs no files group and a copy at ask was approved by the owner.
+ * exception is a run of ws the Robot started itself (a copy, the caches' archive): it has a permit for its one key and its one direction
+ * (copy-permit.ts), checked before the files group, since a copy between the Box and a Host needs no files group, a copy at ask was
+ * approved by the owner, and the caches are the platform's.
  */
 import { usableLevel, type GrantLevel } from '@mr-robot/protocol'
 import { sameToken, type BoxToken } from '../box/token.ts'
@@ -16,7 +17,7 @@ import { PermitRefused, type CopyPermit, type PermitSecret } from './copy-permit
 import { answer, httpStatus, isTransferFailure, parseTransferRequest, type Transfers } from './transfers.ts'
 
 export interface BoxDoorDeps {
-  /** The token of the Box this Robot's record says is booting or running; undefined when the Box is off. */
+  /** The token of the Box this Robot's record says is booting, running or stopping; undefined when the Box is off. */
   liveToken(): BoxToken | undefined
   /** Whether the container answers, for a Box recorded as running. */
   containerUp(): Promise<boolean>

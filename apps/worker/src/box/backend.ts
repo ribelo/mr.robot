@@ -33,7 +33,8 @@ export interface BoxBackend {
   write(path: string, bytes: Uint8Array): Promise<void>
   /** Delete a file; one that is not there is not an error. */
   remove(path: string): Promise<void>
-  list(directory: string): Promise<readonly BoxFile[]>
+  /** Every file under `directory`, except those under the folders `pruned` names relative to it (they are not walked). */
+  list(directory: string, pruned?: readonly string[]): Promise<readonly BoxFile[]>
   stop(): Promise<void>
 }
 
@@ -59,7 +60,7 @@ export function containerBox(env: Env, robotId: string): BoxBackend {
     read: (path) => stub.read(path),
     write: (path, bytes) => stub.write(path, bytes),
     remove: (path) => stub.remove(path),
-    list: (directory) => stub.list(directory),
+    list: (directory, pruned) => stub.list(directory, pruned),
     stop: () => stub.end(),
   }
 }

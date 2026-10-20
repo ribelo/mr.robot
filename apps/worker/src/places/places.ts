@@ -8,11 +8,11 @@
  */
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { GrantLevel, HostView } from '@mr-robot/protocol'
-import { copyTimeoutMs, type UploadPart } from '@mr-robot/host-protocol'
+import type { UploadPart } from '@mr-robot/host-protocol'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
 import type { BoxBackend } from '../box/backend.ts'
-import { CopyPermits, PERMIT_ENV, type CopyPermit, type PermitSecret } from './copy-permit.ts'
+import { runWs, type CopyPermits } from './copy-permit.ts'
 import { BadCall, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
 import { shellQuote } from './file-ops.ts'
 import { BoxFiles, boxPath, BOX_ROOT, HostFiles, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
@@ -59,6 +59,8 @@ export interface PlacesDeps {
   readonly jobs: Jobs
   /** The Robot's Workspace as presigned URLs: how a file reaches a Host without the Worker in the pipe. */
   readonly transfers: Transfers
+  /** The permits of the runs of ws the Robot starts on its Box; the Box's door finds them by secret. */
+  readonly permits: CopyPermits
   /** How many parts of a file a Host is handed links for at once. */
   readonly windowParts: number
 }
@@ -146,8 +148,6 @@ const sameItem = (a: GrantItem, b: GrantItem): boolean => a.kind === b.kind && a
 
 export class Places {
   private readonly workspaceFiles: WorkspaceFiles
-  /** The permits of the copies in flight that run ws on the Box, one per run of ws. */
-  private readonly permits = new CopyPermits()
 
   constructor(private readonly deps: PlacesDeps) {
     this.workspaceFiles = new WorkspaceFiles(deps.workspace)
@@ -338,20 +338,13 @@ export class Places {
     return { from: `/workspace/${from}`, to: `/workspace/${to}`, bytes: object.size }
   }
 
-  /** The permit of a copy in flight, by the secret its ws sent: the Box's door lets that ws through for its one key and direction. */
-  permit(secret: PermitSecret): CopyPermit | undefined {
-    return this.permits.find(secret)
-  }
-
   /**
    * ws inside the Box moves the file between the Box's disk and R2; its token and the Worker's address were written when the Box booted.
    * This run of ws gets a permit for `key` in direction `op`, in its environment; the permit ends with the run.
    */
   private async ws(backend: BoxBackend, op: 'get' | 'put', key: string, args: string, bytes: number): Promise<void> {
-    const seconds = Math.ceil(copyTimeoutMs(bytes) / 1000)
-    const permit = this.permits.issue(op, key)
-    const result = await backend.run(`ws ${op} ${args}`, BOX_ROOT, seconds, { [PERMIT_ENV]: permit.secret }).finally(() => permit.end())
-    if (result.exitCode !== 0) throw new CopyRefused({ message: `copy: ws ${result.exitCode === 124 ? `ran out of time (${seconds} s)` : 'failed'}: ${(result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`).slice(0, 500)}` })
+    const result = await runWs(backend, this.deps.permits, op, key, args, bytes)
+    if (result.exitCode !== 0) throw new CopyRefused({ message: `copy: ws ${result.exitCode === 124 ? `ran out of time (${result.seconds} s)` : 'failed'}: ${(result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`).slice(0, 500)}` })
   }
 
   private async workspaceToBox(fromPath: string, toPath: string): Promise<Moved> {

@@ -240,7 +240,7 @@ Read this before you use the Box for more than one short command: a script, a bi
 
 - Read box.md before you install anything. It lists the tools and versions in the image and what the image lacks, so you do not guess or probe.
 - For a package that the image lacks, write box/setup.sh (pip3 install, npm install). It runs at every boot, so keep it short and safe to run twice.
-- The uv and Bun caches are in box/.cache/. A second boot does not download the same packages again.
+- The uv and Bun caches are in /workspace/box/.cache/. Before the Box stops, they go to the Workspace as one file, box/.cache.tar.zst, so a second boot does not download the same packages again. To start with empty caches, delete that file.
 
 ## Jobs
 

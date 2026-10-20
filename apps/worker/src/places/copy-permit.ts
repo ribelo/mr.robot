@@ -1,8 +1,8 @@
 /**
- * The permit of one copy between the Workspace and the Box (deep review P4). A copy the Robot made runs ws on the Box for one Workspace key;
- * the door lets that ws through even when the files group is not at allow (at ask the owner approved the copy; a copy between the Box and a
- * Host needs no files group at all). The permit is a secret handed to that one ws process in its environment, never in a command line,
- * and it ends when the run of ws ends.
+ * The permit of one run of ws the Robot starts on its Box (deep review P4, P7): a copy between the Workspace and the Box, or the archive of
+ * the Box's caches (box/box-cache.ts). That ws works on one Workspace key; the door lets it through even when the files group is not at
+ * allow (at ask the owner approved the copy; a copy between the Box and a Host needs no files group at all; the caches are the platform's).
+ * The permit is a secret handed to that one ws process in its environment, never in a command line, and it ends when the run of ws ends.
  *
  * A permit is bound to its copy's operations: a get permit fetches its key and nothing else; a put permit starts one upload of its key and
  * then only asks for the parts of that upload, completes it or aborts it. So a Box script that read the secret from the ws process can do
@@ -10,6 +10,9 @@
  */
 import * as Data from 'effect/Data'
 import * as Schema from 'effect/Schema'
+import { copyTimeoutMs } from '@mr-robot/host-protocol'
+import type { BoxBackend } from '../box/backend.ts'
+import { BOX_ROOT } from './files.ts'
 import { answer, type TransferRequest, type Transfers } from './transfers.ts'
 
 /** The environment variable ws reads its permit from, and the header it sends it back in (infra/computer/ws-core.ts uses the same names). */
@@ -88,4 +91,24 @@ export class CopyPermits {
     const permit = this.open.get(secret)
     return permit === undefined ? undefined : { carry: (request, transfers) => carry(permit, request, transfers) }
   }
+}
+
+/** What one run of ws on the Box answered, and the time limit it had. */
+export interface WsRun {
+  readonly stdout: string
+  readonly stderr: string
+  readonly exitCode: number
+  readonly seconds: number
+}
+
+/**
+ * Run `ws <op> <args>` in the Box's /workspace with a permit for `key` in direction `op`, in its environment only; the permit ends with
+ * the run. Its time limit is that of a copy of `bytes` bytes. A failed run is in the exit code (124 when it ran out of time); the promise
+ * rejects only when the Box does not answer.
+ */
+export async function runWs(backend: BoxBackend, permits: CopyPermits, op: 'get' | 'put', key: string, args: string, bytes: number): Promise<WsRun> {
+  const seconds = Math.ceil(copyTimeoutMs(bytes) / 1000)
+  const permit = permits.issue(op, key)
+  const result = await backend.run(`ws ${op} ${args}`, BOX_ROOT, seconds, { [PERMIT_ENV]: permit.secret }).finally(() => permit.end())
+  return { ...result, seconds }
 }

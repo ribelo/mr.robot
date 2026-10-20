@@ -90,9 +90,10 @@ export class ComputerContainer extends Container<Env> {
     if (out.exitCode !== 0) throw new Error(`cannot delete ${path}: ${text.decode(out.stderr)}`)
   }
 
-  /** Every file under a directory with its size and change time: the manifest the sync compares. */
-  async list(directory: string): Promise<Array<{ path: string; size: number; mtime: number }>> {
-    const process = await this.ctx.container!.exec(['bash', '-lc', 'test -d "$0" && find "$0" -type f -printf "%P\\t%s\\t%T@\\n"', directory], {})
+  /** Every file under a directory with its size and change time, the folders `pruned` names (relative to it) left out: the manifest the sync compares. */
+  async list(directory: string, pruned: readonly string[] = []): Promise<Array<{ path: string; size: number; mtime: number }>> {
+    const script = 'test -d "$0" || exit 0; skip=(); for p in "$@"; do skip+=(-path "$0/$p" -prune -o); done; find "$0" "${skip[@]}" -type f -printf "%P\\t%s\\t%T@\\n"'
+    const process = await this.ctx.container!.exec(['bash', '-lc', script, directory, ...pruned], {})
     const out = await process.output()
     return text.decode(out.stdout).split('\n').filter((line) => line !== '').map((line) => {
       const [path, size, mtime] = line.split('\t')

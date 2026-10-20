@@ -36,7 +36,7 @@ ${boxToolList(BOX_TOOLS)}
 - The box/ folder of the Workspace is small and kept. At boot it is copied to /workspace/box, and box/setup.sh runs if it exists. When a Turn ends, and before the Box stops, the changed and new files under /workspace/box go back to box/. A file you delete on the Box stays in the Workspace. A file over 20 MB does not go back.
 - The rest of the Box disk is scratch. The next boot starts with a fresh disk.
 
-The uv and Bun caches are in box/.cache/ (UV_CACHE_DIR and BUN_INSTALL_CACHE_DIR). Keep a big file in the Workspace, not in box/, and fetch it with copy or ws.
+The uv and Bun caches are in /workspace/box/.cache/. When the Box stops, they go whole to box/.cache.tar.zst; the next boot unpacks it before setup.sh. Delete it for empty caches. Keep big files in the Workspace, not in box/.
 
 ## Jobs
 
