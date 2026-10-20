@@ -7,7 +7,7 @@ import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import * as Schema from 'effect/Schema'
-import { StoredPlace } from '../places/host-facet.ts'
+import { HOST_FACETS, hostFacetKey, StoredPlace } from '../places/host-facet.ts'
 import { HOST_ACCESS, mrRobotHostLevel } from './host-access.ts'
 import { JobId } from '../places/job-id.ts'
 import { dropEmptyRoutines, legacyWakeup } from './routine-export.ts'
@@ -256,11 +256,11 @@ function renameComputerToBox(sql: SqlStorage): void {
 function moveOffRemovedBrowsers(sql: SqlStorage): void {
   const row = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
   if (row !== undefined) {
-    const config = JSON.parse(row.v) as { readonly browserBackend?: unknown }
-    if (isRemovedBrowserBackend(config.browserBackend)) sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, browserBackend: null }))
+    const config = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(row.v)
+    if (isRemovedBrowserBackend(config['browserBackend'])) sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, browserBackend: null }))
   }
   const session = sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = 'browser-session'").toArray()[0]
-  if (session !== undefined && isRemovedBrowserBackend((JSON.parse(session.v) as { readonly backend?: unknown }).backend)) sql.exec("DELETE FROM kv WHERE k = 'browser-session'")
+  if (session !== undefined && isRemovedBrowserBackend(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(session.v)['backend'])) sql.exec("DELETE FROM kv WHERE k = 'browser-session'")
 }
 
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
@@ -553,7 +553,7 @@ export class RobotStore {
       skills: allow(this.reach.skills),
       recipients: {},
       secrets: allow(this.reach.secrets),
-      hosts: Object.fromEntries((this.reach.hosts ?? []).flatMap((id) => [`${id}:browser`, `${id}:files`, `${id}:shell`]).map((facet) => [facet, mrRobotHostLevel(facet)])),
+      hosts: Object.fromEntries((this.reach.hosts ?? []).flatMap((id) => HOST_FACETS.map((facet) => hostFacetKey(id, facet))).map((facet) => [facet, mrRobotHostLevel(facet)])),
       // Mr. Robot reaches every connection his owner can use, writing included (cn-xezx).
       connections: allow((this.reach.connections ?? []).flatMap((id) => [id, `${id}:write`])),
     }

@@ -4,28 +4,28 @@
  * are the Files bucket's S3 credentials from the Alchemy stack (an R2 API token scoped to that bucket), held as a Worker secret.
  */
 import { AwsClient } from 'aws4fetch'
+import * as Data from 'effect/Data'
+import * as Schema from 'effect/Schema'
+
+const NonEmpty = Schema.String.check(Schema.isMinLength(1))
 
 /** What Alchemy's Cloudflare.R2.S3Credentials delivers to the Worker, as JSON. */
-export interface S3Credentials {
-  readonly endpoint: string
-  readonly bucketName: string
-  readonly region: 'auto'
-  readonly accessKeyId: string
-  readonly secretAccessKey: string
-}
+export const S3Credentials = Schema.Struct({
+  endpoint: NonEmpty,
+  bucketName: NonEmpty,
+  region: Schema.Literal('auto'),
+  accessKeyId: NonEmpty,
+  secretAccessKey: NonEmpty,
+})
+export type S3Credentials = typeof S3Credentials.Type
+
+const parseCredentialsJson = Schema.decodeUnknownOption(Schema.fromJsonString(S3Credentials))
 
 /** The credentials in the secret, or undefined when there is none or it is not what Alchemy writes. */
 export function parseS3Credentials(raw: string | undefined): S3Credentials | undefined {
   if (raw === undefined || raw === '') return undefined
-  try {
-    const value = JSON.parse(raw) as Record<string, unknown>
-    const text = (name: string): string | undefined => (typeof value[name] === 'string' && value[name] !== '' ? (value[name] as string) : undefined)
-    const [endpoint, bucketName, accessKeyId, secretAccessKey] = [text('endpoint'), text('bucketName'), text('accessKeyId'), text('secretAccessKey')]
-    if (endpoint === undefined || bucketName === undefined || accessKeyId === undefined || secretAccessKey === undefined) return undefined
-    return { endpoint: endpoint.replace(/\/+$/, ''), bucketName, region: 'auto', accessKeyId, secretAccessKey }
-  } catch {
-    return undefined
-  }
+  const parsed = parseCredentialsJson(raw)
+  return parsed._tag === 'None' ? undefined : { ...parsed.value, endpoint: parsed.value.endpoint.replace(/\/+$/, '') }
 }
 
 /** One part of a multipart upload as the client reported it: its number and the ETag R2 returned for it. */
@@ -35,9 +35,7 @@ export interface CompletedPart {
 }
 
 /** A control call to R2 that did not succeed; the message is for the Robot. */
-export class ObjectStoreError extends Error {
-  override readonly name = 'ObjectStoreError'
-}
+export class ObjectStoreError extends Data.TaggedError('ObjectStoreError')<{ readonly message: string }> {}
 
 export interface ObjectStore {
   /** A URL that lets its holder GET or PUT one object (or one part of a multipart upload, with its query) until it expires. */
@@ -62,11 +60,14 @@ export function s3ObjectStore(credentials: S3Credentials, fetcher: typeof fetch 
   const control = async (what: string, method: 'POST' | 'DELETE', url: URL, body?: string): Promise<string> => {
     const signed = await client.sign(url.toString(), { method, ...(body === undefined ? {} : { body, headers: { 'content-type': 'application/xml' } }) })
     const response = await fetcher(signed).catch((error: unknown) => {
-      throw new ObjectStoreError(`${what}: R2 could not be reached (${error instanceof Error ? error.message : String(error)})`)
+      throw new ObjectStoreError({ message: `${what}: R2 could not be reached (${error instanceof Error ? error.message : String(error)})` })
     })
     const text = await response.text()
     // S3 can answer a completed call with 200 and an error in the body.
-    if (!response.ok || /<Error>/.test(text)) throw new ObjectStoreError(`${what}: R2 answered ${response.status}${/<Code>([^<]*)<\/Code>/.exec(text)?.[1] === undefined ? '' : ` ${/<Code>([^<]*)<\/Code>/.exec(text)![1]}`}`)
+    if (!response.ok || /<Error>/.test(text)) {
+      const code = /<Code>([^<]*)<\/Code>/.exec(text)?.[1]
+      throw new ObjectStoreError({ message: `${what}: R2 answered ${response.status}${code === undefined ? '' : ` ${code}`}` })
+    }
     return text
   }
   return {
@@ -77,7 +78,7 @@ export function s3ObjectStore(credentials: S3Credentials, fetcher: typeof fetch 
     startMultipart: async (key) => {
       const text = await control('start of the upload', 'POST', urlOf(key, { uploads: '' }))
       const id = /<UploadId>([^<]+)<\/UploadId>/.exec(text)?.[1]
-      if (id === undefined) throw new ObjectStoreError('start of the upload: R2 gave no upload id')
+      if (id === undefined) throw new ObjectStoreError({ message: 'start of the upload: R2 gave no upload id' })
       return id
     },
     completeMultipart: async (key, uploadId, parts) => {

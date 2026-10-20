@@ -85,10 +85,15 @@ async function ask(io: WsIo, request: Json): Promise<Json> {
   const response = await attempts('the Workspace', async () => {
     const reply = await io.fetch(`${origin}/api/files/presign`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(request) })
     const text = reply.ok ? '' : await reply.text()
-    const message = (() => { try { return String((JSON.parse(text) as Json)['error'] ?? text) } catch { return text } })()
+    const message = (() => { try { return String(record(JSON.parse(text))?.['error'] ?? text) } catch { return text } })()
     return classify(reply, message)
   }, io)
-  return (await response.json()) as Json
+  return record(await response.json()) ?? {}
+}
+
+/** An object from JSON, or undefined for anything else. */
+function record(value: unknown): Json | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined
 }
 
 const text = (value: unknown, what: string): string => {
@@ -102,13 +107,21 @@ const number = (value: unknown, what: string): number => {
 
 interface PlannedPart { readonly number: number; readonly offset: number; readonly length: number }
 
+/** The parts of an upload plan, each with its number, offset and length. */
+function plannedParts(value: unknown): PlannedPart[] {
+  if (!Array.isArray(value)) throw new WsError('the Workspace sent no upload plan')
+  return value.map((entry): PlannedPart => {
+    const part = record(entry) ?? {}
+    return { number: number(part['number'], 'part number'), offset: number(part['offset'], 'part offset'), length: number(part['length'], 'part length') }
+  })
+}
+
 async function put(io: WsIo, file: string, path: string): Promise<string> {
   const size = await io.size(file)
   if (size === undefined) throw new WsError(`no file ${file}`)
   const plan = await ask(io, { op: 'put', path, size })
   const uploadId = typeof plan['uploadId'] === 'string' ? plan['uploadId'] : undefined
-  const parts = plan['parts'] as PlannedPart[] | undefined
-  if (parts === undefined) throw new WsError('the Workspace sent no upload plan')
+  const parts = plannedParts(plan['parts'])
   try {
     const etags: Array<{ number: number; etag: string }> = []
     for (const part of parts) {
@@ -163,7 +176,10 @@ async function get(io: WsIo, path: string, dest: string): Promise<string> {
 
 async function list(io: WsIo, path: string): Promise<string[]> {
   const answer = await ask(io, { op: 'ls', path })
-  const files = (answer['files'] as Array<{ path: string; size: number }> | undefined) ?? []
+  const files = (Array.isArray(answer['files']) ? answer['files'] : []).map((entry) => {
+    const file = record(entry) ?? {}
+    return { path: text(file['path'], 'path'), size: number(file['size'], 'size') }
+  })
   return [...files.map((file) => `${file.size}\t${file.path}`), ...(answer['truncated'] === true ? ['(more files than are listed here; give a folder)'] : [])]
 }
 

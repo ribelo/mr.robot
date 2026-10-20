@@ -60,18 +60,18 @@ describe('the Host app copies a file over presigned URLs', () => {
   })
 
   it('downloads in windows with a fresh link each, and the file appears only when the last window arrived', async () => {
-    const bytes = Uint8Array.from({ length: 3_000_000 }, (_, index) => (index * 13 + (index >> 9)) & 255)
+    const bytes = Uint8Array.from({ length: 300_000 }, (_, index) => (index * 13 + (index >> 9)) & 255)
     const { io, objects } = r2()
     objects.set('https://r2.test/first', bytes)
     objects.set('https://r2.test/second', bytes)
     const { rpc, close } = await connected(dir, io)
     const full = access({ mode: 'full' })
     const target = join(dir, 'windowed', 'copy.bin')
-    const partBytes = 1_000_000
-    await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/first', size: bytes.length, partBytes, from: 0, until: 2_000_000, access: full }))
+    const partBytes = 100_000
+    await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/first', size: bytes.length, partBytes, from: 0, until: 200_000, access: full }))
     // Half-way, nothing is at the path yet.
     expect(await readdir(join(dir, 'windowed'))).toEqual(['copy.bin.mr-robot-part'])
-    await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/second', size: bytes.length, partBytes, from: 2_000_000, until: bytes.length, access: full }))
+    await Effect.runPromise(rpc['Download']!({ path: target, url: 'https://r2.test/second', size: bytes.length, partBytes, from: 200_000, until: bytes.length, access: full }))
     expect(new Uint8Array(await readFile(target))).toEqual(bytes)
     expect(await readdir(join(dir, 'windowed'))).toEqual(['copy.bin'])
     await close()

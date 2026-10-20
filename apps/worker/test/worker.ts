@@ -8,6 +8,7 @@ import { fakeR2, testObjectStore } from './fake-r2.ts'
 import type { ObjectStore } from '../src/workspace/object-store.ts'
 import app from '../src/index.ts'
 import { QUIET_DUE } from '../src/robot/programs.ts'
+import { currentMonth } from '../src/home/home.ts'
 import type { BoxBackend } from '../src/box/backend.ts'
 import { FakeChannel } from './fake-channel.ts'
 import { fakeConnectors, fakeService } from './fake-connector.ts'
@@ -69,11 +70,6 @@ export class Home extends ProductionHome {
     const sql = this.ctx.storage.sql
     sql.exec("INSERT OR REPLACE INTO setting (k, v) VALUES ('defaultBrowserBackend', ?), ('vpn-config', '\"sealed\"'), ('vpn-summary', '{\"endpoint\":\"1.2.3.4:51820\"}'), ('proxy-config', '\"sealed\"')", JSON.stringify(defaultBackend))
     this.migrateBrowserBackends()
-  }
-
-  /** The Home's settings keys, as stored. */
-  async settingKeysForTest(): Promise<string[]> {
-    return this.ctx.storage.sql.exec<{ k: string }>('SELECT k FROM setting ORDER BY k').toArray().map((row) => row.k)
   }
 
   protected override connectorFetch(): typeof globalThis.fetch {
@@ -266,19 +262,9 @@ export class Robot extends ProductionRobot {
     const config = this.store.requireConfig()
     sql.exec("UPDATE robot SET v = ? WHERE k = 'config'", JSON.stringify({ ...config, browserBackend: backend }))
     this.store.set('browser-session', { backend, since: Date.now() })
-    this.store.addBrowserUsage('2026-09', backend, 600_000, 0.018)
+    this.store.addBrowserUsage(currentMonth(Date.now()), backend, 600_000, 0.018)
     sql.exec('UPDATE schema_version SET version = 19')
     this.store.prepare()
-  }
-
-  /** The browser time rows of a month, as stored. */
-  async browserUsageForTest(month: string): Promise<Array<{ backend: string; ms: number; costUsd: number }>> {
-    return this.store.browserUsage(month)
-  }
-
-  /** Whether a browser session is recorded as open. */
-  async browserSessionForTest(): Promise<unknown> {
-    return this.store.get('browser-session') ?? null
   }
 
   /** The config exactly as stored. */

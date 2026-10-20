@@ -6,6 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { HostAccess } from '@mr-robot/host-protocol'
+import { errorCode } from './error-code.ts'
 import { HostShell } from './shell.ts'
 
 async function main(): Promise<void> {
@@ -20,7 +21,7 @@ async function main(): Promise<void> {
       if (result.kind !== 'foreground') throw new Error(`the command did not end: ${result.kind}`)
       console.log(label, JSON.stringify({ exitCode: result.exitCode, stdout: result.stdout.text.trim(), stderr: result.stderr.text.trim(), sandbox: result.sandbox }))
     } catch (error) {
-      console.log(label, 'FAILED:', error instanceof Error ? error.message : String(error), (error as { code?: string }).code)
+      console.log(label, 'FAILED:', error instanceof Error ? error.message : String(error), errorCode(error))
     }
   }
   const confined: HostAccess = { robot: 'check', mode: 'workspace-write', roots: [] }

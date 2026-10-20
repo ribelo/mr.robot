@@ -343,7 +343,7 @@ export class HostHub {
     return jobs.flatMap((job) => { const ref = splitRef(job.job); return ref === undefined ? [] : [{ ...job, job: ref.jobId }] })
   }
 
-  jobOutput(id: string, robotId: string, jobId: string, stream: 'out' | 'err', offset: number) {
+  jobOutput(id: string, robotId: string, jobId: string, stream: 'out' | 'err', offset: number): Promise<{ text: string; bytes: number; size: number }> {
     return this.run(id, robotId, 'shell', (client) => client.JobOutput({ job: jobRef(robotId, jobId), stream, offset }), 60_000)
   }
 

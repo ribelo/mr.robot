@@ -19,8 +19,8 @@ export function readWindow(displayPath: string, text: string, offset?: number, l
   const shown: string[] = []
   let bytes = 0
   let capped = false
-  for (let index = first - 1; index < lines.length && shown.length < count; index += 1) {
-    const raw = lines[index]!
+  for (const [skipped, raw] of lines.slice(first - 1, first - 1 + count).entries()) {
+    const index = first - 1 + skipped
     const line = raw.length > READ_MAX_LINE ? `${raw.slice(0, READ_MAX_LINE)}... (line truncated to ${READ_MAX_LINE} chars)` : raw
     bytes += new TextEncoder().encode(line).length + 1
     if (bytes > READ_MAX_BYTES) {

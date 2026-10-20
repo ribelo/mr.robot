@@ -41,7 +41,7 @@ export class NoSuchJob extends Data.TaggedError('NoSuchJob')<{ readonly message:
 /** How many bytes of `buffer[0..length)` end on a whole UTF-8 character: a piece must not cut one in half. */
 export function wholeCharacters(buffer: Uint8Array, length: number): number {
   for (let back = 1; back <= 3 && back <= length; back++) {
-    const byte = buffer[length - back]!
+    const byte = buffer[length - back] ?? 0
     if ((byte & 0xc0) === 0x80) continue
     const need = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1
     return need > back ? length - back : length

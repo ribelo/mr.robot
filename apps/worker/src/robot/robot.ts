@@ -791,7 +791,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private places(): Places {
     this.placeService ??= new Places({
       workspace: this,
-      workspaceUsable: () => this.store.config()?.status === 'setup' || this.groupUsable('files'),
+      workspaceUsable: () => this.workspaceUsable(),
       boxUsable: () => this.groupUsable('box'),
       hostUsable: (hostId, facet) => this.store.mayUse('host', hostFacetKey(hostId, facet)),
       hosts: () => this.home().hostsFor(this.store.requireConfig().ownerId),
@@ -804,6 +804,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       windowParts: this.hostWindowParts(),
     })
     return this.placeService
+  }
+
+  /** Whether the Robot's tools reach its Workspace: it holds the files group, or it is in setup, which opens the Workspace to write its persona files (S1). */
+  private workspaceUsable(): boolean {
+    return this.store.config()?.status === 'setup' || this.groupUsable('files')
   }
 
   /** Whether a tool group is usable now: allow or ask, and the Home has its plugin on. */
@@ -1882,7 +1887,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       },
       prompt,
       mounts,
-      spill: { workspace: this.workspace, fileTools: mounts.some((entry) => (entry.plugin as unknown) === PlacesCapability && (entry.config as { reach: PlacesReach }).reach.workspace) },
+      spill: { workspace: this.workspace, fileTools: this.workspaceUsable() },
       extraAdapters: await this.subagentAdapters(config),
       ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
     }))).catch(async (error: unknown) => {
@@ -1989,7 +1994,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (holdsSkills) mounts.push(mount(Skills, { host: this }, gate(items.skills(granted.has('skills')))))
     // Host files and shell follow the per-host grants, not a tool group (hs-5ktw).
     const hostGrants = usableNames(grants.hosts)
-    const names = (kind: string) => hostGrants.filter((grant) => grant.endsWith(`:${kind}`)).map((grant) => this.knownHosts.find((host) => `${host.id}:${kind}` === grant)?.name ?? grant.slice(0, -kind.length - 1))
+    const names = (facet: 'files' | 'shell') => hostGrants.flatMap((grant) => {
+      const split = splitHostFacet(grant)
+      return split?.facet === facet ? [this.knownHosts.find((host) => host.id === split.hostId)?.name ?? split.hostId] : []
+    })
     // One capability for the Workspace, the Box and the Hosts: its tools exist when the Robot holds any of them (v1.16 ticket 01).
     const reach: PlacesReach = { workspace: granted.has('files'), box: granted.has('box'), hosts: { files: names('files'), shell: names('shell') } }
     if (reach.workspace || reach.box || reach.hosts.files.length > 0 || reach.hosts.shell.length > 0) mounts.push(mount(PlacesCapability, { host: this.places(), reach }, gate(items.places)))
@@ -2051,7 +2059,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         possible: hostFacets('browser'),
         used: async () => {
           const backend = await this.chosenBackend()
-          return isHostBackend(backend) ? [{ kind: 'host', name: `${hostIdOf(backend)}:browser` }] : []
+          return isHostBackend(backend) ? [{ kind: 'host', name: hostFacetKey(hostIdOf(backend), 'browser') }] : []
         },
       }),
       // The skills group covers every skill tool; loading a Home skill also uses that skill's item. Local skills are the Robot's own.
@@ -3866,7 +3874,7 @@ function boxRunner(backend: BoxBackend): JobRunner {
 
 /** The `on` of one end of a copy call, when the call is well formed. */
 function copyEnd(end: unknown): unknown {
-  return end !== null && typeof end === 'object' ? (end as { on?: unknown }).on : undefined
+  return end !== null && typeof end === 'object' && 'on' in end ? end.on : undefined
 }
 /** The usage of one model response, as the session event carries it. */
 type ChildUsage = { readonly inputTokens?: number; readonly outputTokens?: number; readonly cacheReadTokens?: number }

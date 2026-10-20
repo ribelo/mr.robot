@@ -11,7 +11,6 @@ Mr. Robot plugs its own Cordis adapters into these DSH seams:
 | seam | adapter | file |
 |---|---|---|
 | session-persistence | Conversation log on DO SQLite | apps/worker/src/agent/session-log.ts |
-| fs (+ DSH tool-fs) | the Robot's R2 Workspace, Member files read-only | apps/worker/src/workspace/r2-filesystem.ts |
 | credentials | read-only over the Member and Home DOs | apps/worker/src/agent/seams.ts |
 | browser-use | registers Browser Rendering as the provider | apps/worker/src/agent/seams.ts |
 | ptc-runtime | Worker Loader isolate (ADR 0001) | apps/worker/src/agent/ptc.ts |
@@ -28,6 +27,8 @@ sees the provider.
 runs ripgrep, which a Worker cannot.
 
 ## Effect
+
+**The Workspace has one access path (v1.16).** The Robot's files are not behind a DSH fs seam any more: the file tools, copy, the Box's door (ws) and the edge all reach R2 through the Effect Workspace service (apps/worker/src/workspace/workspace.ts: read, stat, write, remove, list, page, open, removeUnder). Nothing else reads or writes the Files bucket for a Robot's prefix. Presigned links are the one exception that never touches the bytes: the Worker only signs them (workspace/object-store.ts) for a key the Workspace service has already looked at.
 
 Effect owns: the edge API (router, errors, request decoding), the Workspace (R2), the Vault,
 OAuth, Web Push, skill sync, and the scope of every Cordis composition (closing the scope disposes

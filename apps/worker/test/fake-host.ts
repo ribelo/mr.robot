@@ -5,7 +5,7 @@
 import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
+import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -43,7 +43,7 @@ const readOnly = (access: HostAccess, path: string) => access.mode === 'read-onl
   ? Effect.fail(new HostError({ message: `${path} was not written: this grant is read-only, so nothing on this computer may be changed.`, code: 'SANDBOX_DENIED' }))
   : undefined
 
-const skippedPath = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
+const skippedPath = skipped
 
 
 /** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). Its notifications (notify frames) are kept in `notices`. */

@@ -6,7 +6,7 @@
 import { lstat, readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, SKIPPED_DIRECTORIES, type HostAccess } from '@mr-robot/host-protocol'
+import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, type HostAccess } from '@mr-robot/host-protocol'
 import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, removeWithin, writeWithin } from './access.ts'
 
 const MAX_READ = 10 * 1024 * 1024
@@ -33,7 +33,7 @@ async function* filesBelow(directory: string, prefix = ''): AsyncGenerator<strin
   entries.sort((a, b) => (a.name < b.name ? -1 : 1))
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      if (!(SKIPPED_DIRECTORIES as readonly string[]).includes(entry.name)) yield* filesBelow(join(directory, entry.name), `${prefix}${entry.name}/`)
+      if (!isSkippedDirectory(entry.name)) yield* filesBelow(join(directory, entry.name), `${prefix}${entry.name}/`)
     } else if (entry.isFile()) {
       yield `${prefix}${entry.name}`
     }

@@ -13,6 +13,9 @@ export type HostFacet = 'files' | 'shell' | 'browser'
  */
 export type Reach = 'granted' | 'escalated'
 
+/** Every facet of a Host. */
+export const HOST_FACETS: readonly HostFacet[] = ['browser', 'files', 'shell']
+
 /** The grant item name of a Host facet. */
 export const hostFacetKey = (hostId: string, facet: HostFacet): string => `${hostId}:${facet}`
 
@@ -20,7 +23,8 @@ export const hostFacetKey = (hostId: string, facet: HostFacet): string => `${hos
 export function splitHostFacet(key: string): { readonly hostId: string; readonly facet: HostFacet } | undefined {
   const at = key.lastIndexOf(':')
   const facet = key.slice(at + 1)
-  return at > 0 && (facet === 'files' || facet === 'shell' || facet === 'browser') ? { hostId: key.slice(0, at), facet } : undefined
+  const known = HOST_FACETS.find((candidate) => candidate === facet)
+  return at > 0 && known !== undefined ? { hostId: key.slice(0, at), facet: known } : undefined
 }
 
 /** The name of a job's place as the store keeps it: "box" or "host:<id>". */

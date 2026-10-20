@@ -9,6 +9,7 @@ import { capability } from './define.ts'
 
 export const Places = capability<{ host: PlacesHost; reach: PlacesReach }>({
   name: 'places',
+  // SAFETY: the mount config is handed over by the Robot's own composition (robot.ts), typed there; the schema only has to exist for Cordis and cannot name these types.
   Config: z.object({ host: z.any().required(), reach: z.any().required() }) as never,
   tools: ({ host, reach }) => placesTools(host, reach),
   prompt: ({ reach }) => {

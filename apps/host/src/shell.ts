@@ -19,6 +19,7 @@ import Sandbox, { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import { RUN_MAX_WAIT_SECONDS, SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
+import { errorCode } from './error-code.ts'
 import { ensureRobotDirectory, expandPath, writeRoots } from './access.ts'
 import { HostJobs } from './jobs.ts'
 import { aclRunnerWorks, findInstalledPwsh7, startRunnersAsNode, withoutElectronSwitch } from './windows.ts'
@@ -59,6 +60,7 @@ class PolicyService extends Service {
   readonly defaultMode: SandboxMode = 'read-only'
   readonly workspaceRoot = homedir()
   constructor(ctx: Context) {
+    // SAFETY: Cordis types service names as a closed union that DSH's own packages extend; this app registers the one name DSH's bash-sandbox looks up.
     super(ctx, 'sandboxPolicy' as never)
   }
   resolve(): SandboxExecutionPolicy {
@@ -160,6 +162,7 @@ export class HostShell {
     const kind: Shell = process.platform === 'win32' ? 'pwsh' : 'bash'
     const ctx = new Context()
     await ctx.plugin(Subprocess)
+    // SAFETY: windows.ts needs only the runner-path hook of subprocess-local, which DSH does not export as a type.
     if (kind === 'pwsh') startRunnersAsNode(ctx.subprocess as never)
     await ctx.plugin(ManyRootsSandbox)
     await ctx.plugin(PolicyService)
@@ -167,6 +170,7 @@ export class HostShell {
     await ctx.plugin(Jobs, { maxConcurrentJobsPerOwner: 200 })
     // A bundled app carries the Landlock launcher beside itself; DSH looks for it in node_modules.
     const launcher = options.landlockLauncher
+    // SAFETY: the sandbox service above is the LocalSandboxProvider this app plugged in; Cordis types it as the abstract sandbox.
     if (launcher !== undefined && existsSync(launcher)) (ctx.sandbox as LocalSandboxProvider).internals.landlockLauncher = launcher
     const probeRoot = join(home, 'mr-robot')
     await mkdir(probeRoot, { recursive: true })
@@ -229,7 +233,7 @@ export class HostShell {
       started = await this.ctx.shell.execute(spec)
     } catch (error) {
       // A confined call on a computer with no usable sandbox fails closed, with the reason.
-      if ((error as { code?: unknown }).code === DSH_SANDBOX_UNAVAILABLE) throw Object.assign(new Error(`This computer has no usable sandbox (Linux needs bubblewrap or a kernel with Landlock, macOS needs sandbox-exec, Windows needs the restricted-token runner to start), so a command in ${input.access.mode} mode does not run. Only a grant in full mode runs here.`), { code: SANDBOX_UNAVAILABLE })
+      if (errorCode(error) === DSH_SANDBOX_UNAVAILABLE) throw Object.assign(new Error(`This computer has no usable sandbox (Linux needs bubblewrap or a kernel with Landlock, macOS needs sandbox-exec, Windows needs the restricted-token runner to start), so a command in ${input.access.mode} mode does not run. Only a grant in full mode runs here.`), { code: SANDBOX_UNAVAILABLE })
       throw error
     }
     this.jobs.start(input.job, input.command, started)

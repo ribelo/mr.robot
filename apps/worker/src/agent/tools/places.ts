@@ -93,10 +93,11 @@ const filePlace = (reach: PlacesReach) => ({ type: 'string', description: `works
 const PATH_RULES = 'Paths: on workspace, relative or under /workspace; on box, relative to /workspace on the Box or under it (the Box disk is scratch except box/); on a computer, absolute, ~/ for its home directory, or relative to your own directory there (~/mr-robot/<you>/, made on first use); reads reach everything your owner\'s user can read, writes only what your grant lets you change. Your owner\'s files, the docs and the platform skills are in your Workspace only.'
 
 function end(value: unknown, which: 'from' | 'to'): CopyEnd {
-  const record = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
-  if (typeof record['on'] !== 'string' || record['on'].trim() === '') throw new Error(`copy: ${which}.on is required: workspace, box or the name of one of your owner's computers.`)
-  if (typeof record['path'] !== 'string' || record['path'] === '') throw new Error(`copy: ${which}.path is required and must not be empty.`)
-  return { on: record['on'], path: record['path'] }
+  const on = value !== null && typeof value === 'object' && 'on' in value ? value.on : undefined
+  const path = value !== null && typeof value === 'object' && 'path' in value ? value.path : undefined
+  if (typeof on !== 'string' || on.trim() === '') throw new Error(`copy: ${which}.on is required: workspace, box or the name of one of your owner's computers.`)
+  if (typeof path !== 'string' || path === '') throw new Error(`copy: ${which}.path is required and must not be empty.`)
+  return { on, path }
 }
 
 const endSchema = (text: string) => ({

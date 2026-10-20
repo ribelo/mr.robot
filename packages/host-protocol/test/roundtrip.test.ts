@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import { describe, expect, it } from 'vitest'
 import type { HostAccess } from '../src/index.ts'
-import { frame, HostError, HostRpcs, makeHostClient, parseFrame, serveHost } from '../src/index.ts'
+import { frame, HostError, HostRpcs, makeHostClient, parseFrame, parseHeartbeat, serveHost } from '../src/index.ts'
 
 const access: HostAccess = { robot: 'bot-1', mode: 'workspace-write', roots: [] }
 
@@ -72,5 +72,20 @@ describe('the host protocol over a socket', () => {
     expect(result.kill).toEqual({ outcome: 'already-finished' })
     const ended = frame({ t: 'job', d: { job: 'r:j-1', state: 'completed', exitCode: 0, signal: null } })
     expect(parseFrame(ended)).toEqual({ t: 'job', d: { job: 'r:j-1', state: 'completed', exitCode: 0, signal: null } })
+  })
+})
+
+describe('frames from older and newer peers', () => {
+  it('drops a frame of a kind it does not know, and one whose data is not the kind\'s', () => {
+    expect(parseFrame(JSON.stringify({ t: 'future', d: {} }))).toBeUndefined()
+    expect(parseFrame(JSON.stringify({ t: 'job', d: { job: 'r:j-1', state: 'exploded' } }))).toBeUndefined()
+    expect(parseFrame('not json')).toBeUndefined()
+  })
+
+  it('takes the heartbeat of an app from before v1.16, which says nothing of its sandbox, shell or run', () => {
+    const old = { t: 'hb', d: { version: '0.1.0', platform: 'linux', hostname: 'desk', capabilities: { graphical: true, chrome: null } } }
+    expect(parseFrame(JSON.stringify(old))).toEqual(old)
+    expect(parseHeartbeat(JSON.stringify(old.d))).toEqual(old.d)
+    expect(parseHeartbeat('{"version":"1"}')).toBeUndefined()
   })
 })

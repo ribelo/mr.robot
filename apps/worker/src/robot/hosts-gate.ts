@@ -6,6 +6,7 @@
  * Wake-up is held back; a message of the owner or of another Robot always wakes the Robot (ob-amlz).
  */
 import { usableNames, type GrantLevels } from '@mr-robot/protocol'
+import { splitHostFacet } from '../places/host-facet.ts'
 
 /** A Host as the Home lists it for the Robot's owner. */
 export interface KnownHost {
@@ -22,7 +23,7 @@ export interface GatedTask {
 
 /** The Hosts the Robot holds a facet on: "<hostId>:files", "<hostId>:shell" or "<hostId>:browser" at allow or ask. */
 export function heldHosts(facets: GrantLevels, known: readonly KnownHost[]): KnownHost[] {
-  const held = new Set(usableNames(facets).map((facet) => facet.slice(0, facet.lastIndexOf(':'))))
+  const held = new Set(usableNames(facets).flatMap((facet) => splitHostFacet(facet)?.hostId ?? []))
   return known.filter((host) => held.has(host.id))
 }
 

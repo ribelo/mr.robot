@@ -8,7 +8,7 @@
 export function globToRegExp(pattern: string): RegExp {
   let source = ''
   for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index]!
+    const char = pattern.charAt(index)
     if (char === '*') {
       if (pattern[index + 1] === '*') {
         source += pattern[index + 2] === '/' ? '(?:.*/)?' : '.*'
@@ -41,7 +41,10 @@ export function globBase(pattern: string): string {
 /** Directories no listing of a Box or a Host shows: version control and installed packages are noise for a Robot. */
 export const SKIPPED_DIRECTORIES = ['.git', 'node_modules'] as const
 
-export const skipped = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
+/** Whether a directory name is one no listing shows. */
+export const isSkippedDirectory = (name: string): boolean => SKIPPED_DIRECTORIES.some((skippedName) => skippedName === name)
+
+export const skipped = (path: string): boolean => path.split('/').some(isSkippedDirectory)
 
 /** The most matches one grep returns, the longest line it shows, and the largest file it searches. */
 export const GREP_MAX_MATCHES = 200

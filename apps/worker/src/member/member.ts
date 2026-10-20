@@ -3,6 +3,7 @@
  * PROACTIVE_PREFERENCES.md, mounted read-only into each of their Robots), and the
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
+import * as Schema from 'effect/Schema'
 import { copyTimeoutMs, RUN_MAX_WAIT_SECONDS, type RunOutcome, type UploadPart } from '@mr-robot/host-protocol'
 import type { Reach } from '../places/host-facet.ts'
 import { HostHub, jobRef, type HostEntry, type HostAction } from './hosts.ts'
@@ -658,12 +659,18 @@ const push = (notification: PushNotification, hosts: readonly string[]) => Effec
 })
 
 /** Quiet hours ended: deliver what waited, and arm for the next. */
+/** The computers a deferred notification names, as stored; a row from before this column names none. */
+const decodeHostIds = (stored: string): string[] => {
+  const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(stored)
+  return parsed._tag === 'Some' ? [...parsed.value] : []
+}
+
 const deliverDue = (now: number) => Effect.gen(function* () {
   const sql = yield* Sql
   const platform = yield* MemberPlatform
   for (const row of yield* sql.all<{ id: number; notification: string; hosts: string }>('SELECT id, notification, hosts FROM pending_notification WHERE deliver_at <= ? ORDER BY id', now)) {
     yield* sql.run('DELETE FROM pending_notification WHERE id = ?', row.id)
-    yield* platform.deliverNow(JSON.parse(row.notification) as PushNotification, JSON.parse(row.hosts) as string[])
+    yield* platform.deliverNow(JSON.parse(row.notification) as PushNotification, decodeHostIds(row.hosts))
   }
   const next = (yield* sql.first<{ at: number | null }>('SELECT MIN(deliver_at) AS at FROM pending_notification'))?.at ?? null
   if (next !== null) yield* platform.setAlarm(next)

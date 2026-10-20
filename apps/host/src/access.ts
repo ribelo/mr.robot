@@ -8,6 +8,7 @@ import { lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import * as Data from 'effect/Data'
 import { SANDBOX_DENIED, type HostAccess } from '@mr-robot/host-protocol'
+import { errorCode } from './error-code.ts'
 
 /** Where the Robot's directory is: mr-robot/<robot> in the OS user's home. */
 export const robotDirectory = (home: string, robot: string): string => join(home, 'mr-robot', robot)
@@ -33,7 +34,7 @@ export function writeRoots(home: string, access: HostAccess): string[] {
 }
 
 /** A path with its symbolic links resolved as far as it exists: the deepest existing ancestor's real path, then what does not exist yet. */
-async function realish(path: string): Promise<string> {
+async function resolvedPath(path: string): Promise<string> {
   const missing: string[] = []
   let current = path
   for (;;) {
@@ -41,7 +42,7 @@ async function realish(path: string): Promise<string> {
       return join(await realpath(current), ...missing.reverse())
     } catch (error) {
       const parent = resolve(current, '..')
-      if ((error as { code?: unknown }).code !== 'ENOENT' || parent === current) throw error
+      if (errorCode(error) !== 'ENOENT' || parent === current) throw error
       missing.push(current.slice(parent.length + 1))
       current = parent
     }
@@ -64,7 +65,7 @@ const outside = (target: string, access: HostAccess, home: string): WriteDenied 
 /** Whether the real path lies inside one of the directories the grant lets the Robot change. */
 async function insideWriteRoots(home: string, access: HostAccess, real: string): Promise<boolean> {
   for (const root of writeRoots(home, access)) {
-    if (inside(await realish(root), real)) return true
+    if (inside(await resolvedPath(root), real)) return true
   }
   return false
 }
@@ -78,7 +79,7 @@ async function insideWriteRoots(home: string, access: HostAccess, real: string):
 export async function assertMayWrite(home: string, access: HostAccess, target: string): Promise<string> {
   if (access.mode === 'full') return target
   if (access.mode === 'read-only') throw new WriteDenied({ message: `${target} was not written: this grant is read-only, so nothing on this computer may be changed.` })
-  const real = await realish(target)
+  const real = await resolvedPath(target)
   if (await insideWriteRoots(home, access, real)) return real
   throw outside(target, access, home)
 }
@@ -87,7 +88,7 @@ export async function assertMayWrite(home: string, access: HostAccess, target: s
 export async function assertMayRemove(home: string, access: HostAccess, target: string): Promise<string> {
   if (access.mode === 'full') return target
   if (access.mode === 'read-only') throw new WriteDenied({ message: `${target} was not changed: this grant is read-only, so nothing on this computer may be changed.` })
-  const real = join(await realish(dirname(target)), basename(target))
+  const real = join(await resolvedPath(dirname(target)), basename(target))
   if (await insideWriteRoots(home, access, real)) return real
   throw outside(target, access, home)
 }
@@ -99,7 +100,7 @@ export async function removeWithin(home: string, access: HostAccess, target: str
     await unlink(real)
     return true
   } catch (error) {
-    if ((error as { code?: unknown }).code === 'ENOENT') return false
+    if (errorCode(error) === 'ENOENT') return false
     throw error
   }
 }
@@ -124,12 +125,12 @@ export async function writeWithin(home: string, access: HostAccess, target: stri
   try {
     handle = await open(real, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow)
   } catch (error) {
-    if ((error as { code?: unknown }).code !== 'EEXIST' && (error as { code?: unknown }).code !== 'ELOOP') throw error
+    if (errorCode(error) !== 'EEXIST' && errorCode(error) !== 'ELOOP') throw error
     created = false
     try {
       handle = await open(real, constants.O_WRONLY | noFollow)
     } catch (second) {
-      if ((second as { code?: unknown }).code === 'ELOOP') throw outside(target, access, home)
+      if (errorCode(second) === 'ELOOP') throw outside(target, access, home)
       throw second
     }
   }
