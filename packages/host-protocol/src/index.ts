@@ -2,7 +2,8 @@
  * The Host protocol (v1.2, hs-xax9): what Mr. Robot asks a Host (a computer running the Mr. Robot
  * app) and what the Host reports, as Effect RPC schemas shared by the app and the Worker. One
  * WebSocket per Host carries text frames: {"t":"rpc","d":<RPC message>} for calls (the Member DO
- * is the RPC client, the app the server) and {"t":"hb","d":<Heartbeat>} for heartbeats.
+ * is the RPC client, the app the server), {"t":"hb","d":<Heartbeat>} for heartbeats and {"t":"job","d":<JobEnded>} when a job on the
+ * Host ends.
  */
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -123,28 +124,96 @@ export const SandboxReport = Schema.Struct({
 })
 export type SandboxReport = typeof SandboxReport.Type
 
-/**
- * Run a command through DSH's shell and sandbox (v1.16 ticket 02, ob-wsf7): bash with bwrap or Landlock on Linux and Seatbelt on macOS,
- * as the signed-in user, in the Robot's directory unless told otherwise. The answer has DSH's foreground shape; a later ticket adds
- * the promoted and background shapes beside it.
- */
-export const RunOutcome = Schema.Struct({
-  kind: Schema.Literal('foreground'),
+/** The facts a command's answer carries whatever its shape: where it ran and how long the call waited. */
+const OutcomeFacts = {
   cwd: Schema.String,
+  timeoutMs: Schema.Number,
+}
+
+/** The command ended within the time the call gave it. */
+export const ForegroundOutcome = Schema.Struct({
+  kind: Schema.Literal('foreground'),
+  ...OutcomeFacts,
   exitCode: Schema.NullOr(Schema.Number),
   signal: Schema.NullOr(Schema.String),
   timedOut: Schema.Boolean,
   aborted: Schema.Boolean,
-  timeoutMs: Schema.Number,
   stdout: CollectedOutput,
   stderr: CollectedOutput,
+  /** What the sandbox did; known once the command has ended, so only this shape carries it. */
   sandbox: Schema.optional(SandboxReport),
 })
+
+/** The command was still running when the time was up, so it goes on as a job; `output` is what it printed so far. */
+export const PromotedOutcome = Schema.Struct({ kind: Schema.Literal('promoted'), ...OutcomeFacts, jobId: Schema.String, output: Schema.String })
+
+/** The call asked for a job, and the command was started as one. */
+export const BackgroundOutcome = Schema.Struct({ kind: Schema.Literal('background'), ...OutcomeFacts, jobId: Schema.String })
+
+/**
+ * Run a command through DSH's shell and sandbox (v1.16 tickets 02 and 03, ob-wsf7, ob-sja4): bash with bwrap or Landlock on Linux and
+ * Seatbelt on macOS, as the signed-in user, in the Robot's directory unless told otherwise. Every command is a job of DSH's jobs-local
+ * registry, and the answer has DSH's three shapes: it ended in time (foreground), it was still running at the limit (promoted: the job
+ * goes on) or it was started as a job at once (background).
+ */
+export const RunOutcome = Schema.Union([ForegroundOutcome, PromotedOutcome, BackgroundOutcome])
 export type RunOutcome = typeof RunOutcome.Type
 
 export const Run = Rpc.make('Run', {
-  payload: { command: Schema.String, cwd: Schema.optional(Schema.String), timeoutMs: Schema.optional(Schema.Number), access: HostAccess },
+  payload: {
+    command: Schema.String,
+    cwd: Schema.optional(Schema.String),
+    /** How long the call waits for the command to end before it goes on as a job; the command itself has no limit. */
+    timeoutMs: Schema.optional(Schema.Number),
+    /** Start the command as a job and answer at once. */
+    background: Schema.Boolean,
+    /** The name the Worker gives the job, which the other job calls and the job frame use. */
+    job: Schema.String,
+    access: HostAccess,
+  },
   success: RunOutcome,
+  error: HostError,
+})
+
+/** The code of the HostError a job call fails with when the app has no such job (it was never started here, or the app restarted). */
+export const NO_SUCH_JOB = 'NO_SUCH_JOB'
+
+/** How a job stands. Like DSH's: a nonzero exit is still completed; killed is a signal; failed is a job that broke before it ran. */
+export const JobState = Schema.Literals(['running', 'completed', 'killed', 'failed'])
+export type JobState = typeof JobState.Type
+
+export const JobInfo = Schema.Struct({
+  job: Schema.String,
+  command: Schema.String,
+  state: JobState,
+  exitCode: Schema.NullOr(Schema.Number),
+  signal: Schema.NullOr(Schema.String),
+  startedAt: Schema.Number,
+  finishedAt: Schema.NullOr(Schema.Number),
+})
+export type JobInfo = typeof JobInfo.Type
+
+/** The jobs of one Robot that this app holds, running and ended; a job the app lost by restarting is not among them. */
+export const JobList = Rpc.make('JobList', {
+  payload: { robot: Schema.String },
+  success: Schema.Struct({ jobs: Schema.Array(JobInfo) }),
+  error: HostError,
+})
+
+/**
+ * What a job printed on one stream from a byte offset on: the text, how many bytes of the stream it covers (the next offset is the
+ * offset plus that) and how long the stream is now. A job whose output outgrew the app's memory is read from the file the app keeps.
+ */
+export const JobOutput = Rpc.make('JobOutput', {
+  payload: { job: Schema.String, stream: Schema.Literals(['out', 'err']), offset: Schema.Number },
+  success: Schema.Struct({ text: Schema.String, bytes: Schema.Number, size: Schema.Number }),
+  error: HostError,
+})
+
+/** Stop a job. The answer says whether it was still running. */
+export const JobKill = Rpc.make('JobKill', {
+  payload: { job: Schema.String },
+  success: Schema.Struct({ outcome: Schema.Literals(['requested', 'already-finished']) }),
   error: HostError,
 })
 
@@ -160,7 +229,7 @@ export const BrowserClose = Rpc.make('BrowserClose', {
   error: HostError,
 })
 
-export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, BrowserOpen, BrowserClose) {}
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose) {}
 
 /** The sandbox state of a Host, as its heartbeat reports it. */
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])
@@ -169,6 +238,11 @@ export type Sandbox = typeof Sandbox.Type
 /** What a Host reports every few seconds while connected (hs-7dlt). */
 export const Heartbeat = Schema.Struct({
   version: Schema.String,
+  /**
+   * Which run of the app this is: new at every start, the same across reconnects. The jobs live in the app's memory, so a heartbeat
+   * with another instance than the jobs were started under says the app restarted and they are gone (v1.16 ticket 03, ob-cgn1).
+   */
+  instance: Schema.String,
   platform: Schema.String,
   hostname: Schema.String,
   capabilities: Schema.Struct({
@@ -195,7 +269,20 @@ export interface HostNotification {
   readonly tag: string
 }
 
-export type Frame = { readonly t: 'rpc'; readonly d: string } | { readonly t: 'hb'; readonly d: Heartbeat } | { readonly t: 'notify'; readonly d: HostNotification }
+/** A job ended on the Host without anyone waiting for it (v1.16 ticket 03, ob-ku5j): the Worker closes it and wakes the Robot. */
+export interface JobEnded {
+  /** The name the Worker gave the job in Run. */
+  readonly job: string
+  readonly state: 'completed' | 'killed' | 'failed'
+  readonly exitCode: number | null
+  readonly signal: string | null
+}
+
+export type Frame =
+  | { readonly t: 'rpc'; readonly d: string }
+  | { readonly t: 'hb'; readonly d: Heartbeat }
+  | { readonly t: 'notify'; readonly d: HostNotification }
+  | { readonly t: 'job'; readonly d: JobEnded }
 
 export function frame(value: Frame): string {
   return JSON.stringify(value)
@@ -204,7 +291,7 @@ export function frame(value: Frame): string {
 export function parseFrame(text: string): Frame | undefined {
   try {
     const value = JSON.parse(text) as Frame
-    return value.t === 'rpc' || value.t === 'hb' || value.t === 'notify' ? value : undefined
+    return value.t === 'rpc' || value.t === 'hb' || value.t === 'notify' || value.t === 'job' ? value : undefined
   } catch {
     return undefined
   }

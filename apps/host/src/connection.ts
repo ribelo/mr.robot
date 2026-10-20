@@ -6,7 +6,7 @@
 import { hostname, platform } from 'node:os'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
-import { frame, HEARTBEAT_MS, parseFrame, serveHost, type HostNotification } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, parseFrame, serveHost, type HostNotification, type JobEnded } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import { findChrome, hasGraphicalSession, type HostChrome } from './chrome.ts'
 import { hostHandlers } from './handlers.ts'
@@ -47,13 +47,22 @@ export class HostLink {
   private retry = 1000
   private heartbeat: ReturnType<typeof setInterval> | undefined
   private server: Fiber.Fiber<never, never> | undefined
+  /** Jobs that ended while there was no connection: the app is still the same run, so it tells the Worker when it is back. */
+  private readonly unsent: JobEnded[] = []
 
   constructor(
     private readonly target: { server: string; hostId: string; token: string; version: string },
     private readonly shell: HostShell,
     private readonly chrome: HostChrome,
     private readonly events: LinkEvents,
-  ) {}
+  ) {
+    shell.onJobEnded((ended) => {
+      if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(frame({ t: 'job', d: ended }))
+      else this.unsent.push(ended)
+      // The Worker looks at its running jobs from time to time anyway; a very long outage need not be remembered in full.
+      if (this.unsent.length > 200) this.unsent.shift()
+    })
+  }
 
   start(): void {
     this.stopped = false
@@ -74,7 +83,7 @@ export class HostLink {
   }
 
   private beat(): void {
-    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox } } }))
+    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, instance: this.shell.instance, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox } } }))
   }
 
   private connect(): void {
@@ -89,6 +98,7 @@ export class HostLink {
       this.retry = 1000
       this.server = Effect.runFork(host.server)
       this.beat()
+      for (const ended of this.unsent.splice(0)) socket.send(frame({ t: 'job', d: ended }))
       this.heartbeat = setInterval(() => this.beat(), HEARTBEAT_MS)
       this.events.state('online')
     })

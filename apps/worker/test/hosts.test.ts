@@ -79,7 +79,7 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     expect(denied).toContain('permission denied (EACCES)')
     // run is not offered without a shell grant; the Member DO refuses it too.
     expect(requests.get(without)!.at(-1)!.tools!.map((definition) => definition.name)).not.toContain('run')
-    expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, without, { command: 'id' }))).toMatch(/no shell grant/)
+    expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, without, { command: 'id', background: false, job: 'j-direct' }))).toMatch(/no shell grant/)
     expect(ran).not.toContain('id')
     const shell = await robotWith(ANNA, [`${host.hostId}:shell`])
     await say(ANNA, shell, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'leash --help' } }] }, { text: 'ok' }])
@@ -94,7 +94,7 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     await say(ANNA, mr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'uptime' } }] }, { text: 'ok' }])
     expect(toolResults(mr)[0]).toContain('ran: uptime')
     const bens = await robotWith(BEN, [`${host.hostId}:shell`])
-    expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, bens, { command: 'whoami' }))).toMatch(/no shell grant/)
+    expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, bens, { command: 'whoami', background: false, job: 'j-direct' }))).toMatch(/no shell grant/)
   })
 
   it('fails clearly when the host is offline, and marks it offline when heartbeats stop (hs-bfr8, hs-7dlt)', async () => {

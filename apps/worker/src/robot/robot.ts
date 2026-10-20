@@ -103,7 +103,7 @@ import { carryOut, parseTransferRequest, PART_BYTES, Transfers } from '../places
 import { parseS3Credentials, s3ObjectStore, type ObjectStore } from '../workspace/object-store.ts'
 import { BOX_ORIGIN_PATH, BOX_TOKEN_PATH, newBoxToken, sameToken } from '../box/token.ts'
 import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
-import { HostRunner, HostRuns } from '../places/host-runner.ts'
+import { HostRunner, HostRuns, type HostJobLink } from '../places/host-runner.ts'
 import type { Place, StoredPlace } from '../places/place.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
 import type { HostLink } from '../places/places.ts'
@@ -735,20 +735,37 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** A Host as a place for jobs, for as long as the Host side runs one command per call (HostRunner). */
+  /**
+   * A Host as a place for jobs (v1.16 ticket 03): its app runs the commands as jobs of DSH's jobs-local and keeps them while it runs.
+   * The place is always "up"; a Host that is gone or has restarted is told by its Member (hostJobsLost), and a job the Host no longer
+   * knows is gone when the alarm asks.
+   */
   private hostJobPlace(host: { readonly id: string; readonly name: string }, escalated = false): JobPlace {
     const robotId = this.store.requireConfig().id
-    const runner = new HostRunner(
-      this.hostRuns,
-      host.name,
-      (command, cwd, timeoutMs) => this.hostCall(async () => (await this.hostOwnerStub(host.id)).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, ...(escalated ? { escalated } : {}) })),
-      (pending) => this.ctx.waitUntil(pending),
-    )
-    return { place: `host:${host.id}`, label: host.name, start: async () => runner, runner: () => runner, alive: async () => true, touch: async () => undefined }
+    const owner = () => this.hostOwnerStub(host.id)
+    const link: HostJobLink = {
+      start: ({ job, command, cwd, timeoutMs, background }) => this.hostCall(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, background, job, ...(escalated ? { escalated } : {}) })),
+      // The alarm asks for the state of every running job: a Host that is away is not worth a notice to the owner each time.
+      list: async () => (await owner()).hostJobList(host.id, robotId),
+      output: (job, stream, offset) => this.hostCall(async () => (await owner()).hostJobOutput(host.id, robotId, job, stream, offset)),
+      kill: async (job) => { await this.hostCall(async () => (await owner()).hostJobKill(host.id, robotId, job)) },
+    }
+    const runner = new HostRunner(this.hostRuns, host.name, link, (pending) => this.ctx.waitUntil(pending))
+    return { place: `host:${host.id}`, label: host.name, start: async () => runner, runner: () => runner, alive: async () => true, touch: () => this.rearm() }
   }
 
-  /** The pending calls of the Robot's Host jobs (HostRunner); lost with the isolate. */
+  /** The pending calls of the Robot's Host jobs (HostRunner); lost with the isolate, after which the Host is asked. */
   private readonly hostRuns = new HostRuns()
+
+  /** For the Member of a Host: a job of this Robot ended there with nobody waiting for it (the job frame, ob-ku5j). */
+  async hostJobEnded(jobId: string, ended: { state: 'completed' | 'killed' | 'failed'; exitCode: number | null; signal: string | null }): Promise<void> {
+    await this.jobs().hostEnded(jobId, ended)
+  }
+
+  /** For the Member of a Host: these jobs of this Robot are gone, because the app restarted or the Host stayed away (ob-cgn1). */
+  async hostJobsLost(jobIds: string[], reason: string): Promise<void> {
+    await this.jobs().lose(jobIds, reason)
+  }
 
   /** The jobs of every place (v1.15 ticket 07, v1.16 ticket 01), made on first use. */
   private jobRegistry: Jobs | undefined
@@ -2188,7 +2205,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       upload: (input) => this.hostCall(async () => (await owner()).hostUpload(host.id, robotId, input)),
       download: (input) => this.hostCall(async () => (await owner()).hostDownload(host.id, robotId, input)),
       recordCopy: async (detail, outcome) => (await owner()).recordHostCopy(host.id, robotId, detail, outcome),
-      run: (command, cwd, timeoutMs, escalated) => this.hostCall(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, ...(escalated ? { escalated } : {}) })),
     }
   }
 

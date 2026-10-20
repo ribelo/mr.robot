@@ -5,7 +5,7 @@
 import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type Sandbox, type SandboxReport } from '@mr-robot/host-protocol'
+import { CopyFailed, downloadFile, frame, globToRegExp, HostError, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, SKIPPED_DIRECTORIES, uploadFile, type CopyIo, type HostAccess, type JobEnded, type JobState, type Sandbox, type SandboxReport } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -13,9 +13,10 @@ const ANNA = 'anna@example.com'
 
 export const ran: string[] = []
 /** Every command with the directory, mode and roots it reached the app with (v1.16 ticket 02), and every file call with its path and mode. */
-export const hostRuns: Array<{ command: string; cwd: string | undefined; access: HostAccess }> = []
+export const hostRuns: Array<{ command: string; cwd: string | undefined; access: HostAccess; background: boolean; timeoutMs: number | undefined; job: string }> = []
 export const hostFileCalls: Array<{ rpc: string; path: string; access: HostAccess }> = []
 const open: WebSocket[] = []
+let runs = 0
 /** The fake host's disk (v1.15, copy): path → bytes. */
 export const hostDisk = new Map<string, Uint8Array>()
 /** What the fake app did to copy: each Upload and Download it was handed, with the URLs' keys. */
@@ -25,6 +26,15 @@ const copyIo = (): CopyIo => ({ fetch: fakeR2(env.FILES), sleep: async () => und
 const hostError = (error: unknown) => new HostError({ message: error instanceof Error ? error.message : String(error) })
 /** Answers to commands, in order: the first that returns a result wins; every other command echoes. Cleared by the test. */
 export const hostCommands: Array<(command: string, access: HostAccess) => { stdout: string; stderr?: string; exitCode?: number; sandbox?: SandboxReport } | undefined> = []
+
+/** A job the fake app holds, as DSH's jobs-local would (v1.16 ticket 03): lost when the app restarts. */
+interface FakeJob { ref: string; command: string; cwd: string; state: JobState; exitCode: number | null; signal: string | null; out: string; err: string; startedAt: number; finishedAt: number | null }
+export const hostJobs = new Map<string, FakeJob>()
+/** Commands that do not end by themselves: a test ends them with finish. Cleared by closeHosts. */
+export const heldCommands = new Set<string>()
+/** The job calls the fake app received, in order, as "JobKill <ref>" and the like. */
+export const hostJobCalls: string[] = []
+const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
 
 const skippedPath = (path: string): boolean => path.split('/').some((segment) => (SKIPPED_DIRECTORIES as readonly string[]).includes(segment))
 
@@ -106,34 +116,120 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox } = {
       if (!hostDisk.delete(path)) return Effect.fail(new HostError({ message: `No file ${path}; nothing was deleted.`, code: 'ENOENT' }))
       return Effect.succeed({ path })
     },
-    Run: ({ command, cwd, access }) => {
+    Run: ({ command, cwd, timeoutMs, background, job, access }) => {
       ran.push(command)
-      hostRuns.push({ command, cwd, access })
+      hostRuns.push({ command, cwd, access, background, timeoutMs, job })
       // The app fails a confined command closed where it has no sandbox (ob-n72n).
       if (access.mode !== 'full' && options.sandbox === 'none') return Effect.fail(new HostError({ message: 'This computer has no usable sandbox', code: 'SANDBOX_UNAVAILABLE' }))
       const scripted = hostCommands.map((answer) => answer(command, access)).find((answer) => answer !== undefined)
       const sandbox = scripted?.sandbox ?? (access.mode === 'full' ? { mode: access.mode, denied: false } : { mode: access.mode, denied: false, enforcement: options.sandbox === 'partial' ? 'partial' as const : 'full' as const })
-      return Effect.succeed({
-        kind: 'foreground' as const, cwd: cwd ?? `/home/anna/mr-robot/${access.robot}`, exitCode: scripted?.exitCode ?? 0, signal: null, timedOut: false, aborted: false, timeoutMs: 120_000,
-        stdout: { text: scripted?.stdout ?? `ran: ${command}`, truncated: false }, stderr: { text: scripted?.stderr ?? '', truncated: false }, sandbox,
+      const where = cwd ?? `/home/anna/mr-robot/${access.robot}`
+      const held = heldCommands.has(command)
+      const stdout = scripted?.stdout ?? `ran: ${command}`
+      const record: FakeJob = { ref: job, command, cwd: where, state: held ? 'running' : 'completed', exitCode: held ? null : scripted?.exitCode ?? 0, signal: null, out: held ? '' : stdout, err: held ? '' : scripted?.stderr ?? '', startedAt: Date.now(), finishedAt: held ? null : Date.now() }
+      hostJobs.set(job, record)
+      const limit = timeoutMs ?? 120_000
+      if (background) return Effect.succeed({ kind: 'background' as const, cwd: where, timeoutMs: limit, jobId: job })
+      // The call waits for the command up to its limit, as the app does; a command that is still running then goes on as a job.
+      return Effect.promise(async () => {
+        for (const started = Date.now(); record.state === 'running' && Date.now() - started < limit; ) await new Promise((resolve) => setTimeout(resolve, 25))
+        if (record.state === 'running') return { kind: 'promoted' as const, cwd: where, timeoutMs: limit, jobId: job, output: record.out }
+        hostJobs.delete(job)
+        return {
+          kind: 'foreground' as const, cwd: where, exitCode: record.exitCode, signal: null, timedOut: false, aborted: false, timeoutMs: limit,
+          stdout: { text: record.out, truncated: false }, stderr: { text: record.err, truncated: false }, sandbox,
+        }
       })
+    },
+    JobList: ({ robot }) => Effect.sync(() => {
+      hostJobCalls.push(`JobList ${robot}`)
+      return { jobs: [...hostJobs.values()].filter((entry) => entry.ref.startsWith(`${robot}:`)).map((entry) => ({ job: entry.ref, command: entry.command, state: entry.state, exitCode: entry.exitCode, signal: entry.signal, startedAt: entry.startedAt, finishedAt: entry.finishedAt })) }
+    }),
+    JobOutput: ({ job, stream, offset }) => {
+      hostJobCalls.push(`JobOutput ${job} ${stream} ${offset}`)
+      const entry = hostJobs.get(job)
+      if (entry === undefined) return Effect.fail(new HostError({ message: `no job ${job}`, code: NO_SUCH_JOB }))
+      const all = bytes(stream === 'out' ? entry.out : entry.err)
+      const piece = all.subarray(offset, offset + 262_144)
+      return Effect.succeed({ text: new TextDecoder().decode(piece), bytes: piece.length, size: all.length })
+    },
+    JobKill: ({ job }) => {
+      hostJobCalls.push(`JobKill ${job}`)
+      const entry = hostJobs.get(job)
+      if (entry === undefined) return Effect.fail(new HostError({ message: `no job ${job}`, code: NO_SUCH_JOB }))
+      if (entry.state !== 'running') return Effect.succeed({ outcome: 'already-finished' as const })
+      Object.assign(entry, { state: 'killed' as const, signal: 'SIGTERM', finishedAt: Date.now() })
+      return Effect.succeed({ outcome: 'requested' as const })
     },
     BrowserOpen: () => Effect.fail(new HostError({ message: 'no Chrome in the fake host' })),
     BrowserClose: () => Effect.void,
   })
-  const host = serveHost(handlers, (text) => socket.send(text))
-  socket.addEventListener('message', (event) => {
-    const parsed = parseFrame(String(event.data))
-    if (parsed?.t === 'rpc') Effect.runFork(host.deliver(parsed.d))
-  })
-  Effect.runFork(host.server)
-  socket.send(frame({ t: 'hb', d: { version: '0.1.0', platform: 'linux', hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full' } } }))
+  let current = socket
+  let instance = `app-run-${++runs}`
+  const beat = (as = instance) => current.send(frame({ t: 'hb', d: { version: '0.1.0', instance: as, platform: 'linux', hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full' } } }))
+  /** The app serves the Host RPCs on a socket: its first connection, and each time it comes back. */
+  const serve = (on: WebSocket) => {
+    current = on
+    const host = serveHost(handlers, (text) => on.send(text))
+    on.addEventListener('message', (event) => {
+      const parsed = parseFrame(String(event.data))
+      if (parsed?.t === 'rpc') Effect.runFork(host.deliver(parsed.d))
+    })
+    Effect.runFork(host.server)
+    beat()
+  }
+  serve(socket)
   await new Promise((resolve) => setTimeout(resolve, 100))
-  return { hostId: paired.hostId, token: paired.token, socket, closes, connect }
+  /** The job's state, found by its command (the latest one). */
+  const jobOf = (command: string): FakeJob => {
+    const found = [...hostJobs.values()].filter((entry) => entry.command === command).at(-1)
+    if (found === undefined) throw new Error(`the fake app holds no job "${command}"`)
+    return found
+  }
+  return {
+    hostId: paired.hostId, token: paired.token, socket, closes, connect,
+    /** The job printed something. */
+    print: (command: string, text: string, stream: 'out' | 'err' = 'out') => { const job = jobOf(command); if (stream === 'out') job.out += text; else job.err += text },
+    /** The job ended; the app tells the Worker with a job frame unless the test says its connection was down. */
+    finish: (command: string, result: { stdout?: string; stderr?: string; exitCode?: number; frame?: boolean } = {}) => {
+      const job = jobOf(command)
+      job.out += result.stdout ?? ''
+      job.err += result.stderr ?? ''
+      Object.assign(job, { state: 'completed' as const, exitCode: result.exitCode ?? 0, finishedAt: Date.now() })
+      if (result.frame !== false) current.send(frame({ t: 'job', d: { job: job.ref, state: 'completed', exitCode: job.exitCode, signal: null } satisfies JobEnded }))
+    },
+    /** The connection drops and the same run of the app connects again (a network blip): the jobs are still there. */
+    blip: async () => {
+      current.close(1000)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const again = (await connect()).webSocket!
+      again.accept()
+      open.push(again)
+      serve(again)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    },
+    /** The connection drops and stays down. */
+    drop: async () => { current.close(1000); await new Promise((resolve) => setTimeout(resolve, 100)) },
+    /** The app restarts: a new run, with no jobs, connected again. */
+    restart: async () => {
+      current.close(1000)
+      hostJobs.clear()
+      instance = `app-run-${++runs}`
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const again = (await connect()).webSocket!
+      again.accept()
+      open.push(again)
+      serve(again)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    },
+  }
 }
 
 /** Close the sockets of the fake hosts a test opened. */
 export async function closeHosts(): Promise<void> {
+  hostJobs.clear()
+  heldCommands.clear()
+  hostJobCalls.length = 0
   for (const socket of open.splice(0)) {
     try { socket.close(1000) } catch { /* closed */ }
   }

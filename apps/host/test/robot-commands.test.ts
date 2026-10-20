@@ -8,13 +8,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import * as Effect from 'effect/Effect'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { access, connected } from './connected.ts'
+import { access, connected, jobName } from './connected.ts'
 import { deniedPath } from '../src/shell.ts'
 
 let home = ''
 let host: Awaited<ReturnType<typeof connected>>
-const run = (command: string, change: Parameters<typeof access>[0] = {}) => Effect.runPromise(host.rpc['Run']!({ command, access: access(change) }))
-const failure = (command: string, change: Parameters<typeof access>[0] = {}) => Effect.runPromise(Effect.flip(host.rpc['Run']!({ command, access: access(change) }))) as Promise<{ message: string; code?: string }>
+const run = (command: string, change: Parameters<typeof access>[0] = {}) => Effect.runPromise(host.rpc['Run']!({ command, background: false, job: jobName(), access: access(change) }))
+const failure = (command: string, change: Parameters<typeof access>[0] = {}) => Effect.runPromise(Effect.flip(host.rpc['Run']!({ command, background: false, job: jobName(), access: access(change) }))) as Promise<{ message: string; code?: string }>
 
 beforeAll(async () => {
   home = await mkdtemp(join(homedir(), '.mr-robot-host-test-'))
@@ -53,7 +53,7 @@ describe('a confined command', () => {
   it('writes in the extra roots of the grant', async (context) => {
     if (host.sandbox === 'none') return context.skip()
     const extra = join(home, 'extra')
-    await Effect.runPromise(host.rpc['Run']!({ command: `mkdir -p ${extra}`, access: access({ mode: 'full' }) }))
+    await Effect.runPromise(host.rpc['Run']!({ command: `mkdir -p ${extra}`, background: false, job: jobName(), access: access({ mode: 'full' }) }))
     const result = await run(`echo yes > ${extra}/y.txt`, { roots: [extra] })
     expect(result).toMatchObject({ exitCode: 0, sandbox: { denied: false } })
     expect(await readFile(join(extra, 'y.txt'), 'utf8')).toBe('yes\n')

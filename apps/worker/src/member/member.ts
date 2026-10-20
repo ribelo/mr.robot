@@ -3,8 +3,8 @@
  * PROACTIVE_PREFERENCES.md, mounted read-only into each of their Robots), and the
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
-import { copyTimeoutMs, type UploadPart } from '@mr-robot/host-protocol'
-import { HostHub, type HostEntry, type HostAction } from './hosts.ts'
+import { copyTimeoutMs, type RunOutcome, type UploadPart } from '@mr-robot/host-protocol'
+import { HostHub, jobRef, type HostEntry, type HostAction } from './hosts.ts'
 import { GoogleConsents } from './google-consent.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
 import { describeConnectorFailure } from '../connectors/connector.ts'
@@ -952,11 +952,20 @@ export class Member extends DurableObject<Env> {
   hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Upload({ ...input, access }), copyTimeoutMs(input.size)) }
   hostDownload(id: string, robotId: string, input: { path: string; url: string; size: number; partBytes: number }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Download({ ...input, access }), copyTimeoutMs(input.size)) }
   recordHostCopy(id: string, robotId: string, detail: string, outcome: string): void { this.hosts.recordCopy({ hostId: id, robotId, detail, outcome }) }
-  /** A command under the shell grant's mode and roots; `escalated` is a call its owner approved to run without the sandbox, once (ob-ifak). */
-  hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; escalated?: boolean }) {
-    const { escalated, ...payload } = input
-    return this.hosts.run(id, robotId, 'shell', (client, access) => client.Run({ ...payload, access }), Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000, { action: escalated === true ? 'run (escalated)' : 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})`, exitCode: (result) => result.exitCode }, escalated === true)
+  /**
+   * A command under the shell grant's mode and roots, run by the app as a job (v1.16 ticket 03): the call waits up to `timeoutMs` and
+   * answers with the result, or says the command goes on as a job, or starts one at once. `job` is the Robot's name for it.
+   * `escalated` is a call its owner approved to run without the sandbox, once (ob-ifak).
+   */
+  async hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; background: boolean; job: string; escalated?: boolean }): Promise<RunOutcome> {
+    const { escalated, job, ...payload } = input
+    const wait = input.background ? 60_000 : Math.min(input.timeoutMs ?? 120_000, 600_000) + 10_000
+    const outcome = await this.hosts.run(id, robotId, 'shell', (client, access) => client.Run({ ...payload, job: jobRef(robotId, job), access }), wait, { action: escalated === true ? 'run (escalated)' : 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})`, exitCode: (result) => result.kind === 'foreground' ? result.exitCode : null }, escalated === true)
+    return this.hosts.jobStarted(id, robotId, job, outcome)
   }
+  hostJobList(id: string, robotId: string) { return this.hosts.jobList(id, robotId) }
+  hostJobOutput(id: string, robotId: string, job: string, stream: 'out' | 'err', offset: number) { return this.hosts.jobOutput(id, robotId, job, stream, offset) }
+  hostJobKill(id: string, robotId: string, job: string) { return this.hosts.jobKill(id, robotId, job) }
   /** List, search and delete under the files grant, done by the app in Node (v1.16 ticket 02); a delete is a write and obeys the mode and roots. */
   hostGlob(id: string, robotId: string, pattern: string) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Glob({ pattern, access }), 60_000, { action: 'glob', detail: pattern }) }
   hostGrep(id: string, robotId: string, input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }) { return this.hosts.run(id, robotId, 'files', (client, access) => client.Grep({ ...input, access }), 60_000, { action: 'grep', detail: input.pattern }) }

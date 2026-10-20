@@ -16,7 +16,8 @@ async function main(): Promise<void> {
   console.log('sandbox on this computer:', shell.sandbox)
   const run = async (label: string, command: string, access: HostAccess) => {
     try {
-      const result = await shell.run({ command, access })
+      const result = await shell.run({ command, access, background: false, job: `check:${label.trim()}` })
+      if (result.kind !== 'foreground') throw new Error(`the command did not end: ${result.kind}`)
       console.log(label, JSON.stringify({ exitCode: result.exitCode, stdout: result.stdout.text.trim(), stderr: result.stderr.text.trim(), sandbox: result.sandbox }))
     } catch (error) {
       console.log(label, 'FAILED:', error instanceof Error ? error.message : String(error), (error as { code?: string }).code)

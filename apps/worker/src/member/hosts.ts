@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { HostView } from '@mr-robot/protocol'
-import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, type Heartbeat, type HostAccess, type HostNotification } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, type Heartbeat, type HostAccess, type HostNotification, type JobEnded, type JobInfo, type RunOutcome } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
 import { HOME_ID } from '../env.ts'
 
@@ -43,6 +43,22 @@ export interface HostEntry {
 /** What a Robot is told when a command would run confined on a computer that cannot confine it (ob-n72n). */
 export const NO_SANDBOX = (host: string, mode: string): string =>
   `${host} has no usable sandbox, so a command in ${mode} mode does not run there (it fails closed). Your owner can install bubblewrap on that computer (Linux) or give you the shell grant in full mode; or call run with escalate for one call.`
+
+/**
+ * How long a Host may stay away before its running jobs count as lost (v1.16 ticket 03, ob-cgn1). The jobs live in the app's memory, so a
+ * connection that drops and returns with the same app instance loses nothing; a new instance is a restart and loses them at once (the
+ * heartbeat says which). A Host that does not come back at all would leave the Robot waiting for ever, so this is the end of the wait.
+ */
+export const JOBS_LOST_AFTER_MS = 5 * 60_000
+
+/** The name of a job on a Host: the Robot's id and the Robot's name for the job. Only the Robot's id is needed to find its jobs. */
+export const jobRef = (robotId: string, jobId: string): string => `${robotId}:${jobId}`
+const splitRef = (ref: string): { robotId: string; jobId: string } | undefined => {
+  const at = ref.lastIndexOf(':')
+  return at <= 0 ? undefined : { robotId: ref.slice(0, at), jobId: ref.slice(at + 1) }
+}
+
+type JobRow = { host_id: string; robot_id: string; job_id: string; instance: string }
 
 export class HostOffline extends Error {
   override readonly name = 'HostOffline'
@@ -81,6 +97,11 @@ export class HostHub {
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS host (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL, token_hash TEXT NOT NULL, sharing TEXT NOT NULL,
       paired_at INTEGER NOT NULL, last_seen INTEGER, online INTEGER NOT NULL DEFAULT 0, heartbeat TEXT, origin TEXT
+    )`)
+    // The jobs Robots have on each Host, and the run of the app each started under: which Robot to tell when they are lost.
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS host_job (
+      host_id TEXT NOT NULL, robot_id TEXT NOT NULL, job_id TEXT NOT NULL, instance TEXT NOT NULL, started_at INTEGER NOT NULL,
+      PRIMARY KEY (host_id, robot_id, job_id)
     )`)
   }
 
@@ -123,6 +144,7 @@ export class HostHub {
 
   /** Unpair (hs-rwxw): the token stops working and the app is disconnected. */
   async unpair(id: string): Promise<void> {
+    await this.loseJobs(id, (name) => `${name} was unpaired while it ran`)
     this.ctx.storage.sql.exec('DELETE FROM host WHERE id = ?', id)
     for (const socket of this.ctx.getWebSockets(`host:${id}`)) {
       try { socket.close(4001, 'unpaired') } catch { /* closing */ }
@@ -191,6 +213,10 @@ export class HostHub {
         await this.report(id)
       }
       await this.armSweep()
+      // Another run of the app than the jobs started under: it restarted, and its jobs went with it.
+      if (typeof parsed.d.instance === 'string') await this.loseJobs(id, (name) => `the Mr. Robot app on ${name} was restarted while it ran`, parsed.d.instance)
+    } else if (parsed?.t === 'job') {
+      await this.jobEnded(parsed.d)
     } else if (parsed?.t === 'rpc') {
       const link = this.clients.get(id)
       if (link !== undefined) await Effect.runPromise(link.deliver(parsed.d))
@@ -214,6 +240,7 @@ export class HostHub {
       this.ctx.storage.sql.exec('UPDATE host SET online = 0 WHERE id = ?', id)
       await this.drop(id)
       await this.report(id)
+      await this.armJobsLost(id)
     }
     return true
   }
@@ -232,7 +259,87 @@ export class HostHub {
         await this.report(row.id)
       } else next = next === null ? due : Math.min(next, due)
     }
+    // A Host that stayed away with jobs running: past the wait they are lost.
+    for (const row of this.ctx.storage.sql.exec<HostRow>('SELECT * FROM host WHERE online = 0 AND id IN (SELECT host_id FROM host_job)').toArray()) {
+      const due = (row.last_seen ?? 0) + JOBS_LOST_AFTER_MS
+      if (due <= now) await this.loseJobs(row.id, (name) => `${name} stayed offline for more than ${JOBS_LOST_AFTER_MS / 60_000} minutes while it ran`)
+      else next = next === null ? due : Math.min(next, due)
+    }
     return next
+  }
+
+  /** The alarm comes back when the jobs of a Host that went offline are due to be lost. */
+  private async armJobsLost(id: string): Promise<void> {
+    if (this.ctx.storage.sql.exec('SELECT 1 FROM host_job WHERE host_id = ? LIMIT 1', id).toArray().length === 0) return
+    const due = (this.row(id)?.last_seen ?? Date.now()) + JOBS_LOST_AFTER_MS
+    const alarm = await this.ctx.storage.getAlarm()
+    if (alarm === null || alarm > due) await this.ctx.storage.setAlarm(due)
+  }
+
+  /** A Robot started a job on a Host (the app answered promoted or background): remember which Robot to tell if it is lost. */
+  trackJob(hostId: string, robotId: string, jobId: string): void {
+    const instance = this.instanceOf(this.row(hostId))
+    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO host_job (host_id, robot_id, job_id, instance, started_at) VALUES (?, ?, ?, ?, ?)', hostId, robotId, jobId, instance, Date.now())
+  }
+
+  private forgetJob(hostId: string, robotId: string, jobId: string): void {
+    this.ctx.storage.sql.exec('DELETE FROM host_job WHERE host_id = ? AND robot_id = ? AND job_id = ?', hostId, robotId, jobId)
+  }
+
+  private instanceOf(row: HostRow | undefined): string {
+    return row?.heartbeat == null ? '' : ((JSON.parse(row.heartbeat) as Partial<Heartbeat>).instance ?? '')
+  }
+
+  /**
+   * Jobs of a Host are lost: each Robot that owns one is told, once, and the Robot wakes as failed. With `instance` only the jobs that
+   * started under another run of the app are lost (a heartbeat of a restarted app); a job whose run is not known is never lost by that.
+   */
+  private async loseJobs(hostId: string, reasonFor: (hostName: string) => string, instance?: string): Promise<void> {
+    const rows = this.ctx.storage.sql.exec<JobRow>(
+      instance === undefined ? 'SELECT * FROM host_job WHERE host_id = ?' : "SELECT * FROM host_job WHERE host_id = ? AND instance != '' AND instance != ?",
+      ...(instance === undefined ? [hostId] : [hostId, instance]),
+    ).toArray()
+    if (rows.length === 0) return
+    for (const row of rows) this.forgetJob(row.host_id, row.robot_id, row.job_id)
+    const reason = reasonFor(this.row(hostId)?.name ?? 'The Host')
+    for (const robotId of new Set(rows.map((row) => row.robot_id))) {
+      const ids = rows.filter((row) => row.robot_id === robotId).map((row) => row.job_id)
+      await this.env.ROBOT.getByName(robotId).hostJobsLost(ids, reason).catch((error: unknown) => console.warn('lost jobs not told', error))
+    }
+  }
+
+  /** The app says a job ended with nobody waiting for it: the Robot that owns it closes it and wakes. */
+  private async jobEnded(ended: JobEnded): Promise<void> {
+    const ref = splitRef(ended.job)
+    if (ref === undefined) return
+    const hostId = this.ctx.storage.sql.exec<{ host_id: string }>('SELECT host_id FROM host_job WHERE robot_id = ? AND job_id = ?', ref.robotId, ref.jobId).toArray()[0]?.host_id
+    if (hostId !== undefined) this.forgetJob(hostId, ref.robotId, ref.jobId)
+    await this.env.ROBOT.getByName(ref.robotId).hostJobEnded(ref.jobId, { state: ended.state, exitCode: ended.exitCode, signal: ended.signal }).catch((error: unknown) => console.warn('ended job not told', error))
+  }
+
+  /** The jobs of one Robot that the app holds, named as the Robot named them. */
+  async jobList(id: string, robotId: string): Promise<JobInfo[]> {
+    const { jobs } = await this.run(id, robotId, 'shell', (client) => client.JobList({ robot: robotId }), 30_000)
+    for (const job of jobs) {
+      const ref = splitRef(job.job)
+      if (ref !== undefined && job.state !== 'running') this.forgetJob(id, ref.robotId, ref.jobId)
+    }
+    return jobs.flatMap((job) => { const ref = splitRef(job.job); return ref === undefined ? [] : [{ ...job, job: ref.jobId }] })
+  }
+
+  jobOutput(id: string, robotId: string, jobId: string, stream: 'out' | 'err', offset: number) {
+    return this.run(id, robotId, 'shell', (client) => client.JobOutput({ job: jobRef(robotId, jobId), stream, offset }), 60_000)
+  }
+
+  async jobKill(id: string, robotId: string, jobId: string): Promise<void> {
+    await this.run(id, robotId, 'shell', (client) => client.JobKill({ job: jobRef(robotId, jobId) }), 30_000, { action: 'stop job', detail: jobId })
+    this.forgetJob(id, robotId, jobId)
+  }
+
+  /** What a Run answered: a job that goes on is remembered. */
+  jobStarted(hostId: string, robotId: string, jobId: string, outcome: RunOutcome): RunOutcome {
+    if (outcome.kind !== 'foreground') this.trackJob(hostId, robotId, jobId)
+    return outcome
   }
 
   private async armSweep(): Promise<void> {

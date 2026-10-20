@@ -54,7 +54,11 @@ export function hostHandlers(shell: HostShell, chrome: HostChrome, relay: () => 
     Glob: ({ pattern, access }) => Effect.tryPromise({ try: () => disk.glob(access, pattern), catch: fail }),
     Grep: ({ pattern, ignoreCase, glob, path, access }) => Effect.tryPromise({ try: () => disk.grep(access, { pattern, ignoreCase, glob, path }), catch: fail }),
     Delete: ({ path, access }) => Effect.tryPromise({ try: () => disk.remove(access, path), catch: fail }),
-    Run: ({ command, cwd, timeoutMs, access }) => Effect.tryPromise({ try: () => shell.run({ command, cwd, timeoutMs, access }), catch: fail }),
+    // The signal ends when the connection to the Worker is lost: a command the call was still waiting for is then stopped.
+    Run: ({ command, cwd, timeoutMs, background, job, access }) => Effect.tryPromise({ try: (signal) => shell.run({ command, cwd, timeoutMs, background, job, access, signal }), catch: fail }),
+    JobList: ({ robot }) => Effect.try({ try: () => ({ jobs: shell.jobs.list(robot) }), catch: fail }),
+    JobOutput: ({ job, stream, offset }) => Effect.tryPromise({ try: () => shell.jobs.output(job, stream, offset), catch: fail }),
+    JobKill: ({ job }) => Effect.try({ try: () => ({ outcome: shell.jobs.stop(job) }), catch: fail }),
     BrowserOpen: ({ session, relayUrl }) => Effect.tryPromise({
       try: async () => {
         const endpoint = await chrome.devtools()

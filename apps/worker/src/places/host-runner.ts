@@ -1,23 +1,36 @@
 /**
- * Jobs on a Host, for as long as the Host side keeps today's RPCs (v1.16 ticket 01): the Host runs one command in a fresh shell and
- * answers when it ends. A job here is such a call that the Robot does not wait for: the Robot keeps the pending call and its answer
- * in memory, so a job is lost when the Robot restarts (the registry then marks it lost and wakes the Robot as failed). A Host job
- * that DSH's jobs-local runs on the Host itself replaces this in ticket 03; the registry (jobs.ts) does not change.
+ * Jobs on a Host (v1.16 ticket 03, ob-sja4): the Host app runs every command as a job of DSH's jobs-local registry and holds the job as long
+ * as the app runs. This runner is the Robot's side of it. A foreground command is one Run call that waits at the Host up to the limit and
+ * answers with the result, or with "promoted" when the command goes on; a job started at once answers "background". After that the Robot
+ * asks the Host for the job's state and output (JobList, JobOutput), and the registry (jobs.ts) does what it does for the Box.
+ *
+ * What the Robot keeps in memory is only the pending Run call and its answer. When the Robot restarts the memory is gone, and the
+ * runner asks the Host instead; a job the Host does not know is gone (the app restarted).
  */
-import type { RunOutcome } from '@mr-robot/host-protocol'
+import type { JobInfo, RunOutcome } from '@mr-robot/host-protocol'
 import type { BoxJobStatus } from '../box/backend.ts'
-import type { JobRunner, RunExtras } from './jobs.ts'
+import type { JobRunner, RunExtras, SpawnOptions } from './jobs.ts'
 
-/** The longest a command on a Host runs: the Host RPC stops it there. */
-export const HOST_COMMAND_MAX_SECONDS = 600
-
-/** What the Host answered for a command: DSH's foreground shape (ticket 02). */
+/** What the Host answered for a command: DSH's shapes (tickets 02 and 03). */
 export type HostCommandResult = RunOutcome
+type Foreground = Extract<RunOutcome, { kind: 'foreground' }>
+
+/** The Host's job calls for one Robot on one Host, each failing as a Host call fails (offline, refused, an OS error). */
+export interface HostJobLink {
+  /** Run: start the command as a job, wait for it up to `timeoutMs` (not at all for a background job). */
+  start(input: { job: string; command: string; cwd: string | undefined; timeoutMs: number; background: boolean }): Promise<HostCommandResult>
+  list(): Promise<readonly JobInfo[]>
+  output(job: string, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
+  kill(job: string): Promise<void>
+}
 
 type Entry =
+  /** The Run call is pending. */
   | { state: 'running' }
-  | { state: 'exited'; exitCode: number; result: HostCommandResult }
-  | { state: 'gone'; result: HostCommandResult }
+  /** The command ended within its call. */
+  | { state: 'done'; result: Foreground }
+  /** The Host holds the job: it was promoted or started in the background. */
+  | { state: 'continues' }
   /** The call did not run the command: the Host refused it, was offline or has no sandbox. The message says why. */
   | { state: 'refused'; message: string }
 
@@ -27,7 +40,7 @@ export class HostRuns {
 }
 
 /** What the Robot is told beside a result when the sandbox denied a write (ob-vnld): the path, and how to ask for the wider reach (ob-ifak). */
-export function denialNote(host: string, result: HostCommandResult): string | undefined {
+export function denialNote(host: string, result: Foreground): string | undefined {
   const sandbox = result.sandbox
   if (sandbox?.denied !== true) return undefined
   const where = sandbox.deniedPath === undefined ? 'a file' : sandbox.deniedPath
@@ -38,7 +51,7 @@ export function denialNote(host: string, result: HostCommandResult): string | un
 const cut = (name: string, output: { truncated: boolean }): string | undefined => (output.truncated ? `${name} is cut to its last part` : undefined)
 
 /** The notes and sandbox facts a result carries to the Robot beside its output. */
-function extrasOf(host: string, result: HostCommandResult): RunExtras {
+function extrasOf(host: string, result: Foreground): RunExtras {
   const note = [denialNote(host, result), result.sandbox?.enforcement === 'partial' ? `${host} enforces its sandbox only partly` : undefined, cut('stdout', result.stdout), cut('stderr', result.stderr)].filter((part) => part !== undefined).join('. ')
   return { cwd: result.cwd, ...(result.sandbox === undefined ? {} : { sandbox: result.sandbox }), ...(note === '' ? {} : { note }) }
 }
@@ -47,45 +60,65 @@ export class HostRunner implements JobRunner {
   constructor(
     private readonly runs: HostRuns,
     private readonly host: string,
-    /** One command on the Host, the call that returns when it ends; fails like every Host call. */
-    private readonly command: (command: string, cwd: string | undefined, timeoutMs: number) => Promise<HostCommandResult>,
+    private readonly link: HostJobLink,
     /** Keeps the Robot up while the call is pending. */
     private readonly keepAlive: (pending: Promise<unknown>) => void,
   ) {}
 
-  async spawn(job: string, command: string, cwd: string | undefined): Promise<void> {
+  async spawn(job: string, command: string, cwd: string | undefined, options: SpawnOptions): Promise<void> {
     this.runs.entries.set(job, { state: 'running' })
-    const pending = this.command(command, cwd, HOST_COMMAND_MAX_SECONDS * 1000).then(
-      (result) => {
-        if (this.runs.entries.get(job)?.state !== 'running') return
-        // A command the Host stopped (its limit, a signal) left no exit code.
-        this.runs.entries.set(job, result.exitCode === null ? { state: 'gone', result: { ...result, stderr: { ...result.stderr, text: `${result.stderr.text}${result.timedOut ? `\n[stopped after ${HOST_COMMAND_MAX_SECONDS} s]` : ''}` } } } : { state: 'exited', exitCode: result.exitCode, result })
-      },
+    const call = this.link.start({ job, command, cwd, timeoutMs: options.seconds * 1000, background: options.background })
+    if (options.background) {
+      // A job started at once is answered at once, so a refusal is the Robot's to hear now.
+      try {
+        this.answer(job, await call)
+      } catch (error) {
+        this.runs.entries.delete(job)
+        throw error
+      }
+      return
+    }
+    this.keepAlive(call.then(
+      (outcome) => this.answer(job, outcome),
       (error: unknown) => {
-        if (this.runs.entries.get(job)?.state !== 'running') return
-        this.runs.entries.set(job, { state: 'refused', message: error instanceof Error ? error.message : String(error) })
+        if (this.runs.entries.get(job)?.state === 'running') this.runs.entries.set(job, { state: 'refused', message: error instanceof Error ? error.message : String(error) })
       },
-    )
-    this.keepAlive(pending)
+    ))
+  }
+
+  private answer(job: string, outcome: HostCommandResult): void {
+    if (this.runs.entries.get(job)?.state !== 'running') return
+    this.runs.entries.set(job, outcome.kind === 'foreground' ? { state: 'done', result: outcome } : { state: 'continues' })
   }
 
   async status(job: string): Promise<BoxJobStatus> {
     const entry = this.runs.entries.get(job)
-    if (entry === undefined || entry.state === 'gone' || entry.state === 'refused') return { state: 'gone' }
-    return entry.state === 'running' ? { state: 'running' } : { state: 'exited', exitCode: entry.exitCode }
+    if (entry?.state === 'running') return { state: 'running' }
+    if (entry?.state === 'refused') return { state: 'gone' }
+    // A command the Host stopped (a signal) left no exit code.
+    if (entry?.state === 'done') return entry.result.exitCode === null ? { state: 'gone' } : { state: 'exited', exitCode: entry.result.exitCode }
+    // The Host holds the job (or the Robot restarted and forgot the call): ask it. A Host that cannot be reached is not an answer.
+    const listed = await this.link.list().then((jobs) => jobs.find((candidate) => candidate.job === job), () => 'unreachable' as const)
+    if (listed === 'unreachable' || listed?.state === 'running') return { state: 'running' }
+    if (listed === undefined || listed.exitCode === null) return { state: 'gone' }
+    return { state: 'exited', exitCode: listed.exitCode }
   }
 
   async output(job: string, stream: 'out' | 'err', offset: number): Promise<{ text: string; bytes: number; size: number }> {
     const entry = this.runs.entries.get(job)
-    const text = entry === undefined || entry.state === 'running' ? '' : entry.state === 'refused' ? (stream === 'err' ? entry.message : '') : stream === 'out' ? entry.result.stdout.text : entry.result.stderr.text
-    const bytes = new TextEncoder().encode(text)
-    const piece = bytes.subarray(offset, offset + 262_144)
-    return { text: new TextDecoder().decode(piece), bytes: piece.length, size: bytes.length }
+    if (entry?.state === 'refused' || entry?.state === 'done') {
+      const text = entry.state === 'refused' ? (stream === 'err' ? entry.message : '') : stream === 'out' ? entry.result.stdout.text : entry.result.stderr.text
+      const bytes = new TextEncoder().encode(text)
+      const piece = bytes.subarray(offset, offset + 262_144)
+      return { text: new TextDecoder().decode(piece), bytes: piece.length, size: bytes.length }
+    }
+    return this.link.output(job, stream, offset)
   }
 
-  /** The Host app cannot stop a command it is running for a call: the Robot lets go of it, and it ends at its own limit. */
   async kill(job: string): Promise<void> {
-    if (this.runs.entries.get(job)?.state === 'running') this.runs.entries.set(job, { state: 'exited', exitCode: 143, result: { kind: 'foreground', cwd: '', exitCode: 143, signal: null, timedOut: false, aborted: true, timeoutMs: 0, stdout: { text: '', truncated: false }, stderr: { text: '', truncated: false } } })
+    const entry = this.runs.entries.get(job)
+    if (entry?.state === 'refused' || entry?.state === 'done') return
+    await this.link.kill(job)
   }
 
   refusal(job: string): string | undefined {
@@ -95,6 +128,6 @@ export class HostRunner implements JobRunner {
 
   extras(job: string): RunExtras | undefined {
     const entry = this.runs.entries.get(job)
-    return entry?.state === 'exited' ? extrasOf(this.host, entry.result) : undefined
+    return entry?.state === 'done' ? extrasOf(this.host, entry.result) : undefined
   }
 }

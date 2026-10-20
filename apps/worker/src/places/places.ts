@@ -14,7 +14,6 @@ import { workspacePrefix } from '../workspace/workspace.ts'
 import { shellQuote } from './file-ops.ts'
 import { BoxFiles, boxPath, BOX_ROOT, HostFiles, WorkspaceFiles, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
 import type { Transfer, Transfers } from './transfers.ts'
-import type { HostCommandResult } from './host-runner.ts'
 import { Jobs, type JobEntry, type JobPlace, type RunResult } from './jobs.ts'
 import { BOX_PLACE, OWNED_ON_WORKSPACE, ownedPath, parseOn, placeName, WORKSPACE_PLACE, type Place, type PlaceFacet, type StoredPlace } from './place.ts'
 
@@ -28,8 +27,6 @@ export interface HostLink extends HostFileLink {
   download(input: { path: string; url: string; size: number; partBytes: number }): Promise<{ readonly path: string; readonly bytes: number }>
   /** The copy as a whole is one line in the Host's log. */
   recordCopy(detail: string, outcome: string): Promise<void>
-  /** One command through the Host's shell and sandbox, under the shell facet; `escalated` is a call the owner approved to run without the sandbox. */
-  run(command: string, cwd: string | undefined, timeoutMs: number, escalated: boolean): Promise<HostCommandResult>
 }
 
 export interface PlacesDeps {

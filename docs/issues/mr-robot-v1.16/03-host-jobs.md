@@ -6,5 +6,5 @@
 
 **Status:** ready-for-agent
 
-- [ ] Workerd test with the Host stub: promotion on the limit; background at once; job_output since last read and with wait; kill; the finished Wake-up and the spill log; lost on disconnect (ob-sja4, ob-ku5j, ob-6kkn, ob-cgn1)
-- [ ] By hand: a Host job survives the Robot's Turn and wakes it (ob-sja4)
+- [x] Workerd test with the Host stub: promotion on the limit; background at once; job_output since last read and with wait; kill; the finished Wake-up and the spill log; lost on disconnect (ob-sja4, ob-ku5j, ob-6kkn, ob-cgn1)
+- [ ] By hand: a Host job survives the Robot's Turn and wakes it (ob-sja4) (not run in this session: needs a person with the desktop app on a real computer and a deployed Worker; the Host side is checked in apps/host against real bash and jobs-local)

@@ -22,7 +22,7 @@ export const JOB_WAIT_MAX_MS = 600_000
 /** What the jobs of one place can do: the Box backend is one, a Host's runner another. */
 export interface JobRunner {
   /** Start a command that goes on by itself; the call returns once it is started. */
-  spawn(job: string, command: string, cwd: string | undefined): Promise<void>
+  spawn(job: string, command: string, cwd: string | undefined, options: SpawnOptions): Promise<void>
   status(job: string): Promise<BoxJobStatus>
   /** The output of one stream of a job from a byte offset on, and the size of that stream now. */
   output(job: string, stream: 'out' | 'err', offset: number): Promise<{ readonly text: string; readonly bytes: number; readonly size: number }>
@@ -31,6 +31,12 @@ export interface JobRunner {
   refusal?(job: string): string | undefined
   /** What a finished command adds to its result beside the output: its directory, the sandbox's facts and a note. */
   extras?(job: string): RunExtras | undefined
+}
+
+/** What a runner is told about a command beside the command: how long the Robot waits for it, and whether it is a job from the start. */
+export interface SpawnOptions {
+  readonly seconds: number
+  readonly background: boolean
 }
 
 /** The sandbox as the Robot sees it in a result (ticket 02): the mode, whether a write was denied (and where), and how completely it is enforced. */
@@ -119,7 +125,7 @@ export class Jobs {
     const id = jobIdOf()
     this.store.addJob(id, where.place, where.label, command, this.host.now())
     try {
-      await runner.spawn(id, command, cwd)
+      await runner.spawn(id, command, cwd, { seconds, background })
     } catch (error) {
       this.store.closeJob(id, 'lost', null, this.host.now(), null)
       throw error
@@ -210,8 +216,16 @@ export class Jobs {
       return { jobId: id, status: current.status, exitCode: current.exitCode, stdout: '', stderr: '', note: `${current.place === 'box' ? 'The Box has stopped' : `The job on ${where.label} has ended`}. The whole output is in ${current.spill}; read it with read on "workspace".` }
     }
     const runner = where.runner()
-    const out = await this.readFrom(runner, id, 'out', current.outOffset)
-    const err = await this.readFrom(runner, id, 'err', current.errOffset)
+    let out: { text: string; bytes: number }
+    let err: { text: string; bytes: number }
+    try {
+      out = await this.readFrom(runner, id, 'out', current.outOffset)
+      err = await this.readFrom(runner, id, 'err', current.errOffset)
+    } catch (error) {
+      // A Host drops the jobs it ended after a while, and forgets all of them when its app restarts; the log is what is left.
+      if (current.status !== 'running' && current.spill !== null) return { jobId: id, status: current.status, exitCode: current.exitCode, stdout: '', stderr: '', note: `The job has ended and ${where.label} no longer holds it. The whole output is in ${current.spill}; read it with read on "workspace".` }
+      throw error
+    }
     this.store.setJobOffsets(id, current.outOffset + out.bytes, current.errOffset + err.bytes)
     return {
       jobId: id, status: current.status, exitCode: current.exitCode, stdout: out.text, stderr: err.text,
@@ -258,6 +272,25 @@ export class Jobs {
       if (this.waiting.has(job.id)) continue
       if (job.foreground) this.store.promoteJob(job.id)
       await this.finish(job, status.state === 'exited' ? status.exitCode : null, up ? where.runner() : undefined)
+    }
+  }
+
+  /** A Host says a job of its own ended (the job frame, ob-ku5j): it is closed and the Robot is woken, once. */
+  async hostEnded(id: string, ended: { readonly state: 'completed' | 'killed' | 'failed'; readonly exitCode: number | null; readonly signal: string | null }): Promise<void> {
+    const job = this.store.job(id)
+    // A run waiting for it in this isolate closes it itself.
+    if (job === undefined || job.status !== 'running' || this.waiting.has(id)) return
+    if (job.foreground) this.store.promoteJob(id)
+    const stopped = ended.state === 'completed' ? undefined : ended.signal === null ? `it was ${ended.state}` : `it was stopped by signal ${ended.signal}`
+    await this.finish(job, ended.state === 'completed' ? ended.exitCode : null, this.placeOf(job).runner(), stopped)
+  }
+
+  /** The Member says these Host jobs are gone (the app restarted, or the Host stayed away too long): they are lost, and the Robot is woken as failed (ob-cgn1). */
+  async lose(ids: readonly string[], reason: string): Promise<void> {
+    for (const id of ids) {
+      const job = this.store.job(id)
+      if (job === undefined || job.status !== 'running' || this.waiting.has(id)) continue
+      await this.finish(job, null, undefined, reason)
     }
   }
 

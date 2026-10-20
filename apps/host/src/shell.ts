@@ -1,7 +1,8 @@
 /**
- * Commands on this computer, through DSH (v1.16 ticket 02, ob-wsf7): bash and DSH's sandbox-local (bwrap or Landlock on Linux,
- * Seatbelt on macOS). The Host app composes only the layer under DSH's tools (subprocess, sandbox, shell), in a context of its own; the
- * tools themselves belong to an agent and are not used. One seam picks the shell (a later ticket puts pwsh on Windows behind it).
+ * Commands on this computer, through DSH (v1.16 tickets 02 and 03, ob-wsf7, ob-sja4): bash and DSH's sandbox-local (bwrap or Landlock
+ * on Linux, Seatbelt on macOS), and jobs-local for the commands that outlive their call. The Host app composes only the layer under
+ * DSH's tools (subprocess, sandbox, shell, jobs), in a context of its own; the tools themselves belong to an agent and are not used.
+ * One seam picks the shell (a later ticket puts pwsh on Windows behind it); jobs.ts takes any process the seam spawns.
  */
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -10,12 +11,14 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Bash from '@deepseek-ai/dsh-bash-sandbox'
+import Jobs from '@deepseek-ai/dsh-jobs-local'
 import { SANDBOX_UNAVAILABLE as DSH_SANDBOX_UNAVAILABLE, type SandboxExecutionPolicy, type SandboxMode, type SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import Sandbox, { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
-import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
+import type { ShellExecution, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
-import { SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type Sandbox as SandboxState, type SandboxReport } from '@mr-robot/host-protocol'
+import { SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState } from '@mr-robot/host-protocol'
 import { ensureRobotDirectory, expandPath, writeRoots } from './access.ts'
+import { HostJobs } from './jobs.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = 600_000
@@ -87,32 +90,41 @@ const denial = (stderr: string, cwd: string): { deniedPath?: string } => {
 export interface RunInput {
   readonly command: string
   readonly cwd?: string | undefined
+  /** How long the call waits for the command before it goes on as a job. */
   readonly timeoutMs?: number | undefined
+  /** Start the command as a job and answer at once. */
+  readonly background: boolean
+  /** The name the Worker gives the job. */
+  readonly job: string
   readonly access: HostAccess
+  /** The call is cancelled (its connection went away): a command still being waited for is stopped. */
+  readonly signal?: AbortSignal | undefined
 }
 
-/** DSH's foreground shape, which the Run RPC answers with. */
-export type ShellResult = {
-  readonly kind: 'foreground'
-  readonly cwd: string
-  readonly exitCode: number | null
-  readonly signal: string | null
-  readonly timedOut: boolean
-  readonly aborted: boolean
-  readonly timeoutMs: number
-  readonly stdout: ShellRunResult['stdout']
-  readonly stderr: ShellRunResult['stderr']
-  readonly sandbox?: SandboxReport
-}
+/** What a job that is still running has printed so far, for the answer that tells the Robot it goes on. */
+const printedSoFar = (out: string, err: string): string => (err === '' ? out : `${out}\n[stderr]\n${err}`)
 
 export class HostShell {
+  /** Which run of the app this is: new at every start. The heartbeat carries it so that the Worker can tell a restart from a lost connection. */
+  readonly instance = crypto.randomUUID()
+  /** The jobs of this run of the app; they outlive the connection to the Worker. */
+  readonly jobs: HostJobs
+  private jobEnded: (ended: JobEnded) => void = () => undefined
+
   private constructor(
     private readonly ctx: Context,
     private readonly home: string,
     private readonly path: string | undefined,
     /** How completely this computer confines a command, found when the app started. */
     readonly sandbox: SandboxState,
-  ) {}
+  ) {
+    this.jobs = new HostJobs(ctx, (ended) => this.jobEnded(ended))
+  }
+
+  /** Who hears of a job that ends with nobody waiting for it (the link to the Worker). */
+  onJobEnded(listener: (ended: JobEnded) => void): void {
+    this.jobEnded = listener
+  }
 
   /** Compose DSH's layer and find out what the sandbox can do here (the heartbeat reports it, ob-n72n). */
   static async start(options: { readonly home?: string; readonly landlockLauncher?: string } = {}): Promise<HostShell> {
@@ -122,6 +134,8 @@ export class HostShell {
     await ctx.plugin(ManyRootsSandbox)
     await ctx.plugin(PolicyService)
     await ctx.plugin(Bash, {})
+    // Every command is a job here, the ones a call waits for too, so the limit per owner is raised well above DSH's ten.
+    await ctx.plugin(Jobs, { maxConcurrentJobsPerOwner: 200 })
     // A bundled app carries the Landlock launcher beside itself; DSH looks for it in node_modules.
     const launcher = options.landlockLauncher
     if (launcher !== undefined && existsSync(launcher)) (ctx.sandbox as LocalSandboxProvider).internals.landlockLauncher = launcher
@@ -134,28 +148,43 @@ export class HostShell {
     return new HostShell(ctx, home, await loginPath(), sandbox)
   }
 
-  /** One command in the Robot's directory (or the cwd it names), under the mode and roots of its grant. */
-  async run(input: RunInput): Promise<ShellResult> {
+  /**
+   * One command in the Robot's directory (or the cwd it names), under the mode and roots of its grant. It runs as a job: the call
+   * waits for it up to its limit and answers with the result (foreground), answers at once when asked for a job (background), and
+   * answers that it goes on as a job when it is still running at the limit (promoted).
+   */
+  async run(input: RunInput): Promise<RunOutcome> {
     const directory = await ensureRobotDirectory(this.home, input.access)
     const cwd = input.cwd === undefined ? directory : expandPath(this.home, directory, input.cwd)
     if (!(await stat(cwd).then((info) => info.isDirectory(), () => false))) throw Object.assign(new Error(`${cwd} is not a directory on this computer`), { code: 'ENOENT' })
     const extraRoots = writeRoots(this.home, input.access).slice(1)
     const policy: SandboxExecutionPolicy & { extraRoots?: readonly string[] } = { mode: SANDBOX_MODE[input.access.mode], workspaceRoot: directory, ...(extraRoots.length === 0 ? {} : { extraRoots }) }
-    let result: ShellRunResult
+    const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
+    let started: ShellExecution
     try {
+      // No deadline of its own: the command lives until it ends or is stopped, and the call bounds only its own wait.
       const spec = this.ctx.shell.resolve({
         command: input.command,
         workdir: cwd,
-        timeoutMs: Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS),
+        timeoutMs,
+        onExpiry: 'none',
         sandboxPolicy: policy,
         ...(this.path === undefined ? {} : { env: { PATH: this.path } }),
       })
-      result = await (await this.ctx.shell.execute(spec)).result()
+      started = await this.ctx.shell.execute(spec)
     } catch (error) {
       // A confined call on a computer with no usable sandbox fails closed, with the reason.
       if ((error as { code?: unknown }).code === DSH_SANDBOX_UNAVAILABLE) throw Object.assign(new Error(`This computer has no usable sandbox (Linux needs bubblewrap or a kernel with Landlock, macOS needs sandbox-exec), so a command in ${input.access.mode} mode does not run. Only a grant in full mode runs here.`), { code: SANDBOX_UNAVAILABLE })
       throw error
     }
+    this.jobs.start(input.job, input.command, started)
+    if (input.background) return { kind: 'background', cwd, timeoutMs, jobId: input.job }
+    if (!(await this.jobs.settled(input.job, timeoutMs, input.signal))) {
+      const [out, err] = await Promise.all([this.jobs.output(input.job, 'out', 0), this.jobs.output(input.job, 'err', 0)])
+      return { kind: 'promoted', cwd, timeoutMs, jobId: input.job, output: printedSoFar(out.text, err.text) }
+    }
+    const result: ShellRunResult = await started.result()
+    this.jobs.release(input.job)
     const sandbox = result.sandbox
     return {
       kind: 'foreground',

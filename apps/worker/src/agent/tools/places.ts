@@ -169,7 +169,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
     tools.push(
       tool<{ on: string; command: string; cwd?: string; timeout_seconds?: number; run_in_background?: boolean; escalate?: boolean; reason?: string }>({
         name: 'run',
-        description: `Run a shell command. Where: ${where}. There is no default: name the place on every call; the Workspace runs no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A command on a computer is stopped after 600 s. When the sandbox denies a write, the result says which path and how to ask for the wider reach: run the same command again with escalate and a reason; your owner is asked once, and the call runs without the sandbox only if they approve.`,
+        description: `Run a shell command. Where: ${where}. There is no default: name the place on every call; the Workspace runs no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A job on a computer lives as long as the Mr. Robot app there runs: if the app restarts or the computer stays away for five minutes, the job is lost and you are woken as failed. When the sandbox denies a write, the result says which path and how to ask for the wider reach: run the same command again with escalate and a reason; your owner is asked once, and the call runs without the sandbox only if they approve.`,
         parameters: {
           properties: {
             on: { type: 'string', description: `box or a computer's name. Where: ${where}.` },
@@ -207,7 +207,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       }),
       tool<{ job_id: string }>({
         name: 'job_kill',
-        description: 'Stop a running job: on the Box TERM to its whole process group, KILL five seconds later; on a computer you let go of it, and it ends at its own limit. Its output so far is kept in spill/jobs/.',
+        description: 'Stop a running job: on the Box TERM to its whole process group, KILL five seconds later; on a computer the app stops it. Its output so far is kept in spill/jobs/.',
         parameters: { properties: { job_id: { type: 'string', description: 'The job id from run or job_list' } }, required: ['job_id'] },
         execute: async ({ job_id }) => host.jobKill(job_id),
       }),

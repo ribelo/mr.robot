@@ -19,9 +19,9 @@ A Host belongs to the Member who paired it. It is private or shared with the Hom
 A Host offers three facets. Each is a separate grant item for a Robot:
 - browser: the Host browser, which is Chrome installed on that computer. Read browser.md.
 - files: read, write, edit, glob, grep, delete_file and copy with on set to the name of the Host. read and write pass the content through the model. copy moves one file, of any size and binary too, between the Host and your Workspace in either direction, or between two Hosts (it is parked in your Workspace under tmp/ and deleted after); the content does not pass through the model, and the Host app and R2 exchange it directly in parts of 64 MB. A file copied into box/ is on your Box at its next boot. A relative path on a Host starts in your own directory there. See "Your directory and what you may change".
-- shell: run with on set to the name of the Host. It runs a bash command as the OS user, through the sandbox of the app. A command that is still going at its time limit goes on as a job, as on the Box (job_list, job_output and job_kill), for at most 600 seconds.
+- shell: run with on set to the name of the Host. It runs a bash command through the sandbox of the app. A command still going at its time limit goes on as a job (job_list, job_output, job_kill); run_in_background starts one at once. A job is lost if the app restarts or the Host is away over five minutes.
 
-The tools take a mandatory \`on\`: "workspace", "box" or the name of a Host. There is no default. A call to a Host that the Robot holds no facet on, or to a name that is no Host, is refused and names the grant. These are the Host tools. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one.
+The tools take a mandatory \`on\`: "workspace", "box" or the name of a Host. There is no default. A call to a Host that the Robot holds no facet on, or to a name that is no Host, is refused and names the grant. A new Robot gets deny on all Hosts. The owner or the Robot proposes a grant. Read grants.md. Mr. Robot holds every facet his owner can reach, unless the owner lowered one.
 
 ## Your directory and what you may change
 
