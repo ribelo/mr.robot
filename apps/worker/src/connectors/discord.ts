@@ -128,6 +128,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
     },
     {
       name: 'discord_guilds',
+      external: true,
       service: 'discord',
       description: 'The servers this bot is in.',
       parameters: { properties: {} },
@@ -136,6 +137,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
     },
     {
       name: 'discord_channels',
+      external: true,
       service: 'discord',
       description: 'The channels of a server (text channels and threads), or the direct messages the bot can see.',
       parameters: { properties: { guildId: { type: 'string', description: 'A server id from discord_guilds; leave out to list the bot\'s direct messages.' } } },
@@ -151,6 +153,7 @@ export function discordTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSp
     },
     {
       name: 'discord_read_messages',
+      external: true,
       service: 'discord',
       description: 'Read recent messages of a channel or direct message, newest first.',
       parameters: { properties: { channelId: { type: 'string', description: 'Discord channel id (from discord_channels)' }, limit: { type: 'number', description: 'Most messages to return (default 25, at most 100)' }, before: { type: 'string', description: 'A message id: only messages before it.' } }, required: ['channelId'] },

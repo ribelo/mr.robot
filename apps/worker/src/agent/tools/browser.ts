@@ -16,18 +16,21 @@ export function browserTools(host: BrowserHost): ToolDefinition[] {
   return [
     tool<{ url: string }>({
       name: 'browser_open',
+      external: true,
       description: 'Open a URL in your browser (it keeps your cookies and logins between Turns). Returns what is on the page.',
       parameters: { properties: { url: { type: 'string', description: 'The http or https address to open' } }, required: ['url'] },
       execute: async ({ url }) => renderObservation(await host.browserOpen(url)),
     }),
     tool<Record<string, never>>({
       name: 'browser_observe',
+      external: true,
       description: 'Look at the current page: its numbered elements and text.',
       parameters: { properties: {} },
       execute: async () => renderObservation(await host.browserObserve()),
     }),
     tool<{ action: string; index?: number; text?: string; submit?: boolean; option?: string; checked?: boolean; key?: string; direction?: 'up' | 'down' }>({
       name: 'browser_act',
+      external: true,
       description: 'Act on the page: click, type (into a text field, optionally submit with Enter), select (an option of a select), check (set a checkbox), press (a key such as Enter or Escape), scroll (up or down). Elements are referenced by the index from the latest observation. Returns the page after the action. Stop before payment or bank confirmation steps.',
       parameters: {
         properties: {
@@ -46,6 +49,7 @@ export function browserTools(host: BrowserHost): ToolDefinition[] {
     }),
     tool<{ text?: string; ms?: number }>({
       name: 'browser_wait',
+      external: true,
       description: 'Wait until some text is visible on the page: the visible page text and the page title are searched (exact match, case-sensitive). With text, ms is the timeout (default 30 000 ms, at most 60 000) and the call throws when the text does not appear in time. Without text, wait ms milliseconds (default 1 000, at most 30 000).',
       parameters: { properties: { text: { type: 'string', description: 'Text to wait for in the visible page text or the page title' }, ms: { type: 'integer', description: 'With text: the timeout in milliseconds (default 30000). Without text: how long to wait (default 1000)' } } },
       execute: async (input) => renderObservation(await host.browserWait(input)),

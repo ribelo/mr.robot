@@ -120,6 +120,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
   const specs: Array<ConnectorToolSpec<Args>> = [
     {
       name: 'slack_list_user_channels',
+      external: true,
       service: 'slack',
       description: 'List the channels and direct messages of the workspace with their unread counts, most recent activity first.',
       parameters: { properties: { max: { type: 'number', description: 'At most this many (default 100).' } } },
@@ -142,6 +143,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'slack_list_unreads',
+      external: true,
       service: 'slack',
       description: 'What is unread: every channel, group and direct message with unread messages, how many, and when the last one arrived (slkx reads this the same way).',
       parameters: { properties: { withChannels: { type: 'boolean', description: 'Name each channel (one extra call); default true.' } } },
@@ -165,6 +167,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'slack_read_channel',
+      external: true,
       service: 'slack',
       description: "Read a channel's recent messages, newest first (slack_list_user_channels gives the ids).",
       parameters: { properties: { channel: { type: 'string', description: 'Slack channel id (from slack_list_user_channels)' }, limit: { type: 'number', description: 'Most messages to return' }, oldest: { type: 'string', description: 'A ts or ISO time: only messages after it.' }, latest: { type: 'string', description: 'Only messages before this timestamp (ts)' } }, required: ['channel'] },
@@ -183,6 +186,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'slack_read_thread',
+      external: true,
       service: 'slack',
       description: 'Read a thread: the parent message and its replies, oldest first.',
       parameters: { properties: { channel: { type: 'string', description: 'Slack channel id (from slack_list_user_channels)' }, threadTs: { type: 'string', description: 'Timestamp (ts) of the thread\'s first message' }, limit: { type: 'number', description: 'Most messages to return' } }, required: ['channel', 'threadTs'] },
@@ -197,6 +201,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'slack_search_channels',
+      external: true,
       service: 'slack',
       description: 'Find channels and direct messages by name, topic or purpose.',
       parameters: { properties: { query: { type: 'string', description: 'Words to search for' }, max: { type: 'number', description: 'Most results to return' } }, required: ['query'] },
@@ -212,6 +217,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'slack_search_users',
+      external: true,
       service: 'slack',
       description: 'Find people by name, display name or e-mail address.',
       parameters: { properties: { query: { type: 'string', description: 'Words to search for' }, max: { type: 'number', description: 'Most results to return' } }, required: ['query'] },
@@ -227,6 +233,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'slack_read_user_profile',
+      external: true,
       service: 'slack',
       description: "Read one person's profile: display name, username, title, e-mail and phone.",
       parameters: { properties: { user: { type: 'string', description: 'A user id (U…) or a name as slack_search_users shows it.' } }, required: ['user'] },
@@ -250,6 +257,7 @@ export function slackTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'slack_search_public_and_private',
+      external: true,
       service: 'slack',
       description: 'Search messages across the workspace channels and direct messages (Slack search syntax, e.g. "from:@anna invoice", "in:#finance budget").',
       parameters: { properties: { query: { type: 'string', description: 'Words to search for' }, max: { type: 'number', description: 'Most results to return' } }, required: ['query'] },

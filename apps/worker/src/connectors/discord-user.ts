@@ -132,6 +132,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
   const specs: Array<ConnectorToolSpec<Args>> = [
     {
       name: 'discord_list_user_guilds',
+      external: true,
       description: 'List the servers (guilds) this Discord account is on.',
       parameters: { properties: {} },
       action: () => 'list servers',
@@ -139,6 +140,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     },
     {
       name: 'discord_list_user_channels',
+      external: true,
       description: 'List the channels of a server (text, voice chat, announcement, forum), or without guildId the direct messages of the account, most recent first.',
       parameters: { properties: { guildId: { type: 'string', description: 'A server id from discord_list_user_guilds; leave out for direct messages.' }, max: { type: 'number', description: 'At most this many (default 100).' } } },
       action: (args) => (str(args, 'guildId') === '' ? 'list direct messages' : 'list channels of ' + str(args, 'guildId')),
@@ -169,6 +171,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     },
     {
       name: 'discord_read_channel',
+      external: true,
       description: "Read a channel's or a direct message's recent messages, newest first. A message with a thread names the thread's id for discord_read_thread.",
       parameters: { properties: { channelId: CHANNEL_ID, limit: { type: 'number', description: 'Most messages to return (default 50, at most 100)' }, before: { type: 'string', description: 'A message id: only messages before it.' } }, required: ['channelId'] },
       action: (args) => 'read ' + str(args, 'channelId'),
@@ -179,6 +182,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     },
     {
       name: 'discord_read_thread',
+      external: true,
       description: 'Read a thread: its messages, oldest first (the thread id is in the thread field of a message from discord_read_channel).',
       parameters: { properties: { threadId: { type: 'string', description: 'The thread id' }, limit: { type: 'number', description: 'Most messages to return (default 100, at most 100)' } }, required: ['threadId'] },
       action: (args) => 'read thread ' + str(args, 'threadId'),
@@ -189,6 +193,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     },
     {
       name: 'discord_search_messages',
+      external: true,
       description: 'Search messages in a server, or in one direct message, newest first.',
       parameters: { properties: {
         query: { type: 'string', description: 'Words to search for' },
@@ -215,6 +220,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     },
     {
       name: 'discord_search_users',
+      external: true,
       description: "Find people by name: the account's friends, or with guildId the members of a server.",
       parameters: { properties: { query: { type: 'string', description: 'Words to search for' }, guildId: { type: 'string', description: 'A server id from discord_list_user_guilds' }, max: { type: 'number', description: 'Most results to return (default 20)' } }, required: ['query'] },
       action: (args) => 'search people "' + str(args, 'query') + '"' + (str(args, 'guildId') === '' ? '' : ' in ' + str(args, 'guildId')),
@@ -234,6 +240,7 @@ export function discordUserTools(host: ConnectorHost): ReadonlyArray<ConnectorTo
     },
     {
       name: 'discord_read_user_profile',
+      external: true,
       description: "Read one person's profile: name, username, bio, pronouns and the servers the account shares with them.",
       parameters: { properties: { userId: { type: 'string', description: 'A user id (fromId of a message, or from discord_search_users)' } }, required: ['userId'] },
       action: (args) => 'read profile ' + str(args, 'userId'),

@@ -223,6 +223,8 @@ export interface ConnectorToolSpec<A> {
   readonly parameters: { readonly properties: Record<string, unknown>; readonly required?: readonly string[]; readonly emptyAllowed?: readonly string[] }
   /** A write tool (send, post): offered only when an account has the write grant. */
   readonly write?: boolean
+  /** The result carries text written by others (mail, chat messages): fenced as external data (agent/tools/external.ts). */
+  readonly external?: true
   /** Which service of the account the tool needs (Google: gmail, calendar, …). */
   readonly service?: string
   /** One line naming what the call did, for the failure header and the trajectory. */
@@ -250,6 +252,7 @@ export function connectorTool<A extends Record<string, unknown>>(host: Connector
   const itemsOf = (account: GrantedConnection): GrantItem[] => [{ kind: 'connection', name: account.id }, ...(spec.write === true ? [{ kind: 'connection' as const, name: `${account.id}:write` }] : [])]
   return withCallItems(tool<A & { account?: string }>({
     name: spec.name,
+    ...(spec.external === true ? { external: true as const } : {}),
     description: `${spec.description}${several ? '' : ` Acts on ${only.label === only.account ? only.label : `${only.label} (${only.account})`}.`}`,
     parameters: { properties, ...(spec.parameters.required === undefined ? {} : { required: [...spec.parameters.required] }) } as never,
     ...(spec.parameters.emptyAllowed === undefined ? {} : { emptyAllowed: spec.parameters.emptyAllowed }),

@@ -6,6 +6,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import WebRuntime, { WebError, type WebFetchProvider, type WebFetchRequest, type WebFetchResult } from '@deepseek-ai/dsh-web'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import { fenced } from './tools/external.ts'
 import { withToolRewrite } from './tool-wording.ts'
 
 const MAX_BODY_BYTES = 2_000_000
@@ -48,7 +49,7 @@ const FETCH_DESCRIPTION = 'Fetch the content of a specific HTTP(S) URL and retur
 /** dsh-tool-web with fetch only, and a web_fetch description that states the status behaviour and where search is. */
 const FetchOnly = {
   ...ToolWeb,
-  apply: (ctx: Context, config: unknown) => ToolWeb.apply(withToolRewrite(ctx, (tool) => (tool.name === 'web_fetch' ? { ...tool, description: FETCH_DESCRIPTION } : tool)) as never, config as never),
+  apply: (ctx: Context, config: unknown) => ToolWeb.apply(withToolRewrite(ctx, (tool) => (tool.name === 'web_fetch' ? fenced({ ...tool, description: FETCH_DESCRIPTION }) : tool)) as never, config as never),
 }
 
 /** The web seam with the Worker's fetch provider, and dsh-tool-web with web_fetch only. */

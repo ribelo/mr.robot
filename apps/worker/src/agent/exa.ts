@@ -43,6 +43,7 @@ export function exaResearchTools(host: ExaHost): ToolDefinition[] {
   return [
     tool<Search>({
       name: 'web_search_exa',
+      external: true,
       description: 'Search the web with Exa and get the best pages with their text. Good for research without opening a browser.',
       parameters: {
         properties: {
@@ -63,6 +64,7 @@ export function exaResearchTools(host: ExaHost): ToolDefinition[] {
     }),
     tool<{ urls?: string[]; ids?: string[]; subpages?: number; subpageTarget?: string | string[]; maxAgeHours?: number }>({
       name: 'crawling_exa',
+      external: true,
       description: 'Fetch the contents of pages (by URL or Exa result id) with Exa, optionally with their subpages.',
       parameters: {
         properties: {
@@ -80,6 +82,7 @@ export function exaResearchTools(host: ExaHost): ToolDefinition[] {
     }),
     tool<{ query: string; tokensNum?: number | 'dynamic' }>({
       name: 'get_code_context_exa',
+      external: true,
       description: 'Find code examples and documentation for a programming question with Exa.',
       parameters: {
         properties: {
@@ -101,6 +104,7 @@ export function exaAgentTools(host: ExaHost): ToolDefinition[] {
   return [
     tool<{ query: string; outputSchema?: Record<string, unknown>; systemPrompt?: string; metadata?: Record<string, unknown>; effort?: string }>({
       name: 'exa_agent_create_run',
+      external: true,
       description: 'Start an Exa agent research run (billable, may take minutes). Check it with exa_agent_get_run.',
       parameters: {
         properties: {
@@ -116,24 +120,28 @@ export function exaAgentTools(host: ExaHost): ToolDefinition[] {
     }),
     tool<{ id: string }>({
       name: 'exa_agent_get_run',
+      external: true,
       description: 'Read an Exa agent run: its status and, when done, its output.',
       parameters: { properties: { id: { type: 'string', description: 'Run id from exa_agent_create_run or exa_agent_list_runs' } }, required: ['id'] },
       execute: async ({ id }) => exa(host, 'GET', `/agent/runs/${encodeURIComponent(id)}`),
     }),
     tool<{ limit?: number; cursor?: string }>({
       name: 'exa_agent_list_runs',
+      external: true,
       description: 'List Exa agent runs.',
       parameters: { properties: { limit: { type: 'integer', description: 'How many runs, 1 to 100' }, cursor: { type: 'string', description: 'The nextCursor of the previous page' } } },
       execute: async ({ limit, cursor }) => exa(host, 'GET', `/agent/runs?${new URLSearchParams(defined({ limit: limit === undefined ? undefined : String(limit), cursor }) as Record<string, string>)}`),
     }),
     tool<{ id: string; limit?: number; cursor?: string }>({
       name: 'exa_agent_list_events',
+      external: true,
       description: 'List the stored events of an Exa agent run.',
       parameters: { properties: { id: { type: 'string', description: 'Run id from exa_agent_create_run or exa_agent_list_runs' }, limit: { type: 'integer', description: 'How many events, 1 to 100' }, cursor: { type: 'string', description: 'The nextCursor of the previous page' } }, required: ['id'] },
       execute: async ({ id, limit, cursor }) => exa(host, 'GET', `/agent/runs/${encodeURIComponent(id)}/events?${new URLSearchParams(defined({ limit: limit === undefined ? undefined : String(limit), cursor }) as Record<string, string>)}`),
     }),
     tool<{ id: string }>({
       name: 'exa_agent_cancel_run',
+      external: true,
       description: 'Cancel a queued or running Exa agent run.',
       parameters: { properties: { id: { type: 'string', description: 'Run id to cancel' } }, required: ['id'] },
       execute: async ({ id }) => exa(host, 'POST', `/agent/runs/${encodeURIComponent(id)}/cancel`),

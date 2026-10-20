@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: a web_fetch and a gmail_thread result are fenced with the source; a read of a Workspace file and a box_run result are not (gb-75j6, gb-d0d4)
-- [ ] Workerd test: a result containing the closing marker comes out with the marker rewritten (gb-75j6)
-- [ ] The fence rule is in the prompt's tools section (gb-1dxb)
+- [x] Workerd test: a web_fetch and a gmail_thread result are fenced with the source; a read of a Workspace file and a box_run result are not (gb-75j6, gb-d0d4)
+- [x] Workerd test: a result containing the closing marker comes out with the marker rewritten (gb-75j6)
+- [x] The fence rule is in the prompt's tools section (gb-1dxb)

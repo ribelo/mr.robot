@@ -99,6 +99,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
   const specs: Array<ConnectorToolSpec<Args>> = [
     {
       name: 'gmail_search',
+      external: true,
       service: 'gmail',
       description: 'Search the mailbox with Gmail search syntax (e.g. "is:unread in:inbox", "from:bank newer_than:7d", "has:attachment invoice"). Returns threads newest first: id, latest message from, subject, date, snippet, unread, labels, attachments.',
       parameters: { properties: { query: { type: 'string', description: 'Gmail search query, for example "is:unread in:inbox" or "from:bank newer_than:7d"' }, max: { type: 'number', description: 'At most this many threads (default 20, up to 50).' } }, required: ['query'] },
@@ -116,6 +117,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'gmail_thread',
+      external: true,
       service: 'gmail',
       description: 'Read a whole thread: every message with from, to, date, subject, its text and its attachments (ids and names for gmail_attachment).',
       parameters: { properties: { threadId: { type: 'string', description: 'Gmail thread id (from gmail_search)' } }, required: ['threadId'] },
@@ -124,6 +126,7 @@ export function gmailTools(host: ConnectorHost): ReadonlyArray<ConnectorToolSpec
     },
     {
       name: 'gmail_attachment',
+      external: true,
       service: 'gmail',
       description: 'Save an attachment of a message into your Workspace under attachments/gmail/; returns its path.',
       parameters: { properties: { messageId: { type: 'string', description: 'Gmail message id (from gmail_thread)' }, attachmentId: { type: 'string', description: 'Attachment id (from gmail_thread)' }, filename: { type: 'string', description: 'Name to save the file under in your Workspace' } }, required: ['messageId', 'attachmentId', 'filename'] },

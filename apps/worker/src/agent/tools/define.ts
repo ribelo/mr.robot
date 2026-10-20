@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
+import { fenced } from './external.ts'
 
 type JsonSchema = Record<string, unknown>
 
@@ -7,6 +8,8 @@ export interface ToolSpec<A> {
   readonly description: string
   readonly parameters: JsonSchema
   readonly concurrencySafe?: boolean
+  /** The result carries text from outside: its rendered text is fenced as external data (external.ts). */
+  readonly external?: true
   /** Required string parameters for which the empty string is a real value (an empty file, a deletion, a mail without text). */
   readonly emptyAllowed?: readonly string[]
   readonly execute: (args: A, exec: ToolRunContext) => Promise<unknown>
@@ -32,7 +35,7 @@ export function requireParameters(spec: Pick<ToolSpec<unknown>, 'name' | 'parame
 
 /** A DSH tool whose result is JSON shown to the model as text. */
 export function tool<A>(spec: ToolSpec<A>): ToolDefinition {
-  return {
+  const definition = {
     name: spec.name,
     description: spec.description,
     parameters: { type: 'object', additionalProperties: false, ...spec.parameters } as never,
@@ -46,4 +49,5 @@ export function tool<A>(spec: ToolSpec<A>): ToolDefinition {
       return spec.execute(args as A, exec)
     },
   } as ToolDefinition
+  return spec.external === true ? fenced(definition) : definition
 }
