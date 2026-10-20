@@ -19,6 +19,7 @@ The address is #/r/<robot>/pages/<path>.
 
 - A Markdown Page shows its title, a table of contents from its "##" and "###" headings, and the text with tables, TeX math (KaTeX), Mermaid diagrams and images from the Workspace.
 - An HTML Page runs in a frame without the app's origin. It can run its own inline script. It cannot reach the app, its cookies or its API, and it loads nothing from the internet. Links open in a new tab. Source shows the HTML.
+- An HTML Page cannot show images from the Workspace; only images written into the file as data: URLs. A Page that needs Workspace images is Markdown.
 - Rename (the owner only) changes the title.
 - PDF prints the Page through Browser Rendering and downloads it.
 

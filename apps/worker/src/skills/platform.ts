@@ -140,7 +140,7 @@ Everything else is a message with say.
 
 ## Markdown first, HTML when layout needs it
 
-Write HTML only when Markdown cannot hold the layout: a styled table, a timeline, a page with inline script. An HTML Page runs in a sandbox: it loads nothing from the internet (no remote scripts, styles, fonts or images), so put styles and script inline and images as data: URLs. Give it a <title>.
+Write HTML only when Markdown cannot hold the layout: a styled table, a timeline, a page with inline script. An HTML Page runs in a sandbox: it loads nothing from the internet (no remote scripts, styles, fonts or images), so put styles and script inline. It cannot show images from your Workspace either, only data: URLs in the file: when a Page needs Workspace images, write it in Markdown. Give it a <title>.
 
 ## Keep a Page current
 
