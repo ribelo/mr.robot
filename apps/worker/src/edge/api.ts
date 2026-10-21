@@ -492,11 +492,9 @@ export const api = new Router<ApiContext>()
     yield* owner(c, id)
     const input = yield* decodeBody(c.request, RewindRequest)
     if (input.beforeTurn === undefined && input.atSeq === undefined) return yield* Effect.fail(badRequest('give atSeq or beforeTurn'))
-    return yield* call(() => (input.beforeTurn !== undefined ? robot(c, id).rewindBeforeTurn(input.beforeTurn) : robot(c, id).rewind(input.atSeq!))).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))
+    // Into any chapter of the Conversation (v1.19, ec-i74p); there is no undo: what came after stays readable, superseded.
+    return yield* call(() => (input.beforeTurn !== undefined ? robot(c, id).rewindBeforeTurn(input.beforeTurn, input.chapter) : robot(c, id).rewind(input.atSeq!, input.chapter))).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))
   }))
-  .on('POST', '/api/robots/:id/rewinds/:rewind/undo', (c, { id, rewind }) => owner(c, id).pipe(
-    Effect.andThen(call(() => robot(c, id).undoRewind(rewind)).pipe(Effect.mapError((error) => conflict(error.detail ?? error.message)))),
-  ))
   .on('POST', '/api/robots/:id/messages', (c, { id }) => Effect.gen(function* () {
     yield* reach(c, id)
     const message = yield* decodeBody(c.request, SendMessage)

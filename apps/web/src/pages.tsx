@@ -104,7 +104,9 @@ function TrajectoryPage({ id, robot, me }: { id: string; robot: RobotSummary | u
   const live = AsyncResult.isSuccess(liveResult) ? liveResult.value : undefined
   const liveOrdinal = live?.chapter
   const chapter = picked === undefined || picked === liveOrdinal ? undefined : picked
-  const canRewind = robot?.ownerId === me.id
+  // A superseded chapter is read-only (ec-cc6i).
+  const shown = live?.chapters.find((entry) => entry.ordinal === (chapter ?? live.chapter))
+  const canRewind = robot?.ownerId === me.id && shown?.superseded !== true
   return (
     <div className="page page-wide">
       <PageHead title={`${robot?.identity.name ?? 'Robot'} · Trajectory`} back={{ page: 'robot', id, panel: true }} />
@@ -113,19 +115,24 @@ function TrajectoryPage({ id, robot, me }: { id: string; robot: RobotSummary | u
       <Suspense fallback={<div className="muted">Loading the trajectory…</div>}>
         <RobotTrajectory key={`${viewKey}-${chapter ?? 'live'}`} robotId={id} liveVersion={liveVersion} {...(chapter === undefined ? {} : { chapter })} />
       </Suspense>
-      {rewinding ? <RewindSheet id={id} onClose={() => setRewinding(false)} onDone={() => { setRewinding(false); setViewKey((key) => key + 1) }} /> : null}
+      {rewinding ? <RewindSheet id={id} {...(chapter === undefined ? {} : { chapter })} onClose={() => setRewinding(false)} onDone={() => { setRewinding(false); setPicked(undefined); setViewKey((key) => key + 1) }} /> : null}
     </div>
   )
 }
 
-/** Rewind (robot-0q6a, robot-8v1t): back to before a Turn, or undo an earlier rewind. */
-function RewindSheet({ id, onClose, onDone }: { id: string; onClose: () => void; onDone: () => void }) {
-  const result = useAtomValue(trajectoryAtom(id))
+/**
+ * Rewind (robot-0q6a, v1.19 ec-i74p): back to before a Turn of the chapter shown, the live one or an older one. The chapters after the
+ * point stay readable, superseded; there is no undo.
+ */
+function RewindSheet({ id, chapter, onClose, onDone }: { id: string; chapter?: number; onClose: () => void; onDone: () => void }) {
+  const result = useAtomValue(trajectoryAtom(chapter === undefined ? id : `${id}|${chapter}`))
   const trajectory: Trajectory | undefined = AsyncResult.isSuccess(result) ? result.value : undefined
   const command = useCommand()
   const [error, setError] = useState<string>()
   const turns = useMemo(() => {
-    const events = trajectory?.events ?? []
+    // The chapter's own Turns: its seed carries a closed Turn of the chapter before it.
+    const first = trajectory?.chapters.find((entry) => entry.ordinal === trajectory.chapter)?.firstSeq ?? 0
+    const events = (trajectory?.events ?? []).filter((event) => event.seq >= first)
     return events.filter((event) => event.type === 'turn/start').map((start) => {
       const message = events.find((event) => event.seq > start.seq && event.type === 'user/message')
       let text = ''
@@ -146,13 +153,8 @@ function RewindSheet({ id, onClose, onDone }: { id: string; onClose: () => void;
       <div className="modal sheet form" role="dialog" aria-label="Rewind" onClick={(event) => event.stopPropagation()}>
         <div className="sheet-head"><span /><span className="sheet-title">Rewind the Conversation</span><button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button></div>
         <div className="sheet-body">
-          <div className="muted">The Robot forgets everything from that Turn on. The current log stays in the archive and you can undo. What it did outside (messages sent, orders placed) still stands.</div>
+          <div className="muted">The Robot forgets everything from that Turn on. What came after stays readable in the Trajectory, greyed. What it did outside (messages sent, orders placed) still stands, and it is told so.</div>
           {renderResult(result, { what: 'the trajectory' }, () => null)}
-          {(trajectory?.rewinds ?? []).filter((rewind) => !rewind.undone).map((rewind) => (
-            <div key={rewind.id} className="detail-block">
-              Rewound to event {rewind.atSeq} on {new Date(rewind.at).toLocaleString()}. <button type="button" className="link" onClick={() => void act((api) => api.undoRewind(id, rewind.id))}>Undo</button>
-            </div>
-          ))}
           <ul className="task-cards">
             {turns.map((turn) => (
               <li key={turn.seq} className="task-card">
@@ -160,7 +162,7 @@ function RewindSheet({ id, onClose, onDone }: { id: string; onClose: () => void;
                   <span className="task-name">Turn {turn.turn ?? ''} · {new Date(turn.at).toLocaleString()}</span>
                   <span className="muted">{turn.text || '(no message)'}</span>
                 </span>
-                <ConfirmButton label="Rewind to before" confirm="Rewind" onConfirm={() => void act((api) => api.rewindBeforeTurn(id, turn.turn ?? 0))} />
+                <ConfirmButton label="Rewind to before" confirm="Rewind" onConfirm={() => void act((api) => api.rewindBeforeTurn(id, turn.turn ?? 0, trajectory?.chapter))} />
               </li>
             ))}
           </ul>

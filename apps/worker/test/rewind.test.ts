@@ -1,8 +1,14 @@
+/**
+ * The Trajectory and Rewind (robot-h5v3, robot-0q6a; v1.19 ticket 05): a Rewind opens a chapter seeded with real history up to the
+ * point, in the live chapter or an older one; the chapters after it are superseded and stay readable; no note enters the model's
+ * context, the next Wake-up's label says what stands; there is no undo.
+ */
 import { reset } from 'cloudflare:test'
+import { env } from 'cloudflare:workers'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, RewindView, Trajectory } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 
@@ -21,9 +27,9 @@ async function robotWithHistory(): Promise<string> {
   await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   await testRobot(body.id).activateForTest()
   scripts.set(body.id, [
-    { text: 'Noted: blue.' },
+    { say: 'Noted: blue.' },
     { calls: [{ name: 'react', args: { emoji: '👍' } }] },
-    { text: 'Ordered the red one.' },
+    { say: 'Ordered the red one.' },
   ])
   for (const text of ['I like blue.', 'Actually order the red one.']) {
     await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text } })
@@ -32,21 +38,27 @@ async function robotWithHistory(): Promise<string> {
   return body.id
 }
 
-const trajectory = async (id: string) => (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body
+const trajectory = async (id: string, chapter?: number) => (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory${chapter === undefined ? '' : `?chapter=${chapter}`}`)).body
 const conversation = async (id: string) => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
+const texts = (chat: Conversation) => chat.items.flatMap((item) => (item.kind === 'message' || item.kind === 'reply' ? [item.text] : []))
 
-describe('the Trajectory and rewind', () => {
-  it('lists every event of the Conversation in order (robot-h5v3)', async () => {
+async function turn(id: string, text: string, reply: string): Promise<void> {
+  scripts.set(id, [{ say: reply }])
+  await api(ANNA, `/api/robots/${id}/messages`, { body: { text } })
+  await settle(id)
+}
+
+describe('the Trajectory and Rewind', () => {
+  it('lists every event of the live chapter in order (robot-h5v3)', async () => {
     const id = await robotWithHistory()
     const { events } = await trajectory(id)
     expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index))
     expect(events.some((event) => event.type === 'tool/call' && JSON.parse(event.data).name === 'react')).toBe(true)
   })
 
-  it('rewinds to a point: the new live log is exactly the prefix plus the rewind note (robot-0q6a, robot-acr3)', async () => {
+  it('rewinds in the live chapter: a new chapter of real history, no note in it, the label on the next Wake-up (ec-i74p, ec-utsf)', async () => {
     const id = await robotWithHistory()
     const before = await trajectory(id)
-    // The owner's last message (the platform's own step after a Turn without a say is a user message too).
     const regretted = before.events.find((event) => event.type === 'user/message' && event.data.includes('Actually order the red one.'))!
     const atSeq = regretted.seq - 1
     const rewound = await api<RewindView>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq } })
@@ -54,40 +66,51 @@ describe('the Trajectory and rewind', () => {
 
     const after = await trajectory(id)
     expect(after.sessionId).not.toBe(before.sessionId)
-    expect(after.events.slice(0, atSeq + 1)).toEqual(before.events.slice(0, atSeq + 1))
-    expect(after.events[atSeq + 1]).toMatchObject({ type: 'session/end-seed' })
-    const note = after.events.at(-1)!
-    expect(note.type).toBe('agent/inbox/spliced')
-    expect(note.data).toContain('external effects still stand')
-    expect(note.data).toContain('react')
-    expect(after.rewinds).toEqual([expect.objectContaining({ atSeq, archivedSessionId: before.sessionId, liveSessionId: after.sessionId, undone: false })])
+    expect(after.chapters.map((chapter) => [chapter.ordinal, chapter.closedBy, chapter.superseded])).toEqual([[1, 'rewind', false], [2, null, false]])
+    // The seed is what the model saw at the point: the first message and its reply, nothing after it, and no note.
+    const seed = JSON.stringify(after.events)
+    expect(seed).toContain('I like blue.')
+    expect(seed).not.toContain('Actually order the red one.')
+    expect(seed).not.toContain('external effects')
+    expect(after.events.at(-1)).toMatchObject({ type: 'session/end-seed' })
 
     const chat = await conversation(id)
-    const texts = chat.items.flatMap((item) => (item.kind === 'message' || item.kind === 'reply' ? [item.text] : []))
-    expect(texts).toContain('I like blue.')
-    expect(texts).not.toContain('Actually order the red one.')
-    expect(texts).not.toContain('Ordered the red one.')
+    expect(texts(chat)).toEqual(['I like blue.', 'Noted: blue.'])
+    expect(chat.items.at(-1)).toMatchObject({ kind: 'notice', text: expect.stringContaining('Rewound to') })
 
-    scripts.set(id, [{ text: 'Back to blue.' }])
-    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'what colour?' } })
-    await settle(id)
-    const seen = JSON.stringify(requests.get(id)!.at(-1)!.messages)
-    expect(seen).toContain('external effects still stand')
-    expect(seen).not.toContain('Actually order the red one.')
+    await turn(id, 'what colour?', 'Back to blue.')
+    const sent = requests.get(id)!.at(-1)!
+    const wake = JSON.stringify(wakeOf(sent))
+    expect(wake).toContain('external effects since then stand')
+    expect(wake).toContain('react')
+    expect(JSON.stringify(sent.messages)).not.toContain('Actually order the red one.')
+    // The label is the next Wake-up's only, and the chat shows the message without it.
+    await turn(id, 'and now?', 'Still blue.')
+    expect(JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))).not.toContain('Rewound to')
+    expect(texts(await conversation(id))).toEqual(['I like blue.', 'Noted: blue.', 'what colour?', 'Back to blue.', 'and now?', 'Still blue.'])
   })
 
-  it('undo makes the archived log live again (robot-8v1t)', async () => {
+  it('rewinds into an older chapter: the chapters after the point are superseded, readable and greyed (ec-i74p, ec-cc6i)', async () => {
     const id = await robotWithHistory()
-    const before = await trajectory(id)
-    const rewound = (await api<RewindView>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: 5 } })).body
-    const undone = await api<RewindView>(ANNA, `/api/robots/${id}/rewinds/${rewound.id}/undo`, { body: {} })
-    expect(undone.body.undone).toBe(true)
+    const first = await trajectory(id)
+    await testRobot(id).closeChapterForTest()
+    await turn(id, 'Book the dentist.', 'Booked for Friday.')
+    expect((await trajectory(id)).chapters).toHaveLength(2)
+    const regretted = first.events.find((event) => event.type === 'user/message' && event.data.includes('Actually order the red one.'))!
+    const rewound = await api<RewindView>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: regretted.seq - 1, chapter: 1 } })
+    expect(rewound.status).toBe(200)
+
     const after = await trajectory(id)
-    expect(after.sessionId).toBe(before.sessionId)
-    expect(after.events).toEqual(before.events)
-    const texts = (await conversation(id)).items.flatMap((item) => (item.kind === 'message' ? [item.text] : []))
-    expect(texts).toContain('Actually order the red one.')
-    expect((await api(ANNA, `/api/robots/${id}/rewinds/${rewound.id}/undo`, { body: {} })).status).toBe(409)
+    expect(after.chapters.map((chapter) => [chapter.ordinal, chapter.closedBy, chapter.superseded])).toEqual([[1, 'compaction', false], [2, 'rewind', true], [3, null, false]])
+    expect(texts(await conversation(id))).toEqual(['I like blue.', 'Noted: blue.'])
+    // The superseded chapter is read in full, and cannot be rewound to; search leaves it out.
+    expect(JSON.stringify((await trajectory(id, 2)).events)).toContain('Book the dentist.')
+    expect((await api(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: 3, chapter: 2 } })).status).toBe(409)
+    expect((await env.ROBOT.getByName(id).searchConversation('dentist')).items).toEqual([])
+    await turn(id, 'what now?', 'Blue it is.')
+    const wake = JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))
+    expect(wake).toContain('external effects since then stand')
+    expect(wake).toContain('say')
   })
 
   it('rewinding to before a Turn removes its message too; it is not delivered again', async () => {
@@ -102,7 +125,7 @@ describe('the Trajectory and rewind', () => {
     await settle(id)
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'second question' } })
     await settle(id)
-    const events = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body.events
+    const events = (await trajectory(id)).events
     const asked = events.find((event) => event.type === 'user/message' && event.data.includes('second question'))!
     const last = events.filter((event) => event.type === 'turn/start' && event.seq < asked.seq).at(-1)!.turn!
     expect((await api(ANNA, `/api/robots/${id}/rewind`, { body: { beforeTurn: last } })).status).toBe(200)
@@ -112,5 +135,11 @@ describe('the Trajectory and rewind', () => {
     expect(sent).toContain('first question')
     expect(sent).not.toContain('second question')
     expect(sent).toContain('third question')
+  })
+
+  it('has no undo (ec-cc6i)', async () => {
+    const id = await robotWithHistory()
+    const rewound = (await api<RewindView>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: 5 } })).body
+    expect((await api(ANNA, `/api/robots/${id}/rewinds/${rewound.id}/undo`, { body: {} })).status).toBe(404)
   })
 })

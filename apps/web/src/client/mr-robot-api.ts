@@ -128,9 +128,9 @@ const make = Effect.gen(function* () {
     stopBox: (robotId: string) => send('POST', `/api/robots/${enc(robotId)}/box/stop`),
     stopBoxJob: (robotId: string, jobId: string) => send('POST', `/api/robots/${enc(robotId)}/box/jobs/${enc(jobId)}/stop`),
     assignTask: (id: string, assignee: TaskAssignee) => request(TaskView, 'POST', `/api/tasks/${enc(id)}/assign`, { assignee }),
-    rewind: (id: string, atSeq: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { atSeq }),
-    rewindBeforeTurn: (id: string, turn: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { beforeTurn: turn }),
-    undoRewind: (id: string, rewind: string) => send('POST', `/api/robots/${enc(id)}/rewinds/${enc(rewind)}/undo`),
+    rewind: (id: string, atSeq: number, chapter?: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { atSeq, ...(chapter === undefined ? {} : { chapter }) }),
+    /** Rewind to before a Turn of a chapter, the live one by default (v1.19); there is no undo. */
+    rewindBeforeTurn: (id: string, turn: number, chapter?: number) => send('POST', `/api/robots/${enc(id)}/rewind`, { beforeTurn: turn, ...(chapter === undefined ? {} : { chapter }) }),
     upload: (id: string, file: { readonly name: string; readonly type: string; readonly bytes: Uint8Array }) =>
       request(Attachment, 'PUT', `/api/robots/${enc(id)}/files?name=${enc(file.name)}`, undefined, { bytes: file.bytes, contentType: file.type || 'application/octet-stream' }),
     files: (id: string) => get(Schema.Array(WorkspaceFileView), `/api/robots/${enc(id)}/files`),

@@ -31,7 +31,18 @@ export function chapterSeed(events: readonly SessionEvent[], projections: readon
   const headerSeq = header === undefined ? undefined : push({ type: 'request/header', time: header.time, data: { ...header.data, reason: 'initial' } })
   const context = log.findLast((event) => event.type === 'request/context')
   if (context !== undefined) push({ type: 'request/context', time: context.time, data: context.data })
-  for (const seq of fold.nodes) {
+  // A point between a tool call and its result (a Rewind into a step): the surface ends before the call that has no answer.
+  const answered = new Set(fold.nodes.flatMap((seq) => {
+    const event = log[seq]!
+    return event.type === 'tool/result' ? [String((event.data['message'] as { toolCallId?: unknown } | undefined)?.toolCallId)] : []
+  }))
+  const open = fold.nodes.findIndex((seq) => {
+    const event = log[seq]!
+    const content = event.type === 'assistant/message' ? ((event.data['message'] as { content?: Array<{ type: string; id?: unknown }> } | undefined)?.content ?? []) : []
+    return content.some((block) => block.type === 'tool-call' && !answered.has(String(block.id)))
+  })
+  const nodes = open < 0 ? fold.nodes : fold.nodes.slice(0, open)
+  for (const seq of nodes) {
     const event = log[seq]!
     const projected = fold.projectedMessages.get(SessionSeq(seq)) as unknown as Record<string, unknown> | undefined
     if (event.type === 'user/message') {

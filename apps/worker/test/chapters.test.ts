@@ -141,8 +141,8 @@ describe('the upgrade registers old Conversations as chapters (ec-eaz3)', () => 
     for (const [text, reply] of [['I like blue.', 'Noted: blue.'], ['Actually red.', 'Red then.'], ['Or green.', 'Green.']]) await turn(id, text!, [{ say: reply! }])
     const events = (await trajectory(id)).events
     const at = (text: string) => events.find((event) => event.type === 'user/message' && event.data.includes(text))!.seq - 1
-    const undone = (await api<RewindView>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: at('Or green.') } })).body
-    expect((await api(ANNA, `/api/robots/${id}/rewinds/${undone.id}/undo`, { body: {} })).status).toBe(200)
+    // Before v1.19 an owner could undo a Rewind: its session stayed behind.
+    const undone = await testRobot(id).undoneRewindForTest(at('Or green.'))
     const kept = (await api<RewindView>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: at('Actually red.') } })).body
     await turn(id, 'Yellow?', [{ say: 'Yellow.' }])
     const before = await chat(id)
@@ -150,11 +150,12 @@ describe('the upgrade registers old Conversations as chapters (ec-eaz3)', () => 
 
     await testRobot(id).unchapterForTest()
     const chapters = await testRobot(id).chaptersForTest()
-    expect(chapters.map((chapter) => chapter.sessionId)).toEqual([kept.archivedSessionId, undone.liveSessionId, kept.liveSessionId])
+    expect(chapters.map((chapter) => chapter.sessionId)).toEqual([kept.archivedSessionId, undone, kept.liveSessionId])
     expect(chapters[0]).toMatchObject({ cut: kept.atSeq, state: { kind: 'closed', by: 'rewind', superseded: false } })
     expect(chapters[1]).toMatchObject({ state: { kind: 'closed', by: 'rewind', superseded: true } })
-    expect(chapters[2]).toMatchObject({ parent: { sessionId: kept.archivedSessionId, seq: kept.atSeq }, firstSeq: kept.atSeq + 1, state: { kind: 'live' } })
-    expect(await chat(id)).toEqual(before)
+    expect(chapters[2]).toMatchObject({ parent: { sessionId: kept.archivedSessionId, seq: kept.atSeq }, state: { kind: 'live' } })
+    // What the Conversation says reads the same (a notice v1.19 stored only as a chat item is not in a v1.18 store).
+    expect(texts(await chat(id))).toEqual(texts(before))
   })
 })
 

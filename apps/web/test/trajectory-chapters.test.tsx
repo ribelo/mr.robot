@@ -37,6 +37,16 @@ describe('the chapter bar of the Trajectory (ec-mwvo)', () => {
     expect(asked).toEqual([1, 3, 3])
   })
 
+  it('greys a superseded chapter in the picker and says it is kept to read (ec-cc6i)', () => {
+    const rewound: ChapterView[] = [chapters[0]!, { ...chapters[1]!, superseded: true }, { ...chapters[2]!, ordinal: 3 }]
+    render(<ChapterBar chapters={rewound} shown={2} onShow={() => {}} />)
+    const option = screen.getByLabelText('Chapter').querySelectorAll('option')[1]!
+    expect(option.className).toBe('superseded')
+    expect(option.textContent).toMatch(/· superseded$/)
+    expect(screen.getByText(/A Rewind went back before this chapter/)).toBeTruthy()
+    expect(document.querySelector('.chapter-bar.superseded')).not.toBeNull()
+  })
+
   it('has no Previous at the first chapter and no Next at the live one', () => {
     bar(1)
     expect((screen.getByText('‹ Previous') as HTMLButtonElement).disabled).toBe(true)

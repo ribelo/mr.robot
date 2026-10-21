@@ -26,8 +26,6 @@ import { maxInlineTokens, WorkspaceSpillStore, type WorkspaceSpillConfig } from 
 export interface CompositionInput {
   readonly storage: DurableObjectStorage
   readonly sessionId: string
-  /** A new session seeded from another one's prefix (rewind). Used only when the session does not exist yet. */
-  readonly seed?: { readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string }
   readonly onAppend?: (sessionId: string) => void
   readonly redact?: (json: string) => string
   /** Inside each append's transaction (the chat fold, v1.19). */
@@ -141,18 +139,10 @@ export async function compose(input: CompositionInput): Promise<Composition> {
       if (input.ptcRuntime !== undefined) agentCtx.tools.presentAs('ptc')
     }
     const exists = (await ctx.sessionPersistence.stat(id)) !== undefined
+    // A chapter seeded by a compaction or a Rewind is stored whole before its first Turn (v1.19): it is resumed like any other.
     const handle = exists
       ? await ctx.agents.resume({ resumeSessionId: id, agentOptions, setup })
-      : input.seed === undefined
-        ? await ctx.agents.create({ sessionId: id, meta: { cwd: '/workspace' }, agentOptions, setup })
-        : await ctx.agents.create({
-          sessionId: id,
-          meta: { cwd: '/workspace', isSeeded: true, parentSession: SessionId(input.seed.parentSession) },
-          seed: input.seed.events,
-          inheritedEventCount: SessionLogOffset(input.seed.inheritedEventCount),
-          agentOptions,
-          setup,
-        })
+      : await ctx.agents.create({ sessionId: id, meta: { cwd: '/workspace' }, agentOptions, setup })
     const child = async (spec: ChildAgentInput, resume: boolean) => {
       const childInfo = await ctx.llm.resolveModelInfo(spec.provider, spec.model)
       const childOptions = { provider: spec.provider, model: spec.model, ...reasoning(spec.effort, (childInfo.reasoning?.efforts ?? []).map((entry) => String(entry.id))) }

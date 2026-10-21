@@ -200,6 +200,22 @@ export class Robot extends ProductionRobot {
     return chatBackfill.events ?? super.chatBackfillEvents()
   }
 
+  /** A compaction happened in the live chapter and the Turn ended: it closes as the Robot closes it (v1.19). */
+  async closeChapterForTest(): Promise<void> {
+    this.store.set(CHAPTER_COMPACTED, this.store.requireConfig().liveSessionId)
+    await this.rollChapter()
+  }
+
+  /** A Rewind of v1.18 that its owner undid: a session seeded from the live one, left behind (v1.19 ticket 05). */
+  async undoneRewindForTest(atSeq: number): Promise<string> {
+    const live = this.store.requireConfig().liveSessionId
+    const header = JSON.parse(this.store.sql.exec<{ header: string }>('SELECT header FROM session_log WHERE id = ?', live).one().header) as Record<string, unknown>
+    const id = `s-undone-${crypto.randomUUID().slice(0, 8)}`
+    this.store.sql.exec('INSERT INTO session_log (id, header, inherited, length) VALUES (?, ?, ?, 0)', id, JSON.stringify({ ...header, id, createdAt: Date.now(), isSeeded: true, parentSession: live }), atSeq + 1)
+    this.store.sql.exec('INSERT INTO rewind (id, at_seq, archived_session_id, live_session_id, created_at, undone_at) VALUES (?, ?, ?, ?, ?, ?)', `rw-${id}`, atSeq, live, id, Date.now(), Date.now() + 1)
+    return id
+  }
+
   /** The chapter a Subagent belongs to: its parent session. */
   async subagentChapterForTest(id: string): Promise<string | null> {
     return this.store.sql.exec<{ parent_session: string }>('SELECT parent_session FROM subagent WHERE id = ?', id).toArray()[0]?.parent_session ?? null
@@ -213,6 +229,8 @@ export class Robot extends ProductionRobot {
   /** The Robot as v1.18 left it: no chapters; then the store opened again, as after the deploy (v1.19 ticket 02). */
   async unchapterForTest(): Promise<void> {
     this.store.sql.exec('DROP TABLE chapter')
+    // v1.18 had no stored chat either.
+    this.store.chat.clear()
     this.store.sql.exec('UPDATE schema_version SET version = 23')
     this.store.prepare()
   }

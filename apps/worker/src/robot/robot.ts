@@ -216,7 +216,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private readonly approvedCalls = new Map<string, readonly string[]>()
   /** backend|host pairs that showed a block page in the running Turn. */
   private readonly blockedThisTurn = new Map<string, string>()
-  private pendingSeed: { readonly sessionId: string; readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string } | undefined
 
   private readonly runtime: DurableRuntime<RobotState | RobotPlatform>
 
@@ -255,13 +254,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
         working: () => Effect.sync(() => this.store.activeTurn() !== undefined || this.pumping !== undefined),
         releaseAgent: () => Effect.promise(() => this.releaseComposition()),
-        seedSession: (sessionId, seed, note) => Effect.promise(async () => {
-          this.pendingSeed = { sessionId, ...seed }
-          const { agent, ctx } = await this.agent()
-          // The notice the program adds tells the owner; the instruction itself stays out of the chat.
-          agent.inject(wakeupMessage({ sender: { kind: 'platform' }, text: note, summary: '' }))
-          await ctx.sessions.flush(agent.session)
-        }),
       }),
     ))
   }
@@ -606,9 +598,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       if (taskId !== undefined) await this.focusTask(taskId, '').catch((error: unknown) => console.warn('attempt not started', taskId, error))
       // Follow-ups from the same sender queued with it join its Turn; a Task never shares one (ao-rdhs).
       const joined = wakeup.kind === 'task' ? [] : joinable(wakeup, this.store.queuedWakeups())
-      const first = this.wakeupMessageOf(wakeup, text, toolCallAnswer)
+      // After a Rewind the first Wake-up says that what was done since the point still stands (v1.19, ec-utsf).
+      const rewound = this.store.get<string>(Programs.REWIND_LABEL)
+      const first = this.wakeupMessageOf(wakeup, text, toolCallAnswer, false, rewound)
       agent.followup(joined.length === 0 ? first : joinedMessage([first, ...joined.map((other) => this.wakeupMessageOf(other, other.text))], [wakeup, ...joined].map(joinedPart)))
       this.store.consumeWakeups(joined.map((other) => other.id))
+      if (rewound !== undefined) this.store.delete(Programs.REWIND_LABEL)
     } else {
       agent.followup(wakeupMessage({
         sender: { kind: 'platform' },
@@ -1294,7 +1289,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private runningAgent: Agent | undefined
 
   /** A Wake-up as the model reads it: its source label, the local time, and the steer's Wake-up id. */
-  private wakeupMessageOf(wakeup: Wakeup, text: string, toolCallAnswer?: ToolCallAnswerWake, steer = false): UserMessage {
+  private wakeupMessageOf(wakeup: Wakeup, text: string, toolCallAnswer?: ToolCallAnswerWake, steer = false, rewound?: string): UserMessage {
     // Questions the owner's message moved past are dismissed; the Robot reads that after the message (gb-nr8s).
     const dismissed = (wakeup.payload['dismissedAsks'] as Array<{ askId: string; prompt: string }> | undefined) ?? []
     return wakeupMessage({
@@ -1313,6 +1308,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       ...optionalString(wakeup.payload, 'clientId'),
       ...(wakeup.kind === 'task' ? { taskRun: taskRunOf(wakeup.payload) } : {}),
       ...(steer ? { steer: { wakeupId: wakeup.id } } : {}),
+      ...(rewound === undefined ? {} : { rewound }),
       woke: { at: Date.now(), timeZone: this.store.requireConfig().timeZone },
     })
   }
@@ -1984,7 +1980,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.composition !== undefined && this.children.size > 0) return this.composition.value
     await this.releaseComposition()
     const brief = this.store.get<string>('brief') ?? null
-    const seed = this.pendingSeed?.sessionId === config.liveSessionId ? this.pendingSeed : undefined
     const chosen = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)
     const contextWindow = chosen?.contextWindow
     const adapter = this.adapter(config.model.provider, contextWindow, config.model.model, chosen?.wire)
@@ -2000,7 +1995,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const value = await Effect.runPromise(Scope.provide(scope)(composeScoped({
       storage: this.ctx.storage,
       sessionId: config.liveSessionId,
-      ...(seed === undefined ? {} : { seed }),
       onAppend: () => {
         this.broadcast()
         this.reportActivity()
@@ -2038,7 +2032,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       throw error
     })
     this.composition = { revision: config.revision, reach, value, scope }
-    this.pendingSeed = undefined
     return value
   }
 
@@ -3887,19 +3880,26 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Rewind to before Turn n: before the inbox events that delivered its message too, so the
    * message is gone with the Turn (it is not delivered again).
    */
-  async rewindBeforeTurn(turn: number): Promise<RewindView> {
+  /** Rewind to before a Turn of a chapter, the live one by default (v1.19, ec-i74p). */
+  async rewindBeforeTurn(turn: number, chapter?: number): Promise<RewindView> {
     const before = this.store.requireConfig().liveSessionId
-    const view = await this.program(Programs.rewindBeforeTurn(turn))
-    this.archiveChildren(before, view.atSeq)
+    const view = await this.program(Programs.rewindBeforeTurn(turn, chapter))
+    this.archiveRewound(before, view)
     return view
   }
 
-
-  async rewind(atSeq: number): Promise<RewindView> {
+  /** Rewind to an event of a chapter, the live one by default (v1.19, ec-i74p). */
+  async rewind(atSeq: number, chapter?: number): Promise<RewindView> {
     const before = this.store.requireConfig().liveSessionId
-    const view = await this.program(Programs.rewind(atSeq))
-    this.archiveChildren(before, view.atSeq)
+    const view = await this.program(Programs.rewind(atSeq, chapter))
+    this.archiveRewound(before, view)
     return view
+  }
+
+  /** The Subagents after the point leave with what the Rewind left behind: the rest of its chapter and the live chapter. */
+  private archiveRewound(live: string, view: RewindView): void {
+    this.archiveChildren(view.archivedSessionId, view.atSeq)
+    if (live !== view.archivedSessionId) this.archiveChildren(live, 0)
   }
 
   /** A Rewind to before a delegation archives its Subagents with the old log (ao-qy77); running ones stop. */
@@ -3914,16 +3914,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  /** Undo the latest rewind: its archived log becomes live again (robot-8v1t). */
-  undoRewind(id: string): Promise<RewindView> {
-    return this.program(Programs.undoRewind(id))
-  }
 
-
-  /** An archived log, read-only (the rewind archive). */
-  archivedTrajectory(sessionId: string): Promise<TrajectoryEvent[]> {
-    return this.program(Views.archivedTrajectory(sessionId))
-  }
 
 
   /** Every grantable item with the level this Robot holds on it (sk-e1hh, sk-ixvp): the one list settings, my_capabilities and the prompt share. */

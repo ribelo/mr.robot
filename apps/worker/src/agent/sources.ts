@@ -77,6 +77,8 @@ export interface WakeupMessageInput {
   readonly taskRun?: { readonly by: TaskRunBy; readonly who?: string }
   /** The Wake-up reached a running Turn as a steer. */
   readonly steer?: { readonly wakeupId: number }
+  /** The first Wake-up after a Rewind: its label, "[Rewound to …: external effects since then stand: …]", after the time (v1.19, ec-utsf). */
+  readonly rewound?: string
 }
 
 /** The owner's answer to a tool-call Ask, as its label names it. */
@@ -141,8 +143,8 @@ export function timeLabel(at: number, timeZone: string): string {
   return `[${parts['weekday']} ${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']} ${timeZone}]`
 }
 
-/** The time label alone on the first line of a Member's message: the pattern the chat view drops. */
-export const MEMBER_TIME_LABEL = /^\[[A-Z][a-z]{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2} [^\]\n]+\]\n/
+/** The time label (and a Rewind's label after it, v1.19) alone on the first line of a Member's message: the pattern the chat view drops. */
+export const MEMBER_TIME_LABEL = /^\[[A-Z][a-z]{2} \d{4}-\d{2}-\d{2} \d{2}:\d{2} [^\]\n]+\](?: \[Rewound to [^\n]*\])?\n/
 
 /**
  * A Wake-up as the model reads it: the label of its source (sourceMessage) with the local time in front.
@@ -155,7 +157,7 @@ export function wakeupMessage(input: WakeupMessageInput): UserMessage {
     ? sourced
     : { ...sourced, source: { ...sourced.source, wakeupId: input.steer.wakeupId, delivery: 'steer' } } as UserMessage
   if (input.woke === undefined) return message
-  const time = timeLabel(input.woke.at, input.woke.timeZone)
+  const time = input.rewound === undefined ? timeLabel(input.woke.at, input.woke.timeZone) : `${timeLabel(input.woke.at, input.woke.timeZone)} ${input.rewound}`
   const [first, ...rest] = message.content
   if (first?.type !== 'text') return message
   const text = input.sender.kind === 'member' ? `${time}\n${first.text}` : `${time} ${first.text}`

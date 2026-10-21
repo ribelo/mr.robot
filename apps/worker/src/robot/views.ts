@@ -383,12 +383,6 @@ export const trajectory = (ordinal?: number) => Effect.gen(function* () {
   } as Trajectory
 })
 
-/** An archived log, read-only (the rewind archive). */
-export const archivedTrajectory = (sessionId: string) => Effect.gen(function* () {
-  const store = yield* RobotState
-  if (!store.rewinds().some((rewind) => rewind.archivedSessionId === sessionId || rewind.liveSessionId === sessionId)) return [] as TrajectoryEvent[]
-  return yield* trajectoryEvents(sessionId)
-})
 
 /**
  * The live session's DSH events exactly as stored (every field, including surfaceOp), secrets

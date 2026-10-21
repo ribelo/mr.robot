@@ -126,12 +126,6 @@ export class ChapterStore {
     this.sql.exec("UPDATE chapter SET superseded = 1, closed_at = COALESCE(closed_at, ?), closed_by = COALESCE(closed_by, 'rewind') WHERE ordinal > ? AND superseded = 0", now, target.ordinal)
   }
 
-  /** Undo of a Rewind (until v1.19 ticket 05): its chapter leaves the chain and the one it came from is live again, whole. */
-  restore(sessionId: string, from: string, now: number): void {
-    this.sql.exec("UPDATE chapter SET superseded = 1, closed_at = COALESCE(closed_at, ?), closed_by = COALESCE(closed_by, 'rewind') WHERE session_id = ?", now, from)
-    this.sql.exec('UPDATE chapter SET closed_at = NULL, closed_by = NULL, cut = NULL, superseded = 0 WHERE session_id = ?', sessionId)
-  }
-
   /** The chapter with this ordinal, on the Conversation or superseded. */
   byOrdinal(ordinal: number): Chapter | undefined {
     const row = this.sql.exec<Row>('SELECT * FROM chapter WHERE ordinal = ?', ordinal).toArray()[0]

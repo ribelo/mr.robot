@@ -17,10 +17,11 @@ import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { chiefGrants, type ProposalRow, type RobotConfig, type RobotStore, type WakeupKind } from './store.ts'
 import { setupGrants } from '../agent/catalog.ts'
 import { effectiveSpendLimit, emptyGrants, GRANT_FIELDS, grantSetFrom, overlayGrants, usableNames, type GrantItemRef, type GrantSet, type HomeSpendLimit } from '@mr-robot/protocol'
-import { THREAD_PAUSE_AT, type AskAnswerLabel } from '../agent/sources.ts'
+import { THREAD_PAUSE_AT, timeLabel, type AskAnswerLabel } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
-import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { readStoredEvents, storedLength } from '../agent/session-log.ts'
+import { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { chapterSeed } from '../agent/chapter-seed.ts'
+import { readStoredEvents, storedHeader, storedLength, storeSession } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
 import { causedByOwner, deliveryOf, robotMessageDelivery } from './delivery.ts'
@@ -97,8 +98,6 @@ export interface RobotPlatformShape {
   working(): Effect.Effect<boolean>
   /** Dispose the DSH agent so the next Turn composes over the current live session. */
   releaseAgent(): Effect.Effect<void>
-  /** Start the DSH session seeded from a prefix of the old one, with a platform note for the model. */
-  seedSession(sessionId: string, seed: { readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string }, note: string): Effect.Effect<void>
 }
 
 export class RobotPlatform extends Context.Service<RobotPlatform, RobotPlatformShape>()('mr-robot/RobotPlatform') {}
@@ -921,78 +920,89 @@ export const secret = (name: string) => Effect.gen(function* () {
   return entry.password
 })
 
-// ------------------------------------------------------------------ rewind (robot-0q6a, robot-8v1t, robot-acr3)
+// ------------------------------------------------------------------ rewind (robot-0q6a, robot-acr3; v1.19 ec-i74p, ec-utsf)
+
+/** The kv key of the label the next Wake-up carries after a Rewind (ec-utsf). */
+export const REWIND_LABEL = 'rewind-label'
+/** At most this many tool names in the label. */
+const LABEL_TOOLS = 12
 
 /**
- * Make a new live session seeded from the log up to and including `atSeq`. The old log
- * stays in this Robot's SQLite as the archive, with a rewind record; nothing is rewritten.
- * The Robot is told that external effects after the point still stand.
+ * Rewind (v1.19, ec-i74p): open a new chapter seeded with what the model saw at `atSeq` of a chapter of the Conversation, the live one
+ * or an older one. The seed is real history only, no note (ec-utsf); every chapter after the point leaves the Conversation, superseded and
+ * readable. That external effects since the point still stand rides as the label of the next Wake-up. There is no undo: the superseded
+ * chapters are what is kept.
  */
-export const rewind = (atSeq: number) => Effect.gen(function* () {
+export const rewind = (atSeq: number, ordinal?: number) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
   if (yield* platform.working()) return yield* conflict('the Robot is working; rewind when it is done')
-  const events = readStoredEvents(store.sql, current.liveSessionId)
-  if (!Number.isInteger(atSeq) || atSeq < 0 || atSeq >= events.length) return yield* invalid(`no event ${atSeq} in this Conversation`)
-  const toolsAfter = [...new Set(events.slice(atSeq + 1).filter((event) => event.type === 'tool/call').map((event) => String((event.data as { name?: unknown }).name)))]
-  const sessionId = `s-${crypto.randomUUID()}`
+  const target = ordinal === undefined ? store.chapters.get(current.liveSessionId) : store.chapters.byOrdinal(ordinal)
+  if (target === undefined) return yield* notFound(`no chapter ${ordinal ?? ''} in this Conversation`)
+  if (target.state.kind === 'closed' && target.state.superseded) return yield* conflict('that chapter was superseded by a Rewind; it can be read, not rewound to')
+  const events = readStoredEvents(store.sql, target.sessionId)
+  if (!Number.isInteger(atSeq) || atSeq < target.firstSeq || atSeq >= events.length) return yield* invalid(`no event ${atSeq} of its own in this chapter`)
+  const header = storedHeader(store.sql, target.sessionId)
+  if (header === undefined) return yield* notFound('that chapter has no log')
+  const seed = chapterSeed(events.slice(0, atSeq + 1))
   const now = Date.now()
-  const record = { id: `rw-${crypto.randomUUID().slice(0, 8)}`, atSeq, archivedSessionId: current.liveSessionId, liveSessionId: sessionId, at: now }
+  const sessionId = `s-${crypto.randomUUID()}`
+  const nextHeader = { ...header, id: SessionId(sessionId), createdAt: now, isSeeded: true, parentSession: SessionId(target.sessionId) }
+  const refused = Result.try(() => Session.create(SessionId(sessionId), seed.events, nextHeader, SessionLogOffset(seed.inheritedEventCount)))
+  if (Result.isFailure(refused)) return yield* conflict(`that point cannot start a chapter: ${String(refused.failure)}`)
+  const later = store.chapters.chain().filter((chapter) => chapter.ordinal > target.ordinal)
+  const label = rewindLabel(timeLabel(events[atSeq]!.time, current.timeZone), toolsSince(store, target.sessionId, atSeq, later.map((chapter) => chapter.sessionId)))
+  const record = { id: `rw-${crypto.randomUUID().slice(0, 8)}`, atSeq, archivedSessionId: target.sessionId, liveSessionId: sessionId, at: now }
+  const liveEvents = current.liveSessionId === target.sessionId ? events : readStoredEvents(store.sql, current.liveSessionId)
   yield* platform.releaseAgent()
   store.transaction(() => {
+    storeSession(store.sql, nextHeader, seed.inheritedEventCount, seed.events)
+    store.search.track(sessionId, seed.inheritedEventCount)
     store.addRewind(record)
-    // The new session is the next chapter, seeded from the live one up to the point (v1.19).
-    store.chapters.branch(current.liveSessionId, atSeq, now)
-    store.chapters.close(current.liveSessionId, 'rewind', now, events)
-    store.openChapter(sessionId, { sessionId: current.liveSessionId, seq: atSeq }, atSeq + 1, now)
-    // The seeded prefix keeps the voice it had (gb-psyl); what follows the rewind point is say only.
-    store.setVoiceFrom(sessionId, Math.min(store.voiceFrom(current.liveSessionId), atSeq + 1))
+    store.chapters.close(current.liveSessionId, 'rewind', now, liveEvents)
+    store.chapters.branch(target.sessionId, atSeq, now)
+    store.openChapter(sessionId, { sessionId: target.sessionId, seq: atSeq }, seed.inheritedEventCount, now, seed.events.length)
+    store.set(REWIND_LABEL, label)
+    store.delete('chapter-compacted')
     store.updateConfig(() => ({ liveSessionId: sessionId }))
   })
-  yield* platform.seedSession(sessionId, { events: buildForkSeed(events, SessionSeq(atSeq)), inheritedEventCount: atSeq + 1, parentSession: current.liveSessionId }, [
-    'Your owner rewound this Conversation to an earlier point. Everything after that point is gone from your memory of the Conversation, but its external effects still stand: messages already sent, files written, carts filled, orders placed stay as they are.',
-    toolsAfter.length === 0 ? 'No tools were used after the rewind point.' : `After the rewind point you had used: ${toolsAfter.join(', ')}. Check the real state before you repeat or contradict anything.`,
-  ].join('\n'))
-  store.addNotice(sessionId, storedLength(store.sql, sessionId), 'Rewound to an earlier point. The previous Conversation is kept in the archive.', now)
+  store.addNotice(sessionId, storedLength(store.sql, sessionId), `Rewound to ${timeLabel(events[atSeq]!.time, current.timeZone).slice(1, -1)}. What came after is kept, greyed, in the Trajectory.`, now)
   yield* platform.changed()
   return { ...record, undone: false } as RewindView
 })
 
+/** The tools used after the point: in the chapter after it, and in every chapter the Rewind supersedes. */
+function toolsSince(store: RobotStore, sessionId: string, atSeq: number, later: readonly string[]): string[] {
+  const names = (session: string, from: number) => store.sql.exec<{ name: string | null }>(
+    `SELECT DISTINCT json_extract(event, '$.data.name') AS name FROM session_event WHERE session_id = ? AND seq > ? AND event LIKE '{"type":"tool/call"%'`, session, from,
+  ).toArray().flatMap((row) => (row.name === null ? [] : [row.name]))
+  return [...new Set([...names(sessionId, atSeq), ...later.flatMap((session) => names(session, -1))])]
+}
+
+/** The next Wake-up's label after a Rewind (ec-utsf). */
+function rewindLabel(when: string, tools: readonly string[]): string {
+  const used = tools.length === 0 ? 'no tool was used since then' : `you used ${tools.slice(0, LABEL_TOOLS).join(', ')}${tools.length > LABEL_TOOLS ? ` and ${tools.length - LABEL_TOOLS} more` : ''}; check the real state before you repeat or contradict anything`
+  return `[Rewound to ${when.slice(1, -1)}: external effects since then stand: ${used}]`
+}
+
 /**
- * Rewind to before Turn n: before the inbox events that delivered its message too, so the
+ * Rewind to before Turn n of a chapter (the live one by default): before the inbox events that delivered its message too, so the
  * message is gone with the Turn (it is not delivered again).
  */
-export const rewindBeforeTurn = (turn: number) => Effect.gen(function* () {
+export const rewindBeforeTurn = (turn: number, ordinal?: number) => Effect.gen(function* () {
   const store = yield* RobotState
   const live = (yield* config).liveSessionId
-  const events = readStoredEvents(store.sql, live)
-  // The chapter's own Turns: its seed carries a closed Turn of the chapter before (v1.19).
-  const first = store.chapters.get(live)?.firstSeq ?? 0
+  const chapter = ordinal === undefined ? store.chapters.get(live) : store.chapters.byOrdinal(ordinal)
+  if (chapter === undefined) return yield* notFound(`no chapter ${ordinal ?? ''} in this Conversation`)
+  const events = readStoredEvents(store.sql, chapter.sessionId)
+  // The chapter's own Turns: its seed carries a closed Turn of the chapter before.
+  const first = chapter.firstSeq
   const start = events.findIndex((event) => event.seq >= first && event.type === 'turn/start' && (event.data as { turn?: number }).turn === turn)
-  if (start < 0) return yield* notFound(`no Turn ${turn} in this Conversation`)
+  if (start < 0) return yield* notFound(`no Turn ${turn} in this chapter`)
   let at = start
   while (at > first && events[at - 1]!.type === 'agent/inbox/spliced') at -= 1
-  return yield* rewind(Math.max(0, events[at]!.seq - 1))
-})
-
-/** Undo the latest rewind: its archived log becomes live again (robot-8v1t). */
-export const undoRewind = (id: string) => Effect.gen(function* () {
-  const store = yield* RobotState
-  const platform = yield* RobotPlatform
-  const current = yield* config
-  if (yield* platform.working()) return yield* conflict('the Robot is working; undo when it is done')
-  const record = store.rewinds().find((entry) => entry.id === id)
-  if (record === undefined || record.undone) return yield* notFound('no such rewind')
-  if (record.liveSessionId !== current.liveSessionId) return yield* conflict('only the latest rewind can be undone')
-  yield* platform.releaseAgent()
-  store.transaction(() => {
-    store.markRewindUndone(id, Date.now())
-    store.chapters.restore(record.archivedSessionId, record.liveSessionId, Date.now())
-    store.updateConfig(() => ({ liveSessionId: record.archivedSessionId }))
-  })
-  yield* platform.changed()
-  return { ...record, undone: true } as RewindView
+  return yield* rewind(Math.max(first, events[at]!.seq - 1), chapter.ordinal)
 })
 
 // ------------------------------------------------------------------ creation and the alarm (robot-qo06, robot-7j1a, robot-v1gb)

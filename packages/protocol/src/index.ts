@@ -1799,6 +1799,7 @@ export const SendMessage = Schema.Struct({
 export type SendMessage = typeof SendMessage.Type
 
 /** Rewind to an event, or to before a Turn (its message included). */
-export const RewindRequest = Schema.Struct({ atSeq: Schema.optional(Schema.Number), beforeTurn: Schema.optional(Schema.Number) })
+/** Rewind to an event or to before a Turn of a chapter, the live one by default (v1.19, ec-i74p). */
+export const RewindRequest = Schema.Struct({ atSeq: Schema.optional(Schema.Number), beforeTurn: Schema.optional(Schema.Number), chapter: Schema.optional(Schema.Number) })
 
 export * from './capabilities.ts'

@@ -80,17 +80,14 @@ describe.each(MODES)('searching the own Conversation with %s (cd-ggem)', (_, mod
     // 60 Turns before the search: slow when the whole suite shares the machine.
   }, 90_000)
 
-  it('follows the live Conversation through a rewind, its undo and a clear', async () => {
+  it('follows the Conversation through a rewind and a clear', async () => {
     const id = await activeRobot(mode)
     await longConversation(id)
     const robot = env.ROBOT.getByName(id)
     const point = (await robot.conversationView()).items.find((item) => item.kind === 'reply' && item.text === 'Checked invoice 28.')!
-    const { body: rewound } = await api<{ id: string }>(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: point.seq } })
+    expect((await api(ANNA, `/api/robots/${id}/rewind`, { body: { atSeq: point.seq } })).status).toBe(200)
     expect((await robot.searchConversation('quokka')).items).toEqual([])
     expect((await robot.searchConversation('zeppelin')).items).toHaveLength(1)
-
-    expect((await api(ANNA, `/api/robots/${id}/rewinds/${rewound.id}/undo`, { body: {} })).status).toBe(200)
-    expect((await robot.searchConversation('quokka')).items).toHaveLength(2)
 
     expect((await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'New robot' } })).status).toBe(200)
     expect((await robot.searchConversation('zeppelin')).items).toEqual([])
