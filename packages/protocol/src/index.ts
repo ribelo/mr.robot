@@ -1218,6 +1218,10 @@ export const Conversation = Schema.Struct({
   activity: Schema.optional(Schema.String),
   /** The last Turn failed and can be run again. */
   canRetry: Schema.optional(Schema.Boolean),
+  /** A page of the chat (v1.19, ec-n0uh): the cursor of the page of older items; null at the Conversation's start. */
+  before: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Every open Ask, wherever it is in the Conversation (rb-dat4). */
+  asks: Schema.optional(Schema.Array(ProposalView)),
 })
 export type Conversation = typeof Conversation.Type
 

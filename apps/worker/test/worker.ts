@@ -138,6 +138,9 @@ export class Member extends ProductionMember {
   }
 }
 
+/** A test sets how many events one Turn backfills into the stored chat (v1.19 ticket 03). */
+export const chatBackfill: { events: number | undefined } = { events: undefined }
+
 /** Every document a test Robot printed to PDF, in order. */
 export const printedPdfs: string[] = []
 
@@ -169,6 +172,8 @@ export class Robot extends ProductionRobot {
       const handle = await log.open(SessionId(live), 'write')
       await handle.append(batch as unknown as SessionEvent[])
       await handle.close()
+      // The Robot's own log stores the chat with the events (its onStored); this log is the seam's bare adapter.
+      this.store.chat.extend(live, batch[0]!.seq, this.store.chatInput(live))
       events += batch.length
       for (const event of batch) bytes += JSON.stringify(event).length
       // Each span but the last ends in a compaction the Robot has seen: its chapter closes the way a Turn's end closes it.
@@ -179,6 +184,20 @@ export class Robot extends ProductionRobot {
       Object.assign(position, at(live, position.turn))
     }
     return { events, bytes, ms: Date.now() - started, chapters: this.store.chapters.all().length }
+  }
+
+  /** The chat as a Robot before v1.19 kept it: not stored, projected from the log (v1.19 ticket 03). */
+  async unstoreChatForTest(): Promise<void> {
+    this.store.chat.clear()
+  }
+
+  /** How many chapters of the Conversation have a chat not stored up to their end yet. */
+  async chatBehindForTest(): Promise<number> {
+    return this.store.chapters.all().filter((chapter) => !this.store.chat.current(chapter.sessionId)).length
+  }
+
+  protected override chatBackfillEvents(): number {
+    return chatBackfill.events ?? super.chatBackfillEvents()
   }
 
   /** The chapter a Subagent belongs to: its parent session. */
@@ -295,6 +314,8 @@ export class Robot extends ProductionRobot {
   async upgradeVoiceForTest(): Promise<void> {
     this.store.sql.exec("DELETE FROM kv WHERE k = 'voice-upgraded' OR k LIKE 'voice-from:%'")
     this.markVoiceUpgrade()
+    // Before v1.19 the chat was not stored: it is folded again under the new marker.
+    this.store.chat.clear()
     // v1.14 had indexed that assistant text as replies: the index is read again under the new marker.
     this.store.search.clear()
   }
@@ -404,6 +425,8 @@ export class Robot extends ProductionRobot {
   /** A Routine card notice and a queued Routine Wake-up, as a Robot before v1.13 stored them (mc-c2bb). */
   async seedRoutineItemsForTest(routineId: string, name: string): Promise<void> {
     const config = this.store.requireConfig()
+    // Before v1.19 the chat was not stored: notices were rows of their own.
+    this.store.chat.clear()
     this.store.sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, ?)', 'n-old', config.liveSessionId, 0, Date.now(), `Routine created by Mr. Robot: ${name}`, JSON.stringify({ kind: 'routine', action: 'created', name, by: 'Mr. Robot' }))
     this.store.sql.exec('INSERT INTO wakeup (kind, sender, text, payload, created_at) VALUES (?, ?, ?, ?, ?)', 'routine', JSON.stringify({ kind: 'routine', routineId, name }), 'Do the old thing.', JSON.stringify({ routineId, due: Date.now(), attachments: [] }), Date.now())
   }

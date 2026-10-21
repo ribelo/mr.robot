@@ -30,6 +30,8 @@ export interface CompositionInput {
   readonly seed?: { readonly events: readonly SessionEvent[]; readonly inheritedEventCount: number; readonly parentSession: string }
   readonly onAppend?: (sessionId: string) => void
   readonly redact?: (json: string) => string
+  /** Inside each append's transaction (the chat fold, v1.19). */
+  readonly onStored?: (sessionId: string, from: number) => void
   readonly provider: string
   readonly model: string
   readonly effort: ThinkingEffort
@@ -95,6 +97,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
       storage: input.storage,
       ...(input.onAppend === undefined ? {} : { onAppend: input.onAppend }),
       ...(input.redact === undefined ? {} : { redact: input.redact }),
+      ...(input.onStored === undefined ? {} : { onStored: input.onStored }),
     })
     await ctx.plugin(TokenMeter)
     await ctx.plugin(RobotWorkingDirectory)

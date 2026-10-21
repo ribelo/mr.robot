@@ -59,6 +59,14 @@ async function measured<T>(work: () => Promise<T>): Promise<Measured<T>> {
 const numbers: string[] = []
 const report = (name: string, run: Measured<unknown>, extra = '') => {
   numbers.push(`${name.padEnd(24)} ${String(run.ms).padStart(7)} ms ${String(run.sessionRows).padStart(9)} session rows ${String(run.rows).padStart(9)} rows${extra === '' ? '' : `  ${extra}`}`)
+  // Where the rows went: the statements that read most, summed by their text.
+  const by = new Map<string, { rows: number; runs: number }>()
+  for (const read of run.reads) {
+    const key = read.query.replace(/\s+/g, ' ').slice(0, 110)
+    const entry = by.get(key) ?? { rows: 0, runs: 0 }
+    by.set(key, { rows: entry.rows + read.cursor.rowsRead, runs: entry.runs + 1 })
+  }
+  for (const [query, entry] of [...by.entries()].sort((a, b) => b[1].rows - a[1].rows).slice(0, 3)) numbers.push(`    ${String(entry.rows).padStart(8)} rows in ${String(entry.runs).padStart(4)} runs: ${query}`)
 }
 
 let id = ''
@@ -89,20 +97,27 @@ afterAll(() => {
 })
 
 describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
-  it.fails('opens the chat reading a bounded number of rows (ec-yxru)', async () => {
+  let before: string | null | undefined
+  it('opens the chat reading a bounded number of rows (ec-yxru)', async () => {
     const run = await measured(() => api<Conversation>(ANNA, `/api/robots/${id}/conversation`))
     report('chat open', run, run.value.status === 200 ? `${run.value.body.items.length} items` : `status ${run.value.status}: ${JSON.stringify(run.value.body).slice(0, 200)}`)
     expect(run.value.status).toBe(200)
+    before = run.value.body.before
+    expect(before).toEqual(expect.any(String))
     expect(run.sessionRows).toBeLessThanOrEqual(CHAT_ROWS)
     expect(run.ms).toBeLessThan(CHAT_MS)
   }, 300_000)
 
-  it.fails('loads an older page of the chat reading a bounded number of rows (ec-n0uh)', async () => {
-    const run = await measured(() => env.ROBOT.getByName(id).conversationPage(2))
-    report('chat page 2', run, `${run.value.items.length} items`)
-    expect(run.value.items.length).toBeGreaterThan(0)
+  it('loads an older page of the chat by its cursor reading a bounded number of rows (ec-n0uh)', async () => {
+    const run = await measured(() => api<Conversation>(ANNA, `/api/robots/${id}/conversation?before=${encodeURIComponent(before!)}`))
+    report('chat page 2', run, `${run.value.body.items.length} items`)
+    expect(run.value.body.items.length).toBeGreaterThan(0)
     expect(run.sessionRows).toBeLessThanOrEqual(CHAT_ROWS)
     expect(run.ms).toBeLessThan(CHAT_MS)
+    // The page another Robot reads (robot_conversation) is as bounded.
+    const deputy = await measured(() => env.ROBOT.getByName(id).conversationPage(2))
+    report('deputy page 2', deputy, `${deputy.value.items.length} items`)
+    expect(deputy.sessionRows).toBeLessThanOrEqual(CHAT_ROWS)
   }, 300_000)
 
   it('opens the Trajectory reading one span (ec-elhb)', async () => {

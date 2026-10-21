@@ -5,13 +5,14 @@
  */
 import * as Effect from 'effect/Effect'
 import { effectiveSpendLimit, type HomeSpendLimit } from '@mr-robot/protocol'
-import type { ChatItem, Conversation, ConversationPage, ConversationSearchResult, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, ScreenView, TaskView, Trajectory, TrajectoryEvent, TrajectoryExcerpt, UsageView } from '@mr-robot/protocol'
+import type { ChatItem, Conversation, ConversationPage, ProposalView, ConversationSearchResult, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, ScreenView, TaskView, Trajectory, TrajectoryEvent, TrajectoryExcerpt, UsageView } from '@mr-robot/protocol'
 import { readStoredEvents } from '../agent/session-log.ts'
 import { HOME_ID } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { invalid, notFound } from '../platform/durable.ts'
 import { homeDefaults, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
-import { projectChat } from './projection.ts'
+import { projectChat, resolveItem, type ResolveInput, type StoredRow } from './projection.ts'
+import { formatCursor, parseCursor, type ChatCursor } from './chat-items.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, RobotStore, Wakeup } from './store.ts'
 import type { Chapter } from './chapters.ts'
@@ -38,7 +39,7 @@ export function causeOf(wakeup: Wakeup): WakeupCause {
 /** The running Subagents as lines of the Robot's row (ao-2fgp, ao-j8t9). */
 export const subagentLines = Effect.gen(function* () {
   const store = yield* RobotState
-  return new SubagentStore(store.sql).running().map((row): SubagentLine => ({ id: row.id, label: row.label, since: row.startedAt, activity: runningTool(readStoredEvents(store.sql, row.id)) ?? null }))
+  return new SubagentStore(store.sql).running().map((row): SubagentLine => ({ id: row.id, label: row.label, since: row.startedAt, activity: runningTool(tailEvents(store, row.id, 0)) ?? null }))
 })
 
 /** How many of its newest Subagents a Robot lists. */
@@ -51,7 +52,7 @@ export const subagents = Effect.gen(function* () {
   return new SubagentStore(store.sql).ofConversation(SUBAGENTS_SHOWN).map((row): SubagentView => ({
     id: row.id, label: row.label, mode: row.mode, model: { provider: row.provider, model: row.model, effort: row.effort }, status: row.status,
     startedAt: row.startedAt, finishedAt: row.finishedAt, result: row.report === null ? null : (row.report.split('\n')[0] ?? '').slice(0, 200),
-    activity: row.status === 'running' ? runningTool(readStoredEvents(store.sql, row.id)) ?? null : null,
+    activity: row.status === 'running' ? runningTool(tailEvents(store, row.id, 0)) ?? null : null,
   }))
 })
 
@@ -64,7 +65,7 @@ const runningTurn = Effect.gen(function* () {
   const active = store.activeTurn()
   const wakeup = active === undefined ? undefined : store.wakeup(active.wakeupId)
   if (active === undefined || wakeup === undefined) return null
-  const activity = runningTool(readStoredEvents(store.sql, active.sessionId, active.startSeq)) ?? null
+  const activity = runningTool(tailEvents(store, active.sessionId, active.startSeq)) ?? null
   return { wakeup: causeOf(wakeup), task: active.task === null ? null : { id: active.task.id, title: active.task.title }, activity, since: active.startedAt } as RobotTurn
 })
 
@@ -90,6 +91,15 @@ export const fleetState = Effect.gen(function* () {
   return 'sleeping' as FleetState
 })
 
+/** How many events at the end of a log the running tool is looked for in (the Fleet's activity, v1.19 ec-es5g). */
+const ACTIVITY_TAIL = 200
+
+/** The last events of a log from `from` on, oldest first. */
+function tailEvents(store: RobotStore, sessionId: string, from: number): ReadonlyArray<{ type: string; data: unknown }> {
+  return store.sql.exec<{ event: string }>('SELECT event FROM session_event WHERE session_id = ? AND seq >= ? ORDER BY seq DESC LIMIT ?', sessionId, from, ACTIVITY_TAIL).toArray()
+    .reverse().map((row) => JSON.parse(row.event) as { type: string; data: unknown })
+}
+
 /** The tool running now: the latest call without a result (a code program's latest inner call wins). */
 export function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): string | undefined {
   const open = new Map<string, string>()
@@ -108,50 +118,54 @@ export function runningTool(events: ReadonlyArray<{ type: string; data: unknown 
   return last === undefined ? undefined : last === 'run_code' ? (inner ?? 'code') : last
 }
 
-/**
- * One chapter's chat items (v1.19): its own events (not its seed) from `from` up to its cut, projected, with a card per delegation
- * where the Robot started it (ao-15ui), which follows the Subagent's state.
- */
-function chapterItems(store: RobotStore, chapter: Chapter, input: { readonly details: boolean; readonly avatarSeed: string; readonly from?: number }): ChatItem[] {
-  const from = Math.max(chapter.firstSeq, input.from ?? 0)
-  const within = (seq: number) => seq >= from && (chapter.cut === null || seq <= chapter.cut)
-  const events = readStoredEvents(store.sql, chapter.sessionId, from).filter((event) => within(event.seq))
-  const items = projectChat({
-    details: input.details,
-    events,
-    assistantRepliesBefore: store.voiceFrom(chapter.sessionId),
-    notices: store.notices(chapter.sessionId).filter((notice) => notice.afterSeq >= from && (chapter.cut === null || notice.afterSeq <= chapter.cut + 1)),
-    thread: (id) => store.thread(id)?.view,
-    avatarSeed: input.avatarSeed,
+/** What a stored row shows now (v1.19): an Ask, a Thread and a Subagent read as they are. */
+function resolver(store: RobotStore): ResolveInput {
+  const subagents = new SubagentStore(store.sql)
+  return {
     proposal: (id) => {
       const row = store.proposal(id)
       return row === undefined ? undefined : proposalView(row)
     },
-  })
-  for (const row of new SubagentStore(store.sql).of(chapter.sessionId).reverse()) {
-    if (!within(row.parentSeq) || row.status === 'archived') continue
-    const position = items.findIndex((item) => item.seq >= row.parentSeq)
-    const card: ChatItem = {
-      kind: 'delegation', id: `delegation-${row.id}`, seq: row.parentSeq, at: row.startedAt, subagentId: row.id, label: row.label, mode: row.mode,
-      model: { provider: row.provider, model: row.model, effort: row.effort }, status: row.status, result: row.report === null ? null : (row.report.split('\n')[0] ?? '').slice(0, 200),
-    }
-    items.splice(position < 0 ? items.length : position, 0, card)
+    thread: (id) => store.thread(id)?.view,
+    delegation: (id) => {
+      const row = subagents.get(id)
+      if (row === undefined || row.status === 'archived') return undefined
+      return { subagentId: row.id, label: row.label, mode: row.mode, model: { provider: row.provider, model: row.model, effort: row.effort }, status: row.status, result: row.report === null ? null : (row.report.split('\n')[0] ?? '').slice(0, 200) }
+    },
   }
-  return items
 }
 
+/** Items of the PWA's chat page (v1.19, ec-n0uh). */
+export const CHAT_PAGE_SIZE = 50
+
 /**
- * A proposal made inside a code-mode program has no direct tool result to project from (robot-vy9z); answered ones stay too, as the
- * stream's record of the ask (rb-r0oj): the ones made since `since` and not shown yet go where their time puts them.
+ * Rows of the Conversation, newest first, older than a cursor (v1.19, ec-yxru): one query per chapter the page reaches, never the
+ * history. `more` tells whether older rows exist.
  */
-function withProposals(store: RobotStore, items: ChatItem[], since: number): ChatItem[] {
-  const shown = new Set(items.flatMap((item) => (item.kind === 'proposal' ? [item.proposal.id] : [])))
-  for (const row of store.proposals().filter((proposal) => proposal.createdAt >= since && proposal.status !== 'superseded')) {
-    if (shown.has(row.id)) continue
-    const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
-    items.splice(position, 0, { kind: 'proposal', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
+function chatRows(store: RobotStore, input: { readonly before: ChatCursor | null; readonly limit: number; readonly details: boolean }): { rows: Array<{ readonly chapter: Chapter; readonly row: StoredRow }>; more: boolean } {
+  const out: Array<{ readonly chapter: Chapter; readonly row: StoredRow }> = []
+  let chapter = input.before === null ? store.chapters.latest(1)[0] : store.chapters.onChain(input.before.ordinal) ?? store.chapters.olderThan(input.before.ordinal)
+  let position = input.before !== null && chapter?.ordinal === input.before.ordinal ? input.before.position : null
+  while (chapter !== undefined && out.length <= input.limit) {
+    const reached: Chapter = chapter
+    const rows = store.chat.page(reached, input.details ? 'detail' : 'compact', position, input.limit + 1 - out.length, (sessionId) => store.chatInput(sessionId), store.chatSides())
+    out.push(...rows.map((row) => ({ chapter: reached, row })))
+    chapter = store.chapters.olderThan(reached.ordinal)
+    position = null
   }
-  return items
+  return { rows: out.slice(0, input.limit), more: out.length > input.limit }
+}
+
+/** The rows as items, newest first: what each shows now, with the Page titles of now (dp-e0rp). */
+function itemsOf(store: RobotStore, rows: ReadonlyArray<{ readonly row: StoredRow }>): ChatItem[] {
+  const resolve = resolver(store)
+  const titles = store.get<Record<string, string>>(PAGE_TITLES) ?? {}
+  return rows.flatMap(({ row }) => {
+    const item = resolveItem(row.item, resolve)
+    if (item === undefined) return []
+    return [item.kind !== 'reply' || item.attachments === undefined || !item.attachments.some((file) => file.page !== undefined) ? item
+      : { ...item, attachments: item.attachments.map((file) => file.page === undefined || titles[file.path] === undefined ? file : { ...file, page: { ...file.page, title: titles[file.path]! } }) }]
+  })
 }
 
 /** What one Turn of the live chapter showed, from its first event (the Turn's end reads it, v1.19: never the history). */
@@ -160,29 +174,36 @@ export const turnItems = (startSeq: number) => Effect.gen(function* () {
   const current = yield* config
   const live = store.chapters.get(current.liveSessionId)
   if (live === undefined) return [] as ChatItem[]
-  const items = chapterItems(store, live, { details: false, avatarSeed: current.identity.avatarSeed, from: startSeq })
-  const first = store.sql.exec<{ event: string }>('SELECT event FROM session_event WHERE session_id = ? AND seq >= ? ORDER BY seq LIMIT 1', live.sessionId, startSeq).toArray()[0]
-  return withProposals(store, items, first === undefined ? Date.now() : (JSON.parse(first.event) as { time: number }).time)
+  const rows: StoredRow[] = []
+  for (let before: number | null = null; ;) {
+    const page = store.chat.page(live, 'compact', before, 50, (sessionId) => store.chatInput(sessionId), store.chatSides())
+    rows.push(...page.filter((row) => row.seq >= startSeq))
+    if (page.length < 50 || page.at(-1)!.seq < startSeq) break
+    before = page.at(-1)!.position
+  }
+  return itemsOf(store, rows.map((row) => ({ row }))).reverse()
 })
 
-/** The chat (robot-q4b2): every chapter of the Conversation projected, with open proposals always shown as questions. */
+const workingNow = (store: RobotStore) => {
+  const active = store.activeTurn()
+  // The tool running now is in the Turn's own events, at their tail (ec-es5g).
+  const activity = active === undefined ? undefined : runningTool(tailEvents(store, active.sessionId, active.startSeq))
+  return { working: active !== undefined, ...(activity === undefined ? {} : { activity }) }
+}
+
+/** The whole chat, every chapter (tests and Robot RPC); the PWA reads it a page at a time (chatPage). */
 export const conversation = (details = false) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = yield* config
-  const items = withProposals(store, store.chapters.chain().flatMap((chapter) => chapterItems(store, chapter, { details, avatarSeed: current.identity.avatarSeed })), current.createdAt)
-  const active = store.activeTurn()
-  const working = active !== undefined
-  const activity = active === undefined ? undefined : runningTool(readStoredEvents(store.sql, active.sessionId, active.startSeq))
-  // A Page card shows the Page's title now, not the one it had when it was handed over (dp-e0rp).
-  const titles = store.get<Record<string, string>>(PAGE_TITLES) ?? {}
-  return {
-    canRetry: store.get('failed-wakeup') !== undefined,
-    robotId: current.id,
-    working,
-    items: items.map((item) => item.kind !== 'reply' || item.attachments === undefined || !item.attachments.some((file) => file.page !== undefined) ? item
-      : { ...item, attachments: item.attachments.map((file) => file.page === undefined || titles[file.path] === undefined ? file : { ...file, page: { ...file.page, title: titles[file.path]! } }) }),
-    ...(activity === undefined ? {} : { activity }),
-  } as Conversation
+  const items: ChatItem[] = []
+  for (let before: ChatCursor | null = null; ;) {
+    const page = chatRows(store, { before, limit: 500, details })
+    items.push(...itemsOf(store, page.rows))
+    const oldest = page.rows.at(-1)
+    if (!page.more || oldest === undefined) break
+    before = { ordinal: oldest.chapter.ordinal, position: oldest.row.position }
+  }
+  return { canRetry: store.get('failed-wakeup') !== undefined, robotId: current.id, ...workingNow(store), items: items.reverse() } as Conversation
 })
 
 function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
@@ -194,21 +215,45 @@ function maskItem(item: ChatItem, mask: (text: string) => string): ChatItem {
     case 'delegation': return { ...item, label: mask(item.label), result: item.result === null ? null : mask(item.result) }
     case 'activity': return item.calls === undefined ? item : { ...item, calls: item.calls.map((call) => ({ ...call, args: mask(call.args), result: mask(call.result), inner: call.inner.map((inner) => ({ ...inner, args: mask(inner.args) })) })) }
     // A tool-call Ask shows the stored arguments; a secret value among them is masked like the chat (sk-hx8j).
-    case 'proposal': {
-      const call = item.proposal.toolCall
-      if (call === undefined) return item
-      return { ...item, proposal: { ...item.proposal, purpose: mask(item.proposal.purpose), toolCall: { ...call, reason: mask(call.reason), arguments: call.arguments.map((argument) => ({ ...argument, value: mask(argument.value) })) } } }
-    }
+    case 'proposal': return { ...item, proposal: maskProposal(item.proposal, mask) }
     default: return item
   }
 }
 
-/** The chat as a viewer gets it, secrets masked (robot-4zi6). */
+function maskProposal(proposal: ProposalView, mask: (text: string) => string): ProposalView {
+  const call = proposal.toolCall
+  if (call === undefined) return proposal
+  return { ...proposal, purpose: mask(proposal.purpose), toolCall: { ...call, reason: mask(call.reason), arguments: call.arguments.map((argument) => ({ ...argument, value: mask(argument.value) })) } }
+}
+
+/** The whole chat as a viewer gets it, secrets masked (robot-4zi6). */
 export const conversationView = (details = false) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const mask = yield* platform.masker()
   const view = yield* conversation(details)
   return { ...view, items: view.items.map((item) => maskItem(item, mask)) } as Conversation
+})
+
+/**
+ * One page of the chat as the PWA shows it (v1.19, ec-n0uh): the newest items, or the ones older than a cursor, oldest first, with
+ * the cursor of the page before them (null at the start of the Conversation) and every open Ask, wherever it is (rb-dat4).
+ */
+export const chatPage = (before: string | null, details: boolean) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const mask = yield* (yield* RobotPlatform).masker()
+  const cursor = before === null ? null : parseCursor(before)
+  if (cursor === undefined) return yield* invalid('before is not a cursor of this chat')
+  const page = chatRows(store, { before: cursor, limit: CHAT_PAGE_SIZE, details })
+  const oldest = page.rows.at(-1)
+  return {
+    canRetry: store.get('failed-wakeup') !== undefined,
+    robotId: current.id,
+    ...workingNow(store),
+    items: itemsOf(store, page.rows).reverse().map((item) => maskItem(item, mask)),
+    before: page.more && oldest !== undefined ? formatCursor({ ordinal: oldest.chapter.ordinal, position: oldest.row.position }) : null,
+    asks: store.proposals('open').map((row) => maskProposal(proposalView(row), mask)),
+  } as Conversation
 })
 
 /** Items on one page of a Conversation read by another Robot (cd-gjhb). */
@@ -221,35 +266,48 @@ const TRAJECTORY_REACH = 40
 
 /** The chat as a viewer gets it, newest item first, a page at a time (page is 1-based); the same items the PWA shows. */
 export const conversationPage = (page: number) => Effect.gen(function* () {
-  const view = yield* conversationView(false)
+  const store = yield* RobotState
+  const current = yield* config
+  const mask = yield* (yield* RobotPlatform).masker()
   const number = Number.isInteger(page) && page >= 1 ? page : 1
-  const newest = [...view.items].reverse()
+  let cursor: ChatCursor | null = null
+  let rows: ReturnType<typeof chatRows> = { rows: [], more: false }
+  for (let index = 1; index <= number; index += 1) {
+    rows = chatRows(store, { before: cursor, limit: CONVERSATION_PAGE_SIZE, details: false })
+    const oldest = rows.rows.at(-1)
+    if (oldest === undefined) break
+    cursor = { ordinal: oldest.chapter.ordinal, position: oldest.row.position }
+    if (!rows.more && index < number) {
+      rows = { rows: [], more: false }
+      break
+    }
+  }
   return {
-    robotId: view.robotId,
-    working: view.working,
-    items: newest.slice((number - 1) * CONVERSATION_PAGE_SIZE, number * CONVERSATION_PAGE_SIZE),
-    nextPage: newest.length > number * CONVERSATION_PAGE_SIZE ? number + 1 : null,
+    robotId: current.id,
+    working: workingNow(store).working,
+    items: itemsOf(store, rows.rows).map((item) => maskItem(item, mask)),
+    nextPage: rows.more ? number + 1 : null,
   } as ConversationPage
 })
 
 /**
- * The events of the live log around one chat item (its id, or an event number), secrets masked and
- * cut to TRAJECTORY_EXCERPT_CHARS of event data so a diagnosis never floods the reader's context (cd-9te1).
+ * The events of the log around one chat item (its id, or an event number of the live chapter), secrets masked and cut to
+ * TRAJECTORY_EXCERPT_CHARS of event data so a diagnosis never floods the reader's context (cd-9te1).
  */
 export const trajectoryAround = (itemId: string, before: number, after: number) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = yield* config
   const mask = yield* (yield* RobotPlatform).masker()
-  // The item's chapter, newest first: what a diagnosis asks about is mostly recent (v1.19). A number is an event of the live chapter.
-  let found: { readonly seq: number; readonly sessionId: string } | undefined
-  for (const chapter of [...store.chapters.chain()].reverse()) {
-    const item = chapterItems(store, chapter, { details: false, avatarSeed: current.identity.avatarSeed }).find((entry) => entry.id === itemId)
-    if (item !== undefined) {
-      found = { seq: item.seq, sessionId: chapter.sessionId }
+  let found = store.chat.find(itemId)
+  // A chapter not folded yet (written before v1.19) is looked through in memory, newest first.
+  for (const chapter of found === undefined ? [...store.chapters.chain()].reverse() : []) {
+    if (store.chat.current(chapter.sessionId)) continue
+    const row = store.chat.page(chapter, 'detail', null, Number.MAX_SAFE_INTEGER, (sessionId) => store.chatInput(sessionId), store.chatSides()).find((entry) => entry.item.id === itemId)
+    if (row !== undefined) {
+      found = { seq: row.seq, sessionId: chapter.sessionId }
       break
     }
   }
-  found ??= (yield* conversation()).items.flatMap((entry) => (entry.id === itemId ? [{ seq: entry.seq, sessionId: current.liveSessionId }] : []))[0]
   found ??= /^\d+$/.test(itemId) ? { seq: Number(itemId), sessionId: current.liveSessionId } : undefined
   if (found === undefined) return yield* notFound(`no item "${itemId}" in this Conversation`)
   const centre = found.seq
@@ -445,16 +503,21 @@ export const report = Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
-  // The last line is in the newest chapter that shows anything (v1.19): the history is never read for it.
-  let items: ChatItem[] = []
-  for (const chapter of store.chapters.latest(3)) {
-    items = chapterItems(store, chapter, { details: false, avatarSeed: current.identity.avatarSeed })
-    if (items.length > 0) break
+  // The last line is among the newest items (v1.19): a few pages at most, never the history.
+  let newest: ChatItem | undefined
+  let line: { text: string; at: number } | undefined
+  for (let page = 0, before: ChatCursor | null = null; page < 3 && line === undefined; page += 1) {
+    const rows = chatRows(store, { before, limit: 30, details: false })
+    const items = itemsOf(store, rows.rows)
+    newest ??= items[0]
+    line = lastLine([...items].reverse())
+    const oldest = rows.rows.at(-1)
+    if (!rows.more || oldest === undefined) break
+    before = { ordinal: oldest.chapter.ordinal, position: oldest.row.position }
   }
-  items = withProposals(store, items, items[0]?.at ?? current.createdAt)
   const last = store.get('failed-wakeup') !== undefined
-    ? { text: 'Could not finish its last task. Open to see why.', at: items.at(-1)?.at ?? Date.now() }
-    : lastLine(items)
+    ? { text: 'Could not finish its last task. Open to see why.', at: newest?.at ?? Date.now() }
+    : line
   const entry: RegistryEntry = {
     id: current.id, ownerId: current.ownerId, kind: current.kind, identity: current.identity, sharing: current.sharing,
     status: current.status, fleetState: yield* fleetState, lastLine: last?.text ?? '', lastAt: last?.at ?? current.createdAt,

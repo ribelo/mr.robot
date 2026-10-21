@@ -35,7 +35,8 @@ const hook = (path: string, init: { body?: string; type?: string; idempotencyKey
   body: init.body ?? '{}',
 })
 
-const webhookMessages = async (id: string) => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'message' && item.sender.kind === 'channel')
+// The whole Conversation: the PWA's page holds the newest 50 items (v1.19).
+const webhookMessages = async (id: string) => (await testRobot(id).conversationView()).items.filter((item) => item.kind === 'message' && item.sender.kind === 'channel')
 
 describe('webhook Channel (v1.6 ticket 07)', () => {
   it('shows the owner an address and key, and Regenerate replaces the key at once (cd-pqt8)', async () => {

@@ -78,6 +78,18 @@ export class ChapterStore {
     return this.sql.exec<Row>('SELECT * FROM chapter WHERE superseded = 0 ORDER BY ordinal').toArray().map(fromSql)
   }
 
+  /** The chapter of the Conversation with this ordinal; undefined when it is superseded or does not exist. */
+  onChain(ordinal: number): Chapter | undefined {
+    const row = this.sql.exec<Row>('SELECT * FROM chapter WHERE ordinal = ? AND superseded = 0', ordinal).toArray()[0]
+    return row === undefined ? undefined : fromSql(row)
+  }
+
+  /** The chapter of the Conversation just before this ordinal. */
+  olderThan(ordinal: number): Chapter | undefined {
+    const row = this.sql.exec<Row>('SELECT * FROM chapter WHERE ordinal < ? AND superseded = 0 ORDER BY ordinal DESC LIMIT 1', ordinal).toArray()[0]
+    return row === undefined ? undefined : fromSql(row)
+  }
+
   /** The newest chapters of the Conversation, newest first. */
   latest(count: number): Chapter[] {
     return this.sql.exec<Row>('SELECT * FROM chapter WHERE superseded = 0 ORDER BY ordinal DESC LIMIT ?', count).toArray().map(fromSql)
@@ -130,6 +142,9 @@ export function registerChapters(sql: SqlStorage): void {
   const config = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
   const hasLog = sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'session_log'").toArray().length > 0
   if (config === undefined || !hasLog || sql.exec('SELECT 1 FROM chapter LIMIT 1').toArray().length > 0) return
+  // Chapters registered now have no stored chat yet: the backfill looks again (chat-items.ts).
+  if (sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'chat_fold'").toArray().length > 0) sql.exec("DELETE FROM chat_fold WHERE session_id = '*all-folded*'")
+  if (sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'chat_search_state'").toArray().length > 0) sql.exec("DELETE FROM chat_search_state WHERE session_id = '*all-indexed*'")
   const live = (JSON.parse(config.v) as { liveSessionId: string }).liveSessionId
   const sessions = sql.exec<{ id: string; header: string; inherited: number }>("SELECT id, header, inherited FROM session_log WHERE id NOT LIKE 'sa-%'").toArray()
     .map((row) => ({ id: row.id, inherited: row.inherited, createdAt: Number((JSON.parse(row.header) as { createdAt?: number }).createdAt ?? 0) }))

@@ -467,7 +467,11 @@ export const api = new Router<ApiContext>()
     return yield* call(() => home(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
   }))
   .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(
-    Effect.andThen(call(() => robot(c, id).conversationView(new URL(c.request.url).searchParams.get('details') === '1'))),
+    Effect.andThen(() => {
+      // A page at a time (v1.19, ec-n0uh): the newest, or the one older than the cursor a page gave.
+      const query = new URL(c.request.url).searchParams
+      return call(() => robot(c, id).chatPage(query.get('before'), query.get('details') === '1'))
+    }),
     Effect.tap(() => call(() => c.env.MEMBER.getByName(c.member.id).markSeen(id, Date.now()))),
   ))
   .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))

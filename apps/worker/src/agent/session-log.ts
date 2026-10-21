@@ -91,6 +91,8 @@ export interface SessionLogConfig {
   readonly onAppend?: (sessionId: string) => void
   /** Rewrites an event's JSON before it is stored: secret values never reach SQLite (robot-4zi6). */
   readonly redact?: (json: string) => string
+  /** Called inside the append's transaction with the first seq it stored: the chat is folded with its events (v1.19). */
+  readonly onStored?: (sessionId: string, from: number) => void
 }
 
 export class SqliteSessionLog extends SessionPersistence {
@@ -98,6 +100,7 @@ export class SqliteSessionLog extends SessionPersistence {
   private readonly storage: DurableObjectStorage
   private readonly onAppend: ((sessionId: string) => void) | undefined
   private readonly redact: (json: string) => string
+  private readonly onStored: ((sessionId: string, from: number) => void) | undefined
   private readonly sql: SqlStorage
   private readonly index: ConversationIndex
   private readonly writers = new Map<string, SessionHandle>()
@@ -107,6 +110,7 @@ export class SqliteSessionLog extends SessionPersistence {
     this.storage = config.storage
     this.onAppend = config.onAppend
     this.redact = config.redact ?? ((json) => json)
+    this.onStored = config.onStored
     this.sql = config.storage.sql
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
     this.index = new ConversationIndex(this.sql)
@@ -178,6 +182,7 @@ export class SqliteSessionLog extends SessionPersistence {
       }
       this.sql.exec('UPDATE session_log SET length = ? WHERE id = ?', stored.length + batch.length, id)
       this.index.extend(id)
+      this.onStored?.(id, stored.length)
     })
     this.onAppend?.(id)
   }

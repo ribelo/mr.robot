@@ -945,7 +945,7 @@ export const rewind = (atSeq: number) => Effect.gen(function* () {
     // The new session is the next chapter, seeded from the live one up to the point (v1.19).
     store.chapters.branch(current.liveSessionId, atSeq, now)
     store.chapters.close(current.liveSessionId, 'rewind', now)
-    store.chapters.open(sessionId, { sessionId: current.liveSessionId, seq: atSeq }, atSeq + 1, now)
+    store.openChapter(sessionId, { sessionId: current.liveSessionId, seq: atSeq }, atSeq + 1, now)
     // The seeded prefix keeps the voice it had (gb-psyl); what follows the rewind point is say only.
     store.setVoiceFrom(sessionId, Math.min(store.voiceFrom(current.liveSessionId), atSeq + 1))
     store.updateConfig(() => ({ liveSessionId: sessionId }))
@@ -1036,7 +1036,7 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   store.transaction(() => {
     store.saveConfig(config)
     // Its Conversation's first chapter (v1.19).
-    store.chapters.open(config.liveSessionId, null, 0, config.createdAt)
+    store.openChapter(config.liveSessionId, null, 0, config.createdAt)
     // A Robot made since v1.15 always had say: no Conversation of it shows assistant text as replies (gb-psyl).
     store.set('voice-upgraded', true)
     // And it can ask its chief from the start (gb-qmnc).

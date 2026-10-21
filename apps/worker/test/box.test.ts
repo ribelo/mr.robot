@@ -5,7 +5,7 @@
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
-import type { RobotPanel } from '@mr-robot/protocol'
+import type { RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { REVIEW_POLICY } from '../src/agent/auto-review.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { boxDisks, boxLog, boxScripts, holdBoxRun, releaseBoxRun, StubBox } from './stub-box.ts'
@@ -256,5 +256,19 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     ])
     expect((requests.get(id) ?? []).filter((request) => request.system === REVIEW_POLICY)).toHaveLength(1)
     expect(boxLog.get(id) ?? []).toEqual([])
+  })
+})
+
+describe("the Fleet's running tool (v1.19, ec-es5g)", () => {
+  it('names the command the Turn runs now, read from the tail of the live chapter', async () => {
+    const id = await robotWith({ box: 'allow' })
+    holdBoxRun(id, 'make report')
+    scripts.set(id, [{ calls: [{ name: 'run', args: { on: 'box', command: 'make report' } }] }, { say: 'Made.' }])
+    await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'make the report' } })
+    const row = async () => (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((entry) => entry.id === id)!
+    await vi.waitFor(async () => expect((await row()).turn?.activity).toBe('run'), { timeout: 10_000 })
+    releaseBoxRun(id, 'make report')
+    await settle(id)
+    expect((await row()).turn).toBeNull()
   })
 })

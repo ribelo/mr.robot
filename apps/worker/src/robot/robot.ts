@@ -350,13 +350,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.releaseComposition()
     this.subagentRows.clear()
     const sql = this.ctx.storage.sql
-    for (const table of ['session_event', 'session_log', 'chapter', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
+    for (const table of ['session_event', 'session_log', 'chapter', 'chat_item', 'chat_fold', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
     // Answered Asks go with the history; open ones are still decisions the owner owes.
     sql.exec("DELETE FROM proposal WHERE status != 'open'")
     this.store.search.clear()
     for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen', CHAPTER_COMPACTED]) this.store.delete(key)
     const next = this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
-    this.store.chapters.open(next.liveSessionId, null, 0, Date.now())
+    this.store.openChapter(next.liveSessionId, null, 0, Date.now())
+    // The Asks still open are decisions the owner owes: the new chat starts with them.
+    for (const row of this.store.proposals('open')) this.store.chat.side(next.liveSessionId, (seq) => ({ kind: 'proposal', id: `proposal-${row.id}`, seq, at: row.createdAt, proposalId: row.id }))
     await this.changed()
   }
 
@@ -646,6 +648,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.afterTurn(wakeup, turn)
     this.planIdle()
     await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
+    // Chapters written before v1.19 get their stored chat a bounded part per Turn (ec-2sra).
+    this.store.chat.backfill(this.chatBackfillEvents(), (sessionId) => this.store.chatInput(sessionId), this.store.chatSides())
     await this.rearm()
     await this.changed()
   }
@@ -1028,7 +1032,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       prompt: this.childPrompt(input.label), deny: SUBAGENT_DENIED_TOOLS,
       ...(seed === undefined ? {} : { seed, inheritedEventCount: parentSeq }),
     }, false)
-    this.subagentRows.add({ id, parentSession: config.liveSessionId, parentSeq, label: input.label.trim().slice(0, 80) || 'Subagent', mode: input.mode, task: input.task, provider: route.provider, model: route.model, effort, startedAt: Date.now() })
+    const startedAt = Date.now()
+    this.subagentRows.add({ id, parentSession: config.liveSessionId, parentSeq, label: input.label.trim().slice(0, 80) || 'Subagent', mode: input.mode, task: input.task, provider: route.provider, model: route.model, effort, startedAt })
+    // One card per delegation (ao-15ui), where the Robot started it.
+    this.store.chat.side(config.liveSessionId, (seq) => ({ kind: 'delegation', id: `delegation-${id}`, seq, at: startedAt, subagentId: id }))
     this.subagentRows.accounted(id, storedLength(this.ctx.storage.sql, id))
     this.children.set(id, child)
     child.agent.followup(createUserMessage({ content: [{ type: 'text', text: `[Task from ${config.identity.name}, your Robot]\n${input.task}` }], source: this.robotSource() }))
@@ -1247,6 +1254,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * parent. The session and the switch to it are stored in one transaction. A memory baseline the context holds stays current, so
    * the memory plugin acts exactly as after the compaction (ec-ndqf). A seed DSH would refuse leaves the chapter live, as before chapters.
    */
+  /** How many events of chapters written before v1.19 one Turn folds into the stored chat; tests make it small. */
+  protected chatBackfillEvents(): number {
+    return CHAT_BACKFILL_EVENTS
+  }
+
   protected async rollChapter(): Promise<void> {
     const from = this.store.requireConfig().liveSessionId
     if (this.store.get<string>(CHAPTER_COMPACTED) !== from) return
@@ -1271,7 +1283,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       storeSession(sql, nextHeader, seed.inheritedEventCount, seed.events)
       this.store.search.track(next, seed.inheritedEventCount)
       this.store.chapters.close(from, 'compaction', now)
-      this.store.chapters.open(next, { sessionId: from, seq: events.length - 1 }, seed.inheritedEventCount, now)
+      this.store.openChapter(next, { sessionId: from, seq: events.length - 1 }, seed.inheritedEventCount, now, seed.events.length)
       if (this.store.get<string>('memory-baseline') === from) this.store.set('memory-baseline', next)
       this.store.delete(CHAPTER_COMPACTED)
       this.store.updateConfig(() => ({ liveSessionId: next }), false)
@@ -1994,6 +2006,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         this.reportActivity()
       },
       redact: (json) => maskSecrets(json, this.turnSecrets),
+      // The chat is stored with the events it shows (v1.19); a Subagent's is read from its own log.
+      onStored: (sessionId, from) => {
+        if (!sessionId.startsWith('sa-')) this.store.chat.extend(sessionId, from, this.store.chatInput(sessionId))
+      },
       provider: config.model.provider,
       model: config.model.model,
       effort: config.model.effort,
@@ -3404,6 +3420,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.program(Views.conversationView(details))
   }
 
+  /** One page of the chat, newest or older than a cursor (v1.19, ec-n0uh). */
+  chatPage(before: string | null, details = false): Promise<Conversation> {
+    return this.program(Views.chatPage(before, details))
+  }
+
 
 /**
    * The live session's DSH events exactly as stored (every field, including surfaceOp), secrets
@@ -4173,6 +4194,8 @@ export const REVIEW_RECORD = 'plugin:mr-robot/review'
 const WARM_REQUEST = 'warm-request'
 /** The kv key of the live chapter a compaction ran in, until the chapter closes (v1.19). */
 export const CHAPTER_COMPACTED = 'chapter-compacted'
+/** How many events of chapters written before v1.19 one Turn folds into the stored chat. */
+const CHAT_BACKFILL_EVENTS = 4_000
 /** A warming more than this late is skipped: the cache it would refresh is gone. */
 const IDLE_LATE_MS = 5 * 60_000
 

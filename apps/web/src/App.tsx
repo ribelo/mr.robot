@@ -3,6 +3,7 @@ import { hostBridge } from './components/ThisComputer.tsx'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import { AsyncResult } from 'effect/reactivity'
 import type { Conversation as ConversationData, Me, ProposalView, RobotGroup, RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { conversationAtom, groupsAtom, keys, meAtom, panelAtom, robotsAtom, useCommand } from './client/api-atoms.ts'
@@ -14,6 +15,7 @@ import { Avatar } from './components/Avatar.tsx'
 import { ChatView } from './components/ChatView.tsx'
 import { Composer } from './components/Composer.tsx'
 import { ChatScroll } from './components/ChatScroll.tsx'
+import { useChatPages } from './components/chat-pages.ts'
 import { usePendingSends, type OutgoingMessage } from './components/use-pending-sends.ts'
 import { AskBar } from './components/AskBar.tsx'
 import type { AskReply } from './components/ask-reply.ts'
@@ -170,12 +172,20 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
 }) {
   const id = route.id
   const command = useCommand()
+  // The newest page is the conversation the app reads; the reader scrolls back through older pages (v1.19, ec-n0uh).
+  const details = me.workDetails !== 'compact'
+  const loadOlder = useCallback(async (before: string) => {
+    const exit = await command((api) => api.conversation(id, details, before), [])
+    return Exit.isSuccess(exit) ? exit.value : undefined
+  }, [command, id, details])
+  const pages = useChatPages(conversation, loadOlder)
+  const items = pages.items
   const [replyingInstead, setReplyingInstead] = useState(false)
   const [search, setSearch] = useState<{ query: string; index: number }>()
   const [failure, setFailure] = useState<string>()
   const [sentCount, setSentCount] = useState(0)
   const post = useCallback((message: OutgoingMessage) => command((api) => api.send(id, message), [keys.robot(id), keys.robots]), [command, id])
-  const outgoing = usePendingSends(conversation.items, me.id, post)
+  const outgoing = usePendingSends(items, me.id, post)
   const answerHelp = async (proposal: ProposalView, text: string) => {
     setFailure(exitFailure(await command((api) => api.answerHelp(id, proposal, text), [keys.robot(id), keys.robots])))
   }
@@ -192,16 +202,27 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   }
 
   // Open asks, oldest first, take the composer's place for the owner (rb-dat4).
-  const asks = panel.canEdit ? conversation.items.flatMap((item) => (item.kind === 'proposal' && item.proposal.status === 'open' ? [item.proposal] : [])) : []
+  const asks = !panel.canEdit ? [] : conversation.asks ?? items.flatMap((item) => (item.kind === 'proposal' && item.proposal.status === 'open' ? [item.proposal] : []))
   const identity = robot?.identity ?? panel.summary.identity
   // Search within the conversation (pl-8594): every item's text, newest match first.
   const needle = search?.query.trim().toLowerCase() ?? ''
-  const matches = needle === '' ? [] : conversation.items.filter((item) => searchText(item).toLowerCase().includes(needle)).map((item) => item.id).reverse()
+  const matches = needle === '' ? [] : items.filter((item) => searchText(item).toLowerCase().includes(needle)).map((item) => item.id).reverse()
   const current = matches.length === 0 || search === undefined ? undefined : matches[Math.min(search.index, matches.length - 1)]
   const jump = (index: number) => {
     setSearch((value) => (value === undefined ? value : { ...value, index }))
-    const target = matches[index]
   }
+  const matching = (list: readonly ConversationData['items'][number][]) => list.filter((item) => searchText(item).toLowerCase().includes(needle)).length
+  // Past the oldest match loaded, the search reads older pages until it finds the next one or the Conversation's start (v1.19, ec-enqy).
+  const older = async () => {
+    const seen = matches.length
+    for (let page = 0; page < 40; page += 1) {
+      const loaded = await pages.older()
+      if (loaded === undefined) break
+      if (matching(loaded.items) > seen) return jump(seen)
+    }
+    if (seen > 0) jump(0)
+  }
+  const previous = () => (search !== undefined && search.index + 1 >= matches.length && pages.before !== null ? void older() : jump(matches.length === 0 ? 0 : ((search?.index ?? 0) + 1) % matches.length))
   const header: ReactNode = (
     <header className="conversation-head">
       <button type="button" className="icon-button back" aria-label="Back" onClick={() => goBack(route.from === 'mission' ? { page: 'mission' } : { page: 'home' })}>‹</button>
@@ -217,9 +238,9 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
           <span className="conversation-search">
             <input autoFocus aria-label="Search this conversation" placeholder="Search this conversation" value={search.query}
               onChange={(event) => setSearch({ query: event.target.value, index: 0 })}
-              onKeyDown={(event) => { if (event.key === 'Enter') jump(matches.length === 0 ? 0 : (search.index + (event.shiftKey ? matches.length - 1 : 1)) % matches.length); if (event.key === 'Escape') setSearch(undefined) }} />
-            <span className="muted">{needle === '' ? '' : matches.length === 0 ? 'none' : `${Math.min(search.index, matches.length - 1) + 1} of ${matches.length}`}</span>
-            <button type="button" className="icon-button small" aria-label="Previous match" disabled={matches.length === 0} onClick={() => jump((search.index + 1) % matches.length)}>↑</button>
+              onKeyDown={(event) => { if (event.key === 'Enter') { if (event.shiftKey) jump(matches.length === 0 ? 0 : (search.index + matches.length - 1) % matches.length); else previous() } if (event.key === 'Escape') setSearch(undefined) }} />
+            <span className="muted">{needle === '' ? '' : matches.length === 0 ? (pages.before === null ? 'none' : 'none loaded') : `${Math.min(search.index, matches.length - 1) + 1} of ${matches.length}${pages.before === null ? '' : '+'}`}</span>
+            <button type="button" className="icon-button small" aria-label="Previous match" disabled={matches.length === 0 && pages.before === null} onClick={previous}>↑</button>
             <button type="button" className="icon-button small" aria-label="Next match" disabled={matches.length === 0} onClick={() => jump((search.index + matches.length - 1) % matches.length)}>↓</button>
             <button type="button" className="icon-button small" aria-label="Close search" onClick={() => setSearch(undefined)}>×</button>
           </span>
@@ -241,10 +262,10 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
     <div className={route.panel ? 'conversation with-panel' : 'conversation'}>
       <section className="conversation-main">
         {header}
-        <ChatScroll itemCount={conversation.items.length + outgoing.pending.length} pinSignal={sentCount} growth={(stream?.text.length ?? 0) + (stream?.thinking.length ?? 0) + (conversation.working ? 1 : 0)}>
+        <ChatScroll itemCount={items.length + outgoing.pending.length} prepended={pages.prepended} onTop={() => void pages.older()} pinSignal={sentCount} growth={(stream?.text.length ?? 0) + (stream?.thinking.length ?? 0) + (conversation.working ? 1 : 0)}>
           {(scrollRef, following) => (<>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView robotColor={identity.avatarColor} items={conversation.items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} pending={outgoing.pending} onRetry={outgoing.retry} />
+          <ChatView robotColor={identity.avatarColor} items={items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} pending={outgoing.pending} onRetry={outgoing.retry} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>

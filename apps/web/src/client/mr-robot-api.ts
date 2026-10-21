@@ -68,7 +68,8 @@ const make = Effect.gen(function* () {
 
     robots: get(Schema.Array(RobotSummary), '/api/robots'),
     createRobot: (input: { readonly brief?: string; readonly model?: ModelChoice }) => request(CreatedRobot, 'POST', '/api/robots', input),
-    conversation: (id: string, details: boolean) => get(Conversation, `/api/robots/${enc(id)}/conversation${details ? '?details=1' : ''}`),
+    /** The newest page of the chat, or the one older than a page's cursor (v1.19, ec-n0uh). */
+    conversation: (id: string, details: boolean, before?: string) => get(Conversation, `/api/robots/${enc(id)}/conversation?details=${details ? '1' : '0'}${before === undefined ? '' : `&before=${encodeURIComponent(before)}`}`),
     trajectory: (id: string) => get(Trajectory, `/api/robots/${enc(id)}/trajectory`),
     /** A page of raw session events: the latest (no cursor), newer than after, or older than before. */
     events: (id: string, page: { readonly before?: number; readonly after?: number; readonly limit: number }, child?: string) =>

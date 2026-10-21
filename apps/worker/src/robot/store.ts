@@ -7,6 +7,9 @@ import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA, storedLength } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
 import { ChapterStore, registerChapters } from './chapters.ts'
+import { CHAT_SCHEMA, ChatItems, type LegacySides } from './chat-items.ts'
+import { noticeItem, type FoldInput } from './projection.ts'
+import { SubagentStore } from './subagent-store.ts'
 import * as Schema from 'effect/Schema'
 import { HOST_FACETS, hostFacetKey, splitHostFacet, StoredPlace } from '../places/host-facet.ts'
 import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName, unsharedMrRobotDirectory } from './host-access.ts'
@@ -191,7 +194,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 24
+const SCHEMA_VERSION = 25
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -293,8 +296,16 @@ function closeAsksForRemovedTools(sql: SqlStorage): void {
   for (const { id, tool } of open) {
     sql.exec("UPDATE proposal SET status = 'done', answered_at = ? WHERE id = ?", now, id)
     const text = `Since the update, ${tool} no longer exists, so ${identity.name}'s Ask to use it was closed. If the work is still needed, ask ${identity.name} to do it again.`
-    sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, NULL)', `n-${crypto.randomUUID()}`, liveSessionId, storedLength(sql, liveSessionId), now, text)
+    storeNotice(sql, liveSessionId, text, now)
   }
+}
+
+/** A notice written by a migration: an item of a chat that is stored (v1.19), else a row the backfill places. */
+function storeNotice(sql: SqlStorage, sessionId: string, text: string, now: number): void {
+  const id = `n-${crypto.randomUUID()}`
+  const chat = sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'chat_fold'").toArray().length > 0 ? new ChatItems(sql, new ChapterStore(sql)) : undefined
+  if (chat?.side(sessionId, (seq) => noticeItem({ id, at: now, text }, seq)) === true) return
+  sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, NULL)', id, sessionId, storedLength(sql, sessionId), now, text)
 }
 
 /** Add the columns a table lacks (a store opened again at an older version keeps the ones it has). */
@@ -304,6 +315,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // The chat stored as items per chapter (v1.19 ticket 03, ec-2sra); the chapters before it are folded by the backfill.
+  25: CHAT_SCHEMA,
   // The Conversation as a chain of chapters (v1.19 ticket 02, ec-7oq8): every session so far is one, linked by its Rewinds.
   24: [registerChapters],
   // A v1.15 Ask still open for box_run, host_run and the like would run a removed tool when approved (deep review P18): it is closed.
@@ -425,6 +438,8 @@ export class RobotStore {
   search!: ConversationIndex
   /** The Conversation's chapters (v1.19). */
   chapters!: ChapterStore
+  /** The chat, stored per chapter (v1.19). */
+  chat!: ChatItems
 
   constructor(private readonly storage: DurableObjectStorage) {
     this.prepare()
@@ -437,12 +452,36 @@ export class RobotStore {
     this.migrate()
     this.search = new ConversationIndex(this.sql, true, (sessionId) => this.voiceFrom(sessionId))
     this.chapters = new ChapterStore(this.sql)
+    this.chat = new ChatItems(this.sql, this.chapters)
   }
 
   /**
    * From which event of a session only what the Robot said is a reply (v1.15 ticket 01, gb-psyl). Before it the Robot had no
    * say, and its assistant text was the reply. Zero for a session that was never without say.
    */
+  /**
+   * Open a chapter (v1.19): the first of a new Conversation, or the next one seeded from its parent. Its chat is current from
+   * `foldFrom` (the first event after its seed that is stored through the log).
+   */
+  openChapter(sessionId: string, parent: { readonly sessionId: string; readonly seq: number } | null, firstSeq: number, now: number, foldFrom = firstSeq): void {
+    this.chapters.open(sessionId, parent, firstSeq, now)
+    this.chat.open(sessionId, foldFrom)
+  }
+
+  /** What the chat fold of a chapter reads (v1.19). */
+  chatInput(sessionId: string): FoldInput {
+    return { assistantRepliesBefore: this.voiceFrom(sessionId), thread: (id) => this.thread(id)?.view, avatarSeed: this.config()?.identity.avatarSeed ?? '' }
+  }
+
+  /** What a chapter written before v1.19 had beside its log, for the fold that stores it. */
+  chatSides(): LegacySides {
+    return {
+      notices: (sessionId) => this.notices(sessionId),
+      delegations: (sessionId) => new SubagentStore(this.sql).of(sessionId).filter((row) => row.status !== 'archived').map((row) => ({ id: row.id, parentSeq: row.parentSeq, startedAt: row.startedAt })),
+      proposals: (from, until) => this.proposals().filter((row) => row.createdAt >= from && row.createdAt < until && row.status !== 'superseded').map((row) => ({ id: row.id, createdAt: row.createdAt })),
+    }
+  }
+
   voiceFrom(sessionId: string): number {
     return this.get<number>(`voice-from:${sessionId}`) ?? 0
   }
@@ -675,6 +714,9 @@ export class RobotStore {
       )
       const stored = this.proposal(id)
       if (stored === undefined) throw new Error('proposal vanished after insert')
+      // The Ask is in the chat where it was made (v1.19); in a chapter not folded yet its time places it.
+      const live = this.config()?.liveSessionId
+      if (live !== undefined) this.chat.side(live, (seq) => ({ kind: 'proposal', id: `proposal-${id}`, seq, at: now, proposalId: id }))
       return stored
     })
   }
@@ -924,6 +966,8 @@ export class RobotStore {
 
   addNotice(sessionId: string, afterSeq: number, text: string, now: number, card?: NoticeCard): NoticeRow {
     const notice = { id: `n-${crypto.randomUUID()}`, sessionId, afterSeq, at: now, text, ...(card === undefined ? {} : { card }) }
+    // A chapter whose chat is stored gets the notice as an item; one not folded yet keeps it here, where the backfill finds it (v1.19).
+    if (this.chat.side(sessionId, (seq) => noticeItem(notice, seq))) return notice
     this.sql.exec('INSERT INTO notice (id, session_id, after_seq, at, text, card) VALUES (?, ?, ?, ?, ?, ?)', notice.id, sessionId, afterSeq, now, text, card === undefined ? null : JSON.stringify(card))
     return notice
   }

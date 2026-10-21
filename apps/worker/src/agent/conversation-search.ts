@@ -10,6 +10,8 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { chatTextOf } from '../robot/projection.ts'
 
 export const SEARCH_PAGE_SIZE = 10
+/** The state row that says every chapter of the Conversation is indexed. */
+const ALL_INDEXED = '*all-indexed*'
 const CATCH_UP_BATCH = 500
 const MAX_TERMS = 8
 const SNIPPET_RADIUS = 70
@@ -102,13 +104,19 @@ export class ConversationIndex {
     if (terms.length === 0) throw new Error('give some words to search for')
     const number = Number.isInteger(page) && page >= 1 ? page : 1
     this.catchUp(sessionId)
-    // A chapter written before search existed, or before the index was rebuilt, is indexed at the first search that needs it.
+    // A chapter written before search existed, or before the index was rebuilt, is indexed at the first search; chapters opened since are tracked.
+    if (this.sql.exec('SELECT 1 FROM chat_search_state WHERE session_id = ?', ALL_INDEXED).toArray().length > 0) return this.page(terms, number)
     const behind = this.sql.exec<{ session_id: string; first_seq: number }>(
       `SELECT chapter.session_id, chapter.first_seq FROM chapter JOIN session_log ON session_log.id = chapter.session_id
         LEFT JOIN chat_search_state ON chat_search_state.session_id = chapter.session_id
         WHERE chapter.superseded = 0 AND (chat_search_state.next_seq IS NULL OR chat_search_state.next_seq < session_log.length)`,
     ).toArray()
     for (const chapter of behind) this.catchUp(chapter.session_id, chapter.first_seq)
+    this.sql.exec('INSERT OR REPLACE INTO chat_search_state (session_id, next_seq) VALUES (?, 0)', ALL_INDEXED)
+    return this.page(terms, number)
+  }
+
+  private page(terms: readonly string[], number: number): SearchPage {
     const offset = (number - 1) * SEARCH_PAGE_SIZE
     const rows = this.query(terms, offset)
     const hits = rows.slice(0, SEARCH_PAGE_SIZE).map((row): SearchHit => ({ id: row.id, sender: row.kind === 'reply' ? null : row.sender, at: Number(row.at), snippet: snippet(row.text, terms) }))
