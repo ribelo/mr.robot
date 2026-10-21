@@ -10,4 +10,4 @@ Spec: ../mr-robot-v1.19.md. Frontier at the start: 01. Then 02; then 03 and 04 i
 | 04 | [Trajectory per chapter](04-trajectory-per-chapter.md) | 02 | done |
 | 05 | [Rewind as a chapter, no ghost, no undo](05-rewind-as-chapter.md) | 04 | done |
 | 06 | [Cold chapters in R2](06-cold-chapters.md) | 03, 04 | done |
-| 07 | [Glossary and docs](07-glossary-docs.md) | 02, 03, 04, 05, 06 | ready-for-agent |
+| 07 | [Glossary and docs](07-glossary-docs.md) | 02, 03, 04, 05, 06 | done |

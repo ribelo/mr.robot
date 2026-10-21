@@ -10,7 +10,7 @@ Self-hosted robots on Cloudflare: persistent agents with one endless conversatio
 ## Layout
 
 - `apps/worker`: the edge Worker and the Robot, Member and Home Durable Objects
-  - `src/robot`: one Robot (turn queue, Task Wake-ups and attempts, rewind, messaging, browser, takeover)
+  - `src/robot`: one Robot (turn queue, Task Wake-ups and attempts, chapters, the stored chat and cold chapters, rewind, messaging, browser, takeover)
   - `src/agent`: the DSH composition inside a Robot (session log on DO SQLite, tools, code mode, providers)
   - `src/edge`: HTTP API behind Cloudflare Access
 - `apps/web`: the PWA (React)

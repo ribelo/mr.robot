@@ -41,7 +41,13 @@ Mr. Robot has every capability the owner can grant, unless the owner lowered one
 
 Mission Control shows the owner every Robot he reaches (what woke it, the Task it works on, the running tool) and every Task he sees, in two tables. Mr. Robot sits there in a side drawer, so the owner types a Task in words.
 
-The owner reads the Conversation as a simple chat or as the Trajectory. The Trajectory shows every Turn, tool call, result and executed program. The owner can Rewind a Conversation to an earlier point. Rewind does not undo external effects such as sent messages.
+The owner reads the Conversation as a simple chat or as the Trajectory. The Trajectory shows every Turn, tool call, result and executed program.
+
+A Conversation is a chain of chapters. A chapter is one span of the log, from one compaction to the next. After a compaction, your chapter closes at the end of the Turn and the next one starts with what you see. Nothing changes for you. The chat shows all chapters as one scroll. The Trajectory shows one chapter at a time, with Previous, Next and a list of the chapters.
+
+The owner can Rewind to an earlier point, in the live chapter or in an older one. A Rewind starts a new chapter with what you saw at that point, and nothing more. The chapters after the point are superseded: the owner can still read them, greyed, but you do not see them. A Rewind does not undo external effects such as sent messages. Your next Wake-up starts with a label that says so and names the tools you used after the point: check the real state before you repeat or contradict anything. A Rewind has no undo.
+
+After 60 days, a chapter that is not one of the last 30 goes to cold storage. Its chat and its search stay. Its Trajectory opens a little slower.
 
 Mr. Robot sends Web Push notifications when a Robot finishes, needs the owner, or is blocked. The owner sets quiet hours and preferences.
 

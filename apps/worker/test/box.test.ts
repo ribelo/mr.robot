@@ -269,8 +269,9 @@ describe("the Fleet's running tool (v1.19, ec-es5g)", () => {
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'make the report' } })
     const row = async () => (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((entry) => entry.id === id)!
     await vi.waitFor(async () => expect((await row()).turn?.activity).toBe('run'), { timeout: 10_000 })
+    // The command went one of the two ways: release the run, and finish the Job when it is one.
     releaseBoxRun(id, 'make report')
-    finishBoxJob(id, 'make report', { stdout: 'done' })
+    if (boxLog.get(id)?.some((line) => line.startsWith('spawn ')) === true) finishBoxJob(id, 'make report', { stdout: 'done' })
     await settle(id)
     expect((await row()).turn).toBeNull()
   })

@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.19 — The endless Conversation that stays small: chapters, materialized chat, Trajectory per chapter, Rewind without a ghost, cold storage, a scale test"
-status: ready-for-agent
+status: done
 story-prefix: ec
 parent: mr-robot-v1.18.md
 ---
