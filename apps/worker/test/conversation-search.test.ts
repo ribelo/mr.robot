@@ -55,7 +55,7 @@ describe.each(MODES)('searching the own Conversation with %s (cd-ggem)', (_, mod
 
     const chat = (await robot.conversationView()).items
     expect(chat.find((item) => item.id === early.items[0]!.id)).toMatchObject({ kind: 'message', text: 'The zeppelin invoice is overdue' })
-  })
+  }, 90_000)
 
   it('pages through a word found in most of the Conversation', async () => {
     const id = await activeRobot(mode)

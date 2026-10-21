@@ -9,7 +9,7 @@ import type { DefinitionView, Me, RobotSummary } from '@mr-robot/protocol'
 import { parseGrants, parseTasks, writeGrants, writeTasks, type GrantsForm, type TasksForm } from '../src/definitions/definition.ts'
 import { untar } from '../src/skills/library.ts'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts } from './stub-llm.ts'
+import { requests, scripts, wakeOf } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const BEN = 'ben@example.com'
@@ -150,4 +150,63 @@ describe('Save as definition (rm-gv6s, rm-gxp7, rm-77oh)', () => {
     expect((await list(ANNA)).map((row) => row.slug)).toEqual(['other'])
     expect((await api<RobotSummary[]>(ANNA, '/api/robots')).status).toBe(200)
   })
+})
+
+describe('Add a definition (v1.18 ticket 05, rm-xgau)', () => {
+  it('makes a setup Robot with its files, proposes grants.yaml\'s Grants, creates its Tasks paused and asks once', async () => {
+    const ben = (await api<Me>(BEN, '/api/me')).body
+    const google = await env.MEMBER.getByName(ben.id).addConnection({ kind: 'google', label: 'Ben mail', account: 'ben@example.com', services: ['gmail'], shared: false, meta: {}, secrets: { token: 't' } })
+    const grants: GrantsForm = { version: 1, tools: { files: 'allow', tasks: 'allow' }, connectors: [{ kind: 'google', write: false, level: 'allow' }, { kind: 'slack', write: false, level: 'ask' }], logins: [], hosts: [{ facet: 'files', level: 'ask' }] }
+    const tasks: TasksForm = { version: 1, tasks: [
+      { title: 'Weekly invoices', instructions: 'Collect the invoices.', timing: { kind: 'recurring', schedule: { kind: 'weekly', time: '09:00', weekdays: [1] }, timeZone: 'Europe/Warsaw' }, enabled: false },
+      { title: 'Year-end report', instructions: 'Write the report.', timing: { kind: 'scheduled', at: '2031-12-20T09:00:00.000Z' }, enabled: false },
+    ] }
+    await sync(new Map([
+      ['robots/bookkeeper/README.md', text('# Bookkeeper\n\nCollects the invoices every week.\n\nThe interview will ask:\n- where the invoices arrive\n')],
+      ['robots/bookkeeper/SOUL.md', text('# SOUL.md\nI am a careful bookkeeper.\n')],
+      ['robots/bookkeeper/MEMORY.md', text('# MEMORY.md\n\n## Facts\n- Invoices are due on the 10th.\n\n## Preferences\n\n## Commitments\n')],
+      ['robots/bookkeeper/skills/filing/SKILL.md', text('---\nname: filing\ndescription: How to file an invoice\n---\n# Filing\n')],
+      ['robots/bookkeeper/tasks.yaml', text(writeTasks(tasks))],
+      ['robots/bookkeeper/grants.yaml', text(writeGrants(grants))],
+    ]))
+    scripts.set('*', [{ say: 'Hello Ben. Where do your invoices arrive?' }])
+    const added = await api<RobotSummary>(BEN, '/api/definitions/bookkeeper/add', { body: {} })
+    expect(added.status, JSON.stringify(added.body)).toBe(200)
+    const id = added.body.id
+    await settle(id)
+    expect(added.body).toMatchObject({ status: 'setup', identity: { name: 'Bookkeeper' } })
+    const first = JSON.stringify(requests.get(id)![0]!.messages)
+    expect(first).toContain('installed from the definition \\"Bookkeeper\\"')
+    expect(first).toContain('where the invoices arrive')
+    expect(first).toContain('I am a careful bookkeeper.')
+    expect((await api<{ text: string }>(BEN, `/api/robots/${id}/file?path=skills/filing/SKILL.md`)).body.text).toContain('# Filing')
+    expect((await api(BEN, `/api/robots/${id}/file?path=grants.yaml`)).status).toBe(404)
+
+    scripts.set(id, [{ calls: [{ name: 'setup_complete', args: { purpose: 'File Ben\'s invoices.', tools: { web: 'allow' } } }] }, { say: 'Proposed.' }])
+    await api(BEN, `/api/robots/${id}/messages`, { body: { text: 'They arrive by e-mail.' } })
+    await settle(id)
+    const results = requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
+    const result = JSON.parse(results.find((entry) => entry.includes('proposalId'))!) as { proposalId: string; grants: { tools: Record<string, string>; connections: Record<string, string> }; notMet: string[] }
+    expect(result.grants.tools).toMatchObject({ files: 'allow', tasks: 'allow' })
+    expect(result.grants.tools['web']).not.toBe('allow')
+    expect(result.grants.connections).toEqual({ [google.id]: 'allow' })
+    expect(result.notMet).toEqual([expect.stringContaining('No slack Connection'), expect.stringContaining('No Host for files')])
+
+    // The open Ask comes with the chat (v1.19 asks).
+    const proposal = (await api<{ asks: Array<{ id: string; revision: number }> }>(BEN, `/api/robots/${id}/conversation`)).body.asks.find((entry) => entry.id === result.proposalId)!
+    scripts.set(id, [{ say: 'I have two Tasks for you, not running yet: Weekly invoices and Year-end report. Which shall I enable?' }])
+    expect((await api(BEN, `/api/robots/${id}/proposals/${proposal.id}`, { body: { revision: proposal.revision, approve: true } })).status).toBe(200)
+    await settle(id)
+    const mine = (await api<{ tasks: Array<{ title: string; timing: { kind: string; paused?: boolean }; instructions: string }> }>(BEN, `/api/tasks?assignee=robot:${id}&state=all`)).body.tasks
+    expect(mine.map((task) => [task.title, task.timing.kind, task.timing.paused ?? null]).sort()).toEqual([['Weekly invoices', 'recurring', true], ['Year-end report', 'unscheduled', null]])
+    expect(mine.find((task) => task.title === 'Year-end report')!.instructions).toContain('planned it for 2031-12-20T09:00:00.000Z')
+    const wake = JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))
+    expect(wake).toContain('Ask your owner once')
+    expect(wake).toContain('Weekly invoices')
+    // Once: the next Wake-up says nothing about it.
+    scripts.set(id, [{ say: 'Fine.' }])
+    await api(BEN, `/api/robots/${id}/messages`, { body: { text: 'Enable the weekly one.' } })
+    await settle(id)
+    expect(JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))).not.toContain('Ask your owner once')
+  }, 60_000)
 })

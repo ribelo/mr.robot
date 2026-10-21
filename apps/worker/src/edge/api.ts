@@ -428,6 +428,8 @@ export const api = new Router<ApiContext>()
     const row = yield* call(() => robot(c, id).saveAsDefinition(slug))
     return definitionView(row, c.member.id)
   }))
+  // Add a definition: a new Robot of the Member in setup, from the definition's files (v1.18 ticket 05).
+  .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(() => home(c.env).addDefinition(c.member.id, slug)))
   .on('GET', '/api/definitions', (c) => call(() => home(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
   .on('GET', '/api/definitions/:slug/archive', (c, { slug }) => Effect.gen(function* () {
     const files = yield* call(() => home(c.env).definitionFiles(slug, c.member.id))

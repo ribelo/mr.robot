@@ -184,7 +184,7 @@ import { causeOf, LAST_WAKEUP, runningTool } from './views.ts'
 import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
-import { IDLE_PLAN, MR_ROBOT_COMPACTION, proposalView, QUIET_DUE, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput } from './programs.ts'
+import { IDLE_PLAN, MR_ROBOT_COMPACTION, proposalView, QUIET_DUE, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput, type InstalledDefinition } from './programs.ts'
 export type { AnswerResult, HelpAnswerer, HelpAnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, storedToolCall, type ActiveTurn, type TaskCard, type ProposalRow, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
 
@@ -256,7 +256,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         }),
         stopWatching: () => Effect.promise(() => this.stopWatching()),
         setAlarm: (at) => Effect.promise(() => (at === null ? this.ctx.storage.deleteAlarm() : this.ctx.storage.setAlarm(at))),
-        seedWorkspace: () => Effect.promise(() => this.seedWorkspace()),
+        seedWorkspace: (files) => Effect.promise(() => this.seedWorkspace(files)),
         notifyMembers: (kind, body) => Effect.promise(() => this.notifyMembers(kind, body).catch(() => 0)),
         rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
         working: () => Effect.sync(() => this.store.activeTurn() !== undefined || this.pumping !== undefined),
@@ -429,7 +429,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         return text === '' ? [] : [{ name: plugin.name.replace(/^mr-robot-/, 'mr-robot:'), text }]
       }),
     ]
-    if (config.status === 'setup') sections.push({ name: 'Setup interview', text: setupPrompt(owner.name, this.store.get<string>('brief') ?? null) })
+    if (config.status === 'setup') sections.push({ name: 'Setup interview', text: setupPrompt(owner.name, this.store.get<string>('brief') ?? null, this.store.get<InstalledDefinition>(Programs.DEFINITION) ?? null) })
     // The shared-memory tools are off during setup (mounts()).
     sections.push({ name: 'Memory (first message of the context)', text: renderBaseline(await this.memoryFiles(), MEMORY_BYTES, sharedFileEdit(config.kind, config.status !== 'setup')) })
     return {
@@ -2018,7 +2018,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const prompt = [
       // The owner is read with every text too: a rename or a new nickname reaches the next request (ux-nwi1).
       ...PLATFORM_SECTIONS.map((section) => ({ name: section.name, text: () => section.render({ config: this.store.requireConfig(), owner: this.owner(), afterProviderIdentity, ...this.capabilityInput() }) })),
-      ...(config.status === 'setup' ? [{ name: 'setup', text: () => setupPrompt(this.owner().name, brief) }] : []),
+      ...(config.status === 'setup' ? [{ name: 'setup', text: () => setupPrompt(this.owner().name, brief, this.store.get<InstalledDefinition>(Programs.DEFINITION) ?? null) }] : []),
     ]
     const mounts = this.mounts(config)
     const scope = await Effect.runPromise(Scope.make())
@@ -2663,8 +2663,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The Muse layout, written once when the Robot is created (robot-om9f). */
-  private async seedWorkspace(): Promise<void> {
+  /** The templates where a file is missing; a definition's files first (v1.18 ticket 05). */
+  private async seedWorkspace(files: ReadonlyArray<{ readonly path: string; readonly body: Uint8Array }> = []): Promise<void> {
     const ws = this.workspace
+    for (const file of files) await this.run(ws.write(file.path, file.body, undefined, { kind: 'platform' }))
     await this.run(Effect.forEach(Object.entries(ROBOT_FILES), ([path, content]) =>
       ws.stat(path).pipe(Effect.flatMap((existing): Effect.Effect<unknown, unknown> => existing === undefined ? ws.write(path, content, undefined, { kind: 'platform' }) : Effect.void)), { concurrency: 4, discard: true }))
   }
@@ -3715,6 +3717,38 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Robot gets one bounded step to take out what is about its owner and write README.md, its Tasks and Grants become tasks.yaml and
    * grants.yaml, and the directory enters the Space's library. A snapshot: nothing links it back (rm-gxp7).
    */
+  /**
+   * The Grants a definition names (rm-xgau), met from what the owner has: a tool group as it is; a connector by the owner's Connection of
+   * that kind (the default one first); a login by his entries for that site; a Host facet on each of his Hosts. A need nothing meets is a note.
+   */
+  async definitionGrants(): Promise<{ readonly grants: GrantSet; readonly notes: readonly string[] } | undefined> {
+    const definition = this.store.get<InstalledDefinition>(Programs.DEFINITION)
+    if (definition === undefined) return undefined
+    const config = this.store.requireConfig()
+    await this.refreshReach().catch(() => undefined)
+    const form = definition.grants
+    const grants: { tools: Record<string, GrantLevel>; skills: Record<string, GrantLevel>; recipients: Record<string, GrantLevel>; secrets: Record<string, GrantLevel>; hosts: Record<string, GrantLevel>; connections: Record<string, GrantLevel> } = { tools: { ...form.tools }, skills: {}, recipients: {}, secrets: {}, hosts: {}, connections: {} }
+    const notes: string[] = [...(form.notes ?? [])]
+    for (const need of form.connectors) {
+      const candidates = this.knownConnections.filter((connection) => connection.kind === need.kind).sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || Number(b.mine) - Number(a.mine))
+      const chosen = candidates[0]
+      if (chosen === undefined) notes.push(`No ${need.kind} Connection: your owner connects one on their profile, then you propose it.`)
+      else grants.connections[need.write ? `${chosen.id}:write` : chosen.id] = need.level
+    }
+    const logins = await this.env.MEMBER.getByName(config.ownerId).logins().catch(() => [])
+    for (const need of form.logins) {
+      const matches = logins.filter((entry) => entry.websites.some((site) => (registrableDomain(site) ?? site) === need.purpose))
+      if (matches.length === 0) notes.push(`No login for ${need.purpose}: your owner adds one, then you propose it.`)
+      for (const entry of matches) grants.secrets[entry.name] = need.level
+    }
+    for (const need of form.hosts) {
+      const own = this.knownHosts.filter((host) => host.ownerId === config.ownerId)
+      if (own.length === 0) notes.push(`No Host for ${need.facet}: your owner pairs a computer, then you propose it.`)
+      for (const host of own) grants.hosts[`${host.id}:${need.facet}`] = need.level
+    }
+    return { grants, notes }
+  }
+
   async saveAsDefinition(slug: string): Promise<DefinitionRow> {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) throw Object.assign(new Error('a definition name is lowercase letters, digits and dashes'), { name: 'Invalid', status: 400 })
     if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw Object.assign(new Error('the Robot is working; save it as a definition when it is done'), { name: 'Conflict', status: 409 })

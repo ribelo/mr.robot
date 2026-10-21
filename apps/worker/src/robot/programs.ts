@@ -21,6 +21,7 @@ import { THREAD_PAUSE_AT, timeLabel, type AskAnswerLabel } from '../agent/source
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { chapterSeed } from '../agent/chapter-seed.ts'
+import type { GrantsForm, TasksForm } from '../definitions/definition.ts'
 import { coldChapter } from './cold-chapters.ts'
 import { readStoredEvents, storedHeader, storedLength, storeSession } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
@@ -94,7 +95,7 @@ export interface RobotPlatformShape {
   /** The Durable Object's alarm. */
   setAlarm(at: number | null): Effect.Effect<void>
   /** Write the Muse persona files into a new Workspace (robot-om9f). */
-  seedWorkspace(): Effect.Effect<void>
+  seedWorkspace(files: ReadonlyArray<{ readonly path: string; readonly body: Uint8Array }>): Effect.Effect<void>
   /** A Turn is running or about to run. */
   working(): Effect.Effect<boolean>
   /** Dispose the DSH agent so the next Turn composes over the current live session. */
@@ -582,6 +583,13 @@ export interface ToolCallAnswerWake {
   readonly note: string | null
 }
 
+/** The definition's Tasks note, once. */
+function takeDefinitionNote(store: RobotStore): string {
+  const note = store.get<string>(DEFINITION_TASKS_NOTE) ?? ''
+  store.delete(DEFINITION_TASKS_NOTE)
+  return note
+}
+
 function approvedNote(proposal: ProposalRow): string {
   switch (proposal.kind) {
     case 'setup': return 'Your owner approved your setup. You are active now with exactly the Grants you proposed. Say hello in one line and tell them what happens next.'
@@ -603,6 +611,43 @@ function reviewNote(review: ReviewView, decision: { approved: readonly string[];
   ].join('\n')
 }
 
+/** The kv key of the definition a Robot was installed from (v1.18 ticket 05): its title, README, grants.yaml and tasks.yaml. */
+export const DEFINITION = 'definition'
+/** The kv key of the note the approval's Wake-up carries about the definition's Tasks. */
+const DEFINITION_TASKS_NOTE = 'definition-tasks-note'
+
+export interface InstalledDefinition {
+  readonly slug: string
+  readonly title: string
+  readonly readme: string
+  readonly grants: GrantsForm
+  readonly tasks: TasksForm
+}
+
+/**
+ * After setup is approved, a definition's Tasks are created for the Robot, paused (rm-xgau): a recurring one paused, a scheduled one
+ * without its moment (only a recurring Task can be paused); the Robot asks its owner once whether to enable them.
+ */
+const installDefinitionTasks = Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const current = yield* config
+  const definition = store.get<InstalledDefinition>(DEFINITION)
+  if (definition === undefined || definition.tasks.tasks.length === 0) return
+  const home = platform.env.HOME.getByName(HOME_ID)
+  const caller = { kind: 'robot' as const, robotId: current.id, ownerId: current.ownerId, actor: { kind: 'robot' as const, robotId: current.id, name: current.identity.name, avatarColor: current.identity.avatarColor, avatarSeed: current.identity.avatarSeed } }
+  const made: string[] = []
+  for (const task of definition.tasks.tasks) {
+    const timing = task.timing.kind === 'recurring' ? { kind: 'recurring' as const, schedule: task.timing.schedule, timeZone: task.timing.timeZone } : { kind: 'unscheduled' as const }
+    const instructions = task.timing.kind === 'scheduled' ? `${task.instructions}\n\n(The definition planned it for ${task.timing.at}.)` : task.instructions
+    const created = yield* Effect.promise(() => home.createTask(caller, { title: task.title, instructions, assignee: { kind: 'robot', robotId: current.id }, timing }).catch(() => undefined))
+    if (created === undefined) continue
+    if (task.timing.kind === 'recurring') yield* Effect.promise(() => home.pauseTask(caller, created.id, true).catch(() => undefined))
+    made.push(`- ${task.title} (${created.id})${task.timing.kind === 'recurring' ? ', paused' : task.timing.kind === 'scheduled' ? `, no moment yet (planned for ${task.timing.at})` : ''}`)
+  }
+  if (made.length > 0) store.set(DEFINITION_TASKS_NOTE, [`You were installed from the definition "${definition.title}". Its Tasks are yours now and are not running yet:`, ...made, 'Ask your owner once, in one message, which of them to enable. Then resume each chosen one with task_pause (paused false) or give it its moment with task_update. Do not ask again.'].join('\n'))
+})
+
 /** What approval does: the stored payload, exactly. */
 const apply = (proposal: ProposalRow) => Effect.gen(function* () {
   const store = yield* RobotState
@@ -616,6 +661,7 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
         store.setGrants(grants)
         store.updateConfig(() => ({ status: 'active', ...(proposal.requiresHosts === true ? { requiresHosts: true } : {}) }))
       })
+      yield* installDefinitionTasks
       return
     }
     case 'grants': {
@@ -703,7 +749,7 @@ export const answer = (proposalId: string, revision: number, approve: boolean, a
     kind: 'platform',
     sender: { kind: 'platform' },
     text: review !== undefined && decision !== undefined ? reviewNote(review, decision)
-      : approved ? approvedNote(answered) : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
+      : approved ? [approvedNote(answered), takeDefinitionNote(store)].filter((part) => part !== '').join('\n\n') : `Your owner rejected your ${answered.kind} proposal (${answered.purpose}). Do not ask for it again unless they bring it up.`,
     // The chat shows what happened, not the instruction to the model.
     payload: {
       byOwner: true,
@@ -1049,6 +1095,8 @@ export interface RobotInit {
   readonly timeZone: string
   /** What the owner said the Robot is for ("New robot" form or Mr. Robot's brief). */
   readonly brief?: string
+  /** Installed from a definition (v1.18 ticket 05): its files go into the Workspace; setup asks only what belongs to the owner. */
+  readonly definition?: InstalledDefinition & { readonly files: ReadonlyArray<{ readonly path: string; readonly body: Uint8Array }> }
 }
 
 /** A new Robot: its config, Workspace, registry row, and for setup the interview's first Turn (robot-btct). */
@@ -1075,8 +1123,12 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
     if (init.kind === 'robot') store.setGrants(chiefGrants(init.ownerId))
     store.set('owner', { id: init.ownerId, name: init.ownerName, ...(init.ownerNickname === undefined ? {} : { nickname: init.ownerNickname }) })
     if (init.brief !== undefined) store.set('brief', init.brief)
+    if (init.definition !== undefined) {
+      const { files: _files, ...definition } = init.definition
+      store.set(DEFINITION, definition)
+    }
   })
-  yield* platform.seedWorkspace()
+  yield* platform.seedWorkspace(init.definition?.files ?? [])
   yield* platform.changed()
   if (init.status === 'setup') {
     yield* wake({ kind: 'platform', sender: { kind: 'platform' }, text: 'Setup started. Greet your owner and begin the interview.', payload: { summary: 'Setup started' } })

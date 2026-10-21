@@ -13,6 +13,8 @@ export interface RobotHost {
   grants(): GrantSet
   /** Store a proposal for the owner; the stored payload is what approval applies. */
   propose(kind: ProposalKind, purpose: string, payload: Record<string, unknown>): ProposalView
+  /** Installed from a definition (v1.18, rm-xgau): the Grants its grants.yaml names, met from the owner's Connections, logins and Hosts, and what is not met. */
+  definitionGrants(): Promise<{ readonly grants: GrantSet; readonly notes: readonly string[] } | undefined>
   setIdentity(identity: Partial<Identity>): Identity
   now(): number
 }

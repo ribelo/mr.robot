@@ -162,9 +162,14 @@ export function setupTools(host: RobotHost): ToolDefinition[] {
         required: ['purpose'],
       },
       execute: async ({ purpose, requires_hosts, ...grants }) => {
+        // A Robot installed from a definition proposes what its grants.yaml names (v1.18, rm-xgau).
+        const fromDefinition = await host.definitionGrants()
         // The stored proposal is what approval applies, defaults included, so the owner sees it all (sk-3sij).
-        const proposal = host.propose('setup', purpose, { grants: setupGrants(proposedGrants(grants, PROPOSABLE_LEVELS)), ...(requires_hosts === true ? { requiresHosts: true } : {}) })
-        return { proposalId: proposal.id, status: 'waiting for your owner to approve the Grants', grants: proposal.grants, ...(proposal.requiresHosts === true ? { requiresHosts: true } : {}) }
+        const proposal = host.propose('setup', purpose, { grants: setupGrants(fromDefinition?.grants ?? proposedGrants(grants, PROPOSABLE_LEVELS)), ...(requires_hosts === true ? { requiresHosts: true } : {}) })
+        return {
+          proposalId: proposal.id, status: 'waiting for your owner to approve the Grants', grants: proposal.grants, ...(proposal.requiresHosts === true ? { requiresHosts: true } : {}),
+          ...(fromDefinition === undefined || fromDefinition.notes.length === 0 ? {} : { notMet: fromDefinition.notes }),
+        }
       },
     }),
   ]

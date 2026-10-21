@@ -55,7 +55,8 @@ import { makeVault, type VaultShape } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
 import { DEFINITION_SCHEMA, DefinitionLibrary, type DefinitionRow } from '../definitions/library.ts'
 import * as Result from 'effect/Result'
-import { definitionsInTree } from '../definitions/definition.ts'
+import { checkForms, definitionsInTree } from '../definitions/definition.ts'
+import type { RobotInit } from '../robot/programs.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
@@ -491,7 +492,7 @@ const firstUsable = (usable: readonly ModelOption[]): ModelChoice | undefined =>
  * Create a Robot in setup (robot-btct): its Conversation opens with the kickoff Turn in
  * which it interviews its owner. Used by "New robot" and by Mr. Robot (robot-hk2s).
  */
-const createRobot = (ownerId: string, brief?: string, model?: ModelChoice) => Effect.gen(function* () {
+const createRobot = (ownerId: string, brief?: string, model?: ModelChoice, definition?: RobotInit['definition']) => Effect.gen(function* () {
   const owner = yield* member(ownerId)
   if (owner === undefined || owner.status !== 'active') return yield* notFound('unknown member')
   const id = `r-${crypto.randomUUID()}`
@@ -503,12 +504,13 @@ const createRobot = (ownerId: string, brief?: string, model?: ModelChoice) => Ef
     ownerName: owner.name,
     ...(profile.nickname === undefined ? {} : { ownerNickname: profile.nickname }),
     kind: 'robot',
-    identity: { name: 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]!, avatarSeed: id },
+    identity: { name: definition?.title.slice(0, 40) ?? 'New robot', title: '', description: '', avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]!, avatarSeed: id },
     sharing: 'private',
     status: 'setup',
     model: starting,
     timeZone: profile.timeZone,
     ...(brief === undefined || brief.trim() === '' ? {} : { brief }),
+    ...(definition === undefined ? {} : { definition }),
   }))
   const created = yield* entry(id)
   if (created === undefined) return yield* Effect.die(new Error('robot did not register'))
@@ -1628,6 +1630,21 @@ export class Home extends DurableObject<Env> {
   }
 
   /** A definition's files, for a Member who sees it; null when he does not. */
+  /**
+   * Add a definition (v1.18 ticket 05, rm-xgau): a new Robot of the Member, in setup, with the definition's files; its forms are kept by
+   * the Robot for setup_complete and the Tasks. README.md, tasks.yaml and grants.yaml stay with the definition, not in the Workspace.
+   */
+  async addDefinition(memberId: string, slug: string, model?: ModelChoice): Promise<RegistryEntry> {
+    const row = this.definitionLibrary.get(slug)
+    if (row === undefined || (!row.published && row.ownerId !== memberId)) throw Object.assign(new Error('no such definition'), { name: 'NotFound', status: 404 })
+    const files = await this.definitionLibrary.files(slug)
+    const forms = checkForms(files)
+    if (Result.isFailure(forms)) throw Object.assign(new Error(`${forms.failure.file}: ${forms.failure.message}`), { name: 'Invalid', status: 400 })
+    const readme = new TextDecoder().decode(files.get('README.md') ?? new Uint8Array())
+    const own = [...files.entries()].filter(([path]) => !['README.md', 'tasks.yaml', 'grants.yaml'].includes(path)).map(([path, body]) => ({ path, body }))
+    return this.run(createRobot(memberId, undefined, model, { slug, title: row.title, readme, grants: forms.success.grants, tasks: forms.success.tasks, files: own }))
+  }
+
   async definitionFiles(slug: string, memberId: string): Promise<Array<{ path: string; body: Uint8Array }> | null> {
     const row = this.definitionLibrary.get(slug)
     if (row === undefined || (!row.published && row.ownerId !== memberId)) return null

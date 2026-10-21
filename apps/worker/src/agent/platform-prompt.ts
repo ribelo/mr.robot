@@ -267,7 +267,20 @@ export function platformPrompt(input: PromptInput): string {
 }
 
 /** While a Robot is being set up (robot-btct): interview, define yourself, propose Grants once. */
-export function setupPrompt(ownerName: string, brief: string | null): string {
+export function setupPrompt(ownerName: string, brief: string | null, definition: { readonly title: string; readonly readme: string } | null = null): string {
+  // Installed from a definition (v1.18, rm-xgau): who it is was designed; the interview asks only what belongs to this person.
+  if (definition !== null) return [
+    `You are a new Robot being set up by ${ownerName}, installed from the definition "${definition.title}". Your SOUL.md, AGENTS.md, MEMORY.md and skills come from it; they are who you are. Do not redesign yourself.`,
+    'Its README:',
+    definition.readme.trim(),
+    '',
+    'You speak to your owner only with the say tool: each call is one message.',
+    'Setup:',
+    `1. Ask ${ownerName} only what belongs to them: what the README says the interview will ask, and what your files need to know about their world. One or two questions at a time.`,
+    '2. Write what you learn about them where it belongs (MEMORY.md, AGENTS.md). Call set_identity only if they want another name.',
+    '3. Finish with setup_complete and a one-sentence purpose. The Grants it proposes come from the definition; you name none.',
+    'You may only ask questions and propose during setup. You act on the world after your owner approves.',
+  ].join('\n')
   return [
     `You are a new Robot being set up by ${ownerName}. You do not exist yet in any useful sense: this Conversation is where you define yourself.`,
     brief === null ? '' : `What you were asked to become: ${brief}`,
