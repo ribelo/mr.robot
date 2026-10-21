@@ -7,7 +7,7 @@
  */
 
 /** When a platform skill is listed: always, or only for a Robot that holds what it is about. */
-export type PlatformSkillAudience = 'everyone' | 'subagents' | 'browser' | 'channels' | 'surfaces' | 'box' | 'hosts' | 'files'
+export type PlatformSkillAudience = 'everyone' | 'subagents' | 'browser' | 'channels' | 'surfaces' | 'box' | 'hosts' | 'files' | 'workspace'
 
 export interface PlatformSkill {
   readonly name: string
@@ -339,6 +339,38 @@ Read this before you use a Host: a computer that belongs to your owner.
 
 - A shared Host serves the Robots of every Member, all as the same OS user. Your directory is not private from them.
 - Write nothing there that your owner wants private.
+
+## Your Workspace
+
+- When you have a Workspace, its Host is where your work on its repository happens: name it with on "workspace", not with the Host's name. A path there starts in your current directory (working_directory); your own directory stays for your own files.
+- With a Workspace, load the platform skill coding before you change code.
+`),
+  skill('coding', 'Working in a Workspace: instructions first, tests and commits the repository\'s way, secrets, worktrees, reporting.', 'workspace', `
+# Coding in a Workspace
+
+Read this before your first change in your Workspace.
+
+## Instructions first
+- The Workspace instructions (the AGENTS.md chain of the repository, given to you as their own message) come before your habits. When you move with working_directory, the instructions of the new directory come with you. Read the files they name before you change anything.
+- Read a file before you edit it. An edit or a write of a file that changed since you read it is refused: read it again and make your change on what is there.
+
+## Change, verify, commit
+- Change as little as the task needs. Keep the repository's style.
+- Run the tests, the type check and the linter the way the repository says (its AGENTS.md, README, package scripts, Makefile). A change is done when they pass.
+- Use lsp to find a definition or the references of a symbol before you rename or remove it.
+- Commit as the repository asks: its message style, one verified step per commit. Never push, merge or tag unless your owner or the repository says so.
+- Never clone the repository elsewhere, and never work outside your Workspace on its code.
+
+## Secrets
+- Never read .env files, keys, tokens or credential stores unless your owner asks you to. Never print a secret in a command's output or a message.
+
+## A worktree
+- create_worktree gives you a checkout of your own when other Robots work in the same repository. It holds committed content only: no untracked or ignored files, no submodules, no fetch, no installed dependencies. Install what the repository needs there yourself (its install command) before you build or test.
+- With a worktree you change only it and the repository's .git; the main working tree is your owner's.
+
+## Decisions and the report
+- When the task does not say how something should behave and the code cannot answer it, ask your owner once (ask), with your recommended answer, and go on with what does not depend on it.
+- At the end, say what changed, the commits, what you verified and what is left. Keep it short; your owner reads the diffs in the Code view.
 `),
   skill('memory', 'What goes where in memory; the memory sweep.', 'everyone', `
 # Memory
@@ -377,7 +409,7 @@ Before an idle compaction, after the snapshot, you get one more bounded step: th
 ]
 
 /** The platform skills this Robot is shown now. `has` says which of the things they are about the Robot holds. */
-export function platformSkillsFor(has: { readonly subagents: boolean; readonly browser: boolean; readonly channels: boolean; readonly surfaces: boolean; readonly box: boolean; readonly hosts: boolean; readonly files: boolean }): PlatformSkill[] {
+export function platformSkillsFor(has: { readonly subagents: boolean; readonly browser: boolean; readonly channels: boolean; readonly surfaces: boolean; readonly box: boolean; readonly hosts: boolean; readonly files: boolean; readonly workspace: boolean }): PlatformSkill[] {
   return PLATFORM_SKILLS.filter((entry) => entry.audience === 'everyone' || has[entry.audience])
 }
 

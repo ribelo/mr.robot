@@ -6,8 +6,17 @@
  */
 import * as Result from 'effect/Result'
 import { checkForms, readmeSummary, type DefinitionFiles, type GrantsForm } from './definition.ts'
+import { PLATFORM_DEFINITIONS } from './platform.ts'
 
-export type DefinitionSource = 'git' | 'robot' | 'import'
+/** Where a definition came from; 'platform' ships with the Worker (v1.21, cw-wio5). */
+export type DefinitionSource = 'git' | 'robot' | 'import' | 'platform'
+
+/** A platform definition as a library row: published to every Member, the platform's, never stored. */
+function platformRow(slug: string, files: DefinitionFiles): DefinitionRow {
+  const { title, paragraph } = readmeSummary(new TextDecoder().decode(files.get('README.md') ?? new Uint8Array()), slug)
+  return { slug, title, paragraph, source: 'platform', ownerId: null, author: 'Mr. Robot (ships with the platform)', published: true, updatedAt: 0, invalid: null }
+}
+const PLATFORM_ROWS = [...PLATFORM_DEFINITIONS.entries()].map(([slug, files]) => platformRow(slug, files))
 
 export const DEFINITION_SCHEMA = `CREATE TABLE IF NOT EXISTS definition (
   slug TEXT PRIMARY KEY,
@@ -47,21 +56,28 @@ export class DefinitionLibrary {
   constructor(private readonly sql: SqlStorage, private readonly bucket: R2Bucket) {}
 
   get(slug: string): DefinitionRow | undefined {
+    const platform = PLATFORM_ROWS.find((entry) => entry.slug === slug)
+    if (platform !== undefined) return platform
     const row = this.sql.exec<Row>('SELECT * FROM definition WHERE slug = ?', slug).toArray()[0]
     return row === undefined ? undefined : fromSql(row)
   }
 
-  /** The definitions a Member sees: the published ones and his own; the Space admin sees every one, to publish it (v1.20.1). */
+  /**
+   * The definitions a Member sees: the platform's first, then the published ones and his own; the Space admin sees every one, to publish
+   * it (v1.20.1).
+   */
   visible(memberId: string, admin = false): DefinitionRow[] {
     if (admin) return this.all()
-    return this.sql.exec<Row>('SELECT * FROM definition WHERE published = 1 OR owner_id = ? ORDER BY title', memberId).toArray().map(fromSql)
+    return [...PLATFORM_ROWS, ...this.sql.exec<Row>('SELECT * FROM definition WHERE published = 1 OR owner_id = ? ORDER BY title', memberId).toArray().map(fromSql)]
   }
 
   all(): DefinitionRow[] {
-    return this.sql.exec<Row>('SELECT * FROM definition ORDER BY title').toArray().map(fromSql)
+    return [...PLATFORM_ROWS, ...this.sql.exec<Row>('SELECT * FROM definition ORDER BY title').toArray().map(fromSql)]
   }
 
   async files(slug: string): Promise<Map<string, Uint8Array>> {
+    const platform = PLATFORM_DEFINITIONS.get(slug)
+    if (platform !== undefined) return new Map(platform)
     const files = new Map<string, Uint8Array>()
     let cursor: string | undefined
     do {
@@ -82,6 +98,7 @@ export class DefinitionLibrary {
   async store(slug: string, files: DefinitionFiles, meta: { readonly source: DefinitionSource; readonly ownerId: string | null; readonly author: string; readonly published: boolean }, now: number): Promise<Result.Result<DefinitionRow, string>> {
     const forms = checkForms(files)
     if (Result.isFailure(forms)) return Result.fail(`${forms.failure.file}: ${forms.failure.message}`)
+    if (PLATFORM_DEFINITIONS.has(slug)) return Result.fail(`"${slug}" is a definition that ships with the platform; choose another name`)
     const existing = this.get(slug)
     if (existing !== undefined && meta.source !== 'git' && (existing.source === 'git' || existing.ownerId !== meta.ownerId)) {
       return Result.fail(`a definition named "${slug}" already exists in the library; choose another name`)
@@ -128,10 +145,12 @@ export class DefinitionLibrary {
   }
 
   setPublished(slug: string, published: boolean): void {
+    if (PLATFORM_DEFINITIONS.has(slug)) return
     this.sql.exec('UPDATE definition SET published = ? WHERE slug = ?', published ? 1 : 0, slug)
   }
 
   async remove(slug: string): Promise<void> {
+    if (PLATFORM_DEFINITIONS.has(slug)) throw Object.assign(new Error('a platform definition ships with the Worker and cannot be removed'), { name: 'Invalid', status: 400 })
     await this.removeFiles(slug)
     this.sql.exec('DELETE FROM definition WHERE slug = ?', slug)
   }

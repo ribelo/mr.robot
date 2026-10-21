@@ -51,7 +51,7 @@ describe('importing a Grok Bot template (rm-pdgk, rm-ewhv)', () => {
     expect(userAgent).toContain('Mozilla/5.0')
     expect(imported.body).toMatchObject({ slug: 'grok-overheard', title: 'Overheard', source: 'import', author: 'Lenny Rachitsky (Grok Bot, imported)', published: false, mine: true })
     // Not published: the Space admin sees it to publish it (v1.20.1); another Member would not.
-    expect((await api<DefinitionView[]>(ANNA, '/api/definitions')).body.map((row) => [row.slug, row.published])).toEqual([['grok-overheard', false]])
+    expect((await api<DefinitionView[]>(ANNA, '/api/definitions')).body.filter((row) => row.source !== 'platform').map((row) => [row.slug, row.published])).toEqual([['grok-overheard', false]])
 
     const read = await files(BEN, 'grok-overheard')
     expect(read('README.md')).toContain('Imported summary; Grok Bot keeps the recipe closed. Source: https://x.ai/bot/marketplace/bots/overheard')
@@ -75,6 +75,6 @@ describe('importing a Grok Bot template (rm-pdgk, rm-ewhv)', () => {
     served = '<html><body>Bot Marketplace</body></html>'
     expect((await api<{ error: string }>(BEN, '/api/definitions/import', { body: { url: 'https://x.ai/bot/marketplace/bots/overheard' } })).body.error).toContain('no Next.js flight data')
     expect((await api<{ error: string }>(BEN, '/api/definitions/import', { body: { url: 'https://example.com/bots/overheard' } })).body.error).toContain('Grok Bot marketplace page')
-    expect((await api<DefinitionView[]>(BEN, '/api/definitions')).body).toEqual([])
+    expect((await api<DefinitionView[]>(BEN, '/api/definitions')).body.filter((row) => row.source !== 'platform')).toEqual([])
   })
 })

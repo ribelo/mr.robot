@@ -78,7 +78,7 @@ describe('the Marketplace (v1.18-review #1, #3, #4)', () => {
     await testRobot(body.id).activateForTest()
     scripts.set(body.id, [{ text: '' }])
     expect((await api(BEN, `/api/robots/${body.id}/definition`, { body: { slug: 'bens' } })).status).toBe(200)
-    const admin = (await api<DefinitionView[]>(ANNA, '/api/definitions')).body
+    const admin = (await api<DefinitionView[]>(ANNA, '/api/definitions')).body.filter((row) => row.source !== 'platform')
     expect(admin.map((row) => [row.slug, row.published]).sort()).toEqual([['bens', false], ['helper', true]])
     const broken = new Map([...GOOD, ['robots/helper/grants.yaml', 'version: 1\nconnection: c-1\n']])
     expect((await sync(broken)).refusedDefinitions.map((entry) => entry.slug)).toEqual(['helper'])

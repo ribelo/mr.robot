@@ -58,7 +58,7 @@ import * as Result from 'effect/Result'
 import { checkForms, definitionsInTree } from '../definitions/definition.ts'
 import { briefOf, templateOf } from '../definitions/grok-import.ts'
 import { registrableDomain } from '../platform/logins.ts'
-import type { RobotInit } from '../robot/programs.ts'
+import type { InstalledDefinition, RobotInit } from '../robot/programs.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import { SPACE_ID, type Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
@@ -1741,7 +1741,7 @@ export class Space extends DurableObject<Env> {
    * Add a definition (v1.18 ticket 05, rm-xgau): a new Robot of the Member, in setup, with the definition's files; its forms are kept by
    * the Robot for setup_complete and the Tasks. README.md, tasks.yaml and grants.yaml stay with the definition, not in the Workspace.
    */
-  async addDefinition(memberId: string, slug: string, model?: ModelChoice): Promise<RegistryEntry> {
+  async addDefinition(memberId: string, slug: string, model?: ModelChoice, workspace?: { readonly host: string; readonly root: string }): Promise<RegistryEntry> {
     // Added before and still in setup: the same Robot (a retry after a lost answer creates no second one).
     const before = this.ctx.storage.sql.exec<{ robot_id: string }>('SELECT robot_id FROM definition_add WHERE member_id = ? AND slug = ?', memberId, slug).toArray()[0]?.robot_id
     const existing = before === undefined ? undefined : this.ctx.storage.sql.exec<{ status: string }>('SELECT status FROM robot WHERE id = ?', before).toArray()[0]
@@ -1756,7 +1756,14 @@ export class Space extends DurableObject<Env> {
     if (Result.isFailure(forms)) throw Object.assign(new Error(`${forms.failure.file}: ${forms.failure.message}`), { name: 'Invalid', status: 400 })
     const readme = new TextDecoder().decode(files.get('README.md') ?? new Uint8Array())
     const own = [...files.entries()].filter(([path]) => !['README.md', 'tasks.yaml', 'grants.yaml'].includes(path)).map(([path, body]) => ({ path, body }))
-    const created = await this.run(createRobot(memberId, undefined, model, { slug, title: row.title, readme, grants: forms.success.grants, tasks: forms.success.tasks, files: own }))
+    // The Workspace the Add form named (v1.21, cw-nm6y): a computer the Member reaches and a folder there, checked when setup is approved.
+    let chosen: InstalledDefinition['workspace']
+    if (workspace !== undefined && workspace.root.trim() !== '') {
+      const host = (await this.hostsFor(memberId)).find((entry) => entry.id === workspace.host)
+      if (host === undefined) throw Object.assign(new Error('the Workspace names a computer you do not reach'), { name: 'Invalid', status: 400 })
+      chosen = { hostId: host.id, host: host.name, root: workspace.root.trim() }
+    }
+    const created = await this.run(createRobot(memberId, undefined, model, { slug, title: row.title, readme, grants: forms.success.grants, tasks: forms.success.tasks, files: own, ...(chosen === undefined ? {} : { workspace: chosen }) }))
     this.ctx.storage.sql.exec('INSERT OR REPLACE INTO definition_add (member_id, slug, robot_id) VALUES (?, ?, ?)', memberId, slug, created.id)
     return created
   }

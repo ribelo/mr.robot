@@ -142,7 +142,8 @@ const make = Effect.gen(function* () {
     /** The Marketplace (v1.18, rm-vhrq): definitions with their needs; Add makes a Robot in setup; the admin publishes and removes. */
     marketplace: get(Schema.Array(MarketplaceEntry), '/api/marketplace'),
     importGrok: (url: string) => request(DefinitionView, 'POST', '/api/definitions/import', { url }),
-    addDefinition: (slug: string) => request(RobotSummary, 'POST', `/api/definitions/${enc(slug)}/add`, {}),
+    /** Add a definition; one that needs a computer may name its Workspace (v1.21, cw-nm6y). */
+    addDefinition: (slug: string, workspace?: { host: string; root: string }) => request(RobotSummary, 'POST', `/api/definitions/${enc(slug)}/add`, workspace === undefined ? {} : { workspace }),
     publishDefinition: (slug: string, published: boolean) => send('POST', `/api/admin/definitions/${enc(slug)}/publish`, { published }),
     removeDefinition: (slug: string) => send('DELETE', `/api/admin/definitions/${enc(slug)}`),
     saveAsDefinition: (id: string, slug: string) => request(DefinitionView, 'POST', `/api/robots/${enc(id)}/definition`, { slug }),

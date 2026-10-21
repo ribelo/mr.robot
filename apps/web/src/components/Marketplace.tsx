@@ -6,7 +6,9 @@
 import { useState } from 'react'
 import * as Exit from 'effect/Exit'
 import type { MarketplaceEntry } from '@mr-robot/protocol'
-import { keys, marketplaceAtom, useCommand } from '../client/api-atoms.ts'
+import { useAtomValue } from '@effect/atom-react'
+import { AsyncResult } from 'effect/reactivity'
+import { hostsAtom, keys, marketplaceAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { go } from '../route.ts'
 import { AtomView } from './AtomView.tsx'
@@ -44,12 +46,43 @@ function GrokImport() {
   )
 }
 
+/** The Add form's Workspace (cw-nm6y): one of the Member's computers and a folder there, checked when the Robot's setup is approved. */
+function AddWorkspace({ title, onAdd, onCancel }: { title: string; onAdd: (workspace?: { host: string; root: string }) => void; onCancel: () => void }) {
+  const hosts = AsyncResult.getOrElse(useAtomValue(hostsAtom), () => [])
+  const [host, setHost] = useState('')
+  const [root, setRoot] = useState('')
+  const chosen = host === '' ? hosts[0]?.id ?? '' : host
+  return (
+    <span className="form" role="group" aria-label={`Workspace for ${title}`}>
+      <span>Where will it work? A folder on one of your computers, inside a git repository. It is checked when you approve its setup.</span>
+      {hosts.length === 0 ? <span className="muted">You have no computer paired yet: add it without a Workspace and choose one in its settings later.</span> : (
+        <>
+          <label>Computer
+            <select aria-label="Computer" value={chosen} onChange={(event) => setHost(event.target.value)}>
+              {hosts.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+            </select>
+          </label>
+          <label>Folder <input aria-label="Folder" placeholder="~/projects/my-repo" value={root} onChange={(event) => setRoot(event.target.value)} /></label>
+        </>
+      )}
+      <span className="question-actions">
+        <button type="button" className="button" disabled={hosts.length > 0 && root.trim() === ''} onClick={() => onAdd(hosts.length === 0 ? undefined : { host: chosen, root: root.trim() })}>Add with this Workspace</button>
+        <button type="button" className="link" onClick={() => onAdd()}>Add without a Workspace</button>
+        <button type="button" className="link" onClick={onCancel}>Cancel</button>
+      </span>
+    </span>
+  )
+}
+
 function DefinitionCard({ entry, isAdmin }: { entry: MarketplaceEntry; isAdmin: boolean }) {
   const command = useCommand()
   const [error, setError] = useState<string>()
   const { definition } = entry
-  const add = async () => {
-    const exit = await command((api) => api.addDefinition(definition.slug), [keys.robots])
+  // A definition that needs a computer asks for the Workspace first (v1.21, cw-nm6y): the Robot in setup knows its repository.
+  const needsHost = entry.needs.some((need) => need.kind === 'host')
+  const [asking, setAsking] = useState(false)
+  const add = async (workspace?: { host: string; root: string }) => {
+    const exit = await command((api) => api.addDefinition(definition.slug, workspace), [keys.robots])
     if (Exit.isSuccess(exit)) go({ page: 'robot', id: exit.value.id, panel: false })
     else setError(exitFailure(exit))
   }
@@ -68,9 +101,10 @@ function DefinitionCard({ entry, isAdmin }: { entry: MarketplaceEntry; isAdmin: 
         )}
         {definition.invalid === undefined ? null : <span className="muted">The repository's version is refused, so this is the last good one: {definition.invalid}</span>}
         {error === undefined ? null : <span className="muted">{error}</span>}
+        {asking ? <AddWorkspace title={definition.title} onAdd={(workspace) => void add(workspace)} onCancel={() => setAsking(false)} /> : null}
       </span>
       <span className="definition-actions">
-        <button type="button" className="button" onClick={() => void add()}>Add</button>
+        <button type="button" className="button" onClick={() => (needsHost ? setAsking(true) : void add())}>Add</button>
         <a className="link" href={`/api/definitions/${encodeURIComponent(definition.slug)}/archive`} download={`${definition.slug}.tar.gz`}>Download definition</a>
         {isAdmin ? <button type="button" className="link" onClick={() => void act((api) => api.publishDefinition(definition.slug, !definition.published))}>{definition.published ? 'Unpublish' : 'Publish'}</button> : null}
         {isAdmin ? <button type="button" className="link" onClick={() => { if (confirm(`Remove ${definition.title} from the library?`)) void act((api) => api.removeDefinition(definition.slug)) }}>Remove</button> : null}

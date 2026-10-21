@@ -55,7 +55,8 @@ async function sync(files: ReadonlyMap<string, Uint8Array>) {
 }
 
 const text = (value: string) => new TextEncoder().encode(value)
-const list = async (as: string) => (await api<DefinitionView[]>(as, '/api/definitions')).body
+/** The library's stored definitions; the platform's (v1.21) are listed first and checked in platform-definitions.test.ts. */
+const list = async (as: string) => (await api<DefinitionView[]>(as, '/api/definitions')).body.filter((row) => row.source !== 'platform')
 
 describe('the two YAML forms (rm-tszp)', () => {
   const tasks: TasksForm = { version: 1, tasks: [{ title: 'no', instructions: 'Answer: NO, yes, off.', timing: { kind: 'recurring', schedule: { kind: 'weekly', time: '09:00', weekdays: [1, 4] }, timeZone: 'Europe/Warsaw' }, enabled: false }] }
@@ -222,7 +223,7 @@ describe('the Marketplace (v1.18 ticket 06, rm-vhrq, rm-mv69, rm-10ai)', () => {
       ['robots/bookkeeper/README.md', text('# Bookkeeper\n\nCollects the invoices every week.\n')],
       ['robots/bookkeeper/grants.yaml', text(writeGrants(grants))],
     ]))
-    const market = async (as: string) => (await api<Array<{ definition: DefinitionView; tools: string[]; needs: Array<{ kind: string; label: string; met: boolean }> }>>(as, '/api/marketplace')).body
+    const market = async (as: string) => (await api<Array<{ definition: DefinitionView; tools: string[]; needs: Array<{ kind: string; label: string; met: boolean }> }>>(as, '/api/marketplace')).body.filter((entry) => entry.definition.source !== 'platform')
     const [entry] = await market(BEN)
     expect(entry!.definition).toMatchObject({ slug: 'bookkeeper', title: 'Bookkeeper', paragraph: 'Collects the invoices every week.', author: 'the library repository', source: 'git' })
     expect(entry!.tools).toEqual(['files'])

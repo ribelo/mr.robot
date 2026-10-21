@@ -338,7 +338,8 @@ export const DefinitionView = Schema.Struct({
   slug: Schema.String,
   title: Schema.String,
   paragraph: Schema.String,
-  source: Schema.Literals(['git', 'robot', 'import']),
+  /** 'platform': ships with the Worker, read-only, listed first (v1.21, cw-wio5). */
+  source: Schema.Literals(['git', 'robot', 'import', 'platform']),
   author: Schema.String,
   published: Schema.Boolean,
   mine: Schema.Boolean,

@@ -61,7 +61,7 @@ import * as Result from 'effect/Result'
 import { definitionArchive } from '../definitions/tarball.ts'
 import { fetchGrokPage } from '../definitions/grok-import.ts'
 import type { DefinitionView, ToolCallDetails } from '@mr-robot/protocol'
-import { ToolCallsRequest } from '@mr-robot/protocol'
+import { ToolCallsRequest, WorkspaceChoice } from '@mr-robot/protocol'
 import { memberAvatarObject } from '../space/space.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
@@ -130,6 +130,14 @@ function admin(c: ApiContext): Effect.Effect<void, ApiError> {
 const TIME_ZONE_HEADER = 'X-Time-Zone'
 
 const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
+
+/** Add a definition and answer with the new Robot as the Robot list shows it (v1.20.1, v1.18-review #1). */
+async function addDefinitionListed(c: ApiContext, slug: string, workspace: WorkspaceChoice | undefined) {
+  const added = await space(c.env).addDefinition(c.member.id, slug, undefined, workspace)
+  const listed = (await space(c.env).reachable(c.member.id)).find((summary) => summary.id === added.id)
+  if (listed === undefined) throw Object.assign(new Error('the new Robot is not listed yet; reload'), { name: 'Conflict', status: 409 })
+  return listed
+}
 
 /** One read of the Workspace panel: the owner's; a refusal is a 409 with its sentence. */
 function workspacePanel(c: ApiContext, id: string, ask: { kind: 'where' } | { kind: 'files'; path: string } | { kind: 'git' }) {
@@ -478,11 +486,10 @@ export const api = new Router<ApiContext>()
     return definitionView(yield* call(() => space(c.env).importGrokTemplate(c.member.id, page.success.url, page.success.slug, page.success.html)), c.member.id)
   }))
   // The Robot as the Robot list shows it (v1.20.1, v1.18-review #1): the PWA reads a RobotSummary and opens it.
-  .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(async () => {
-    const added = await space(c.env).addDefinition(c.member.id, slug)
-    const listed = (await space(c.env).reachable(c.member.id)).find((summary) => summary.id === added.id)
-    if (listed === undefined) throw Object.assign(new Error('the new Robot is not listed yet; reload'), { name: 'Conflict', status: 409 })
-    return listed
+  .on('POST', '/api/definitions/:slug/add', (c, { slug }) => Effect.gen(function* () {
+    // The Add form's Workspace (v1.21, cw-nm6y), for a definition that needs a computer.
+    const input = yield* decodeBody(c.request, Schema.Struct({ workspace: Schema.optional(WorkspaceChoice) })).pipe(Effect.orElseSucceed(() => ({ workspace: undefined })))
+    return yield* call(() => addDefinitionListed(c, slug, input.workspace))
   }))
   .on('GET', '/api/definitions', (c) => call(() => space(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
   .on('GET', '/api/definitions/:slug/archive', (c, { slug }) => Effect.gen(function* () {

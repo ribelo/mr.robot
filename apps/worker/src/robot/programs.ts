@@ -660,6 +660,11 @@ export interface InstalledDefinition {
   readonly readme: string
   readonly grants: GrantsForm
   readonly tasks: TasksForm
+  /**
+   * The Workspace the Member chose in the Add form (v1.21, cw-nm6y): known to the Robot in setup without a Host call, checked on the Host
+   * and kept as the setting when its setup is approved.
+   */
+  readonly workspace?: { readonly hostId: string; readonly host: string; readonly root: string }
 }
 
 /**

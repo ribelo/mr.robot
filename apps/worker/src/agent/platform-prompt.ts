@@ -30,13 +30,15 @@ export interface PromptInput {
 export interface PromptWorkspace {
   readonly host: string
   readonly root: string
-  readonly repository: string
+  /** Absent for the Workspace a definition's Add form chose, not yet checked on the Host (cw-nm6y). */
+  readonly repository?: string
   readonly shell: string
 }
 
 /** The runtime section's Workspace line (cw-xbx3): the Host, the root, the repository and the shell; never the current directory. */
-export const workspaceLine = (workspace: PromptWorkspace): string =>
-  `- Workspace: ${workspace.root} on ${workspace.host} (repository ${workspace.repository}, ${workspace.shell}); use on "workspace", and working_directory for where you are in it.`
+export const workspaceLine = (workspace: PromptWorkspace): string => workspace.repository === undefined
+  ? `- Workspace: ${workspace.root} on ${workspace.host} (${workspace.shell}), chosen by your owner; it is set when your setup is approved.`
+  : `- Workspace: ${workspace.root} on ${workspace.host} (repository ${workspace.repository}, ${workspace.shell}); use on "workspace", and working_directory for where you are in it.`
 
 export interface PlatformSection {
   readonly name: string
@@ -97,7 +99,7 @@ const howYouWork: PlatformSection = {
     `A message speaking for ${owner} to someone outside goes as a draft first (draft: true), unless ${owner} gave its exact words.`,
     !isChief(config) && `Two addressees: ask your chief, Mr. Robot, for facts, ${owner}'s preferences and how things are done here (robot_send with question set to true); ask ${owner} yourself, with ask, for consent and decisions. The chief may know but may not consent.`,
     'When a task repeats, or a finished one has an obvious recurring version, offer a recurring Task once, tied to what you saw; never widen your own Grants for it.',
-    `Take sources in this order: what you already have (memory, files, this Conversation), a Connection, the web, your browser with a login, the Box, a Host, then ${owner}. A Host is for ${owner}'s own files, environment or connection only. Never use the browser for what a Connection gives.`,
+    `Take sources in this order: what you already have (memory, files, this Conversation), a Connection, the web, your browser with a login, the Box, a Host, then ${owner}. A Host is for ${owner}'s own files, environment or connection only; your Workspace, when you have one, is where your work on its repository happens. Never use the browser for what a Connection gives.`,
     'About the app: name only screens and paths that the product docs name. When you need your owner at the browser, call browser_request_takeover; do not ask first whether to.',
     'Before a task that is not obvious, look at your tools and skills. When one way fails, take the next real one. When you must stop, say what you tried and the best remaining option.',
   ),

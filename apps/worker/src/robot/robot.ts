@@ -2501,11 +2501,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Discord channel of its own or a chat Connection it may use; writing-as-owner, any surface it can write on in its owner's name (a chat Channel or a Connection);
    * box, the box grant; hosts, any facet of a Host (v1.16 ticket 10).
    */
-  private platformSkillAudience(granted: ReadonlySet<string>): { subagents: boolean; browser: boolean; channels: boolean; surfaces: boolean; box: boolean; hosts: boolean; files: boolean } {
+  private platformSkillAudience(granted: ReadonlySet<string>): { subagents: boolean; browser: boolean; channels: boolean; surfaces: boolean; box: boolean; hosts: boolean; files: boolean; workspace: boolean } {
     const config = this.store.requireConfig()
     const held = this.knownConnections.filter((connection) => this.store.mayUse('connection', connection.id))
     const channels = (config.discordChannel ?? '') !== '' || held.some((connection) => connection.kind === 'slack' || connection.kind === 'discord' || connection.kind === 'discord-user')
-    return { subagents: granted.has('subagents'), browser: granted.has('browser'), channels, surfaces: channels || held.length > 0, box: granted.has('box'), hosts: usableNames(this.store.effectiveGrants().hosts).length > 0, files: granted.has('files') }
+    return { subagents: granted.has('subagents'), browser: granted.has('browser'), channels, surfaces: channels || held.length > 0, box: granted.has('box'), hosts: usableNames(this.store.effectiveGrants().hosts).length > 0, files: granted.has('files'), workspace: this.store.get(WORKSPACE) !== undefined }
   }
 
   private grantedConnections(kind: ConnectorKind): GrantedConnection[] {
@@ -3120,8 +3120,31 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * Answer a Grant proposal or question. Compare-and-swap on the revision: an answer to a
    * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
    */
-  answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string, choice: { readonly value?: string; readonly values?: readonly string[]; readonly text?: string } = {}): Promise<AnswerResult> {
-    return this.program(Programs.answer(proposalId, revision, approve, approved, scope, { ...(note === undefined ? {} : { note }), ...choice }))
+  async answer(proposalId: string, revision: number, approve: boolean, approved?: readonly string[], scope?: string, note?: string, choice: { readonly value?: string; readonly values?: readonly string[]; readonly text?: string } = {}): Promise<AnswerResult> {
+    const result = await this.program(Programs.answer(proposalId, revision, approve, approved, scope, { ...(note === undefined ? {} : { note }), ...choice }))
+    // A setup approved: the Workspace the Add form chose is checked on the Host and kept now (v1.21, cw-nm6y).
+    if (result.ok && this.store.config()?.status === 'active') await this.applyChosenWorkspace()
+    return result
+  }
+
+  /**
+   * The Workspace a definition's Add form chose (cw-nm6y), once the Robot is active and holds its Host's files facet: checked as the
+   * owner's choice is, kept as the setting, or refused with a notice to the owner. Done once.
+   */
+  private async applyChosenWorkspace(): Promise<void> {
+    const definition = this.store.get<InstalledDefinition>(Programs.DEFINITION)
+    const chosen = definition?.workspace
+    if (definition === undefined || chosen === undefined || this.store.get<WorkspaceSetting>(WORKSPACE) !== undefined) return
+    const { workspace: _done, ...rest } = definition
+    this.store.set(Programs.DEFINITION, rest)
+    const checked = await this.checkedWorkspace({ host: chosen.hostId, root: chosen.root })
+    if (checked.kind === 'kept') {
+      await this.updateSettings({ workspace: { host: chosen.hostId, root: chosen.root } }, 'The Add form')
+      return
+    }
+    const config = this.store.requireConfig()
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `The Workspace chosen when this Robot was added was not set: ${checked.message} Choose it in the Robot's settings.`, Date.now())
+    await this.changed()
   }
 
   /** draft_revise (v1.17, dp-5ixt): the Robot's new version of an open draft; the owner's card shows what changed. */
@@ -4509,7 +4532,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // The Workspace line (v1.21, cw-xbx3): static, the current directory and the worktree stay out so the prompt cache holds across a cd.
     const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
     const host = setting === undefined ? undefined : this.knownHosts.find((entry) => entry.id === setting.hostId)
-    const workspace: PromptWorkspace | undefined = setting === undefined ? undefined : { host: host?.name ?? setting.host, root: setting.root, repository: setting.repository, shell: host?.capabilities?.shell ?? (host?.platform === 'win32' ? 'pwsh' : 'bash') }
+    // In setup, the Workspace the Add form chose (cw-nm6y), known without a Host call; set when setup is approved.
+    const chosen = this.store.get<InstalledDefinition>(Programs.DEFINITION)?.workspace
+    const chosenHost = chosen === undefined ? undefined : this.knownHosts.find((entry) => entry.id === chosen.hostId)
+    const workspace: PromptWorkspace | undefined = setting !== undefined
+      ? { host: host?.name ?? setting.host, root: setting.root, repository: setting.repository, shell: host?.capabilities?.shell ?? (host?.platform === 'win32' ? 'pwsh' : 'bash') }
+      : chosen === undefined ? undefined : { host: chosenHost?.name ?? chosen.host, root: chosen.root, shell: chosenHost?.capabilities?.shell ?? 'bash' }
     return { ...(items === undefined ? {} : { capabilities: items }), ...(instructions.length === 0 ? {} : { connectionInstructions: instructions }), ...(skills.length === 0 ? {} : { platformSkills: skills }), ...(workspace === undefined ? {} : { workspace }) }
   }
 

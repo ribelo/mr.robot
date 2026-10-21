@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
+import { closeHosts, fakeHost, hostDirectories } from './fake-host.ts'
 import { TOOL_GROUP_NAMES } from '../src/agent/catalog.ts'
 
 const ANNA = 'anna@example.com'
@@ -119,13 +120,18 @@ describe('the v1.15 prompt (ticket 13, gb-3ih8, gb-gwes, gb-ycy1, gb-dqjy, gb-82
     expect(skills.filter((skill) => skill.includes('(platform)')).map((skill) => skill.split(' ')[0])).toEqual(['tasks-cadence', 'asking', 'memory'])
   })
 
-  it('stays under 2 900 words for a Robot with every group granted, the capability rules included (gb-4wem)', async () => {
+  it('stays under 3 000 words for a Robot with every group, a Host and a Workspace, the capability rules included (gb-4wem, cw-etsj)', async () => {
+    const desk = await fakeHost('Desk')
+    hostDirectories.add('/home/anna/repo/.git')
     const id = await newRobot()
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false, autoReview: true, grants: { tools: [...TOOL_GROUP_NAMES], skills: [], recipients: [], secrets: [], hosts: [], connections: [] } } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false, autoReview: true, grants: { tools: [...TOOL_GROUP_NAMES], skills: [], recipients: [], secrets: [], hosts: { [`${desk.hostId}:files`]: 'allow', [`${desk.hostId}:shell`]: 'allow', [`${desk.hostId}:browser`]: 'allow' }, connections: [] } } })
     await testRobot(id).activateForTest()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { workspace: { host: desk.hostId, root: '/home/anna/repo' } } })
     const words = (await preview(id)).filter((section) => !section.name.startsWith('Memory')).reduce((total, section) => total + section.text.split(/\s+/).filter(Boolean).length, 0)
-    // v1.16 ticket 10 added the Host to the source ladder and the box skill line (the cap was 2 800).
-    expect(words).toBeLessThan(2900)
+    // v1.16 ticket 10 added the Host to the source ladder (the cap was 2 800, then 2 900); v1.21 ticket 10 raised it to 3 000 for the
+    // Workspace line, the place tools and the coding skill's line (the measurement is in the ticket's closing note).
+    expect(words).toBeLessThan(3000)
+    await closeHosts()
   })
 })
 
