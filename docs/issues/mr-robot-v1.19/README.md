@@ -4,7 +4,7 @@ Spec: ../mr-robot-v1.19.md. Frontier at the start: 01. Then 02; then 03 and 04 i
 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
-| 01 | [The scale test, run against today](01-scale-test.md) | — | ready-for-agent |
+| 01 | [The scale test, run against today](01-scale-test.md) | — | done |
 | 02 | [Chapters: a compaction opens the next session](02-chapters.md) | 01 | ready-for-agent |
 | 03 | [Materialized chat items and the endless scroll](03-materialized-chat.md) | 02 | ready-for-agent |
 | 04 | [Trajectory per chapter](04-trajectory-per-chapter.md) | 02 | ready-for-agent |

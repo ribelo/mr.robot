@@ -22,6 +22,11 @@ import { makeVault } from '../src/platform/vault.ts'
 import * as Effect from 'effect/Effect'
 import { ConversationIndex } from '../src/agent/conversation-search.ts'
 import type { PushNotification } from '../src/platform/push.ts'
+import { Context } from '@deepseek-ai/cordis'
+import { foldSurface, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { readStoredEvents, SqliteSessionLog } from '../src/agent/session-log.ts'
+import { countSql } from './sql-reads.ts'
+import { yearSpans, type YearShape } from './scale-year.ts'
 
 export const delivered = new Map<string, PushNotification[]>()
 
@@ -136,6 +141,40 @@ export const printedPdfs: string[] = []
 
 /** The production Robot with the scripted stub model on the "stub" Provider. */
 export class Robot extends ProductionRobot {
+  /** Its SQL is counted while a test records (the scale test's seam, sql-reads.ts). */
+  constructor(ctx: DurableObjectState, env: ConstructorParameters<typeof ProductionRobot>[1]) {
+    countSql(ctx.storage)
+    super(ctx, env)
+  }
+
+  /**
+   * A year of a busy Robot appended to its live Conversation through the persistence seam (v1.19 ticket 01); the agent in memory is stale
+   * afterwards, so the test restarts the Robot. Returns how many events and bytes were written.
+   */
+  async seedYearForTest(shape: YearShape): Promise<{ events: number; bytes: number; ms: number }> {
+    const started = Date.now()
+    const sessionId = this.store.requireConfig().liveSessionId
+    const existing = readStoredEvents(this.store.sql, sessionId)
+    const turn = Math.max(0, ...existing.flatMap((event) => (event.type === 'turn/start' ? [(event.data as { turn: number }).turn] : [])))
+    const position = { seq: existing.length, turn, nodes: [...foldSurface(existing).nodes] }
+    const log = new SqliteSessionLog(new Context(), { storage: this.ctx.storage })
+    const handle = await log.open(SessionId(sessionId), 'write')
+    let events = 0
+    let bytes = 0
+    for (const span of yearSpans(shape, position)) {
+      await handle.append(span as unknown as SessionEvent[])
+      events += span.length
+      for (const event of span) bytes += JSON.stringify(event).length
+    }
+    await handle.close()
+    return { events, bytes, ms: Date.now() - started }
+  }
+
+  /** Build (resume) the agent on the live Conversation, as the first Turn after a sleep does. */
+  async resumeForTest(): Promise<void> {
+    await (this as unknown as { agent(): Promise<unknown> }).agent()
+  }
+
   /** Fake connectors set by a test replace the real ones; their HTTP is the recorded fake service. */
   protected override connectorPlugins() {
     return fakeConnectors.size === 0 ? super.connectorPlugins() : Object.fromEntries(fakeConnectors)
