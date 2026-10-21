@@ -7,7 +7,7 @@
 **Status:** done (one check by hand)
 
 - [x] Workerd test through the stub: the four fields and the directory move; the policy's write roots after creation; a Subagent refused
-- [ ] By hand: two Robots on one repository in two worktrees (see below)
+- [ ] By hand: two Robots on one repository in two worktrees (see below): verified only through the stub; real-machine use will tell.
 
 ## Closing note
 

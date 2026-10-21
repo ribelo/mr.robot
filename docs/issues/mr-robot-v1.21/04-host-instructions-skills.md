@@ -8,7 +8,7 @@
 
 - [x] Workerd test from a stub tree: chain, overlays, duplicates, budget, own message, refresh on cd and on a deeper edit, changed and removed files, symlinks skipped; the merged catalog and a loaded Host skill; digests
 - [x] Host Node tests: the walk and the symlink rule
-- [ ] By hand: the owner's real tree on NixOS (see below)
+- [ ] By hand: the owner's real tree on NixOS (see below): verified only through the stub; real-machine use will tell.
 
 ## Closing note
 

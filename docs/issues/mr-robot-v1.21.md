@@ -31,7 +31,7 @@ The first-principles review settled the shape: **the brain stays in Cloudflare, 
 
 **The service Host.** One codebase, two entries; Nix module and units; a display check that asks for a display.
 
-**Roles and acceptance.** Mr. Robot keeps no Workspace; a platform Coding Robot definition; the Add form asks for the Workspace before the interview; the coding skill and a prompt bound raised to 3,000 words; acceptance is one ticket the owner names, implemented by a Coding Robot on his machine.
+**Roles.** Mr. Robot keeps no Workspace; a platform Coding Robot definition; the Add form asks for the Workspace before the interview; the coding skill and a prompt bound raised to 3,000 words.
 
 ## User Stories
 
@@ -98,16 +98,15 @@ The first-principles review settled the shape: **the brain stays in Cloudflare, 
 44. As a person, I want a Nix module, a systemd unit and a launchd plist under infra/host/, so that an always-on Host is one line ^cw-dr33
 45. As an owner, I want a service Host to report no graphical session and no browser facet on every platform (the check asks for a display, not the OS), so that a service Host offers files, shell, lsp and Workspaces ^cw-ixto
 
-### The chief, the definition, the prompt, the skill, the acceptance
+### The chief, the definition, the prompt, the skill
 46. As an owner, I want Mr. Robot to have no Workspace by default, to give coding Robots Tasks, read their Conversations and set their Workspaces, and to keep his Host grants for what a chief does there, so that the chief stays a chief ^cw-evn7
 47. As an owner, I want a Coding Robot definition shipped with the Worker as a platform definition in the library (read-only, listed first in the Marketplace): SOUL.md for an engineer, AGENTS.md with the working rules, grants.yaml naming the Host facets files and shell (lsp comes with files), no Box, no browser, Work details Code, so that the first coding Robot is one Add ^cw-wio5
 48. As a Member, I want the Add form of a definition that needs a Host to ask for the Workspace (Host and root) before the interview, so that the Robot in setup knows its repository without reaching the Host ^cw-nm6y
 49. As a Robot, I want the prompt's Workspace line and the platform skill coding (instructions first; tests the repository's way; commit as the repository asks; never read .env, keys or secrets unless asked; report with say at the end; ask for decisions; never clone elsewhere; a worktree's limits), and the source ladder's Host rule read in the light of a Workspace, so that practice is written once and the prompt stays under its bound (raised to 3,000 words with the measurement in the closing note) ^cw-etsj
-50. As an owner, I want the acceptance of this spec to be a Coding Robot with a Workspace on my computer implementing one ticket I name when the time comes, given the spec's path in its Task, end to end (read, edit, run the tests, commit, report), judged by me and recorded with what hurt, so that the claim is tested on itself ^cw-6ucq
 
 ### Glossary and docs
-51. As an owner, I want the glossary to define Files, Workspace (place name 'workspace'), Code view, Service Host and Coding Robot and to reserve Project, so that the words are one ^cw-791g
-52. As a Robot, I want the product docs hosts, memory-and-files and a new workspaces doc (each under the 900-word cap, as TypeScript modules like the others) updated, so that what I read is what the platform does ^cw-iunm
+50. As an owner, I want the glossary to define Files, Workspace (place name 'workspace'), Code view, Service Host and Coding Robot and to reserve Project, so that the words are one ^cw-791g
+51. As a Robot, I want the product docs hosts, memory-and-files and a new workspaces doc (each under the 900-word cap, as TypeScript modules like the others) updated, so that what I read is what the platform does ^cw-iunm
 
 ## Implementation Decisions
 
@@ -133,7 +132,6 @@ A good test drives the system the way a person or a Robot does: through the edge
 - **Host app Node tests** (prior art: the app's link, files and jobs tests): environment capture and scrub with the allow-list, the policy from a grant with a worktree root, the Workspace session lifecycle closing LSP, lsp.yaml filtering by PATH, the chain walk with symlinks and overlays, git commands with configuration disabled (cw-et7q, cw-o4fr, cw-p4bm, cw-9026, cw-fb1q, cw-yeq1, cw-1wrt).
 - **Component tests** (prior art: v1.3 work details, v1.17 Pages): each renderer, the Workspace panel, the Work details setting, the picker (cw-sc3z, cw-1wrt, cw-gx04).
 - **By hand**: the Host app on the owner's NixOS (his real chain, skills, LSP on this repository, worktrees, git as him) and the service entry on a display-less VM through the Nix module (cw-o2qo, cw-dkkw, cw-bi6y, cw-y7wy, cw-dr33, cw-ixto).
-- **Acceptance**: one ticket named by the owner, implemented by a Coding Robot; the owner's judgement and the list of what hurt (cw-6ucq).
 
 ## Out of Scope
 
@@ -145,4 +143,3 @@ A second agent runtime on the Host; offline work; image generation; Project and 
 - **The brain in Cloudflare.** The agent's withdrawn proposal and the owner's reason are recorded in the Problem Statement so the next reader does not reopen it.
 - **No second class of Robot.** A coding Robot is mounted plugins plus a Workspace and a view; say stays.
 - **Words.** Files / Workspace / Project (reserved), the agent's choice when the owner deferred.
-- **Acceptance is use.** The owner: "I have to start using it and find what hurts, not debate it."

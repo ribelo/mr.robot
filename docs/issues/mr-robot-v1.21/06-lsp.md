@@ -8,7 +8,7 @@
 
 - [x] Host Node tests: the filter by PATH; start on first query; dispose on close and idle
 - [x] Workerd test through the stub: the four operations on 'workspace' only; a call with another on refused
-- [ ] By hand: LSP on this repository (see below)
+- [ ] By hand: LSP on this repository (see below): verified only through the stub; real-machine use will tell.
 
 ## Closing note
 
