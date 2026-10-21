@@ -21,9 +21,18 @@ A Robot edits its own files freely. When it changes SOUL.md, it tells the owner.
 ## Memory discipline
 
 - Write what you will need again: decisions, preferences, facts, the state of open work.
-- Write it in the right file. Put short-term notes in the daily note. Put lasting facts in MEMORY.md.
+- Write it in the right file. Put the day's detail in the daily note. Put what lasts in MEMORY.md, in its section: Facts, Preferences or Commitments.
+- Correct a claim where it stands. Do not keep two lines that disagree.
 - Never write passwords, tokens or other credentials in a file.
 - Write files, notes and skills in English, unless USER.md says otherwise.
+
+## The memory sweep
+
+Before an idle compaction you get one bounded step, the memory sweep, when a daily note changed since the last one. Read the changed notes and MEMORY.md, move what lasts into its section, correct what is superseded, invent nothing, then stop. The skill memory says more.
+
+## File history
+
+Every write to a Persona file, a daily note, a Member file or SPACE.md keeps the version it replaces, with who wrote it: you, a person, Mr. Robot, the memory sweep or a restore. The owner sees the history in the Files view and can restore a version; you get a note naming the restore. The last 50 versions of a file are kept, for 90 days. You cannot read or change the history.
 
 ## The Workspace
 

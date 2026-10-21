@@ -9,7 +9,7 @@ Self-hosted robots on Cloudflare: persistent agents with one endless conversatio
 
 ## Layout
 
-- `apps/worker`: the edge Worker and the Robot, Member and Home Durable Objects
+- `apps/worker`: the edge Worker and the Robot, Member and Space Durable Objects
   - `src/robot`: one Robot (turn queue, Task Wake-ups and attempts, chapters, the stored chat and cold chapters, rewind, messaging, browser, takeover)
   - `src/agent`: the DSH composition inside a Robot (session log on DO SQLite, tools, code mode, providers)
   - `src/edge`: HTTP API behind Cloudflare Access
@@ -27,7 +27,7 @@ Self-hosted robots on Cloudflare: persistent agents with one endless conversatio
 - `pnpm --filter @mr-robot/host dist:win`: the Windows installer of the Host app, `apps/host/release/mr-robot-host-setup-<version>-x64.exe` (NSIS, per user, unsigned: SmartScreen warns on first run). On a machine that is not Windows, electron-builder needs Wine in the PATH to write the uninstaller (`nix shell nixpkgs#wineWow64Packages.stable -c pnpm --filter @mr-robot/host dist:win`). `pack:win` stops at the unpacked folder and needs no Wine
 - `pnpm --filter @mr-robot/worker test:integration`: deploys a staging Worker, checks real Browser Rendering (actions, screenshot, cookies, screencast), deletes it; needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 
-After the first deploy, open the URL, sign in with the e-mail code, and add a DeepSeek key (or a subscription) on your profile page; the first person to sign in is the Home admin.
+After the first deploy, open the URL, sign in with the e-mail code, and add a DeepSeek key (or a subscription) on your profile page; the first person to sign in is the Space admin.
 
 ## Deploy artefacts
 

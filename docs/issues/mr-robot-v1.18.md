@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.18 — Persona and memory from first principles, file history, Robot definitions and the Marketplace, Home becomes Space"
-status: ready-for-agent
+status: done
 story-prefix: rm
 parent: mr-robot-v1.17.md
 ---

@@ -19,6 +19,7 @@ import { SUBAGENTS } from './subagents.ts'
 import { BOX } from './box.ts'
 import { AUTO_REVIEW } from './auto-review.ts'
 import { PAGES } from './pages.ts'
+import { DEFINITIONS } from './definitions.ts'
 import { PLATFORM_SKILLS, platformSkillPath } from '../skills/platform.ts'
 
 export const DOCS_DIRECTORY = 'docs'
@@ -42,7 +43,8 @@ export const PRODUCT_DOCS: readonly ProductDoc[] = [
   doc('grants', 'Grant items and the levels allow, ask and deny; propose_grants; my_capabilities.', GRANTS),
   doc('tasks', 'Tasks: doers, timings, state and attempts, the Task tools, limits, reminders.', TASKS),
   doc('asks-and-help', 'Asks: ask, drafts, request_credential, asking your chief.', ASKS_AND_HELP),
-  doc('memory-and-files', 'Memory files and whose they are, the Workspace layout, the file tools.', MEMORY_AND_FILES),
+  doc('memory-and-files', 'Memory files, the sweep, history, the Workspace, file tools.', MEMORY_AND_FILES),
+  doc('definitions', 'Definitions and the Marketplace.', DEFINITIONS),
   doc('pages', 'Pages: documents under pages/, the reading view, PDF, sharing.', PAGES),
   doc('connections', 'Connectors and Connections: Google, Slack, Discord; connecting, grants, drafts, instructions.', CONNECTIONS),
   doc('hosts', 'Hosts: the desktop app, pairing, the tools with on set to a Host, modes and write roots, jobs, offline Hosts, the Host browser.', HOSTS),

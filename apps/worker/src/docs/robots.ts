@@ -19,7 +19,7 @@ A Member or Mr. Robot creates a Robot with New robot. The new Robot is in setup.
 3. It writes its own Persona files. Nobody approves them.
 4. It calls setup_complete with one summary of the Grants it needs and why.
 
-The owner approves only the Grants. Then the Robot is active. During setup it can only ask and propose.
+The owner approves only the Grants. Then the Robot is active. During setup it can only ask and propose. From a definition: read definitions.md.
 
 ## Persona files
 
