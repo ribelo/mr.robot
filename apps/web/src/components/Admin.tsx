@@ -172,6 +172,8 @@ function SpaceSettings({ view }: { view: AdminView }) {
   const memberSpendLimit = parseSpaceSpendLimit(memberLimit)
   const [backend, setBackend] = useState(view.settings.defaultBrowserBackend ?? 'browser-run')
   const [reviewer, setReviewer] = useState<ModelChoice | null>(view.settings.defaultReviewer)
+  const [dreaming, setDreaming] = useState(view.settings.defaultDreaming !== false)
+  const [dreamModel, setDreamModel] = useState<ModelChoice | null>(view.settings.defaultDreamModel ?? null)
   const [moved, setMoved] = useState<string>()
   const [error, setError] = useState<string>()
   const labelOf = (choice: ModelChoice) => view.settings.models.find((option) => option.provider === choice.provider && option.model === choice.model)?.label ?? choice.model
@@ -185,6 +187,8 @@ function SpaceSettings({ view }: { view: AdminView }) {
       robotSpendLimit: robotSpendLimit.value,
       memberSpendLimit: memberSpendLimit.value,
       defaultReviewer: reviewer,
+      defaultDreaming: dreaming,
+      defaultDreamModel: dreamModel,
     }), [keys.admin, keys.robots, keys.hosts, keys.providers])
     setError(exitFailure(exit))
     if (Exit.isSuccess(exit)) {
@@ -217,6 +221,10 @@ function SpaceSettings({ view }: { view: AdminView }) {
         <small className="muted">{(view.browserBackends ?? []).find((option) => option.id === backend)?.note ?? ''}</small>
       </label>
       <ReviewerSetting value={reviewer} models={view.settings.models} fallback="Each Robot's own model" onChange={setReviewer} />
+      <label className="check"><input type="checkbox" checked={dreaming} onChange={(event) => setDreaming(event.target.checked)} />
+        <span>Dreaming<small>Every Robot without its own setting dreams at 03:00 in its owner's time.</small></span>
+      </label>
+      <ReviewerSetting label="Dream model" value={dreamModel} models={view.settings.models} fallback="Each Robot's own model" onChange={setDreamModel} />
       <small className="muted">The Auto review model of every Robot that has none of its own.</small>
       <div className="form inline spend-limits">
         <SpendLimitChoice label="Spend limit per Robot" kinds={['none', 'usd']} draft={robotLimit} valid={Option.isSome(robotSpendLimit)} note="Each Robot that follows the Space's limit, per month." onChange={setRobotLimit} />

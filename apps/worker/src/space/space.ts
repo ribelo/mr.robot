@@ -88,6 +88,9 @@ export interface SpaceSettings {
   readonly memberSpendLimit: SpaceSpendLimit
   /** The Auto review route of Robots without their own; null: each Robot's own model (ao-6m9i). */
   readonly defaultReviewer: ModelChoice | null
+  /** Dreaming for Robots without their own setting (v1.20); on by default. */
+  readonly defaultDreaming: boolean
+  readonly defaultDreamModel: ModelChoice | null
 }
 
 export interface RegistryEntry {
@@ -303,6 +306,8 @@ const settings = Effect.gen(function* () {
     robotSpendLimit: yield* spendLimitSetting('robotSpendLimit'),
     memberSpendLimit: yield* spendLimitSetting('memberSpendLimit'),
     defaultReviewer: (yield* setting<ModelChoice | null>('defaultReviewer')) ?? null,
+    defaultDreaming: (yield* setting<boolean>('defaultDreaming')) ?? true,
+    defaultDreamModel: (yield* setting<ModelChoice | null>('defaultDreamModel')) ?? null,
   } as SpaceSettings
 })
 

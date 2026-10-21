@@ -75,8 +75,10 @@ export interface RobotConfig {
   readonly compactionInstruction: string
   /** The idle plugins (v1.14); absent on Robots made before them: the default of their kind (idle.ts). */
   readonly cacheWarming?: boolean
-  /** Dreaming at 03:00 in the owner's zone (v1.20); the dream-hour close comes with it. Absent: on. */
-  readonly dreaming?: boolean
+  /** Dreaming at 03:00 in the owner's zone (v1.20); the dream-hour close comes with it. Absent or null: the Space default. */
+  readonly dreaming?: boolean | null
+  /** The dream's route; absent or null: the Space default, then the Robot's own model. */
+  readonly dreamModel?: ModelChoice | null
   readonly idleCompaction?: boolean
   readonly idleCompactionFloorTokens?: number
   /** Auto review (v1.14 ticket 08): off when absent; the reviewer route, or null for the Space default. */

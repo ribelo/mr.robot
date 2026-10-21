@@ -579,6 +579,15 @@ export class Robot extends ProductionRobot {
   }
 
   /** The next idle moment is now, and the alarm with it. */
+  /** The dream is due now and the dream-hour close is not (v1.20 ticket 05); returns the dream hour that was planned. */
+  async dreamNowForTest(): Promise<number | undefined> {
+    const planned = this.store.get<number>('dream-at')
+    this.store.set('dream-at', Date.now() - 1)
+    this.store.set('dream-close-at', Date.now() + 86_400_000)
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
+    return planned
+  }
+
   /** The dream hour is now (v1.20 ticket 02), and the alarm with it. */
   async dreamHourForTest(): Promise<number | undefined> {
     const planned = this.store.get<number>('dream-close-at')

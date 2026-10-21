@@ -367,12 +367,14 @@ export const createRobot = (brief: string) => Effect.gen(function* () {
 export interface SpaceDefaults {
   readonly robotSpendLimit: SpaceSpendLimit
   readonly defaultReviewer: ModelChoice | null
+  readonly defaultDreaming: boolean
+  readonly defaultDreamModel: ModelChoice | null
 }
 
 export const spaceDefaults = Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const settings = yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).settings())
-  return { robotSpendLimit: settings.robotSpendLimit, defaultReviewer: settings.defaultReviewer } as SpaceDefaults
+  return { robotSpendLimit: settings.robotSpendLimit, defaultReviewer: settings.defaultReviewer, defaultDreaming: settings.defaultDreaming, defaultDreamModel: settings.defaultDreamModel } as SpaceDefaults
 })
 
 /** The settings, with the Space's defaults already read. */
@@ -403,6 +405,10 @@ export const settingsWith = (defaults: SpaceDefaults) => Effect.gen(function* ()
     requiresHosts: current.requiresHosts === true,
     reviewer: current.reviewer ?? null,
     spaceReviewer: defaults.defaultReviewer,
+    dreaming: current.dreaming ?? null,
+    dreamModel: current.dreamModel ?? null,
+    spaceDreaming: defaults.defaultDreaming,
+    spaceDreamModel: defaults.defaultDreamModel,
     subagentModels: store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? [],
     hostAccess: store.get<HostAccessByFacet>(HOST_ACCESS) ?? {},
   } as RobotSettings
@@ -482,6 +488,8 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(idleBefore.idleCompactionFloorTokens !== idleAfter.idleCompactionFloorTokens, `changed the idle compaction floor to ${idleAfter.idleCompactionFloorTokens} tokens.`)
   note((before.autoReview === true) !== (after.autoReview === true), `switched Auto review ${after.autoReview === true ? 'on' : 'off'}.`)
   note((before.requiresHosts === true) !== (after.requiresHosts === true), `switched "do not run while any of my Hosts is offline" ${after.requiresHosts === true ? 'on' : 'off'}.`)
+  note((before.dreaming ?? null) !== (after.dreaming ?? null), after.dreaming == null ? 'set dreaming to the Space default.' : `switched dreaming ${after.dreaming ? 'on' : 'off'}.`)
+  note(JSON.stringify(before.dreamModel ?? null) !== JSON.stringify(after.dreamModel ?? null), after.dreamModel == null ? 'set the dream model to the Space default.' : `set the dream model to ${after.dreamModel.model} (${after.dreamModel.provider}).`)
   note(JSON.stringify(before.reviewer ?? null) !== JSON.stringify(after.reviewer ?? null), after.reviewer == null ? 'set the reviewer to the Space default.' : `set the reviewer to ${after.reviewer.model} (${after.reviewer.provider}), thinking ${after.reviewer.effort}.`)
   return notes
 }
@@ -532,6 +540,8 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
       ...(patch.autoReview === undefined ? {} : { autoReview: patch.autoReview }),
       ...(patch.requiresHosts === undefined ? {} : { requiresHosts: patch.requiresHosts }),
       ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
+      ...(patch.dreaming === undefined ? {} : { dreaming: patch.dreaming }),
+      ...(patch.dreamModel === undefined ? {} : { dreamModel: patch.dreamModel }),
       ...(current.kind === 'mr-robot' && patch.sharing !== undefined ? { sharing: 'private' as const } : {}),
     }))
   })

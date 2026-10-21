@@ -168,6 +168,8 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
           autoReview: { type: 'boolean', description: 'A reviewer model checks each allowed tool call before it runs; a denied call becomes an Ask to your owner' },
           subagentModels: { type: 'array', items: { type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' } }, required: ['provider', 'model'] }, description: 'The models its Subagents may run on' },
           reviewer: { oneOf: [{ type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'xhigh', 'max'] } }, required: ['provider', 'model', 'effort'] }, { type: 'null' }], description: "The reviewer's model; null: the Space default" },
+          dreaming: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: 'Dreaming at 03:00 (v1.20); null: the Space default' },
+          dreamModel: { oneOf: [{ type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'xhigh', 'max'] } }, required: ['provider', 'model', 'effort'] }, { type: 'null' }], description: "The dream's model; null: the Space default, then the Robot's own" },
         },
         required: ['robot_id'],
       },

@@ -7,7 +7,7 @@ import { api, settle, stubModels } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
-const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'definitions', 'pages', 'connections', 'hosts', 'browser', 'providers', 'subagents', 'box', 'auto-review']
+const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'dreaming', 'definitions', 'pages', 'connections', 'hosts', 'browser', 'providers', 'subagents', 'box', 'auto-review']
 const DOC_PATHS = DOC_NAMES.map((name) => `docs/${name}.md`)
 const SKILL_PATHS = PLATFORM_SKILLS.map((skill) => `docs/skills/${skill.name}/SKILL.md`)
 

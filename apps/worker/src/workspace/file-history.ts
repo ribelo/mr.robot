@@ -17,6 +17,8 @@ export const FileAuthor = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('sweep') }),
   /** The snapshot before a compaction (v1.20 ticket 01). */
   Schema.Struct({ kind: Schema.Literal('snapshot') }),
+  /** The night's dream (v1.20 ticket 05). */
+  Schema.Struct({ kind: Schema.Literal('dream') }),
   /** A person brought an earlier version back. */
   Schema.Struct({ kind: Schema.Literal('restore'), name: Schema.String, version: Schema.String }),
   /** Templates and migrations. */
@@ -34,6 +36,7 @@ export function authorLabel(author: FileAuthor): string {
     case 'chief': return author.name
     case 'sweep': return 'the memory sweep'
     case 'snapshot': return 'the snapshot'
+    case 'dream': return 'the dream'
     case 'restore': return `${author.name} (restored an earlier version)`
     case 'platform': return 'the platform'
     case 'unknown': return 'unknown (before file history)'
@@ -45,9 +48,9 @@ export const VERSIONS_KEPT = 50
 export const VERSION_DAYS_KEPT = 90
 const DAY_MS = 86_400_000
 
-/** The Robot's files with history: its persona and memory (rm-d68k); IDENTITY.md and TOOLS.md stay, for the versions their fold kept. */
+/** The Robot's files with history: its persona and memory (rm-d68k) and its dreams (v1.20); IDENTITY.md and TOOLS.md stay, for the versions their fold kept. */
 export function isTrackedFile(path: string): boolean {
-  return ['SOUL.md', 'AGENTS.md', 'MEMORY.md', 'IDENTITY.md', 'TOOLS.md'].includes(path) || /^memory\/[^/]+\.md$/.test(path)
+  return ['SOUL.md', 'AGENTS.md', 'MEMORY.md', 'IDENTITY.md', 'TOOLS.md'].includes(path) || /^(memory|dreams)\/[^/]+\.md$/.test(path)
 }
 
 /** One kept version of a file. */

@@ -73,6 +73,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       autoReview: draft.autoReview,
       requiresHosts: draft.requiresHosts === true,
       reviewer: draft.reviewer,
+      dreaming: draft.dreaming ?? null,
+      dreamModel: draft.dreamModel ?? null,
       subagentModels: draft.subagentModels,
       hostAccess: draft.hostAccess ?? {},
       grants: draft.grants,
@@ -115,6 +117,18 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       <label>Compact only above (tokens)
         <input type="number" min={0} step={1000} value={draft.idleCompactionFloorTokens} onChange={(event) => setDraft({ ...draft, idleCompactionFloorTokens: Math.max(0, Number(event.target.value)) })} />
       </label>
+
+      <h2>Dreaming</h2>
+      <label>Dreaming
+        <select aria-label="Dreaming" value={draft.dreaming == null ? 'default' : draft.dreaming ? 'on' : 'off'} onChange={(event) => setDraft({ ...draft, dreaming: event.target.value === 'default' ? null : event.target.value === 'on' })}>
+          <option value="default">Space default ({settings.spaceDreaming === false ? 'off' : 'on'})</option>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <div className="muted">At 03:00 your time the Robot looks back at its day: it writes a dream, tunes how it works for you, and may leave one question for the morning.</div>
+      <ReviewerSetting label="Dream model" value={draft.dreamModel ?? null} models={catalog.models} onChange={(dreamModel) => setDraft({ ...draft, dreamModel })}
+        fallback={`Space default (${settings.spaceDreamModel == null ? "this Robot's own model" : (catalog.models.find((option) => option.provider === settings.spaceDreamModel!.provider && option.model === settings.spaceDreamModel!.model)?.label ?? settings.spaceDreamModel.model)})`} />
 
       <h2>Auto review</h2>
       <label className="check"><input type="checkbox" checked={draft.autoReview} onChange={(event) => setDraft({ ...draft, autoReview: event.target.checked })} />

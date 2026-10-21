@@ -182,6 +182,7 @@ import { isPeoplePage, isPeoplePath, PEOPLE_INDEX, PEOPLE_TEMPLATE_PATH } from '
 import { INDEX_BATCH, isIndexedRobotPath, MemoryIndex, versionOf as memoryVersion, type MemoryMatch } from './memory-index.ts'
 import { platformStep, StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
 import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
+import { cutSection, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote, type DreamEvidence } from '../plugins/dream.ts'
 import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
 import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
 import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
@@ -205,7 +206,9 @@ import type { RobotInit } from './programs.ts'
 export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHost, NotifyHost, SecretHost, MessagingHost, RobotsHost, BrowserHost, TakeoverHost, SayHost {
   protected readonly store: RobotStore
   /** The composition, with the settings revision and the reach (mountsKey) it was built for. */
-  private composition: { readonly revision: number; readonly reach: string; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
+  private composition: { readonly revision: number; readonly reach: string; readonly route: string; readonly value: Composition; readonly scope: Scope.Closeable } | undefined
+  /** The dream runs on its own route when one is set (v1.20, dm-ox7j); undefined: the Robot's model. */
+  private turnRoute: ModelChoice | undefined
   private pumping: Promise<void> | undefined
   private persona: PersonaSnapshot = { files: [], soul: '' }
   private browserPage: Promise<BrowserPage> | undefined
@@ -310,6 +313,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       stopBox: async () => { await this.stopBox() },
     }, BOX_IDLE_MS, JOB_CHECK_MS))
     this.duties.register(idleDuty(this.idleHost()))
+    this.duties.register(dreamDuty({
+      store,
+      nextDreamHour: (after) => nextRun({ kind: 'daily', time: DREAM_TIME }, store.requireConfig().timeZone, after, after) ?? after + 86_400_000,
+      dreamingOn: async () => store.requireConfig().dreaming ?? (await this.space().settings()).defaultDreaming,
+      idleNow: () => store.activeTurn() === undefined && store.pendingWakeups() === 0 && this.pumping === undefined,
+      evidence: (since) => this.dreamEvidence(since),
+      dream: (evidence, now) => {
+        const config = store.requireConfig()
+        const date = new Intl.DateTimeFormat('en-CA', { timeZone: config.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now - 6 * 3_600_000)
+        store.enqueue('platform', { kind: 'platform' }, dreamNote(this.owner().name, date, evidence, config.kind === 'mr-robot'), { dream: true, summary: 'Dream' }, now)
+        this.drain()
+      },
+    }))
     this.duties.register(dreamCloseDuty({
       ...this.idleHost(),
       nextDreamHour: (after) => nextRun({ kind: 'daily', time: DREAM_TIME }, store.requireConfig().timeZone, after, after) ?? after + 86_400_000,
@@ -721,6 +737,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async runTurn(wakeup: Wakeup, resuming: boolean): Promise<void> {
     this.currentWakeup = wakeup.kind
+    // The dream (v1.20 ticket 05): its route, its tools, its author, its step limit, its usage source.
+    const dream = wakeup.payload['dream'] === true
+    this.turnRoute = dream ? await this.dreamRoute() : undefined
     // A compaction whose chapter did not close yet (the Robot slept right after it) closes it before the Turn.
     if (!resuming) await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
     await this.tidyWorkspace().catch((error: unknown) => console.warn('workspace not tidied', error))
@@ -757,6 +776,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         summary: 'Resumed after a restart',
       }))
     }
+    let stopDream = () => {}
+    if (dream) {
+      this.fence.open('the dream', this.store.requireConfig().kind === 'mr-robot' ? new Set([...DREAM_TOOLS, 'robot_files', 'robot_file_read', 'robot_file_write']) : DREAM_TOOLS, dreamArgsCheck())
+      this.writer = { kind: 'dream' }
+      let steps = 0
+      stopDream = ctx.on('session/event', (session, event) => {
+        if (session === agent.session && event.type === 'step/start' && ++steps >= DREAM_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
+      })
+    }
     // From here until the agent is idle, the owner's steers reach this Turn at its next step (ao-9570).
     this.runningAgent = agent
     this.deliverSteers()
@@ -772,8 +800,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       for (const message of late) agent.steer(message)
       await agent.whenIdle()
     }
-    // A Turn that ends without a say gets one bounded step to speak; an owner's gets its last words shown if the step stays silent.
-    await this.speakUp(wakeup, agent).catch((error: unknown) => console.warn('safety net failed', error))
+    if (dream) {
+      stopDream()
+      this.fence.close()
+      this.writer = { kind: 'robot' }
+      await this.afterDream().catch((error: unknown) => console.warn('dream not tidied', error))
+    }
+    // A Turn that ends without a say gets one bounded step to speak; an owner's gets its last words shown if the step stays silent. A dream does not speak.
+    if (!dream) await this.speakUp(wakeup, agent).catch((error: unknown) => console.warn('safety net failed', error))
     this.runningAgent = undefined
     await ctx.sessions.flush(agent.session)
     if (this.turnSecrets.length > 0 && this.children.size === 0) {
@@ -789,6 +823,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.endTurn(wakeup.id)
     this.store.delete(QUIET_DUE)
     await this.afterTurn(wakeup, turn)
+    // The dream's own route is not the Robot's: the next Turn builds its composition again.
+    if (this.turnRoute !== undefined) {
+      this.turnRoute = undefined
+      if (this.children.size === 0) await this.releaseComposition()
+    }
     planIdle(this.idleHost(), this.store.requireConfig())
     await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
     // Chapters written before v1.19 get their stored chat a bounded part per Turn (ec-2sra).
@@ -1467,7 +1506,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     const startSeq = this.store.get<number>(`turn-start:${wakeup.id}`) ?? 0
     this.store.delete(`turn-start:${wakeup.id}`)
-    await this.accountTurn(startSeq)
+    await this.accountTurn(startSeq, wakeup.payload['dream'] === true ? 'memory' : 'robot')
     // What the Turn kept under /workspace/box is in the Workspace now (ao-7ptt); the time so far is billed.
     if (this.boxState().state === 'running') {
       await this.syncBox(this.boxBackend()).catch((error: unknown) => console.warn('Box not synced', error))
@@ -1952,9 +1991,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   private async agent(): Promise<Composition> {
-    const config = this.store.requireConfig()
+    const stored = this.store.requireConfig()
+    const config = this.turnRoute === undefined ? stored : { ...stored, model: this.turnRoute }
     const reach = this.mountsKey()
-    if (this.composition?.revision === config.revision && this.composition.reach === reach) return this.composition.value
+    const route = `${config.model.provider}/${config.model.model}/${config.model.effort}`
+    if (this.composition?.revision === config.revision && this.composition.reach === reach && this.composition.route === route) return this.composition.value
     // Running Subagents live in this composition: a settings change applies once they are done (ao-ij3i).
     if (this.composition !== undefined && this.children.size > 0) return this.composition.value
     await this.releaseComposition()
@@ -2013,7 +2054,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await Effect.runPromise(Scope.close(scope, Exit.void))
       throw error
     })
-    this.composition = { revision: config.revision, reach, value, scope }
+    this.composition = { revision: config.revision, reach, route, value, scope }
     return value
   }
 
@@ -2604,6 +2645,34 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Reset everything and Start over drop every table: the index is made again then.
     if (this.memoryIndexCache === undefined || this.ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'memory_indexed'").toArray().length === 0) this.memoryIndexCache = new MemoryIndex(this.ctx.storage.sql)
     return this.memoryIndexCache
+  }
+
+  /** The dream's route: the Robot's dreamModel, else the Space's, else undefined (the Robot's own model). */
+  private async dreamRoute(): Promise<ModelChoice | undefined> {
+    const own = this.store.requireConfig().dreamModel
+    if (own != null) return own
+    return (await this.space().settings().catch(() => undefined))?.defaultDreamModel ?? undefined
+  }
+
+  /** What the day left (dm-pzxk): daily notes changed, chapters closed, Attempts failed or skipped, Asks dismissed or rejected, since `since`. */
+  private async dreamEvidence(since: number): Promise<DreamEvidence> {
+    const config = this.store.requireConfig()
+    const notes = (await this.run(this.workspace.list('memory'))).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > since).map((entry) => entry.path).sort()
+    const chapters = this.store.chapters.all().flatMap((chapter) => (chapter.state.kind === 'closed' && chapter.state.at > since ? [{ ordinal: chapter.ordinal, closedBy: chapter.state.by }] : []))
+    const caller = { kind: 'robot' as const, robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot' as const, robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }
+    const tasks = await this.space().listTasks(caller, { state: 'all', assignee: { kind: 'robot', robotId: config.id } }).catch(() => ({ tasks: [] as TaskView[] }))
+    const attempts = tasks.tasks.flatMap((task) => task.attempts.filter((attempt) => attempt.robotId === config.id && (attempt.finishedAt ?? 0) > since && (attempt.outcome === 'failed' || attempt.outcome === 'skipped')).map((attempt) => ({ taskId: task.id, title: task.title, outcome: attempt.outcome, line: attempt.firstLine })))
+    const answered = this.store.proposals().filter((proposal) => (proposal.answeredAt ?? 0) > since)
+    // A dismissed question is stored as rejected (store.ts): both are listed.
+    const asks = answered.filter((proposal) => String(proposal.status) === 'rejected').map((proposal) => ({ id: proposal.id, status: 'dismissed or rejected', purpose: proposal.purpose }))
+    return { notes, chapters, attempts, asks, answered: answered.length }
+  }
+
+  /** After the dream: the AGENTS.md section is cut to its limit (dm-4ybd). */
+  private async afterDream(): Promise<void> {
+    const agents = await this.run(this.workspace.readText('AGENTS.md'))
+    const cut = agents === undefined ? undefined : cutSection(agents, this.owner().name)
+    if (cut !== undefined) await this.run(this.workspace.write('AGENTS.md', cut, 'text/markdown; charset=utf-8', { kind: 'platform' }))
   }
 
   /** Every Workspace write reindexes an indexed file at once (dm-yn3q): the Robot's, the owner's, a memory step's, a restore. */

@@ -541,6 +541,12 @@ export const RobotSettings = Schema.Struct({
   autoReview: Schema.Boolean,
   /** The reviewer's route; null follows the Space default (ao-6m9i). */
   reviewer: Schema.NullOr(ModelChoice),
+  /** Dreaming at 03:00 in the owner's time zone (v1.20, dm-buya); null follows the Space default. */
+  dreaming: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** The dream's model; null follows the Space default, then this Robot's own model (dm-ox7j). */
+  dreamModel: Schema.optional(Schema.NullOr(ModelChoice)),
+  spaceDreaming: Schema.optional(Schema.Boolean),
+  spaceDreamModel: Schema.optional(Schema.NullOr(ModelChoice)),
   /** v1.16 (ob-5nvd): no Task runs while a Host the Robot holds a facet on is offline. Absent: off. */
   requiresHosts: Schema.optional(Schema.Boolean),
   /** What the Space default is now; null: the Robot's own model. */
@@ -582,6 +588,8 @@ export const DeputySettingsPatch = Schema.Struct({
   autoReview: Schema.optional(Schema.Boolean),
   requiresHosts: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
+  dreaming: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  dreamModel: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
 })
 export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
@@ -608,6 +616,8 @@ export const SettingsPatch = Schema.Struct({
   autoReview: Schema.optional(Schema.Boolean),
   requiresHosts: Schema.optional(Schema.Boolean),
   reviewer: Schema.optional(Schema.NullOr(ModelChoice)),
+  dreaming: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  dreamModel: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
   /** Replaces the whole map of Host facet access. */
   hostAccess: Schema.optional(HostAccessByFacet),
@@ -1557,6 +1567,10 @@ export const SpaceSettingsPatch = Schema.Struct({
   memberSpendLimit: Schema.optional(SpaceSpendLimit),
   /** The Auto review route of every Robot that has none of its own; null: each Robot's own model (ao-6m9i). */
   defaultReviewer: Schema.optional(Schema.NullOr(ModelChoice)),
+  /** Dreaming for every Robot without its own setting (v1.20, dm-buya); on by default. */
+  defaultDreaming: Schema.optional(Schema.Boolean),
+  /** The dream's model of every Robot without its own; null: each Robot's own model. */
+  defaultDreamModel: Schema.optional(Schema.NullOr(ModelChoice)),
   models: Schema.optional(Schema.Array(Schema.Struct({
     provider: Schema.String,
     model: Schema.String,
@@ -1623,6 +1637,8 @@ export const SpaceSettingsView = Schema.Struct({
   memberSpendLimit: SpaceSpendLimit,
   /** The Auto review route of Robots without their own; null: each Robot's own model (ao-6m9i). */
   defaultReviewer: Schema.NullOr(ModelChoice),
+  defaultDreaming: Schema.optional(Schema.Boolean),
+  defaultDreamModel: Schema.optional(Schema.NullOr(ModelChoice)),
   models: Schema.Array(ModelOption),
 })
 export type SpaceSettingsView = typeof SpaceSettingsView.Type

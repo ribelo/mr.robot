@@ -142,6 +142,25 @@ describe('Robot settings: Auto review (ao-c8k9, ao-6m9i)', () => {
 })
 
 
+describe('Robot settings: dreaming (v1.20 ticket 05, dm-buya, dm-ox7j)', () => {
+  it('follows the Space by default; switching it off and choosing a dream model saves both', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
+    const saved: SettingsPatch[] = []
+    const models = [{ provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 128000 }]
+    const dreamy = { ...panel, settings: { ...panel.settings, dreaming: null, dreamModel: null, spaceDreaming: true, spaceDreamModel: null } }
+    render(<RegistryProvider><AdvancedSettings panel={dreamy} catalog={{ ...catalog, models }} onSave={async (patch) => { saved.push(patch); return true }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
+    const dreaming = screen.getByRole('combobox', { name: 'Dreaming' }) as HTMLSelectElement
+    expect(dreaming.selectedOptions[0]!.textContent).toBe('Space default (on)')
+    const model = screen.getByRole('combobox', { name: 'Dream model' }) as HTMLSelectElement
+    expect(model.selectedOptions[0]!.textContent).toBe("Space default (this Robot's own model)")
+    fireEvent.change(dreaming, { target: { value: 'off' } })
+    fireEvent.change(model, { target: { value: 'own' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).at(-1)!)
+    await waitFor(() => expect(saved).toHaveLength(1))
+    expect(saved[0]).toMatchObject({ dreaming: false, dreamModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'off' } })
+  })
+})
+
 describe('Robot settings: waiting for Hosts (v1.16 ticket 05, ob-5nvd)', () => {
   it('is off by default; switching it on saves requiresHosts', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
