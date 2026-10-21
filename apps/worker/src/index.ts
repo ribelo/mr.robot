@@ -23,7 +23,8 @@ export { ComputerContainer } from './box/container.ts'
 const WS_PATH = new URLPattern({ pathname: '/api/robots/:id/ws' })
 
 /** The Box's door to its Workspace (v1.16 ticket 06): ws in the container calls it with the token written at boot. */
-export const PRESIGN_PATH = '/api/files/presign'
+// Not exported: workerd takes every export of the main module as an entrypoint and refuses one that is not a handler.
+const PRESIGN_PATH = '/api/files/presign'
 
 /**
  * The Box channel: outside the Access login (a bypass application in infra/stack.ts) and open only to a token that names a Robot whose Box
