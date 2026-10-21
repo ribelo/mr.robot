@@ -113,7 +113,7 @@ describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', 
 
   it('idle compaction runs one memory step, then compacts; the next Turn starts from the summary with a fresh memory baseline', async () => {
     const id = await staff({ idleCompactionFloorTokens: 0 })
-    await say(id, 'I like green tea.', { text: 'Noted.' })
+    await say(id, 'I like green tea.', { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'memory/2026-10-21.md', content: '- Anna said she likes green tea.\n' } }] }, { text: 'Noted.' })
     scripts.set(id, [
       { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'MEMORY.md', content: '# MEMORY.md\n- Anna likes green tea.\n' } }] },
       { text: '' },
@@ -121,7 +121,7 @@ describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', 
     ])
     await idleMoment(id)
     const seen = requests.get(id)!
-    expect(JSON.stringify(seen.at(-3)!.messages.at(-1))).toContain('Compaction is coming')
+    expect(JSON.stringify(seen.at(-3)!.messages.at(-1))).toContain('Memory sweep: compaction is coming')
     expect(await compacted(id)).toBe(true)
     expect(await testRobot(id).idlePlanForTest()).toEqual([])
 
@@ -129,7 +129,7 @@ describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', 
     const next = JSON.stringify(requests.get(id)!.at(-1)!.messages)
     expect(next).toContain('SUMMARY: Anna said she likes green tea')
     expect(next).toContain('Anna likes green tea.')
-    expect(next).not.toContain('Compaction is coming')
+    expect(next).not.toContain('Memory sweep: compaction is coming')
   })
 
   it('a context below the floor is left alone (ao-z22f)', async () => {

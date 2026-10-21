@@ -227,6 +227,11 @@ export class Robot extends ProductionRobot {
     this.store.delete('persona-folded')
   }
 
+  /** The last memory sweep was at this moment (v1.18 ticket 03). */
+  async sweptAtForTest(at: number): Promise<void> {
+    this.store.set('memory-swept-at', at)
+  }
+
   /** The history trim of one file at a moment the test picks (v1.18 ticket 02). */
   async trimHistoryForTest(path: string, now: number): Promise<void> {
     await this.workspace.history.trim(path, now)

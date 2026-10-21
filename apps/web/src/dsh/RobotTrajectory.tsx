@@ -284,6 +284,37 @@ export function ReviewList({ reviews }: { reviews: readonly ReviewRow[] }) {
   )
 }
 
+/** A memory sweep before an idle compaction (v1.18, rm-hhxa): the daily notes it read and the files it changed. */
+export interface SweepRow {
+  readonly seq: number
+  readonly notes: readonly string[]
+  readonly changed: readonly string[]
+}
+
+export function sweepsOf(events: SessionEventsPage['events']): SweepRow[] {
+  return events.flatMap((event) => {
+    if ((event.type as string) !== 'plugin:mr-robot/memory-sweep') return []
+    const data = (event as unknown as { data: { notes?: unknown; changed?: unknown } }).data
+    const list = (value: unknown) => (Array.isArray(value) ? value.map(String) : [])
+    return [{ seq: event.seq, notes: list(data.notes), changed: list(data.changed) }]
+  })
+}
+
+/** What each memory sweep read and changed; the file history has each change as a version by the sweep. */
+export function SweepList({ sweeps }: { sweeps: readonly SweepRow[] }) {
+  if (sweeps.length === 0) return null
+  return (
+    <details className="dsh-reviews">
+      <summary>Memory sweeps · {sweeps.length}</summary>
+      <ul aria-label="Memory sweeps">
+        {sweeps.map((row) => (
+          <li key={row.seq}>Read {row.notes.join(', ')}; {row.changed.length === 0 ? 'changed nothing' : `changed ${row.changed.join(', ')}`}.</li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 /** A reply the platform showed in place of a say (v1.15 ticket 02, gb-7jqy): the Turn ended without one, and its last assistant text was shown instead. */
 export interface FallbackRow {
   readonly seq: number
@@ -344,6 +375,7 @@ export function RobotTrajectory({ robotId, liveVersion, child, chapter }: { robo
       {child === undefined ? <DelegationList robotId={robotId} /> : null}
       <ReviewList reviews={reviewsOf(windowOf(key).events)} />
       <FallbackList fallbacks={fallbacksOf(windowOf(key).events)} />
+      <SweepList sweeps={sweepsOf(windowOf(key).events)} />
       <TrajectoryView
         useSession={useSession}
         useTrajectory={useTrajectory}

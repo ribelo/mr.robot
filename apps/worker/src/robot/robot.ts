@@ -20,7 +20,7 @@ import { readDecision, REVIEW_POLICY, reviewHistory, reviewUserText } from '../a
 import { BOX_ROOT, WORKSPACE_ROOT } from '../places/files.ts'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
-import { IDLE_MEMORY_NOTE, IDLE_MEMORY_STEPS, idlePlan, idleSettings, type IdleStep } from './idle.ts'
+import { IDLE_MEMORY_STEPS, idlePlan, idleSettings, memorySweepNote, type IdleStep } from './idle.ts'
 import { buildForkSeed, Session, SessionId, SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { chapterSeed } from '../agent/chapter-seed.ts'
 import { deleteColdChapters, moveColdChapters } from './cold-chapters.ts'
@@ -165,7 +165,7 @@ import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/i
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, normalizePath, workspacePrefix, type WorkspaceShape } from '../workspace/workspace.ts'
-import { authorLabel, authorOf, FileHistory, isTrackedFile, robotHistoryBase, versionView } from '../workspace/file-history.ts'
+import { authorLabel, authorOf, FileHistory, isTrackedFile, robotHistoryBase, versionView, type FileAuthor } from '../workspace/file-history.ts'
 import { foldIdentity, foldTools, shapeMemory, withSection } from '../workspace/persona-fold.ts'
 import type { FileHistoryView, FileVersionContent } from '@mr-robot/protocol'
 import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
@@ -1232,15 +1232,33 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const { agent, ctx } = await this.agent()
     if (ctx.tokenMeter.measure(agent.session).totalTokens < idleSettings(config).idleCompactionFloorTokens) return
     const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
-    let steps = 0
-    const stop = ctx.on('session/event', (session, event) => {
-      if (session === agent.session && event.type === 'step/start' && ++steps >= IDLE_MEMORY_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
-    })
-    try {
-      agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: IDLE_MEMORY_NOTE, summary: 'Idle: saving memory before compaction', woke: { at: Date.now(), timeZone: config.timeZone } }))
-      await agent.whenIdle()
-    } finally {
-      stop()
+    // The memory sweep (v1.18 ticket 03): only when a daily note changed since the last one (rm-l4t8).
+    const sweptAt = this.store.get<number>(SWEPT_AT) ?? 0
+    const notes = (await this.run(this.workspace.list('memory'))).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > sweptAt).map((entry) => entry.path).sort()
+    if (notes.length > 0) {
+      const started = Date.now()
+      let steps = 0
+      const stop = ctx.on('session/event', (session, event) => {
+        if (session === agent.session && event.type === 'step/start' && ++steps >= IDLE_MEMORY_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
+      })
+      this.writer = { kind: 'sweep' }
+      try {
+        agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: memorySweepNote(notes), summary: 'Idle: memory sweep before compaction', woke: { at: started, timeZone: config.timeZone } }))
+        await agent.whenIdle()
+      } finally {
+        stop()
+        this.writer = { kind: 'robot' }
+      }
+      this.store.set(SWEPT_AT, started)
+      // The Trajectory names what the sweep changed (rm-hhxa); each change is a version by the sweep in the file history.
+      const changed: string[] = []
+      for (const entry of await this.run(this.workspace.list(''))) {
+        if (!isTrackedFile(entry.path)) continue
+        const head = await this.env.FILES.head(`${workspacePrefix(config.id)}${entry.path}`)
+        const { by, at } = authorOf(head?.customMetadata, entry.uploaded)
+        if (by.kind === 'sweep' && at >= started) changed.push(entry.path)
+      }
+      appendPluginRecord(agent.session, SWEEP_RECORD as never, { notes, changed } as never)
     }
     await ctx.sessions.flush(agent.session)
     if (this.store.activeTurn() === undefined && this.store.pendingWakeups() === 0) {
@@ -1252,17 +1270,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.changed()
   }
 
+  /** How many events of chapters written before v1.19 one Turn folds into the stored chat; tests make it small. */
+  protected chatBackfillEvents(): number {
+    return CHAT_BACKFILL_EVENTS
+  }
+
   /**
    * After a compaction of the live chapter (v1.19, ec-srfn): once no Turn and no Subagent runs in it, the chapter closes and the next one
    * opens, a new session seeded with what the model sees now (the system prompt, the checkpoint and what came after it), linked to its
    * parent. The session and the switch to it are stored in one transaction. A memory baseline the context holds stays current, so
    * the memory plugin acts exactly as after the compaction (ec-ndqf). A seed DSH would refuse leaves the chapter live, as before chapters.
    */
-  /** How many events of chapters written before v1.19 one Turn folds into the stored chat; tests make it small. */
-  protected chatBackfillEvents(): number {
-    return CHAT_BACKFILL_EVENTS
-  }
-
   protected async rollChapter(): Promise<void> {
     const from = this.store.requireConfig().liveSessionId
     if (this.store.get<string>(CHAPTER_COMPACTED) !== from) return
@@ -2626,8 +2644,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- Workspace
 
+  /** Who the Robot's own writes are by: itself, or the memory sweep while it runs (v1.18, rm-hhxa). */
+  private writer: FileAuthor = { kind: 'robot' }
+
   get workspace(): WorkspaceShape {
-    return makeWorkspace(this.env.FILES, this.store.requireConfig().id)
+    return makeWorkspace(this.env.FILES, this.store.requireConfig().id, this.writer)
   }
 
   run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
@@ -4263,6 +4284,10 @@ const SUBAGENT_DENIED_TOOLS = [
 ]
 /** The session record of an Auto review decision (ao-jn6z): the Trajectory shows it on the reviewed call. */
 export const REVIEW_RECORD = 'plugin:mr-robot/review'
+/** The Trajectory's record of a memory sweep (v1.18, rm-hhxa): the daily notes it read and the files it changed. */
+export const SWEEP_RECORD = 'plugin:mr-robot/memory-sweep'
+/** The kv key of when the last memory sweep started. */
+const SWEPT_AT = 'memory-swept-at'
 /** The last request of the Robot's session, kept for cache warming while idle (ao-jlr0). */
 const WARM_REQUEST = 'warm-request'
 /** The kv key of the live chapter a compaction ran in, until the chapter closes (v1.19). */

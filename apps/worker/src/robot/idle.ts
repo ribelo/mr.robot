@@ -43,7 +43,18 @@ export function idlePlan(config: RobotConfig, provider: string, endedAt: number)
 }
 
 /** What the Robot reads in its one bounded step before an idle compaction (ao-7bq9). */
-export const IDLE_MEMORY_NOTE = 'Compaction is coming: while you are idle, your context will be replaced by a summary. Write what matters to memory now (MEMORY.md, today\'s daily note), then stop. Do not reply to your owner.'
+/**
+ * The memory sweep (v1.18 ticket 03, rm-glmd): the bounded step before an idle compaction. It names the daily notes that changed since
+ * the last sweep; the Robot reads them and MEMORY.md and tidies MEMORY.md, then stops.
+ */
+export function memorySweepNote(notes: readonly string[]): string {
+  return [
+    'Memory sweep: compaction is coming. While you are idle, your context will be replaced by a summary.',
+    `Read the daily notes changed since the last sweep (${notes.join(', ')}) and MEMORY.md. Move what lasts into its section of MEMORY.md (Facts, Preferences, Commitments).`,
+    'Correct what is superseded where it stands, remove what is no longer true, and invent nothing. Leave the raw detail in the daily notes.',
+    'Then stop. Do not reply to your owner.',
+  ].join(' ')
+}
 
 /** The step limit of that platform step. */
 export const IDLE_MEMORY_STEPS = 4
