@@ -1188,6 +1188,8 @@ export class Member extends DurableObject<Env> {
     const payload = { known: input.open ? null : input.known, skillsDigest: input.skillsDigest }
     return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => (input.open ? client.WorkspaceOpen({ ...payload, access }) : client.WorkspaceState({ ...payload, access })), 30_000, undefined, input.cwd))
   }
+  /** The Robot's worktree (v1.21 ticket 05, cw-11je), made by the app with DSH's runtime from the checkout of its current directory. */
+  hostCreateWorktree(id: string, robotId: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.CreateWorktree({ access }), 120_000, { action: 'create worktree', detail: cwd }, cwd)) }
   /** The body of a Host skill (cw-s2rt). */
   hostSkillLoad(id: string, robotId: string, name: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.SkillLoad({ name, access }), 30_000, { action: 'skill', detail: name }, cwd)) }
   /** The Robot moves within its Workspace (v1.21, cw-llvx): the app checks the directory; the Robot keeps it. */

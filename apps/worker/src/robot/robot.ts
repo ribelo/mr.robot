@@ -1101,6 +1101,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       currentDirectory: (exec) => this.currentDirectory(exec),
       setCurrentDirectory: (exec, path) => this.setCurrentDirectory(exec, path),
       touched: (exec) => { this.touchedSessions.add(String(exec.agent?.session.id ?? this.store.requireConfig().liveSessionId)) },
+      isRobot: (exec) => exec.agent === undefined || String(exec.agent.session.id) === this.store.requireConfig().liveSessionId,
+      worktreeCreated: (path) => {
+        const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
+        if (setting === undefined) return
+        this.store.set(WORKSPACE, { ...setting, worktree: path })
+        this.store.set(WORKSPACE_CWD, path)
+        this.ctx.waitUntil(this.changed())
+      },
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
       link: (host, reach, cwd) => hostLink(this.hostCaller(), host, reach, cwd),
       jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach, place.workspace?.cwd),
@@ -2449,6 +2457,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         if (name === 'job_output' || name === 'job_kill') return jobItems
         // working_directory changes nothing on the computer; the places check the Workspace's files facet themselves.
         if (name === 'job_list' || name === 'working_directory') return NO_ITEMS
+        // A worktree is made on the Workspace's Host under its files facet.
+        if (name === 'create_worktree') {
+          const workspace = this.store.get<WorkspaceSetting>(WORKSPACE)
+          return { possible: hostFacets('files'), used: async () => (workspace === undefined ? [] : [{ kind: 'host', name: hostFacetKey(workspace.hostId, 'files') }]), asksAtExecution: true }
+        }
         if (name === 'copy') return { possible: everywhere('files'), used: async (args) => [...(await placeItem(copyEnd(args['from']), 'files')), ...(await placeItem(copyEnd(args['to']), 'files'))], asksAtExecution: true }
         return onItems('files')
       },

@@ -15,6 +15,8 @@
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-agent-instructions": "0.2.1-rc.2",
     "@deepseek-ai/dsh-bash-sandbox": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-experimental-worktree": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs-local": "0.2.1-rc.2",
     "@deepseek-ai/dsh-home-paths": "0.2.1-rc.2",
     "@deepseek-ai/dsh-http-proxy": "0.2.1-rc.2",
     "@deepseek-ai/dsh-jobs": "0.2.1-rc.2",

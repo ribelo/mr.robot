@@ -34,7 +34,7 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src pnpmWorkspaces;
     inherit pnpm;
     fetcherVersion = 4;
-    hash = "sha256-ltOdpwc8rhGN37d/kvbb6qeNjRaBAB/r0aVHKpNopDY=";
+    hash = "sha256-dbLrX085KX2Rzgej8QPvrIHddwic/68YSlHIZ4Is13w=";
   };
 
   buildPhase = ''

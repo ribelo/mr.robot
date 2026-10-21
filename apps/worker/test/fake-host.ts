@@ -68,6 +68,8 @@ const normal = (path: string): string => {
 /** A path of a call as the app resolves it: on the Workspace a relative path starts in the Robot's current directory (access.cwd); otherwise as given. */
 const onPlace = (access: HostAccess, path: string): string => (access.cwd !== undefined && !path.startsWith('/') && !path.startsWith('~') ? normal(`${access.cwd}/${path}`) : path)
 
+/** The worktrees the fake app made. */
+export const worktreesMade: string[] = []
 /** The directories a read or write in a Workspace touched, per Robot directory name, as the app's sessions keep them. */
 export const workspaceTouched = new Map<string, Set<string>>()
 /** The context calls the fake app answered: which RPC, the current directory, and whether the Worker sent what it holds. */
@@ -328,6 +330,17 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     WorkspaceClose: ({ robot }) => Effect.sync(() => { workspaceCloses.push(robot); workspaceTouched.delete(robot) }),
     WorkspaceOpen: ({ access, skillsDigest }) => { contextCalls.push({ rpc: 'WorkspaceOpen', cwd: access.cwd, known: false }); return Effect.promise(() => fakeContext(access, null, skillsDigest)) },
     WorkspaceState: ({ access, known, skillsDigest }) => { contextCalls.push({ rpc: 'WorkspaceState', cwd: access.cwd, known: known !== null }); return Effect.promise(() => fakeContext(access, known, skillsDigest)) },
+    // DSH's worktree runtime, as the app runs it: a checkout of its own under .agents/worktrees (the app's tests run the real one).
+    CreateWorktree: ({ access }) => {
+      const workspace = access.workspace
+      if (workspace === undefined) return Effect.fail(new HostError({ message: 'This call names no Workspace.', code: 'ENOENT' }))
+      if (workspace.worktree !== undefined) return Effect.fail(new HostError({ message: `You have a worktree already: ${workspace.worktree}.`, code: 'EEXIST' }))
+      const path = `${workspace.repository}/.agents/worktrees/${access.robot}`
+      if (knownDirectories().has(path)) return Effect.fail(new HostError({ message: `worktree path already exists: ${path}` }))
+      hostDirectories.add(path)
+      worktreesMade.push(path)
+      return Effect.succeed({ path, branch: access.robot, baseCommit: 'c0ffee0000000000000000000000000000000000', repositoryRoot: workspace.repository })
+    },
     SkillLoad: ({ name, access }) => {
       const repository = access.workspace?.repository ?? ''
       for (const path of [`${repository}/.agents/skills/${name}/SKILL.md`, `${FAKE_HOME}/.agents/skills/${name}/SKILL.md`]) {
@@ -447,6 +460,7 @@ export async function closeHosts(): Promise<void> {
   writeAnswers.clear()
   workspaceTouched.clear()
   contextCalls.length = 0
+  worktreesMade.length = 0
   cut.nextWrite = false
   hostJobCalls.length = 0
   for (const socket of open.splice(0)) {

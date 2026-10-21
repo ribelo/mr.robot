@@ -28,6 +28,8 @@ export interface PlacesHost {
   jobKill(id: JobId, call: PlaceCall): Promise<KillView | WaitingResult>
   /** The notice of a call that named "workspace" and went to the Files (cw-shlm), or undefined. */
   aliasNotice(...ons: readonly unknown[]): string | undefined
+  /** The Robot's worktree in its Workspace (cw-11je). */
+  createWorktree(call: PlaceCall): Promise<{ readonly path: string; readonly branch: string; readonly baseCommit: string; readonly repositoryRoot: string } | WaitingResult>
   /** The current directory in the Workspace, or a move within its repository (cw-llvx). */
   workingDirectory(cd: string | undefined, exec: ToolRunContext): Promise<{ readonly cwd: string; readonly root: string; readonly repository: string; readonly host: string }>
 }
@@ -288,6 +290,11 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       parameters: { properties: { cd: { type: 'string', description: 'The directory to move to; leave it out to read where you are' } } },
       concurrencySafe: false,
       execute: (args, exec) => guarded('working_directory', async () => host.workingDirectory(args.cd, exec)),
+    }), tool<{ reason?: string }>({
+      name: 'create_worktree',
+      description: `Make your own Git worktree in your Workspace on ${reach.workspace.host}, so that you work in a checkout of your own while other Robots share the repository: a branch named after you and its checkout under <repository>/.agents/worktrees/, from the current commit of your current directory's checkout. Your current directory moves there, and from then on you may change only that checkout and the repository's .git, not the main working tree. It holds committed content only: no untracked or ignored files, no submodules, no fetch, and no installed dependencies; install what the repository needs there yourself. One worktree per Robot; a Subagent cannot make one. Returns path, branch, baseCommit and repositoryRoot.`,
+      parameters: { properties: { reason: REASON_PARAMETER } },
+      execute: (args, exec) => guarded('create_worktree', async () => host.createWorktree(callOf('create_worktree', args, exec))),
     }))
   }
   return tools

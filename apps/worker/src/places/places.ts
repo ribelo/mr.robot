@@ -27,6 +27,8 @@ import { BOX_PLACE, FILES_PLACE, parseOn, placeName, refuseOwned, WORKSPACE_ALIA
 export interface HostLink extends HostFileLink {
   /** The Robot's next current directory in its Workspace there (v1.21, cw-llvx), checked by the app. */
   workingDirectory(cd: string): Promise<{ readonly path: string }>
+  /** The Robot's worktree in its Workspace there (v1.21, cw-11je), made by the app. */
+  createWorktree(): Promise<{ readonly path: string; readonly branch: string; readonly baseCommit: string; readonly repositoryRoot: string }>
   /** The size of a file on the Host, so that the Worker can plan an upload. */
   copySize(path: string): Promise<{ readonly path: string; readonly size: number }>
   /** The Host app puts the parts to R2 over the presigned URLs. */
@@ -60,6 +62,10 @@ export interface PlacesDeps {
   setCurrentDirectory(exec: ToolRunContext, path: string): void
   /** A read, write or edit of the agent reached into its Workspace: its instructions may have grown (cw-hm3d). */
   touched(exec: ToolRunContext): void
+  /** Whether the call is the Robot's own, not a Subagent's: only the Robot creates a worktree (cw-4nkx). */
+  isRobot(exec: ToolRunContext): boolean
+  /** Keep the Robot's new worktree in its Workspace and move it there (cw-11je). */
+  worktreeCreated(path: string): void
   readonly box: BoxAccess
   /** One Host; `cwd` when the calls name the Robot's Workspace there. */
   link(host: HostView, reach: Reach, cwd?: string): HostLink
@@ -232,6 +238,24 @@ export class Places {
     const moved = await this.deps.link(place.host, 'granted', place.workspace.cwd).workingDirectory(cd.trim())
     this.deps.setCurrentDirectory(exec, moved.path)
     return { cwd: moved.path, ...answer }
+  }
+
+  /**
+   * Create the Robot's worktree (cw-11je, cw-zuyu): the app makes it with DSH's runtime from the checkout of the current directory; the
+   * platform keeps it in the Workspace setting, whose write roots then become the worktree and the repository's .git, and moves the
+   * Robot there. It writes on the computer, so it waits for the owner when the Workspace's files facet is at ask. A Subagent cannot.
+   */
+  async createWorktree(call: PlaceCall): Promise<{ readonly path: string; readonly branch: string; readonly baseCommit: string; readonly repositoryRoot: string } | WaitingResult> {
+    if (!this.deps.isRobot(call.exec)) throw new WrongPlace({ on: WORKSPACE_PLACE, message: 'create_worktree: a Subagent works in its Robot\'s Workspace and does not create a worktree; say in your report that one is needed.' })
+    const target = await this.workspacePlace('files', call.exec)
+    const place = target.place
+    if (place.kind !== 'host' || place.workspace === undefined) throw new WrongPlace({ on: WORKSPACE_PLACE, message: 'create_worktree: you have no Workspace.' })
+    if (this.deps.workspaceSetting()?.worktree !== undefined) throw new WrongPlace({ on: WORKSPACE_PLACE, message: `create_worktree: you have a worktree already, ${this.deps.workspaceSetting()!.worktree}.` })
+    const waiting = this.waiting(call, [target])
+    if (waiting !== undefined) return waiting
+    const created = await this.deps.link(place.host, 'granted', place.workspace.cwd).createWorktree()
+    this.deps.worktreeCreated(created.path)
+    return created
   }
 
   /**

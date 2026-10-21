@@ -29,6 +29,7 @@ import { aclRunnerWorks, findInstalledPwsh7 } from './windows.ts'
 import { WorkspaceSessions } from './workspace-session.ts'
 import { RecentWrites } from './files.ts'
 import { HostSkills } from './workspace-context.ts'
+import { createWorktree, mountWorktrees } from './worktrees.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
@@ -109,7 +110,13 @@ class GrantPolicyOnly extends Service {
     // SAFETY: Cordis types service names as a closed union that DSH's own packages extend; this app registers the one name DSH's bash-sandbox looks up.
     super(ctx, 'sandboxPolicy' as never)
   }
-  resolve(): SandboxExecutionPolicy {
+  /**
+   * The policy of a request. Only one kind comes without a grant's policy: a platform act of the app's own (a worktree, ticket 05),
+   * which names its policy itself. Anything else is a bug and runs nothing.
+   */
+  resolve(request?: { readonly session?: { readonly platformPolicy?: SandboxExecutionPolicy } }): SandboxExecutionPolicy {
+    const named = request?.session?.platformPolicy
+    if (named !== undefined) return named
     throw new Error('a command reached the shell without the policy of its grant; nothing runs without one')
   }
 }
@@ -273,6 +280,8 @@ export class HostShell implements FileChanges {
     if (options.sandboxChain !== undefined) (ctx.sandbox as LocalSandboxProvider).internals.chain = options.sandboxChain
     // bash is always there, and the probe below runs through it.
     if (kind === 'bash') await ctx.plugin(Bash, {})
+    // DSH's worktree runtime (ticket 05), with git from the login environment when the app's own PATH has none.
+    await mountWorktrees(ctx, home, onPath(process.platform === 'win32' ? 'git.exe' : 'git', env?.['PATH']) ?? 'git')
     const probeRoot = join(home, 'mr-robot')
     // Not recursive, and an existing entry is left as it is: a link at ~/mr-robot is not followed to make anything where it points. The
     // Robots' calls refuse such a link (access.ts, ensureRobotDirectory).
@@ -397,6 +406,18 @@ export class HostShell implements FileChanges {
       stderr: result.stderr,
       ...(sandbox === undefined ? {} : { sandbox: { mode: HOST_MODE[sandbox.mode], denied: sandbox.denied, ...(sandbox.denied ? denial(result.stderr.text, cwd) : {}), ...(sandbox.enforcement === undefined ? {} : { enforcement: sandbox.enforcement }) } }),
     }
+  }
+
+  /**
+   * Create a Robot's worktree (cw-11je) from the checkout of its current directory, named by the Robot's directory name, through DSH's
+   * runtime. The session of its Workspace remembers it.
+   */
+  async createWorktree(access: HostAccess): Promise<{ path: string; branch: string; baseCommit: string; repositoryRoot: string }> {
+    const workspace = access.workspace
+    if (workspace === undefined) throw Object.assign(new Error('This call names no Workspace.'), { code: 'ENOENT' })
+    if (workspace.worktree !== undefined) throw Object.assign(new Error(`You have a worktree already: ${workspace.worktree}.`), { code: 'EEXIST' })
+    const created = await createWorktree(this.ctx, { cwd: access.cwd ?? workspace.root, repository: workspace.repository, name: access.robot })
+    return { path: created.path, branch: created.branch, baseCommit: created.baseCommit, repositoryRoot: created.repositoryRoot }
   }
 
   /** The app quits: the Workspace sessions close, then DSH's layer (its jobs and processes) goes. */

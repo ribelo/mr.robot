@@ -102,6 +102,7 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
     // The Workspace's instructions and skills (v1.21 ticket 04): Open renders the whole chain, State answers what changed.
     WorkspaceOpen: ({ access, skillsDigest }) => Effect.tryPromise({ try: () => context(access, null, skillsDigest), catch: fail }),
     WorkspaceState: ({ access, known, skillsDigest }) => Effect.tryPromise({ try: () => context(access, known, skillsDigest), catch: fail }),
+    CreateWorktree: ({ access }) => Effect.tryPromise({ try: () => shell.createWorktree(access), catch: fail }),
     SkillLoad: ({ name, access }) => Effect.tryPromise({
       try: async () => {
         const loaded = await shell.skills.load(where(access), name)

@@ -423,10 +423,22 @@ export const SkillLoad = Rpc.make('SkillLoad', {
   error: HostError,
 })
 
-/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
-export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory', 'WorkspaceOpen', 'WorkspaceState', 'SkillLoad']
+/**
+ * Create the Robot's worktree (v1.21 ticket 05, cw-11je): DSH's worktree runtime makes branch <robot> and its checkout under
+ * <repository>/.agents/worktrees/<robot> from the current commit of the current directory's checkout. Committed content only: no
+ * untracked files, no submodules, no fetch, Git filters off. The answer is DSH's record; the Worker keeps the worktree and moves the
+ * Robot's directory there. A Robot with a worktree (access.workspace.worktree) is refused another.
+ */
+export const CreateWorktree = Rpc.make('CreateWorktree', {
+  payload: { access: HostAccess },
+  success: Schema.Struct({ path: Schema.String, branch: Schema.String, baseCommit: Schema.String, repositoryRoot: Schema.String }),
+  error: HostError,
+})
 
-export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory, WorkspaceOpen, WorkspaceState, SkillLoad) {}
+/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
+export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory', 'WorkspaceOpen', 'WorkspaceState', 'SkillLoad', 'CreateWorktree']
+
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory, WorkspaceOpen, WorkspaceState, SkillLoad, CreateWorktree) {}
 
 /** The sandbox state of a Host, as its heartbeat reports it. */
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])
