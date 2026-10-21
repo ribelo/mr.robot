@@ -53,6 +53,9 @@ import { fetchMetadata, type MetadataIndex } from '../providers/model-metadata.t
 import { PROVIDER_IDS } from '../agent/providers.ts'
 import { makeVault, type VaultShape } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
+import { DEFINITION_SCHEMA, DefinitionLibrary, type DefinitionRow } from '../definitions/library.ts'
+import * as Result from 'effect/Result'
+import { definitionsInTree } from '../definitions/definition.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
@@ -850,7 +853,9 @@ const syncSkills = Effect.gen(function* () {
   for (const gone of previous.filter((name) => !found.some((skill) => skill.name === name) && !edited.has(name))) {
     yield* sql.run("DELETE FROM skill WHERE name = ? AND source = 'git'", gone)
   }
-  return { synced: found.map((skill) => skill.name) }
+  // The repository's robots/<slug>/ directories are the library's Git definitions (v1.18, rm-vob8).
+  const definitions = yield* remote((env) => new DefinitionLibrary(sql.raw, env.FILES).sync(definitionsInTree(files), Date.now()))
+  return { synced: found.map((skill) => skill.name), definitions: definitions.synced, refusedDefinitions: definitions.refused }
 })
 
 /** An approved Robot proposal enters the library (robot-jqfw). */
@@ -1350,6 +1355,8 @@ export class Home extends DurableObject<Env> {
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     this.migrateSpendLimits()
     this.migrateBrowserBackends()
+    // Robot definitions in the library (v1.18 ticket 04).
+    sql.exec(DEFINITION_SCHEMA)
     sql.exec(`CREATE TABLE IF NOT EXISTS skill (
       name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
       owner_id TEXT, updated_at INTEGER NOT NULL
@@ -1600,7 +1607,32 @@ export class Home extends DurableObject<Env> {
   }
   skillRepository(): Promise<SkillRepository | null> { return this.run(skillRepository) }
   setSkillRepository(repository: SkillRepository, token: string | undefined): Promise<void> { return this.run(setSkillRepository(repository, token)) }
-  syncSkills(): Promise<{ synced: string[] }> { return this.run(syncSkills) }
+  syncSkills(): Promise<{ synced: string[]; definitions: string[]; refusedDefinitions: Array<{ slug: string; reason: string }> }> { return this.run(syncSkills) }
+
+  // ---------------------------------------------------------------- Robot definitions (v1.18 ticket 04)
+
+  private get definitionLibrary(): DefinitionLibrary {
+    return new DefinitionLibrary(this.ctx.storage.sql, this.env.FILES)
+  }
+
+  /** Save a definition from a Robot (Save as definition, rm-gv6s); published at once when its owner is the admin. Throws Invalid on refusal. */
+  async saveDefinition(slug: string, files: Array<{ path: string; body: Uint8Array }>, ownerId: string, author: string): Promise<DefinitionRow> {
+    const admin = this.ctx.storage.sql.exec<{ role: string }>('SELECT role FROM member WHERE id = ?', ownerId).toArray()[0]?.role === 'admin'
+    const stored = await this.definitionLibrary.store(slug, new Map(files.map((file) => [file.path, file.body])), { source: 'robot', ownerId, author, published: admin }, Date.now())
+    if (Result.isFailure(stored)) throw Object.assign(new Error(stored.failure), { name: 'Invalid', status: 400 })
+    return stored.success
+  }
+
+  definitions(memberId: string): DefinitionRow[] {
+    return this.definitionLibrary.visible(memberId)
+  }
+
+  /** A definition's files, for a Member who sees it; null when he does not. */
+  async definitionFiles(slug: string, memberId: string): Promise<Array<{ path: string; body: Uint8Array }> | null> {
+    const row = this.definitionLibrary.get(slug)
+    if (row === undefined || (!row.published && row.ownerId !== memberId)) return null
+    return [...(await this.definitionLibrary.files(slug)).entries()].map(([path, body]) => ({ path, body }))
+  }
   publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private'): Promise<void> { return this.run(publishSkill(ownerId, name, description, content, visibility)) }
   skillContent(memberId: string, name: string, path = 'SKILL.md'): Promise<string | null> { return this.run(skillContent(memberId, name, path)) }
   saveSkill(name: string, description: string, content: string, by: string | null): Promise<void> { return this.run(saveSkill(name, description, content, by)) }

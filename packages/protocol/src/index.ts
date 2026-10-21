@@ -331,6 +331,22 @@ export type FileHistoryView = typeof FileHistoryView.Type
 export const FileVersionContent = Schema.Struct({ version: FileVersionView, text: Schema.String })
 export type FileVersionContent = typeof FileVersionContent.Type
 
+/** A Robot definition in the Space's library (v1.18, rm-hjpa): where it came from, who made it, when it changed. */
+export const DefinitionView = Schema.Struct({
+  slug: Schema.String,
+  title: Schema.String,
+  paragraph: Schema.String,
+  source: Schema.Literals(['git', 'robot', 'import']),
+  author: Schema.String,
+  published: Schema.Boolean,
+  mine: Schema.Boolean,
+  updatedAt: Schema.Number,
+})
+export type DefinitionView = typeof DefinitionView.Type
+
+/** Save a Robot as a definition under this name. */
+export const SaveDefinition = Schema.Struct({ slug: Schema.String })
+
 /** Bring a kept version back; the restore is itself a new version. */
 export const FileRestore = Schema.Struct({ version: Schema.String })
 

@@ -167,6 +167,9 @@ import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, normalizePath, workspacePrefix, type WorkspaceShape } from '../workspace/workspace.ts'
 import { authorLabel, authorOf, FileHistory, isTrackedFile, robotHistoryBase, versionView, type FileAuthor } from '../workspace/file-history.ts'
 import { foldIdentity, foldTools, shapeMemory, withSection } from '../workspace/persona-fold.ts'
+import { grantsFormOf, tasksFormOf, writeGrants, writeTasks } from '../definitions/definition.ts'
+import type { DefinitionRow } from '../definitions/library.ts'
+import { registrableDomain } from '../platform/logins.ts'
 import type { FileHistoryView, FileVersionContent } from '@mr-robot/protocol'
 import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
 import { HOME_ID, type Env } from '../env.ts'
@@ -3707,6 +3710,52 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.fileContent(path)
   }
 
+  /**
+   * Save as definition (v1.18 ticket 04, rm-gv6s): the Robot's persona, memory and skills are copied to definition-draft/<slug>/, the
+   * Robot gets one bounded step to take out what is about its owner and write README.md, its Tasks and Grants become tasks.yaml and
+   * grants.yaml, and the directory enters the Space's library. A snapshot: nothing links it back (rm-gxp7).
+   */
+  async saveAsDefinition(slug: string): Promise<DefinitionRow> {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) throw Object.assign(new Error('a definition name is lowercase letters, digits and dashes'), { name: 'Invalid', status: 400 })
+    if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw Object.assign(new Error('the Robot is working; save it as a definition when it is done'), { name: 'Conflict', status: 409 })
+    const config = this.store.requireConfig()
+    const ws = this.workspace
+    const draft = `${DEFINITION_DRAFT}/${slug}`
+    await this.run(ws.removeUnder(draft))
+    const sources = [...['SOUL.md', 'AGENTS.md', 'MEMORY.md'], ...(await this.run(ws.list('skills'))).map((entry) => entry.path)]
+    for (const path of sources) {
+      const file = await this.run(ws.read(path))
+      if (file !== undefined) await this.run(ws.write(`${draft}/${path}`, file.body, file.contentType, { kind: 'platform' }))
+    }
+    // The owner scrub: one bounded step of the Robot on its own model (rm-gv6s).
+    const { agent, ctx } = await this.agent()
+    let steps = 0
+    const stop = ctx.on('session/event', (session, event) => {
+      if (session === agent.session && event.type === 'step/start' && ++steps >= DEFINITION_SCRUB_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
+    })
+    try {
+      agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: definitionScrubNote(draft), summary: `Saving as the definition ${slug}`, woke: { at: Date.now(), timeZone: config.timeZone } }))
+      await agent.whenIdle()
+    } finally {
+      stop()
+    }
+    await ctx.sessions.flush(agent.session)
+    const files = new Map<string, Uint8Array>()
+    for (const entry of await this.run(ws.list(draft))) {
+      const file = await this.run(ws.read(entry.path))
+      if (file !== undefined) files.set(entry.path.slice(draft.length + 1), new Uint8Array(file.body))
+    }
+    const tasks = await this.home().listTasks({ kind: 'robot', robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot', robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }, { state: 'open', assignee: { kind: 'robot', robotId: config.id } })
+    const logins = await this.logins().catch(() => [])
+    const sites = (name: string) => [...new Set((logins.find((entry) => entry.name === name)?.websites ?? []).map((site) => registrableDomain(site) ?? site))]
+    files.set('tasks.yaml', new TextEncoder().encode(writeTasks(tasksFormOf(tasks.tasks))))
+    files.set('grants.yaml', new TextEncoder().encode(writeGrants(grantsFormOf(this.store.effectiveGrants(), this.knownConnections, sites))))
+    if (!files.has('README.md')) files.set('README.md', new TextEncoder().encode(`# ${config.identity.name}\n\n${config.identity.description}\n`))
+    await this.run(ws.removeUnder(draft))
+    await this.changed()
+    return this.home().saveDefinition(slug, [...files.entries()].map(([path, body]) => ({ path, body })), config.ownerId, this.owner().name)
+  }
+
   /** A persona or memory file's history (v1.18, rm-7jo4): who wrote it now, and its kept versions. */
   async fileHistory(path: string): Promise<FileHistoryView> {
     const normalized = normalizePath(path)
@@ -4288,6 +4337,20 @@ export const REVIEW_RECORD = 'plugin:mr-robot/review'
 export const SWEEP_RECORD = 'plugin:mr-robot/memory-sweep'
 /** The kv key of when the last memory sweep started. */
 const SWEPT_AT = 'memory-swept-at'
+/** Where Save as definition stages a Robot's files (v1.18 ticket 04). */
+const DEFINITION_DRAFT = 'definition-draft'
+/** The step limit of the owner scrub. */
+const DEFINITION_SCRUB_STEPS = 6
+
+/** The owner scrub's instruction (rm-gv6s): the copies are to install for someone else. */
+function definitionScrubNote(draft: string): string {
+  return [
+    `Save as definition: your SOUL.md, AGENTS.md, MEMORY.md and skills/ are copied to ${draft}/. Another person will install a Robot from these copies.`,
+    `Edit only the copies in ${draft}/: take out everything about your owner and their world (names, addresses, accounts, people, private facts, dates of their life). Keep how you work, the rules, the conventions, and facts about the job itself.`,
+    `Then write ${draft}/README.md: a first line "# <title>", one paragraph on what this Robot does, and a list "The interview will ask:" of what the new owner must tell you.`,
+    'Change nothing outside it, then stop. Do not reply to your owner.',
+  ].join(' ')
+}
 /** The last request of the Robot's session, kept for cache warming while idle (ao-jlr0). */
 const WARM_REQUEST = 'warm-request'
 /** The kv key of the live chapter a compaction ran in, until the chapter closes (v1.19). */

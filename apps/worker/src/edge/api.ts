@@ -38,6 +38,7 @@ import {
   DEFAULT_MISSION_PREFS,
   TaskAssign,
   FileRestore,
+  SaveDefinition,
   TaskInput,
   TaskPatch,
   TaskPause,
@@ -55,6 +56,9 @@ import {
   type SessionCapture,
 } from '@mr-robot/protocol'
 import { HOME_ID, type Env } from '../env.ts'
+import type { DefinitionRow } from '../definitions/library.ts'
+import { definitionArchive } from '../definitions/tarball.ts'
+import type { DefinitionView } from '@mr-robot/protocol'
 import { memberAvatarObject } from '../home/home.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
@@ -123,6 +127,11 @@ function admin(c: ApiContext): Effect.Effect<void, ApiError> {
 const TIME_ZONE_HEADER = 'X-Time-Zone'
 
 const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
+
+/** A definition row as a Member sees it. */
+function definitionView(row: DefinitionRow, memberId: string): DefinitionView {
+  return { slug: row.slug, title: row.title, paragraph: row.paragraph, source: row.source, author: row.author, published: row.published, mine: row.ownerId === memberId, updatedAt: row.updatedAt }
+}
 
 /** The ?chapter= of a request (v1.19): undefined when absent, null when it is not a chapter number. */
 function chapterParam(request: Request): number | undefined | null {
@@ -412,6 +421,20 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('DELETE', '/api/admin/skills/:name', (c, { name }) => admin(c).pipe(Effect.andThen(call(() => home(c.env).deleteSkill(name))), Effect.as({ ok: true })))
+  // Robot definitions (v1.18 ticket 04): Save as definition, the library's list, and the directory to commit by hand.
+  .on('POST', '/api/robots/:id/definition', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const { slug } = yield* decodeBody(c.request, SaveDefinition)
+    const row = yield* call(() => robot(c, id).saveAsDefinition(slug))
+    return definitionView(row, c.member.id)
+  }))
+  .on('GET', '/api/definitions', (c) => call(() => home(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
+  .on('GET', '/api/definitions/:slug/archive', (c, { slug }) => Effect.gen(function* () {
+    const files = yield* call(() => home(c.env).definitionFiles(slug, c.member.id))
+    if (files === null) return yield* Effect.fail(notFound('no such definition'))
+    const archive = yield* Effect.promise(() => definitionArchive(`robots/${slug}`, new Map(files.map((file) => [file.path, file.body])), Date.now()))
+    return new Response(archive, { headers: { 'content-type': 'application/gzip', 'content-disposition': `attachment; filename="${slug}.tar.gz"` } })
+  }))
   .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message))))))
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
