@@ -13,14 +13,11 @@ import { bareScreenName, deleteScreenshots, readScreenshot, saveScreenshot, SCRE
 import { entryMatches, type LoginEntry } from '../platform/logins.ts'
 import { DurableObject } from 'cloudflare:workers'
 import * as Effect from 'effect/Effect'
-import { createUserMessage, LlmError, ReasoningEffortId, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, LlmError, ToolCallId, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { readDecision, REVIEW_POLICY, reviewHistory, reviewUserText } from '../agent/auto-review.ts'
-import { BOX_ROOT, WORKSPACE_ROOT } from '../places/files.ts'
+import { BOX_ROOT } from '../places/files.ts'
 import type { OpencodePool } from '../providers/opencode-go.ts'
-import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
-import { IDLE_MEMORY_STEPS, idlePlan, idleSettings, memorySweepNote, type IdleStep } from './idle.ts'
 import { buildForkSeed, Session, SessionId, SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { chapterSeed } from '../agent/chapter-seed.ts'
 import { deleteColdChapters, moveColdChapters } from './cold-chapters.ts'
@@ -60,7 +57,7 @@ import type {
 } from '@mr-robot/protocol'
 import { isToolGroup } from '../agent/catalog.ts'
 import { composeScoped, type Composition } from '../agent/compose.ts'
-import { askGate, bothItems, fixedItems, NO_ITEMS, type AskGateHost, type GrantItem, type ItemsOf, type ReviewOutcome, type ToolCallRequest, type ToolItems } from '../agent/ask-gate.ts'
+import { askGate, bothItems, fixedItems, NO_ITEMS, type AskGateHost, type GrantItem, type ItemsOf, type ToolCallRequest, type ToolItems } from '../agent/ask-gate.ts'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
@@ -77,7 +74,7 @@ import { readStoredEvents, storedHeader, storedLength, storeSession } from '../a
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, UserMessage } from '@deepseek-ai/dsh-llm'
-import { causedByOwner, joinable, mrRobotIdOf } from './delivery.ts'
+import { causedByOwner, joinable } from './delivery.ts'
 import { SubagentStore } from './subagent-store.ts'
 import { SUBAGENT_TOOL_NAMES, type SubagentHost, type SubagentStart } from '../agent/tools/subagents.ts'
 import { MAX_SUBAGENTS, Subagents } from '../plugins/subagents.ts'
@@ -179,12 +176,20 @@ import { dropRoutines, exportRoutines, type ExportedRoutine } from './routine-ex
 import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
+import { Duties } from './duties.ts'
+import { StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
+import { idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
+import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
+import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
+import { boxIdleDuty } from '../plugins/places.ts'
+import { captureExpiryDuty, chainResumeDuty, outboxDuty, screenSweepDuty, screenWatchDuty } from '../plugins/housekeeping.ts'
+import { JOB_CHECK_MS } from '../places/jobs.ts'
 import * as Views from './views.ts'
 import { causeOf, LAST_WAKEUP, runningTool } from './views.ts'
 import * as Threads from './threads.ts'
 import * as Browse from './browsing.ts'
 import { Browsing } from './browsing.ts'
-import { IDLE_PLAN, MR_ROBOT_COMPACTION, proposalView, QUIET_DUE, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput, type InstalledDefinition } from './programs.ts'
+import { MR_ROBOT_COMPACTION, proposalView, QUIET_DUE, RobotPlatform, RobotState, type AnswerResult, type HelpAnswerer, type HelpAnswerResult, type ReceiveResult, type RobotMessage, type ToolCallAnswerWake, type WakeInput, type InstalledDefinition } from './programs.ts'
 export type { AnswerResult, HelpAnswerer, HelpAnswerResult, ReceiveResult, RobotMessage, WakeInput } from './programs.ts'
 import { RobotStore, storedToolCall, type ActiveTurn, type TaskCard, type ProposalRow, type RobotConfig, type Wakeup, type WakeupKind } from './store.ts'
 
@@ -225,6 +230,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private readonly blockedThisTurn = new Map<string, string>()
 
   private readonly runtime: DurableRuntime<RobotState | RobotPlatform>
+  /** What the alarm runs besides the core's own work (v1.20 ticket 00, duties.ts). */
+  private readonly duties = new Duties()
+  /** The tools a running platform step allows (platform-step.ts). */
+  private readonly fence = new StepFence()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -261,8 +270,106 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         rememberSecret: (name, value) => Effect.sync(() => this.remember(name, value)),
         working: () => Effect.sync(() => this.store.activeTurn() !== undefined || this.pumping !== undefined),
         releaseAgent: () => Effect.promise(() => this.releaseComposition()),
+        dutiesNext: () => Effect.sync(() => this.duties.nextAt(Date.now(), this.store.config()?.status ?? 'deleted')),
       }),
     ))
+    this.registerDuties()
+  }
+
+  /** The duties of the plugins that own them, in the order the alarm ran them before v1.20. */
+  private registerDuties(): void {
+    const store = this.store
+    this.duties.register(quietSteerDuty(this.voiceHost(), quietSteerNote))
+    this.duties.register(captureExpiryDuty(store, () => this.endCapture()))
+    this.duties.register(screenWatchDuty(store, (now) => this.checkWatch(now)))
+    this.duties.register(screenSweepDuty(store, (now) => sweepScreenshots(this.env.FILES, store.requireConfig().id, now), SCREEN_SWEEP_EVERY_MS))
+    this.duties.register(outboxDuty(store, () => this.deliverOutbox()))
+    this.duties.register(chainResumeDuty(store, (failed) => causedByOwner(failed as Wakeup, store.requireConfig().ownerId)))
+    this.duties.register(boxIdleDuty({
+      checkJobs: () => this.jobs().check(),
+      runningJobs: (place) => store.runningJobs(place).length,
+      box: () => this.boxState() as { state: string; lastCommandAt?: number },
+      stopBox: async () => { await this.stopBox() },
+    }, BOX_IDLE_MS, JOB_CHECK_MS))
+    this.duties.register(idleDuty(this.idleHost()))
+  }
+
+  /** What a platform step needs of this Robot (platform-step.ts). */
+  private stepHost(): PlatformStepHost {
+    return {
+      fence: this.fence,
+      writeAs: (author) => { this.writer = author ?? { kind: 'robot' } },
+      onEvent: (listener) => {
+        const ctx = this.composition?.value.ctx
+        return ctx === undefined ? () => undefined : ctx.on('session/event', listener as never)
+      },
+      account: (startSeq, source) => this.accountTurn(startSeq, source),
+      storedLength: () => storedLength(this.ctx.storage.sql, this.store.requireConfig().liveSessionId),
+      flush: async () => {
+        const composition = this.composition?.value
+        if (composition !== undefined) await composition.ctx.sessions.flush(composition.agent.session)
+      },
+    }
+  }
+
+  private idleHost(): IdleHost {
+    return {
+      store: this.store,
+      agent: () => this.agent() as never,
+      step: this.stepHost(),
+      idleNow: () => this.store.activeTurn() === undefined && this.store.pendingWakeups() === 0 && this.pumping === undefined,
+      lastRequest: () => this.lastRequest,
+      modelList: () => this.space().modelList(),
+      adapter: (provider, window, model, wire) => this.adapter(provider, window, model, wire),
+      recordUsage: (source, input, output, cost) => this.recordUsage(source, input, output, cost),
+      list: (directory) => this.run(this.workspace.list(directory)),
+      writerOf: async (path, uploaded) => authorOf((await this.env.FILES.head(`${workspacePrefix(this.store.requireConfig().id)}${path}`))?.customMetadata, uploaded),
+      isTracked: isTrackedFile,
+      rollChapter: () => this.rollChapter(),
+      changed: () => this.changed(),
+    }
+  }
+
+  private reviewHost(): ReviewHost {
+    return {
+      route: async () => {
+        const config = this.store.requireConfig()
+        return config.reviewer ?? (await this.space().settings()).defaultReviewer ?? config.model
+      },
+      ownerId: () => this.store.requireConfig().ownerId,
+      modelList: () => this.space().modelList(),
+      adapter: (provider, window, model, wire) => this.adapter(provider, window, model, wire),
+      recordUsage: (source, input, output, cost) => this.recordUsage(source, input, output, cost),
+    }
+  }
+
+  private voiceHost(): VoiceHost {
+    return {
+      store: this.store,
+      step: this.stepHost(),
+      events: (from) => readStoredEvents(this.ctx.storage.sql, this.store.requireConfig().liveSessionId, from),
+      said: (events) => this.said(events),
+      reactedOnly: (events) => this.reactedOnly(events),
+      ownerName: () => this.owner().name,
+      runningAgent: () => this.runningAgent,
+      fallback: async () => undefined,
+    }
+  }
+
+  /** The say plugin's safety net at a Turn's end (gb-xgd7): only for a Turn of an active or setup Robot that was not interrupted. */
+  private async speakUp(wakeup: Wakeup, agent: Agent): Promise<void> {
+    const config = this.store.requireConfig()
+    const active = this.store.activeTurn()
+    if (active === undefined || (config.status !== 'active' && config.status !== 'setup') || this.store.get(INTERRUPTED_BY) !== undefined) return
+    await safetyNet({
+      ...this.voiceHost(),
+      fallback: (text) => this.emitSay(agent.session, { id: `fallback-${wakeup.id}`, text, attachments: [], fallback: true }, [], this.turnVoice(wakeup).route, false),
+    }, agent, {
+      startSeq: active.startSeq,
+      byOwner: () => causedByOwner(wakeup, config.ownerId) || this.store.get(`owner-steered:${wakeup.id}`) === true,
+      note: safetyNetNote(this.owner().name),
+      steps: SAFETY_NET_STEPS,
+    })
   }
 
   /**
@@ -461,21 +568,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
+  /**
+   * The alarm (v1.20 ticket 00): the core's own work (Tasks due, parked Tasks, draining, Subagent resume), then every registered duty in
+   * its order (duties.ts), then the next alarm over both. The outbox is the one duty of a deleted Robot: its last messages still go.
+   */
   private async runAlarm(): Promise<void> {
     const config = this.store.config()
-    if (config !== undefined && config.status !== 'deleted') this.quietSteer(Date.now())
-    if (config !== undefined && config.status !== 'deleted') await this.expireCapture(Date.now()).catch((error: unknown) => console.warn('sign-in not ended', error))
-    if (config !== undefined && config.status !== 'deleted') await this.program(Programs.fireTasks(Date.now())).catch((error: unknown) => console.warn('due Tasks not fetched', error))
-    if (config !== undefined && config.status !== 'deleted') await this.program(Programs.releaseParked(Date.now())).catch((error: unknown) => console.warn('parked Tasks not released', error))
-    // Due Tasks start at once; housekeeping below must not delay their Turns.
+    const alive = config !== undefined && config.status !== 'deleted'
+    if (alive) await this.program(Programs.fireTasks(Date.now())).catch((error: unknown) => console.warn('due Tasks not fetched', error))
+    if (alive) await this.program(Programs.releaseParked(Date.now())).catch((error: unknown) => console.warn('parked Tasks not released', error))
+    // Due Tasks start at once; the duties below must not delay their Turns.
     if (this.store.pendingWakeups() > 0) this.drain()
-    if (config !== undefined && config.status !== 'deleted') await this.checkWatch(Date.now()).catch((error: unknown) => console.warn('screen watch failed', error))
-    if (config !== undefined && config.status !== 'deleted') await this.sweepScreens(Date.now()).catch((error: unknown) => console.warn('screenshots not swept', error))
-    if (config !== undefined) await this.deliverOutbox()
-    if (config !== undefined && config.status !== 'deleted') this.resumeChain(Date.now())
-    if (config !== undefined && config.status !== 'deleted') await this.idleBox(Date.now()).catch((error: unknown) => console.warn('Box not stopped', error))
     if (config !== undefined && config.status === 'active') await this.resumeChildren().catch((error: unknown) => console.warn('subagents not resumed', error))
-    if (config !== undefined && config.status === 'active') await this.runIdle(Date.now()).catch((error: unknown) => console.warn('idle work failed', error))
+    if (config !== undefined) await this.duties.run(Date.now(), () => this.store.config()?.status ?? 'deleted')
     if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0) this.drain()
     await this.rearm()
   }
@@ -639,7 +744,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await agent.whenIdle()
     }
     // A Turn that ends without a say gets one bounded step to speak; an owner's gets its last words shown if the step stays silent.
-    await this.speakUp(wakeup, agent, ctx).catch((error: unknown) => console.warn('safety net failed', error))
+    await this.speakUp(wakeup, agent).catch((error: unknown) => console.warn('safety net failed', error))
     this.runningAgent = undefined
     await ctx.sessions.flush(agent.session)
     if (this.turnSecrets.length > 0 && this.children.size === 0) {
@@ -653,7 +758,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.endTurn(wakeup.id)
     this.store.delete(QUIET_DUE)
     await this.afterTurn(wakeup, turn)
-    this.planIdle()
+    planIdle(this.idleHost(), this.store.requireConfig())
     await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
     // Chapters written before v1.19 get their stored chat a bounded part per Turn (ec-2sra).
     this.store.chat.backfill(this.chatBackfillEvents(), (sessionId) => this.store.chatInput(sessionId), this.store.chatSides())
@@ -937,15 +1042,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.jobs().kill(jobId, by)
   }
 
-  /** The alarm's Box duty: look at the jobs; ten minutes after the last command or job it stops, never while a job runs (ao-joux, gb-5bfw). */
-  private async idleBox(now: number): Promise<void> {
-    await this.jobs().check().catch((error: unknown) => console.warn('jobs not checked', error))
-    if (this.store.runningJobs('box').length > 0) return
-    const current = this.boxState()
-    if (current.state !== 'running' || current.lastCommandAt + BOX_IDLE_MS > now) return
-    await this.stopBox()
-  }
-
   // ---------------------------------------------------------------- Subagents (v1.14 ticket 06)
 
   /** The Subagents running in this composition, by id; a row in the subagent table outlives a restart. */
@@ -1182,97 +1278,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private lastRequest: { sessionId: string; options: GenerateOptions } | undefined
 
   /** A Turn ended: with nothing queued, the idle moments are planned and the request to replay is kept (ao-8hi8). */
-  private planIdle(): void {
-    const config = this.store.requireConfig()
-    if (config.status !== 'active' || this.store.pendingWakeups() > 0) return this.store.delete(IDLE_PLAN)
-    const plan = idlePlan(config, config.model.provider, Date.now())
-    if (plan.length === 0) return this.store.delete(IDLE_PLAN)
-    this.store.set(IDLE_PLAN, plan)
-    const last = this.lastRequest
-    if (plan.some((step) => step.action === 'warm') && last !== undefined && last.sessionId === config.liveSessionId) {
-      const { signal: _signal, ...options } = last.options
-      this.store.set(WARM_REQUEST, { provider: config.model.provider, model: config.model.model, effort: config.model.effort, options })
-    }
-  }
-
-  /** The alarm's idle duty: the next planned moment, only while no Turn runs and nothing is queued. */
-  private async runIdle(now: number): Promise<void> {
-    const plan = this.store.get<IdleStep[]>(IDLE_PLAN)
-    const step = plan?.[0]
-    if (plan === undefined || step === undefined || step.at > now) return
-    if (this.store.activeTurn() !== undefined || this.store.pendingWakeups() > 0 || this.pumping !== undefined) return
-    const rest = plan.slice(1)
-    if (rest.length === 0) this.store.delete(IDLE_PLAN)
-    else this.store.set(IDLE_PLAN, rest)
-    // A warming that comes much later than planned finds the cache gone: it is skipped, not run late.
-    if (step.action === 'warm') { if (now - step.at < IDLE_LATE_MS) await this.warmCache() }
-    else await this.idleCompact()
-  }
-
-  /** Replay the last request for one output token (ao-jlr0); it is a cache read, billed as the Robot's model cost. */
-  private async warmCache(): Promise<void> {
-    const config = this.store.requireConfig()
-    const saved = this.store.get<{ provider: string; model: string; effort: string; options: GenerateOptions }>(WARM_REQUEST)
-    if (saved === undefined || saved.provider !== config.model.provider || saved.model !== config.model.model || !warmable(saved.model, saved.effort)) return
-    const chosen = (await this.space().modelList()).find((option) => option.provider === saved.provider && option.model === saved.model)
-    const adapter = this.adapter(saved.provider, chosen?.contextWindow, saved.model, chosen?.wire)
-    let usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } | undefined
-    for await (const chunk of adapter.stream({ ...saved.options, maxTokens: 1, purpose: CACHE_WARM as never, signal: AbortSignal.timeout(120_000) })) {
-      if (chunk.type === 'usage') usage = chunk.usage as typeof usage
-    }
-    if (usage === undefined) return
-    const [input, output, cached] = [usage.inputTokens ?? 0, usage.outputTokens ?? 0, usage.cacheReadTokens ?? 0]
-    const price = chosen?.price
-    await this.recordUsage('robot', input, output, price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000)
-  }
-
-  /**
-   * Compact once while idle, on the warm prefix (ao-f4sp): a context below the floor is left alone (ao-z22f). First
-   * one bounded platform step for memory (ao-7bq9); a Wake-up during it means the compaction does not happen now.
-   */
-  private async idleCompact(): Promise<void> {
-    const config = this.store.requireConfig()
-    const { agent, ctx } = await this.agent()
-    if (ctx.tokenMeter.measure(agent.session).totalTokens < idleSettings(config).idleCompactionFloorTokens) return
-    const startSeq = storedLength(this.ctx.storage.sql, agent.session.id)
-    // The memory sweep (v1.18 ticket 03): only when a daily note changed since the last one (rm-l4t8).
-    const sweptAt = this.store.get<number>(SWEPT_AT) ?? 0
-    const notes = (await this.run(this.workspace.list('memory'))).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > sweptAt).map((entry) => entry.path).sort()
-    if (notes.length > 0) {
-      const started = Date.now()
-      let steps = 0
-      const stop = ctx.on('session/event', (session, event) => {
-        if (session === agent.session && event.type === 'step/start' && ++steps >= IDLE_MEMORY_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
-      })
-      this.writer = { kind: 'sweep' }
-      try {
-        agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: memorySweepNote(notes), summary: 'Idle: memory sweep before compaction', woke: { at: started, timeZone: config.timeZone } }))
-        await agent.whenIdle()
-      } finally {
-        stop()
-        this.writer = { kind: 'robot' }
-      }
-      this.store.set(SWEPT_AT, started)
-      // The Trajectory names what the sweep changed (rm-hhxa); each change is a version by the sweep in the file history.
-      const changed: string[] = []
-      for (const entry of await this.run(this.workspace.list(''))) {
-        if (!isTrackedFile(entry.path)) continue
-        const head = await this.env.FILES.head(`${workspacePrefix(config.id)}${entry.path}`)
-        const { by, at } = authorOf(head?.customMetadata, entry.uploaded)
-        if (by.kind === 'sweep' && at >= started) changed.push(entry.path)
-      }
-      appendPluginRecord(agent.session, SWEEP_RECORD as never, { notes, changed } as never)
-    }
-    await ctx.sessions.flush(agent.session)
-    if (this.store.activeTurn() === undefined && this.store.pendingWakeups() === 0) {
-      await ctx.compaction.compactNow(agent, AbortSignal.timeout(300_000)).catch((error: unknown) => console.warn('idle compaction did not run', error))
-      await ctx.sessions.flush(agent.session)
-    }
-    await this.accountTurn(startSeq)
-    await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
-    await this.changed()
-  }
-
   /** How many events of chapters written before v1.19 one Turn folds into the stored chat; tests make it small. */
   protected chatBackfillEvents(): number {
     return CHAT_BACKFILL_EVENTS
@@ -1400,48 +1405,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       },
       approved: (callId) => this.approvedCalls.has(callId),
       reviewing: () => this.store.requireConfig().autoReview === true,
-      review: (call) => this.reviewCall(call),
-    }
-  }
-
-  /**
-   * Auto review of one call (v1.14 ticket 08, ao-wkpt): the reviewer route of the Robot, else the Space's, else
-   * the Robot's own model. The session gets a record of the decision for the Trajectory (ao-jn6z); the
-   * reviewer's tokens are the Robot's review cost (ao-hfni). A failed review rejects, so the call does not run.
-   */
-  private async reviewCall(call: { readonly definition: ToolDefinition; readonly arguments: Readonly<Record<string, unknown>>; readonly exec: ToolRunContext }): Promise<ReviewOutcome> {
-    const config = this.store.requireConfig()
-    const route = config.reviewer ?? (await this.space().settings()).defaultReviewer ?? config.model
-    const session = call.exec.agent?.session
-    const record = (data: Record<string, unknown>) => {
-      if (session !== undefined) appendPluginRecord(session, REVIEW_RECORD as never, { callId: String(call.exec.callId), name: call.definition.name, reviewer: `${route.provider}/${route.model}`, ...data } as never)
-    }
-    try {
-      const chosen = (await this.space().modelList()).find((option) => option.provider === route.provider && option.model === route.model)
-      const adapter = this.adapter(route.provider, chosen?.contextWindow, route.model, chosen?.wire)
-      const history = reviewHistory(session?.snapshotEvents() ?? [], { ownerId: config.ownerId, chiefId: mrRobotIdOf(config.ownerId), child: (session?.header as { origin?: string } | undefined)?.origin === 'subagent' })
-      const text = reviewUserText({
-        cwd: WORKSPACE_ROOT,
-        history,
-        action: { mode: call.exec.parent === undefined ? 'native' : 'ptc-inner', name: call.definition.name, description: call.definition.description, parameters: call.definition.parameters, arguments: call.arguments },
-      })
-      const { decision, usage } = await readDecision(adapter.stream({
-        provider: route.provider,
-        model: route.model,
-        system: REVIEW_POLICY,
-        messages: [createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'platform', summary: 'Auto review', form: 'notice' } })],
-        temperature: 0,
-        ...(route.effort === 'off' ? {} : { reasoningEffort: ReasoningEffortId(route.effort) }),
-        signal: call.exec.signal,
-      }))
-      const price = chosen?.price
-      const cost = price === undefined ? 0 : ((usage.inputTokens - usage.cacheReadTokens) * price.input + usage.cacheReadTokens * (price.cachedInput ?? price.input) + usage.outputTokens * price.output) / 1_000_000
-      await this.recordUsage('review', usage.inputTokens, usage.outputTokens, cost)
-      record({ risk: decision.risk, decision: decision.decision, ...(decision.decision === 'deny' && decision.reason !== undefined ? { reason: decision.reason } : {}) })
-      return decision.decision === 'allow' ? { decision: 'allow' } : { decision: 'deny', reason: decision.reason ?? `${decision.risk} risk` }
-    } catch (error) {
-      record({ decision: 'failed', reason: error instanceof Error ? error.message : String(error) })
-      throw error
+      review: autoReviewer(this.reviewHost()),
     }
   }
 
@@ -1718,56 +1682,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return reacted && !events.some((event) => event.type === 'assistant/message' && ((event.data as unknown as { message?: { content?: ReadonlyArray<{ type: string; text?: string }> } }).message?.content ?? []).some((block) => block.type === 'text' && (block.text ?? '').trim() !== ''))
   }
 
-  /**
-   * A Turn that ends without a say (gb-xgd7, gb-7jqy, gb-3gp2): one bounded platform step tells the Robot to speak or end. When the
-   * owner caused the Turn and the step stays silent, the last assistant text of the Turn is shown as the reply and marked as a
-   * fallback; with no text at all nothing is sent. Turns nobody asked for (Tasks, Robot messages, Subagent reports, notices) get the
-   * step and never the fallback: silence is a result there.
-   */
-  private async speakUp(wakeup: Wakeup, agent: Agent, ctx: Composition['ctx']): Promise<void> {
-    const config = this.store.requireConfig()
-    const active = this.store.activeTurn()
-    if (active === undefined || (config.status !== 'active' && config.status !== 'setup') || this.store.get(INTERRUPTED_BY) !== undefined) return
-    await ctx.sessions.flush(agent.session)
-    const turn = readStoredEvents(this.ctx.storage.sql, config.liveSessionId, active.startSeq)
-    if (this.said(turn) || this.reactedOnly(turn) || turn.some((event) => event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')) return
-    const stepStart = storedLength(this.ctx.storage.sql, config.liveSessionId)
-    let steps = 0
-    const stop = ctx.on('session/event', (session, event) => {
-      if (session === agent.session && event.type === 'step/start' && ++steps >= SAFETY_NET_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
-    })
-    try {
-      agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: safetyNetNote(this.owner().name), summary: '' }))
-      await agent.whenIdle()
-    } finally {
-      stop()
-    }
-    await ctx.sessions.flush(agent.session)
-    const step = readStoredEvents(this.ctx.storage.sql, config.liveSessionId, stepStart)
-    if (this.said(step) || !(causedByOwner(wakeup, config.ownerId) || this.store.get(`owner-steered:${wakeup.id}`) === true)) return
-    const textOf = (events: readonly SessionEvent[]) => events.filter((event) => event.type === 'assistant/message')
-      .map((event) => ((event.data as unknown as { message?: { content?: ReadonlyArray<{ type: string; text?: string }> } }).message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim())
-      .filter((text) => text !== '').at(-1)
-    const last = textOf(turn.filter((event) => event.seq < stepStart)) ?? textOf(step)
-    if (last === undefined) return
-    const heard = this.turnVoice(wakeup)
-    await this.emitSay(agent.session, { id: `fallback-${wakeup.id}`, text: last, attachments: [], fallback: true }, [], heard.route, false)
-  }
-
-  /** The alarm: an owner Turn that has said nothing for ten minutes gets one steer, once (gb-0skq). */
-  private quietSteer(now: number): void {
-    const due = this.store.get<{ wakeupId: number; at: number }>(QUIET_DUE)
-    if (due === undefined) return
-    const active = this.store.activeTurn()
-    if (active === undefined || active.wakeupId !== due.wakeupId) return this.store.delete(QUIET_DUE)
-    if (due.at > now) return
-    this.store.delete(QUIET_DUE)
-    const agent = this.runningAgent
-    const config = this.store.requireConfig()
-    if (agent === undefined || agent.status !== 'running' || this.said(readStoredEvents(this.ctx.storage.sql, config.liveSessionId, active.startSeq))) return
-    agent.steer(wakeupMessage({ sender: { kind: 'platform' }, text: quietSteerNote(this.owner().name), summary: '' }))
-  }
-
   /** The Channel a say names: only the Discord channel the owner enabled for this Robot, or the one the Wake-up came from. */
   private sayChannel(config: RobotConfig, channel: string, heard: ReplyRoute | null): ReplyRoute {
     const own = config.discordChannel ?? ''
@@ -1917,20 +1831,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.chainStates.set(entry.account, { ...state, status: 'ok', until: null, note: null })
   }
 
-  /** The earliest reset came: the Robot continues the work it was blocked on (pa-dus3). */
-  private resumeChain(now: number): void {
-    const at = this.store.get<number>('chain-resume-at')
-    if (at === undefined || at > now) return
-    this.store.delete('chain-resume-at')
-    if (this.store.get('failed-wakeup') !== undefined || this.store.pendingWakeups() === 0) {
-      // The work it goes on with was the owner's, if the Wake-up that failed was.
-      const failed = this.store.get<Pick<Wakeup, 'kind' | 'sender' | 'payload'>>('failed-wakeup')
-      const byOwner = failed !== undefined && causedByOwner(failed as Wakeup, this.store.requireConfig().ownerId)
-      this.store.delete('failed-wakeup')
-      this.store.enqueue('platform', { kind: 'platform' }, 'Your model chain is usable again. Continue the work from where it stopped; do not redo finished steps.', byOwner ? { byOwner: true } : {}, now)
-    }
-  }
-
   /** A Turn that could not run is never silent: it becomes a notice and the Robot stays runnable. */
   private failed(error: unknown): void {
     console.error('robot turn failed', error)
@@ -1956,7 +1856,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   // ---------------------------------------------------------------- usage and spend limits (robot-6jqh, robot-8gag, robot-40nw)
 
   /** Add one Turn's tokens and cost to this Robot's and its owner's monthly counters. */
-  private async accountTurn(startSeq: number): Promise<void> {
+  private async accountTurn(startSeq: number, source: UsageSource = 'robot'): Promise<void> {
     const config = this.store.requireConfig()
     let input = 0
     let output = 0
@@ -1971,7 +1871,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (input === 0 && output === 0) return
     const price = (await this.space().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.price
     const cost = price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000
-    await this.recordUsage('robot', input, output, cost)
+    await this.recordUsage(source, input, output, cost)
   }
 
   /** One cost on this Robot's and its owner's monthly counters, under its source (ao-zbld). */
@@ -2043,6 +1943,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       compactionInstruction: config.compactionInstruction,
       // A compacted context lost the memory baseline; the next step brings it back fresh (pl-552r). The Robot's own compaction
       // also closes its chapter once nothing runs in it (v1.19, ec-srfn).
+      fence: this.fence,
       onCompacted: (sessionId) => {
         if (sessionId.startsWith('sa-')) return this.store.delete(`memory-baseline:${sessionId}`)
         this.store.delete('memory-baseline')
@@ -2607,15 +2508,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.store.get<number>('screens-sweep-next') === undefined) this.store.set('screens-sweep-next', at + SCREEN_SWEEP_EVERY_MS)
     this.broadcast({ type: 'screen' })
     return { name }
-  }
-
-  /** The alarm's daily sweep of screenshots older than 7 days; it rearms itself while any are left. */
-  private async sweepScreens(now: number): Promise<void> {
-    const due = this.store.get<number>('screens-sweep-next')
-    if (due === undefined || due > now) return
-    const left = await sweepScreenshots(this.env.FILES, this.store.requireConfig().id, now)
-    if (left > 0) this.store.set('screens-sweep-next', now + SCREEN_SWEEP_EVERY_MS)
-    else this.store.delete('screens-sweep-next')
   }
 
   /** The thumbnail's bytes, or undefined when there is no screen (or it was swept). */
@@ -3259,11 +3151,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** The alarm's check: an attempt past its deadline ends (ux-wgok). */
-  private async expireCapture(now: number): Promise<void> {
-    const deadline = this.store.get<TakeoverState>('takeover')?.capture?.deadline
-    if (deadline !== undefined && deadline <= now) await this.endCapture()
-  }
-
   private endCapture(): Promise<SessionCapture> {
     const capture = this.store.get<TakeoverState>('takeover')?.capture
     if (capture === undefined) return this.capturing ?? Promise.resolve(this.store.get<SessionCapture>('session-capture') ?? { state: 'none' })
@@ -4365,12 +4252,6 @@ const SUBAGENT_DENIED_TOOLS = [
   'memory_write_shared', 'propose_member_file_edit', 'propose_grants', 'propose_review', 'ask', 'request_credential', 'react', 'say', 'browser_request_takeover',
   'task_focus', 'task_done', 'set_identity', 'setup_complete', 'robot_propose_grants',
 ]
-/** The session record of an Auto review decision (ao-jn6z): the Trajectory shows it on the reviewed call. */
-export const REVIEW_RECORD = 'plugin:mr-robot/review'
-/** The Trajectory's record of a memory sweep (v1.18, rm-hhxa): the daily notes it read and the files it changed. */
-export const SWEEP_RECORD = 'plugin:mr-robot/memory-sweep'
-/** The kv key of when the last memory sweep started. */
-const SWEPT_AT = 'memory-swept-at'
 /** Where Save as definition stages a Robot's files (v1.18 ticket 04). */
 const DEFINITION_DRAFT = 'definition-draft'
 /** The step limit of the owner scrub. */
@@ -4385,14 +4266,10 @@ function definitionScrubNote(draft: string): string {
     'Change nothing outside it, then stop. Do not reply to your owner.',
   ].join(' ')
 }
-/** The last request of the Robot's session, kept for cache warming while idle (ao-jlr0). */
-const WARM_REQUEST = 'warm-request'
 /** The kv key of the live chapter a compaction ran in, until the chapter closes (v1.19). */
 export const CHAPTER_COMPACTED = 'chapter-compacted'
 /** How many events of chapters written before v1.19 one Turn folds into the stored chat. */
 const CHAT_BACKFILL_EVENTS = 4_000
-/** A warming more than this late is skipped: the cache it would refresh is gone. */
-const IDLE_LATE_MS = 5 * 60_000
 
 /** Who started a Task Wake-up, from its payload: the schedule unless a person or a Robot ran it now. */
 function taskRunOf(payload: Record<string, unknown>): { by: TaskRunBy; who?: string } {

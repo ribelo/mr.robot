@@ -4,8 +4,19 @@
 
 **Blocked by:** None (can start immediately; needs v1.18 and v1.19 merged)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The duty seam and platformStep exist, with their contracts recorded as an ADR in docs/adr/
-- [ ] Each listed mechanism moved, its tests unchanged and green, runAlarm reduced to the core's work plus the duty loop
-- [ ] The closing note records robot.ts's line count before and after
+- [x] The duty seam and platformStep exist, with their contracts recorded as an ADR in docs/adr/
+- [x] Each listed mechanism moved, its tests unchanged and green, runAlarm reduced to the core's work plus the duty loop
+- [x] The closing note records robot.ts's line count before and after
+
+## Closing note
+
+No behaviour changed: the whole suite (180 files, 1028 tests) passed unchanged. robot.ts: 4,406 lines before, 4,283 after (the moved code less the hosts the Robot now gives its plugins).
+
+Decisions:
+- The contracts are in docs/adr/0003-duties-and-platform-steps.md. Duties keep the order runAlarm had; the core (Tasks, parked Tasks, draining, Subagent resume) runs first, so the quiet steer and sign-in expiry now run after Tasks fire in one alarm (they did before); nothing waits on that order.
+- Moved: idle planning, warming and compaction with the memory sweep to plugins/idle.ts (the sweep now runs through platformStep); the Box idle stop to a duty in plugins/places.ts; the safety net and the ten-minute steer to plugins/say.ts (the safety net through platformStep); Auto review to plugins/auto-review.ts, which gives the gate its review hook; screenshot sweep, chain resume, sign-in expiry, outbox and screen watch to duties in plugins/housekeeping.ts. The screen watch, the outbox delivery and the capture keep their bodies where their state lives; the duty calls them.
+- The external fence is applied in one place, the gated tool runtime in compose.ts: define.ts and web.ts mark a tool external, the runtime fences it before the gate wraps it (as before, a waiting result is not fenced).
+- The step fence (StepFence) is checked in the same runtime for every tool, gated or not, so a step's allow-list also stops say, identity and the other ungated tools. It is wired now and first used by ticket 01.
+- platformStep books usage only when a step names a source; the safety net is booked by its Turn, as before. The idle compaction books the sweep and the compaction separately, under robot, as one line did before.

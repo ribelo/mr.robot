@@ -1,5 +1,5 @@
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { fenced } from './external.ts'
+import { markExternal } from './external.ts'
 
 type JsonSchema = Record<string, unknown>
 
@@ -49,5 +49,5 @@ export function tool<A>(spec: ToolSpec<A>): ToolDefinition {
       return spec.execute(args as A, exec)
     },
   } as ToolDefinition
-  return spec.external === true ? fenced(definition) : definition
+  return spec.external === true ? markExternal(definition) : definition
 }

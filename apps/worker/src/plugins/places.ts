@@ -6,6 +6,7 @@
 import z from '@deepseek-ai/schemastery'
 import { placesTools, type PlacesHost, type PlacesReach } from '../agent/tools/places.ts'
 import { capability } from './define.ts'
+import type { Duty } from '../robot/duties.ts'
 
 export const Places = capability<{ host: PlacesHost; reach: PlacesReach }>({
   name: 'places',
@@ -22,3 +23,35 @@ export const Places = capability<{ host: PlacesHost; reach: PlacesReach }>({
     ].join('\n')
   },
 })
+
+/** What the Box's idle stop asks of its Robot (v1.20 ticket 00: a duty of the places plugin). */
+export interface BoxIdleHost {
+  /** Look at the running jobs: a finished one is collected, a lost one reported. */
+  checkJobs(): Promise<void>
+  /** How many jobs run on the Box now, and on any place. */
+  runningJobs(place?: 'box'): number
+  /** The Box's state: running since its last command, or not. */
+  box(): { readonly state: string; readonly lastCommandAt?: number }
+  stopBox(): Promise<void>
+}
+
+/** The Box stops ten minutes after its last command and never while a job runs; while a job runs the alarm looks every 15 seconds. */
+export function boxIdleDuty(host: BoxIdleHost, idleMs: number, jobCheckMs: number): Duty {
+  return {
+    name: 'box-idle',
+    order: 60,
+    scope: 'alive',
+    nextAt: (now) => {
+      const box = host.box()
+      if (host.runningJobs() > 0) return now + jobCheckMs
+      return box.state === 'running' && box.lastCommandAt !== undefined ? box.lastCommandAt + idleMs : undefined
+    },
+    run: async (now) => {
+      await host.checkJobs().catch((error: unknown) => console.warn('jobs not checked', error))
+      if (host.runningJobs('box') > 0) return
+      const box = host.box()
+      if (box.state !== 'running' || box.lastCommandAt === undefined || box.lastCommandAt + idleMs > now) return
+      await host.stopBox()
+    },
+  }
+}

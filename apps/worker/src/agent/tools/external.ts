@@ -3,7 +3,8 @@
  * result, an e-mail, a chat message, what the browser shows) has its rendered text result wrapped in
  * <external source="<tool>"> … </external>, so the border between data and instructions is visible in the text. A closing
  * marker inside the content is rewritten, so the content cannot end the fence early. Results of the Robot's own files,
- * Tasks, Hosts and Box are not fenced.
+ * Tasks, Hosts and Box are not fenced. A tool is marked external where it is defined; the gated tool runtime (compose.ts) fences every
+ * marked tool as it registers, the one place the decorator is applied (v1.20 ticket 00).
  */
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 
@@ -24,4 +25,14 @@ export function fenced(definition: ToolDefinition): ToolDefinition {
       render: (args, value) => render(args, value).map((block) => (block.type === 'text' ? { ...block, text: fenceText(definition.name, block.text) } : block)),
     },
   } as ToolDefinition
+}
+const EXTERNAL = Symbol('external')
+
+/** Mark a tool whose result carries text from outside. */
+export function markExternal(definition: ToolDefinition): ToolDefinition {
+  return Object.assign({ ...definition }, { [EXTERNAL]: true }) as ToolDefinition
+}
+
+export function isExternal(definition: ToolDefinition): boolean {
+  return (definition as unknown as Record<symbol, unknown>)[EXTERNAL] === true
 }

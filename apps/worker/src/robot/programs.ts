@@ -4,6 +4,7 @@
  * the services and runs them; DSH's agent loop and the browser stay at its boundary.
  */
 import * as Context from 'effect/Context'
+import { IDLE_PLAN } from '../plugins/idle.ts'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
@@ -76,6 +77,8 @@ export interface RobotPlatformShape {
   readonly env: Env
   /** Re-plan the alarm (Tasks, outbox, heartbeat). */
   rearm(): Effect.Effect<void>
+  /** The earliest moment a registered duty has planned (duties.ts). */
+  dutiesNext(): Effect.Effect<number | undefined>
   /** Tell open views and the Space that something visible changed. */
   changed(): Effect.Effect<void>
   /** Make sure the wake-up queue is being worked off. */
@@ -1140,9 +1143,9 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
 /** The kv key of the one moment the Robot keeps of its Tasks: when its earliest due Task wakes it (mc-s1aa). */
 export const NEXT_DUE = 'next-due'
 /** The kv key of the moment an owner Turn that has said nothing gets its one steer (v1.15, gb-0skq). */
-export const QUIET_DUE = 'quiet-due'
+export { QUIET_DUE } from '../plugins/say.ts'
 /** The kv key of the idle plan (idle.ts): the moments left for warming or idle compaction. */
-export const IDLE_PLAN = 'idle-plan'
+export { IDLE_PLAN }
 
 /** The Space planned this Robot's earliest due Task. */
 export const setNextDue = (at: number | null) => Effect.gen(function* () {
@@ -1302,45 +1305,25 @@ export const releaseParked = (now: number) => Effect.gen(function* () {
   }
 })
 
-/** The next alarm: a heartbeat while work runs, the earliest Task, outbox retry, screen check or screenshot sweep. */
+/** The next alarm: the core's (a heartbeat while work runs, the earliest Task, a parked Task's check or deadline) and the duties' earliest. */
 export const rearm = Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const config = store.config()
   if (config === undefined || config.status === 'deleted') return yield* platform.setAlarm(null)
   const runnable = config.status === 'active' || config.status === 'setup'
-  const outbox = store.sql.exec<{ at: number | null }>("SELECT MIN(next_attempt) AS at FROM outbox WHERE status = 'pending'").one().at
-  const watch = store.get<number>('watch-next')
-  const sweep = store.get<number>('screens-sweep-next')
-  const resume = store.get<number>('chain-resume-at')
   const taskDue = store.get<number>(NEXT_DUE)
   // A scheduled Task waits for its Host until its deadline; the alarm also looks again now and then (v1.16 ticket 05).
   const parkedTasks = store.get<readonly ParkedTask[]>(PARKED_TASKS) ?? []
   const parkedDeadline = parkedTasks.flatMap((task) => (task.deadline === null ? [] : [task.deadline]))
-  // A sign-in for a Connection under Takeover ends at its deadline (v1.12 ticket 11).
-  const signInEnds = store.get<{ readonly capture?: { readonly deadline: number } }>('takeover')?.capture?.deadline
-  const idle = store.get<readonly IdleStep[]>(IDLE_PLAN)?.[0]?.at
-  const quiet = store.get<{ readonly at: number }>(QUIET_DUE)?.at
-  // The Box stops ten minutes after its last command (ao-joux).
-  const box = store.get<{ state: string; lastCommandAt?: number }>('box')
-  // Never while a job runs: then the alarm looks at the jobs every 15 seconds instead (v1.15 ticket 07, gb-5bfw).
-  const jobsRunning = store.runningJobs().length > 0
-  const boxStop = store.runningJobs('box').length === 0 && box?.state === 'running' && box.lastCommandAt !== undefined ? box.lastCommandAt + 10 * 60_000 : undefined
+  const duty = yield* platform.dutiesNext()
   const candidates = [
-    ...(boxStop === undefined ? [] : [boxStop]),
-    ...(jobsRunning ? [Date.now() + JOB_CHECK_MS] : []),
-    ...(quiet === undefined ? [] : [quiet]),
-    ...(idle === undefined || !runnable ? [] : [idle]),
     ...(taskDue === undefined ? [] : [taskDue]),
     ...(parkedTasks.length === 0 ? [] : [Date.now() + PARK_RECHECK_MS]),
     ...parkedDeadline,
-    ...(signInEnds === undefined ? [] : [signInEnds]),
-    ...(resume === undefined ? [] : [resume]),
     // Running Subagents keep the heartbeat too: after a restart the alarm resumes them (ao-ij3i).
     ...(store.activeTurn() !== undefined || (store.pendingWakeups() > 0 && runnable) || new SubagentStore(store.sql).running().length > 0 ? [Date.now() + HEARTBEAT_MS] : []),
-    ...(outbox === null ? [] : [outbox]),
-    ...(watch === undefined ? [] : [watch]),
-    ...(sweep === undefined ? [] : [sweep]),
+    ...(duty === undefined ? [] : [duty]),
   ]
   yield* platform.setAlarm(candidates.length === 0 ? null : Math.min(...candidates))
 })
