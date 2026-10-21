@@ -139,6 +139,7 @@ const make = Effect.gen(function* () {
     saveFile: (id: string, path: string, content: string) => request(WorkspaceFileContent, 'PUT', `/api/robots/${enc(id)}/file?path=${enc(path)}`, { content }),
     /** The Marketplace (v1.18, rm-vhrq): definitions with their needs; Add makes a Robot in setup; the admin publishes and removes. */
     marketplace: get(Schema.Array(MarketplaceEntry), '/api/marketplace'),
+    importGrok: (url: string) => request(DefinitionView, 'POST', '/api/definitions/import', { url }),
     addDefinition: (slug: string) => request(RobotSummary, 'POST', `/api/definitions/${enc(slug)}/add`, {}),
     publishDefinition: (slug: string, published: boolean) => send('POST', `/api/admin/definitions/${enc(slug)}/publish`, { published }),
     removeDefinition: (slug: string) => send('DELETE', `/api/admin/definitions/${enc(slug)}`),

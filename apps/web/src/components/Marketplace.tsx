@@ -14,11 +14,33 @@ import { Empty } from './States.tsx'
 
 export function Marketplace({ isAdmin }: { isAdmin: boolean }) {
   return (
+    <>
+    <GrokImport />
     <AtomView atom={marketplaceAtom} what="the Marketplace" errorTitle="The Marketplace cannot be opened">
       {(entries) => entries.length === 0
         ? <Empty title="No definitions yet" hint="Save a Robot as a definition from its settings, or commit one under robots/ in the library repository and sync it." />
         : <ul className="marketplace">{entries.map((entry) => <DefinitionCard key={entry.definition.slug} entry={entry} isAdmin={isAdmin} />)}</ul>}
     </AtomView>
+    </>
+  )
+}
+
+/** Add from a Grok Bot marketplace address (rm-pdgk): a brief, yours until the admin publishes it. */
+function GrokImport() {
+  const command = useCommand()
+  const [url, setUrl] = useState('')
+  const [status, setStatus] = useState<string>()
+  const importIt = async () => {
+    const exit = await command((api) => api.importGrok(url), [keys.marketplace])
+    setStatus(Exit.isSuccess(exit) ? `Imported "${exit.value.title}" as a brief: an imported summary, since Grok Bot keeps the recipe closed.` : exitFailure(exit))
+    if (Exit.isSuccess(exit)) setUrl('')
+  }
+  return (
+    <div className="form">
+      <label>Add from a Grok Bot address <input value={url} placeholder="https://x.ai/bot/marketplace/bots/…" onChange={(event) => setUrl(event.target.value)} /></label>
+      <div><button type="button" className="button" disabled={url.trim() === ''} onClick={() => void importIt()}>Import</button></div>
+      {status === undefined ? null : <div className="muted">{status}</div>}
+    </div>
   )
 }
 

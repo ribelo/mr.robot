@@ -438,6 +438,11 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('DELETE', '/api/admin/definitions/:slug', (c, { slug }) => admin(c).pipe(Effect.andThen(call(() => home(c.env).removeDefinition(slug))), Effect.as({ ok: true })))
+  // Add from a Grok Bot marketplace address (v1.18 ticket 07): a brief, the Member's own until the admin publishes it.
+  .on('POST', '/api/definitions/import', (c) => Effect.gen(function* () {
+    const { url } = yield* decodeBody(c.request, Schema.Struct({ url: Schema.String }))
+    return definitionView(yield* call(() => home(c.env).importGrokTemplate(c.member.id, url)), c.member.id)
+  }))
   .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(() => home(c.env).addDefinition(c.member.id, slug)))
   .on('GET', '/api/definitions', (c) => call(() => home(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
   .on('GET', '/api/definitions/:slug/archive', (c, { slug }) => Effect.gen(function* () {

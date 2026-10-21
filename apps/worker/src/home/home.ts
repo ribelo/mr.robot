@@ -56,6 +56,7 @@ import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/l
 import { DEFINITION_SCHEMA, DefinitionLibrary, type DefinitionRow } from '../definitions/library.ts'
 import * as Result from 'effect/Result'
 import { checkForms, definitionsInTree } from '../definitions/definition.ts'
+import { briefOf, fetchMarketplacePage, parseMarketplaceUrl, templateOf } from '../definitions/grok-import.ts'
 import { registrableDomain } from '../platform/logins.ts'
 import type { RobotInit } from '../robot/programs.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
@@ -1661,6 +1662,23 @@ export class Home extends DurableObject<Env> {
   }
 
   /** The admin removes a definition from the library; one from the repository comes back at the next sync unless it is gone there too. */
+  /**
+   * Import a Grok Bot marketplace template as a brief (v1.18 ticket 07): stored for the importing Member as source 'import', not published,
+   * under grok-<slug>; importing it again replaces it. Throws Invalid with the plain reason when the page cannot be read.
+   */
+  async importGrokTemplate(memberId: string, address: string): Promise<DefinitionRow> {
+    const refuse = (message: string) => Object.assign(new Error(message), { name: 'Invalid', status: 400 })
+    const parsed = parseMarketplaceUrl(address)
+    if (Result.isFailure(parsed)) throw refuse(parsed.failure.message)
+    const page = await fetchMarketplacePage(parsed.success.url)
+    if (Result.isFailure(page)) throw refuse(page.failure.message)
+    const template = templateOf(page.success, parsed.success.slug)
+    if (Result.isFailure(template)) throw refuse(`The page could not be imported: ${template.failure.message}`)
+    const stored = await this.definitionLibrary.store(`grok-${parsed.success.slug}`.slice(0, 64), briefOf(template.success, parsed.success.url), { source: 'import', ownerId: memberId, author: `${template.success.creatorName} (Grok Bot, imported)`, published: false }, Date.now())
+    if (Result.isFailure(stored)) throw refuse(stored.failure)
+    return stored.success
+  }
+
   async removeDefinition(slug: string): Promise<void> {
     if (this.definitionLibrary.get(slug) === undefined) throw Object.assign(new Error('no such definition'), { name: 'NotFound', status: 404 })
     await this.definitionLibrary.remove(slug)
