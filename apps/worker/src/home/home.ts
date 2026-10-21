@@ -3,7 +3,8 @@
  * last line, state), Home settings, and everything shared with the Home.
  * One per deployment, addressed by HOME_ID.
  */
-import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, HostView, LoginView, PluginView, RobotOwner, SkillLibraryRow } from '@mr-robot/protocol'
+import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, FileHistoryView, FileVersionContent, HostView, LoginView, PluginView, RobotOwner, SkillLibraryRow } from '@mr-robot/protocol'
+import { authorLabel, authorMetadata, authorOf, FileHistory, HOME_HISTORY_BASE, versionView, type FileAuthor } from '../workspace/file-history.ts'
 import { CHIEF_TITLE, costBreakdown, HomeSpendLimit, MemberAvatar, robotIdentity, usableNames, type MemberCosts, type StoredIdentity } from '@mr-robot/protocol'
 import * as Schema from 'effect/Schema'
 import type { HostEntry } from '../member/hosts.ts'
@@ -1627,9 +1628,38 @@ export class Home extends DurableObject<Env> {
     return this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md'").toArray().map((row) => JSON.parse(row.v) as string)[0] ?? ''
   }
 
-  async setHomeMemory(content: string, by: string, exceptRobot: string | null): Promise<void> {
-    this.ctx.storage.sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(content))
+  /** HOME.md changed: the version it replaces is kept with its author (v1.18, rm-d68k); `author` wrote this one. */
+  async setHomeMemory(content: string, by: string, exceptRobot: string | null, author: FileAuthor = { kind: 'person', name: by }): Promise<void> {
+    const sql = this.ctx.storage.sql
+    const previous = sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md'").toArray()[0]
+    if (previous !== undefined) {
+      const meta = sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md-author'").toArray()[0]
+      const was = authorOf(meta === undefined ? undefined : JSON.parse(meta.v) as Record<string, string>, 0)
+      await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).keep('HOME.md', { body: JSON.parse(previous.v) as string, by: was.by, at: was.at }, Date.now())
+    }
+    sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(content))
+    sql.exec("INSERT INTO setting (k, v) VALUES ('home-md-author', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(authorMetadata(author, Date.now())))
     await this.memoryChanged(null, 'HOME.md', by, exceptRobot)
+  }
+
+  /** HOME.md's history (v1.18, rm-7jo4). */
+  async homeMemoryHistory(): Promise<FileHistoryView> {
+    const meta = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md-author'").toArray()[0]
+    const current = meta === undefined ? null : authorOf(JSON.parse(meta.v) as Record<string, string>, 0)
+    return { path: 'HOME.md', current: current === null ? null : { at: current.at, by: authorLabel(current.by) }, versions: (await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).list('HOME.md')).map(versionView) }
+  }
+
+  async homeMemoryVersion(version: string): Promise<FileVersionContent | null> {
+    const found = await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).read('HOME.md', version)
+    return found === undefined ? null : { version: versionView(found.version), text: found.text }
+  }
+
+  /** Bring a version of HOME.md back: a new version, every Robot hears it. */
+  async restoreHomeMemory(version: string, name: string): Promise<boolean> {
+    const found = await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).read('HOME.md', version)
+    if (found === undefined) return false
+    await this.setHomeMemory(found.text, `${name} (restored an earlier version)`, null, { kind: 'restore', name, version })
+    return true
   }
 
   /** A Member's name or nickname changed: each of their Robots names its owner the new way (ux-nwi1). */

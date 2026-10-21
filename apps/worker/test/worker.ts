@@ -220,6 +220,11 @@ export class Robot extends ProductionRobot {
     return id
   }
 
+  /** The history trim of one file at a moment the test picks (v1.18 ticket 02). */
+  async trimHistoryForTest(path: string, now: number): Promise<void> {
+    await this.workspace.history.trim(path, now)
+  }
+
   /** One tidy pass of cold chapters at a moment the test picks (v1.19 ticket 06); how many moved. */
   async tidyChaptersForTest(now: number, limit?: number): Promise<number> {
     return moveColdChapters(this.store, this.env.FILES, this.store.requireConfig().id, now, limit)

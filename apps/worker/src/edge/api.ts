@@ -37,6 +37,7 @@ import {
   SettingsPatch,
   DEFAULT_MISSION_PREFS,
   TaskAssign,
+  FileRestore,
   TaskInput,
   TaskPatch,
   TaskPause,
@@ -226,6 +227,19 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
 
+  .on('GET', '/api/me/files/:name/history', (c, { name }) => fileName(name).pipe(Effect.flatMap((file) => call(() => c.env.MEMBER.getByName(c.member.id).memberFileHistory(file)))))
+  .on('GET', '/api/me/files/:name/versions/:version', (c, { name, version }) => Effect.gen(function* () {
+    const file = yield* fileName(name)
+    const found = yield* call(() => c.env.MEMBER.getByName(c.member.id).memberFileVersion(file, version))
+    return found ?? (yield* Effect.fail(notFound('no such version')))
+  }))
+  .on('POST', '/api/me/files/:name/restore', (c, { name }) => Effect.gen(function* () {
+    const file = yield* fileName(name)
+    const { version } = yield* decodeBody(c.request, FileRestore)
+    if (!(yield* call(() => c.env.MEMBER.getByName(c.member.id).restoreMemberFile(file, version)))) return yield* Effect.fail(notFound('no such version'))
+    return { ok: true }
+  }))
+
   // ------------------------------------------------------------ Web Push devices (robot-ajrp, robot-9xoj)
   .on('POST', '/api/push/subscriptions', (c) => Effect.gen(function* () {
     const input = yield* decodeBody(c.request, PushSubscriptionInput)
@@ -355,6 +369,18 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('GET', '/api/home-memory', (c) => call(async () => ({ content: await home(c.env).homeMemory() })))
+  .on('GET', '/api/admin/home-memory/history', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).homeMemoryHistory()))))
+  .on('GET', '/api/admin/home-memory/versions/:version', (c, { version }) => Effect.gen(function* () {
+    yield* admin(c)
+    const found = yield* call(() => home(c.env).homeMemoryVersion(version))
+    return found ?? (yield* Effect.fail(notFound('no such version')))
+  }))
+  .on('POST', '/api/admin/home-memory/restore', (c) => Effect.gen(function* () {
+    yield* admin(c)
+    const { version } = yield* decodeBody(c.request, FileRestore)
+    if (!(yield* call(() => home(c.env).restoreHomeMemory(version, c.member.name)))) return yield* Effect.fail(notFound('no such version'))
+    return { ok: true }
+  }))
   .on('PUT', '/api/admin/home-memory', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
@@ -562,6 +588,27 @@ export const api = new Router<ApiContext>()
     if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
     const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
     return yield* call(() => robot(c, id).saveFile(path, content))
+  }))
+  // File history (v1.18, rm-7jo4): who wrote a persona or memory file, its kept versions, and Restore (a new version).
+  .on('GET', '/api/robots/:id/file/history', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    return yield* call(() => robot(c, id).fileHistory(path))
+  }))
+  .on('GET', '/api/robots/:id/file/version', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const query = new URL(c.request.url).searchParams
+    const path = normalizePath(query.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    return yield* call(() => robot(c, id).fileVersion(path, query.get('version') ?? ''))
+  }))
+  .on('POST', '/api/robots/:id/file/restore', (c, { id }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    const path = normalizePath(new URL(c.request.url).searchParams.get('path') ?? '')
+    if (path === undefined) return yield* Effect.fail(badRequest('a path inside the Workspace'))
+    const { version } = yield* decodeBody(c.request, FileRestore)
+    return yield* call(() => robot(c, id).restoreFile(path, version))
   }))
   .on('DELETE', '/api/robots/:id/file', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)

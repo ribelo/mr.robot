@@ -9,6 +9,7 @@ import { AtomView } from './AtomView.tsx'
 import { InlineEdit } from './InlineEdit.tsx'
 import { SaveButton } from './SaveButton.tsx'
 import { href } from '../route.ts'
+import { FileHistoryDrawer, hasHistory } from './FileHistoryDrawer.tsx'
 
 /** A Page is a .md or .html file under pages/ (v1.17, dp-t2w1). */
 export function isPagePath(path: string): boolean {
@@ -94,6 +95,7 @@ function FileText({ robotId, path, canEdit, file, onBack }: { robotId: string; p
   const command = useCommand()
   const [text, setText] = useState(file.text ?? '')
   const [status, setStatus] = useState<string>()
+  const [history, setHistory] = useState(false)
   const save = async () => {
     const exit = await command((api) => api.saveFile(robotId, path, text), [keys.files(robotId)])
     setStatus(exitFailure(exit))
@@ -107,7 +109,8 @@ function FileText({ robotId, path, canEdit, file, onBack }: { robotId: string; p
         <strong>{path}</strong>
         <span className="muted">{size(file.size)}</span>
       </div>
-      <div className="file-actions">{isPagePath(path) ? <a className="button" href={href({ page: 'page', id: robotId, path })}>Open as Page</a> : null}<a className="button" href={rawFileUrl(robotId, path, true)} download>Download</a>{previewable(path) ? <a className="button" href={rawFileUrl(robotId, path)} target="_blank" rel="noreferrer">Open</a> : null}</div>
+      <div className="file-actions">{isPagePath(path) ? <a className="button" href={href({ page: 'page', id: robotId, path })}>Open as Page</a> : null}<a className="button" href={rawFileUrl(robotId, path, true)} download>Download</a>{previewable(path) ? <a className="button" href={rawFileUrl(robotId, path)} target="_blank" rel="noreferrer">Open</a> : null}{hasHistory(path) ? <button type="button" className="button" onClick={() => setHistory(true)}>History</button> : null}</div>
+      {history ? <FileHistoryDrawer robotId={robotId} path={path} canRestore={canEdit} onClose={() => setHistory(false)} onRestored={(restored) => { setText(restored.text ?? ''); setHistory(false); setStatus('Restored. The Robot is told at its next Turn.') }} /> : null}
       {previewable(path) ? <FilePreview robotId={robotId} path={path} /> : file.text === null ? <div className="muted">{file.note}</div> : (
         <>
           <textarea aria-label={`Edit ${path}`} className="file-text" value={text} readOnly={!editable} spellCheck={false} onChange={(event) => setText(event.target.value)} />

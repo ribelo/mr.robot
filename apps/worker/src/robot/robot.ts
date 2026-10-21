@@ -164,7 +164,9 @@ import type { MemberFileName } from '../member/member.ts'
 import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
-import { makeWorkspace, normalizePath, type WorkspaceShape } from '../workspace/workspace.ts'
+import { makeWorkspace, normalizePath, workspacePrefix, type WorkspaceShape } from '../workspace/workspace.ts'
+import { authorLabel, authorOf, FileHistory, isTrackedFile, robotHistoryBase, versionView } from '../workspace/file-history.ts'
+import type { FileHistoryView, FileVersionContent } from '@mr-robot/protocol'
 import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
 import { HOME_ID, type Env } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
@@ -318,8 +320,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await clearWorkspace(this.env.FILES, robotId)
     await deleteScreenshots(this.env.FILES, robotId)
     await deletePageCache(this.env.FILES, robotId)
-    // Its cold chapters go with it (v1.19, ec-cgsl).
+    // Its cold chapters and its file history go with it (v1.19, ec-cgsl; v1.18).
     await deleteColdChapters(this.env.FILES, robotId)
+    await new FileHistory(this.env.FILES, robotHistoryBase(robotId)).clear()
     await this.ctx.storage.deleteAlarm()
     await this.ctx.storage.deleteAll()
     this.store.prepare()
@@ -2638,7 +2641,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async seedWorkspace(): Promise<void> {
     const ws = this.workspace
     await this.run(Effect.forEach(Object.entries(ROBOT_FILES), ([path, content]) =>
-      ws.stat(path).pipe(Effect.flatMap((existing): Effect.Effect<unknown, unknown> => existing === undefined ? ws.write(path, content) : Effect.void)), { concurrency: 4, discard: true }))
+      ws.stat(path).pipe(Effect.flatMap((existing): Effect.Effect<unknown, unknown> => existing === undefined ? ws.write(path, content, undefined, { kind: 'platform' }) : Effect.void)), { concurrency: 4, discard: true }))
   }
 
   /**
@@ -3637,12 +3640,43 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (isDocsPath(path)) throw Object.assign(new Error(docsReadOnlyMessage(path)), { name: 'Invalid', status: 400 })
     const current = await this.run(this.workspace.stat(path))
     if (current !== undefined && current.size > MAX_EDITABLE_BYTES) throw Object.assign(new Error('this file is too large to edit here'), { name: 'Invalid', status: 400 })
-    await this.run(this.workspace.write(path, content, path.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8'))
+    await this.run(this.workspace.write(path, content, path.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8', { kind: 'person', name: by ?? this.owner().name }))
     await this.memoryChanged(path, by ?? 'your owner')
     const config = this.store.requireConfig()
     this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${by ?? this.owner().name} edited ${path}.`, Date.now())
     await this.changed()
     return this.fileContent(path)
+  }
+
+  /** A persona or memory file's history (v1.18, rm-7jo4): who wrote it now, and its kept versions. */
+  async fileHistory(path: string): Promise<FileHistoryView> {
+    const normalized = normalizePath(path)
+    if (normalized === undefined || !isTrackedFile(normalized)) throw Object.assign(new Error(`${path} has no history: only persona and memory files keep versions`), { name: 'Invalid', status: 400 })
+    const object = await this.env.FILES.head(`${workspacePrefix(this.store.requireConfig().id)}${normalized}`)
+    const current = object === null ? null : authorOf(object.customMetadata, object.uploaded.getTime())
+    return { path: normalized, current: current === null ? null : { at: current.at, by: authorLabel(current.by) }, versions: (await this.workspace.history.list(normalized)).map(versionView) }
+  }
+
+  /** One kept version of a persona or memory file. */
+  async fileVersion(path: string, version: string): Promise<FileVersionContent> {
+    const normalized = normalizePath(path) ?? ''
+    const found = isTrackedFile(normalized) ? await this.workspace.history.read(normalized, version) : undefined
+    if (found === undefined) throw Object.assign(new Error(`no version ${version} of ${path}`), { name: 'NotFound', status: 404 })
+    return { version: versionView(found.version), text: found.text }
+  }
+
+  /** Bring a kept version back (rm-7jo4): the restore is a new version, and the Robot hears who restored the file (rm-cvl8). */
+  async restoreFile(path: string, version: string, by?: string): Promise<WorkspaceFileContent> {
+    const normalized = normalizePath(path) ?? ''
+    const found = isTrackedFile(normalized) ? await this.workspace.history.read(normalized, version) : undefined
+    if (found === undefined) throw Object.assign(new Error(`no version ${version} of ${path}`), { name: 'NotFound', status: 404 })
+    const name = by ?? this.owner().name
+    await this.run(this.workspace.write(normalized, found.text, 'text/markdown; charset=utf-8', { kind: 'restore', name, version }))
+    await this.memoryChanged(normalized, `${by ?? 'your owner'} (restored an earlier version)`)
+    const config = this.store.requireConfig()
+    this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${name} restored an earlier version of ${normalized}.`, Date.now())
+    await this.changed()
+    return this.fileContent(normalized)
   }
 
 /** The Robot's local skills: skills/<name>/SKILL.md in its Workspace (rb-dkt1). */
@@ -3776,8 +3810,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Mr. Robot writes shared memory directly; every other Robot of the owner (or the Home) is told. */
   private async writeShared(file: SharedFile, content: string): Promise<void> {
     const config = this.store.requireConfig()
-    if (file === 'HOME.md') await this.home().setHomeMemory(content, config.identity.name, config.id)
-    else await this.env.MEMBER.getByName(config.ownerId).writeFile(file, content, config.identity.name, config.id)
+    // Mr. Robot writes shared files: their history names him (v1.18, rm-d68k).
+    const author = { kind: 'chief' as const, name: config.identity.name }
+    if (file === 'HOME.md') await this.home().setHomeMemory(content, config.identity.name, config.id, author)
+    else await this.env.MEMBER.getByName(config.ownerId).writeFile(file, content, config.identity.name, config.id, author)
   }
 
   private memoryHost(config: RobotConfig): MemoryHost {
@@ -3795,7 +3831,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The owner deleted a file (a local skill, an old note). */
   async deleteFile(path: string, by?: string): Promise<void> {
     if (isDocsPath(path)) throw Object.assign(new Error(docsReadOnlyMessage(path)), { name: 'Invalid', status: 400 })
-    await this.run(this.workspace.remove(path))
+    await this.run(this.workspace.remove(path, { kind: 'person', name: by ?? this.owner().name }))
     await this.memoryChanged(path, `${by ?? 'your owner'} (deleted)`)
     if (by !== undefined) {
       const config = this.store.requireConfig()

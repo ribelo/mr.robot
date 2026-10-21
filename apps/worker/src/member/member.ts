@@ -32,7 +32,8 @@ import { makeVault, type VaultError, type VaultShape } from '../platform/vault.t
 import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
 import { mintShareToken, sharedPagePath, shareTokenHash } from '../pages/share-token.ts'
-import type { SharedPageView } from '@mr-robot/protocol'
+import type { FileHistoryView, FileVersionContent, SharedPageView } from '@mr-robot/protocol'
+import { authorLabel, authorOf, FileHistory, memberHistoryBase, versionView, type FileAuthor } from '../workspace/file-history.ts'
 
 /** The render limits of Page PDFs (v1.17 review): a leaked share link cannot run up the bill. */
 export const PDF_RENDERS_PER_TOKEN_HOUR = 5
@@ -713,6 +714,8 @@ export class Member extends DurableObject<Env> {
     const sql = ctx.storage.sql
     sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS member_file (name TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)')
+    // Who wrote each Member file now (v1.18, rm-d68k): its history names the author of every version.
+    if (!sql.exec<{ name: string }>('PRAGMA table_info(member_file)').toArray().some((column) => column.name === 'author')) sql.exec('ALTER TABLE member_file ADD COLUMN author TEXT')
     sql.exec('CREATE TABLE IF NOT EXISTS list_pref (robot_id TEXT PRIMARY KEY, pinned INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, marked_unread INTEGER NOT NULL DEFAULT 0, seen_at INTEGER)')
     if (!sql.exec<{ name: string }>('PRAGMA table_info(list_pref)').toArray().some((column) => column.name === 'group_id')) sql.exec('ALTER TABLE list_pref ADD COLUMN group_id TEXT')
     sql.exec('CREATE TABLE IF NOT EXISTS list_group (id TEXT PRIMARY KEY, name TEXT NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL)')
@@ -796,12 +799,49 @@ export class Member extends DurableObject<Env> {
   }
   file(name: MemberFileName): Promise<string> { return this.run(file(name)) }
   files(): Promise<Record<MemberFileName, string>> { return this.run(files) }
-  /** A shared memory file changed: every Robot of this Member hears who changed it (pl-9n7w). */
-  async writeFile(name: MemberFileName, content: string, by = 'your owner', exceptRobot?: string): Promise<void> {
+  /**
+   * A shared memory file changed: every Robot of this Member hears who changed it (pl-9n7w). The version it replaces is kept with
+   * its author (v1.18, rm-d68k); `author` is who wrote this one, the Member unless named.
+   */
+  async writeFile(name: MemberFileName, content: string, by = 'your owner', exceptRobot?: string, author?: FileAuthor): Promise<void> {
+    const sql = this.ctx.storage.sql
+    const previous = sql.exec<{ content: string; author: string | null; updated_at: number }>('SELECT content, author, updated_at FROM member_file WHERE name = ?', name).toArray()[0]
+    const profileNow = await this.run(profile)
+    if (previous !== undefined) {
+      const was = authorOf(previous.author === null ? undefined : { by: previous.author, at: String(previous.updated_at) }, previous.updated_at)
+      await this.fileHistory().keep(name, { body: previous.content, by: was.by, at: was.at }, Date.now())
+    }
     await this.run(writeFile(name, content))
+    sql.exec('UPDATE member_file SET author = ? WHERE name = ?', JSON.stringify(author ?? { kind: 'person', name: profileNow.name }), name)
     const memberId = (await this.run(profile)).id
     await this.env.HOME.getByName(HOME_ID).memoryChanged(memberId, name, by, exceptRobot ?? null).catch((error: unknown) => console.warn('memory change not delivered', error))
   }
+  private fileHistory(): FileHistory {
+    const id = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = 'profile'").toArray()[0]
+    return new FileHistory(this.env.FILES, memberHistoryBase(id === undefined ? 'unknown' : (JSON.parse(id.v) as { id: string }).id))
+  }
+
+  /** A Member file's history (v1.18, rm-7jo4). */
+  async memberFileHistory(name: MemberFileName): Promise<FileHistoryView> {
+    const row = this.ctx.storage.sql.exec<{ author: string | null; updated_at: number }>('SELECT author, updated_at FROM member_file WHERE name = ?', name).toArray()[0]
+    const current = row === undefined ? null : authorOf(row.author === null ? undefined : { by: row.author, at: String(row.updated_at) }, row.updated_at)
+    return { path: name, current: current === null ? null : { at: current.at, by: authorLabel(current.by) }, versions: (await this.fileHistory().list(name)).map(versionView) }
+  }
+
+  async memberFileVersion(name: MemberFileName, version: string): Promise<FileVersionContent | null> {
+    const found = await this.fileHistory().read(name, version)
+    return found === undefined ? null : { version: versionView(found.version), text: found.text }
+  }
+
+  /** Bring a version of a Member file back: a new version, and every Robot of the Member hears it (rm-cvl8). */
+  async restoreMemberFile(name: MemberFileName, version: string): Promise<boolean> {
+    const found = await this.fileHistory().read(name, version)
+    if (found === undefined) return false
+    const who = (await this.run(profile)).name
+    await this.writeFile(name, found.text, 'your owner (restored an earlier version)', undefined, { kind: 'restore', name: who, version })
+    return true
+  }
+
   /** The Member's Provider accounts; `sharedOnly` for another Member's view. */
   accounts(sharedOnly = false): Promise<ProviderView[]> { return this.run(accounts(sharedOnly)) }
   addApiKey(provider: ProviderId, key: string, shared: boolean, label?: string): Promise<string> { return this.run(addApiKey(provider, key, shared, label)) }

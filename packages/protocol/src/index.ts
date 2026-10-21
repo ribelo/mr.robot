@@ -309,6 +309,31 @@ export const WorkspaceFileContent = Schema.Struct({
 })
 export type WorkspaceFileContent = typeof WorkspaceFileContent.Type
 
+/** One kept version of a persona, memory or Member file (v1.18, rm-d68k): who wrote it and when, and when it was replaced. */
+export const FileVersionView = Schema.Struct({
+  id: Schema.String,
+  at: Schema.Number,
+  by: Schema.String,
+  replacedAt: Schema.Number,
+  size: Schema.Number,
+})
+export type FileVersionView = typeof FileVersionView.Type
+
+/** A file's history (rm-7jo4): who wrote the version it has now, and the versions kept, newest first. */
+export const FileHistoryView = Schema.Struct({
+  path: Schema.String,
+  current: Schema.NullOr(Schema.Struct({ at: Schema.Number, by: Schema.String })),
+  versions: Schema.Array(FileVersionView),
+})
+export type FileHistoryView = typeof FileHistoryView.Type
+
+/** One kept version's text. */
+export const FileVersionContent = Schema.Struct({ version: FileVersionView, text: Schema.String })
+export type FileVersionContent = typeof FileVersionContent.Type
+
+/** Bring a kept version back; the restore is itself a new version. */
+export const FileRestore = Schema.Struct({ version: Schema.String })
+
 /** How completely a Host confines a command (v1.16 ticket 02, ob-n72n): full, partial (an older kernel, Windows) or none (a confined command fails closed). */
 export const HostSandbox = Schema.Literals(['full', 'partial', 'none'])
 export type HostSandbox = typeof HostSandbox.Type

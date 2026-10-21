@@ -5,6 +5,7 @@
 import * as Context from 'effect/Context'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import { authorMetadata, authorOf, FileHistory, isTrackedFile, robotHistoryBase, type FileAuthor } from './file-history.ts'
 
 export class WorkspaceError extends Data.TaggedError('WorkspaceError')<{ readonly message: string; readonly cause?: unknown }> {}
 
@@ -36,8 +37,12 @@ export interface WorkspaceShape {
   read(path: string): Effect.Effect<WorkspaceFile | undefined, WorkspaceError>
   readText(path: string): Effect.Effect<string | undefined, WorkspaceError>
   stat(path: string): Effect.Effect<WorkspaceEntry | undefined, WorkspaceError>
-  write(path: string, body: string | ArrayBuffer | Uint8Array | ReadableStream, contentType?: string): Effect.Effect<WorkspaceEntry, WorkspaceError>
-  remove(path: string): Effect.Effect<void, WorkspaceError>
+  /** Write a file; a persona or memory file keeps the version it replaces, and `by` (the Robot unless named) is who wrote this one (v1.18). */
+  write(path: string, body: string | ArrayBuffer | Uint8Array | ReadableStream, contentType?: string, by?: FileAuthor): Effect.Effect<WorkspaceEntry, WorkspaceError>
+  /** Delete a file; a persona or memory file keeps its last version. */
+  remove(path: string, by?: FileAuthor): Effect.Effect<void, WorkspaceError>
+  /** The kept versions of a persona or memory file (v1.18, rm-7jo4). */
+  readonly history: FileHistory
   /** Every file under a relative directory ('' for all). */
   list(directory?: string): Effect.Effect<WorkspaceEntry[], WorkspaceError>
   /** One page of the files under a relative directory ('' for all); pass the previous page's cursor for the next. */
@@ -99,6 +104,16 @@ const fail = (message: string) => (cause: unknown) => new WorkspaceError({ messa
 
 export function makeWorkspace(bucket: R2Bucket, robotId: string): WorkspaceShape {
   const prefix = workspacePrefix(robotId)
+  const history = new FileHistory(bucket, robotHistoryBase(robotId))
+  /** Before a persona or memory file changes, the version it has goes to its history with who wrote it. */
+  const keepPrevious = async (path: string, k: string) => {
+    const normalized = normalizePath(path)
+    if (normalized === undefined || !isTrackedFile(normalized)) return
+    const previous = await bucket.get(k)
+    if (previous === null) return
+    const { by, at } = authorOf(previous.customMetadata, previous.uploaded.getTime())
+    await history.keep(normalized, { body: await previous.arrayBuffer(), by, at }, Date.now())
+  }
   const key = (path: string): Effect.Effect<string, WorkspaceError> => {
     const normalized = normalizePath(path)
     return normalized === undefined
@@ -140,11 +155,21 @@ export function makeWorkspace(bucket: R2Bucket, robotId: string): WorkspaceShape
       },
       catch: fail(`cannot stat ${path}`),
     }))),
-    write: (path, body, contentType) => key(path).pipe(Effect.flatMap((k) => Effect.tryPromise({
-      try: async () => entry(await bucket.put(k, body, { httpMetadata: { contentType: contentType ?? guessType(path) } })),
+    write: (path, body, contentType, by = { kind: 'robot' }) => key(path).pipe(Effect.flatMap((k) => Effect.tryPromise({
+      try: async () => {
+        await keepPrevious(path, k)
+        return entry(await bucket.put(k, body, { httpMetadata: { contentType: contentType ?? guessType(path) }, customMetadata: authorMetadata(by, Date.now()) }))
+      },
       catch: fail(`cannot write ${path}`),
     }))),
-    remove: (path) => key(path).pipe(Effect.flatMap((k) => Effect.tryPromise({ try: () => bucket.delete(k), catch: fail(`cannot delete ${path}`) }))),
+    remove: (path) => key(path).pipe(Effect.flatMap((k) => Effect.tryPromise({
+      try: async () => {
+        await keepPrevious(path, k)
+        await bucket.delete(k)
+      },
+      catch: fail(`cannot delete ${path}`),
+    }))),
+    history,
     list: (directory = '') => Effect.tryPromise({
       try: async () => {
         const entries: WorkspaceEntry[] = []
