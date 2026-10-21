@@ -84,5 +84,9 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
       catch: fail,
     }),
     BrowserClose: ({ session }) => Effect.sync(() => closeSession(session)),
+    // The Workspace (v1.21): the picker's listing and check are reads, as wide as the OS user; a session closes when the Worker says so.
+    ListDirectory: ({ path }) => Effect.tryPromise({ try: () => disk.listDirectory(path), catch: fail }),
+    Stat: ({ path }) => Effect.tryPromise({ try: () => disk.stat(path), catch: fail }),
+    WorkspaceClose: ({ robot }) => Effect.tryPromise({ try: () => shell.sessions.close(robot), catch: fail }),
   })
 }

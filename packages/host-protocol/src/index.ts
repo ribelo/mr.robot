@@ -34,12 +34,27 @@ export class HostError extends Schema.TaggedError<HostError>()('HostError', {
 export const HostMode = Schema.Literals(['read-only', 'workspace-write', 'full'])
 export type HostMode = typeof HostMode.Type
 
+/**
+ * The Robot's Workspace on this Host (v1.21, cw-o4fr, cw-zuyu): the root the owner chose, the repository root above it (the nearest .git
+ * ancestor, which may be the root itself) and the worktree the Robot made, when it made one. In workspace-write mode the app adds them to
+ * the write roots: the worktree and the repository's .git when there is a worktree (not the main working tree), else the root and the
+ * repository's .git. The Worker fills it from the Robot's setting for every call to the Workspace's Host; the Robot never chooses it.
+ */
+export const WorkspaceAccess = Schema.Struct({
+  root: Schema.String,
+  repository: Schema.String,
+  worktree: Schema.optional(Schema.String),
+})
+export type WorkspaceAccess = typeof WorkspaceAccess.Type
+
 export const HostAccess = Schema.Struct({
   /** The name of the Robot's directory under mr-robot/ in the OS user's home: its default cwd and a write root, created on first use. */
   robot: Schema.String,
   mode: HostMode,
   /** More directories the Robot may write in workspace-write mode (absolute, or ~/ for the home directory). */
   roots: Schema.Array(Schema.String),
+  /** The Robot's Workspace when it is on this Host; absent otherwise (and from a Worker before v1.21). */
+  workspace: Schema.optional(WorkspaceAccess),
 })
 export type HostAccess = typeof HostAccess.Type
 
@@ -244,7 +259,56 @@ export const BrowserClose = Rpc.make('BrowserClose', {
   error: HostError,
 })
 
-export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose) {}
+/**
+ * The version of this protocol (v1.21, cw-jn59). An app sends it in every heartbeat; one from before v1.21 sends none and counts as 1.
+ * The Worker refuses the Workspace RPCs (WORKSPACE_RPCS) to an app whose version is older than its own, with one sentence that names the
+ * update, instead of sending a call the app does not know.
+ */
+export const HOST_PROTOCOL_VERSION = 2
+
+/** The most entries ListDirectory answers with. */
+export const LIST_DIRECTORY_MAX = 500
+
+/**
+ * The directories in a directory of this computer, for the Workspace picker (v1.21, cw-gx04): the names of the real directories in it
+ * (a symbolic link is not listed, since no Workspace root may be reached through one), sorted, at most LIST_DIRECTORY_MAX. A relative
+ * path or ~ starts in the OS user's home. A read: every mode may list.
+ */
+export const ListDirectory = Rpc.make('ListDirectory', {
+  payload: { path: Schema.String, access: HostAccess },
+  success: Schema.Struct({ path: Schema.String, directories: Schema.Array(Schema.String), truncated: Schema.Boolean }),
+  error: HostError,
+})
+
+/**
+ * What a path of this computer is, to validate a Workspace root (v1.21, cw-gx04): its absolute form, its kind, the first symbolic link on
+ * the way to it (null when there is none) and the repository root DSH would find for it, the nearest ancestor with a .git entry (null
+ * outside a repository). A relative path or ~ starts in the OS user's home.
+ */
+export const Stat = Rpc.make('Stat', {
+  payload: { path: Schema.String, access: HostAccess },
+  success: Schema.Struct({
+    path: Schema.String,
+    kind: Schema.Literals(['directory', 'file', 'missing', 'other']),
+    link: Schema.NullOr(Schema.String),
+    repository: Schema.NullOr(Schema.String),
+  }),
+  error: HostError,
+})
+
+/**
+ * Close the Workspace session the app keeps for a Robot (v1.21, cw-p4bm): the Worker sends it when the Robot's Workspace changes or the
+ * Robot is deleted. What the session holds (its language servers among them) stops. Closing a session that is not open does nothing.
+ */
+export const WorkspaceClose = Rpc.make('WorkspaceClose', {
+  payload: { robot: Schema.String },
+  error: HostError,
+})
+
+/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later. */
+export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose']
+
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose) {}
 
 /** The sandbox state of a Host, as its heartbeat reports it. */
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])
@@ -257,6 +321,8 @@ export type Shell = typeof Shell.Type
 /** What a Host reports every few seconds while connected (hs-7dlt). */
 export const Heartbeat = Schema.Struct({
   version: Schema.String,
+  /** HOST_PROTOCOL_VERSION of the app (v1.21). */
+  protocolVersion: Schema.Number,
   /**
    * Which run of the app this is: new at every start, the same across reconnects. The jobs live in the app's memory, so a heartbeat
    * with another instance than the jobs were started under says the app restarted and they are gone (v1.16 ticket 03, ob-cgn1).
@@ -285,6 +351,8 @@ export type Heartbeat = typeof Heartbeat.Type
  */
 export const ReceivedHeartbeat = Schema.Struct({
   version: Schema.String,
+  /** Absent in an app from before v1.21: protocol 1. */
+  protocolVersion: Schema.optional(Schema.Number),
   instance: Schema.optional(Schema.String),
   platform: Schema.String,
   hostname: Schema.String,

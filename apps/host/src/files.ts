@@ -3,13 +3,14 @@
  * program of the app's own, so file tools work the same on every OS and do not depend on a shell. Relative paths start in the Robot's directory; reads are as wide as the OS user;
  * every change runs in the sandbox under the grant's mode and roots (file-change.ts), after a first check of the path (access.ts).
  */
-import { readdir, readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
-import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, LISTING_MAX_FILES, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
-import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, resolvedPath } from './access.ts'
+import { lstat, readdir, readFile, stat } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, LIST_DIRECTORY_MAX, LISTING_MAX_FILES, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
+import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, linkOnTheWay, resolvedPath } from './access.ts'
 import type { HostDownloads } from './copy.ts'
 import { errorCode } from './error-code.ts'
 import type { FileChanges } from './file-change.ts'
+import type { WorkspaceSessions } from './workspace-session.ts'
 
 const MAX_READ = 10 * 1024 * 1024
 
@@ -46,15 +47,47 @@ export async function* filesBelow(directory: string, prefix = ''): AsyncGenerato
 /** A path as the Robot sees it in a listing: the base as it gave it, then the path below. */
 const shown = (base: string, below: string): string => (base === '.' ? below : base.endsWith('/') ? `${base}${below}` : `${base}/${below}`)
 
+/** The repository root DSH would find for a directory (v1.21, cw-gx04): the nearest ancestor, the directory included, with a .git entry. */
+export async function repositoryOf(directory: string): Promise<string | null> {
+  for (let current = directory; ; current = dirname(current)) {
+    if (await lstat(join(current, '.git')).then(() => true, () => false)) return current
+    if (dirname(current) === current) return null
+  }
+}
+
 export class HostDisk {
   private readonly home: string
 
-  constructor(private readonly changes: FileChanges, private readonly downloads: HostDownloads) {
+  constructor(private readonly changes: FileChanges & { readonly sessions: WorkspaceSessions }, private readonly downloads: HostDownloads) {
     this.home = changes.home
   }
 
+  /** A path of a call as the app resolves it; a call that carries the Robot's Workspace opens its session (cw-p4bm). */
   private async full(access: HostAccess, path: string): Promise<string> {
+    await this.changes.sessions.touch(access.robot, access.workspace)
     return expandPath(this.home, await ensureRobotDirectory(this.home, access), path)
+  }
+
+  /**
+   * The directories in a directory, for the Workspace picker (cw-gx04): real directories only (no link), sorted, at most
+   * LIST_DIRECTORY_MAX. A relative path or ~ starts in the home directory, not the Robot's: the owner picks among his own folders.
+   */
+  async listDirectory(path: string): Promise<{ path: string; directories: string[]; truncated: boolean }> {
+    const full = expandPath(this.home, this.home, path)
+    const entries = await readdir(full, { withFileTypes: true })
+    const directories = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+    return { path: full, directories: directories.slice(0, LIST_DIRECTORY_MAX), truncated: directories.length > LIST_DIRECTORY_MAX }
+  }
+
+  /** What a path is, for a Workspace root (cw-gx04): its kind, the first link on the way and the repository root above it. */
+  async stat(path: string): Promise<{ path: string; kind: 'directory' | 'file' | 'missing' | 'other'; link: string | null; repository: string | null }> {
+    const full = expandPath(this.home, this.home, path)
+    const info = await stat(full).catch((error: unknown) => {
+      if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return undefined
+      throw error
+    })
+    const kind = info === undefined ? 'missing' : info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other'
+    return { path: full, kind, link: (await linkOnTheWay(this.home, full)) ?? null, repository: kind === 'directory' ? await repositoryOf(full) : null }
   }
 
   async read(access: HostAccess, path: string): Promise<{ path: string; size: number; text: string | null; base64: string | null }> {

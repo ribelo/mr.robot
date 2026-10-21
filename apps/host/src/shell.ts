@@ -5,7 +5,7 @@
  * the tools themselves belong to an agent and are not used. One seam picks the shell: HostShell.kind. Every command, in either shell,
  * goes through the job path of jobs.ts.
  */
-import { execFile, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -21,10 +21,12 @@ import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import { RUN_MAX_WAIT_SECONDS, SANDBOX_UNAVAILABLE, type HostAccess, type HostMode, type JobEnded, type RunOutcome, type Sandbox as SandboxState, type Shell } from '@mr-robot/host-protocol'
 import { errorCode } from './error-code.ts'
 import { assertConfinableRoots, ensureRobotDirectory, expandPath, madeExtraRoots } from './access.ts'
+import { captureLoginEnvironment, commandEnvironment, DEFAULT_ENVIRONMENT, type EnvironmentConfig } from './environment.ts'
 import { runFileChange, type ChangePlace, type FileChange, type FileChanges } from './file-change.ts'
 import { HostJobs } from './jobs.ts'
 import { startRunnersAsNode } from './run-as-node.ts'
 import { aclRunnerWorks, findInstalledPwsh7 } from './windows.ts'
+import { WorkspaceSessions } from './workspace-session.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
@@ -94,29 +96,24 @@ function manyRootsSandbox(commandPath: string | undefined) {
   }
 }
 
-/** bash-sandbox needs a policy service; every call here brings its own policy, so this one only has to exist. */
-class PolicyService extends Service {
+/**
+ * The policy service DSH's sandboxed shells look up (v1.21, cw-o4fr). Every command and file change here carries the policy of the grant it
+ * runs under (HostShell.place: the mode, the Robot's directory, the grant's roots and the Workspace's), so there is no deployment default:
+ * a request without its own policy is a bug and runs nothing. defaultMode is only the capability fact DSH's executor reads when it starts.
+ */
+class GrantPolicyOnly extends Service {
   readonly defaultMode: SandboxMode = 'read-only'
-  readonly workspaceRoot = homedir()
   constructor(ctx: Context) {
     // SAFETY: Cordis types service names as a closed union that DSH's own packages extend; this app registers the one name DSH's bash-sandbox looks up.
     super(ctx, 'sandboxPolicy' as never)
   }
   resolve(): SandboxExecutionPolicy {
-    return { mode: this.defaultMode, workspaceRoot: this.workspaceRoot }
+    throw new Error('a command reached the shell without the policy of its grant; nothing runs without one')
   }
 }
 
-/** The PATH the OS user's login shell would give (a desktop-launched app has a short one); undefined when it cannot be asked. */
-function loginPath(): Promise<string | undefined> {
-  if (process.platform === 'win32') return Promise.resolve(undefined)
-  return new Promise((done) => {
-    execFile(process.env['SHELL'] || '/bin/sh', ['-lc', 'printf %s "$PATH"'], { timeout: 5000 }, (error, stdout) => done(error === null && stdout.trim() !== '' ? stdout.trim() : undefined))
-  })
-}
-
-/** The environment a command gets besides DSH's own: the login shell's PATH, when it could be asked. */
-const commandEnv = (path: string | undefined): { readonly env?: Readonly<Record<string, string>> } => (path === undefined ? {} : { env: { PATH: path } })
+/** The environment a command gets besides DSH's own: the login environment as commandEnvironment makes it, when it could be captured. */
+const commandEnv = (env: Readonly<Record<string, string>> | undefined): { readonly env?: Readonly<Record<string, string>> } => (env === undefined ? {} : { env })
 
 /**
  * How completely a command is confined here. With bash, a command that does nothing runs confined the way run() starts one, with the
@@ -124,10 +121,10 @@ const commandEnv = (path: string | undefined): { readonly env?: Readonly<Record<
  * provider chooses the ACL runner without trying it (always partial), and PowerShell 7 may not be there yet, so the runner is started once
  * on a command that does nothing, to find out that it starts at all.
  */
-async function probeSandbox(ctx: Context, kind: Shell, root: string, path: string | undefined): Promise<SandboxState> {
+async function probeSandbox(ctx: Context, kind: Shell, root: string, env: Readonly<Record<string, string>> | undefined): Promise<SandboxState> {
   try {
     if (kind === 'bash') {
-      const spec = ctx.shell.resolve({ command: 'true', workdir: root, timeoutMs: PROBE_TIMEOUT_MS, sandboxPolicy: { mode: 'workspace-write', workspaceRoot: root }, ...commandEnv(path) })
+      const spec = ctx.shell.resolve({ command: 'true', workdir: root, timeoutMs: PROBE_TIMEOUT_MS, sandboxPolicy: { mode: 'workspace-write', workspaceRoot: root }, ...commandEnv(env) })
       const result = await (await ctx.shell.execute(spec)).result()
       return result.exitCode === 0 ? (result.sandbox?.enforcement ?? 'none') : 'none'
     }
@@ -207,6 +204,8 @@ export class HostShell implements FileChanges {
   readonly instance = crypto.randomUUID()
   /** The jobs of this run of the app; they outlive the connection to the Worker. */
   readonly jobs: HostJobs
+  /** The Workspace sessions of this run of the app, one per Robot whose Workspace is here; they outlive the connection too. */
+  readonly sessions = new WorkspaceSessions()
   /** Why no command can run on this computer (Windows without PowerShell 7); undefined when they do. Looked at again by recheck(). */
   problem: string | undefined
   private shellReady = false
@@ -217,7 +216,10 @@ export class HostShell implements FileChanges {
     private readonly ctx: Context,
     /** The OS user's home directory, where the Robots' directories are. */
     readonly home: string,
-    private readonly path: string | undefined,
+    /** The environment every command gets (environment.ts); undefined when the login environment could not be captured. */
+    private env: Readonly<Record<string, string>> | undefined,
+    private readonly environment: EnvironmentConfig,
+    private readonly capture: () => Promise<Record<string, string> | undefined>,
     /** How completely this computer confines a command, found when the app started. */
     readonly sandbox: SandboxState,
     /** The shell the Robots write for: PowerShell 7 on Windows, bash elsewhere. */
@@ -234,15 +236,26 @@ export class HostShell implements FileChanges {
   }
 
   /** Compose DSH's layer and find out what the sandbox can do here (the heartbeat reports it, ob-n72n). */
-  static async start(options: { readonly home?: string; readonly landlockLauncher?: string; readonly sandboxChain?: LocalSandboxProvider['internals']['chain'] } = {}): Promise<HostShell> {
+  static async start(options: {
+    readonly home?: string
+    readonly landlockLauncher?: string
+    readonly sandboxChain?: LocalSandboxProvider['internals']['chain']
+    /** The Host config's environment section. */
+    readonly environment?: EnvironmentConfig
+    /** How the login environment is captured: the login shell (environment.ts), or a test's own. */
+    readonly capture?: () => Promise<Record<string, string> | undefined>
+  } = {}): Promise<HostShell> {
     const home = options.home ?? homedir()
     const kind: Shell = process.platform === 'win32' ? 'pwsh' : 'bash'
+    const environment = options.environment ?? DEFAULT_ENVIRONMENT
+    const capture = options.capture ?? (() => captureLoginEnvironment())
+    const captured = await capture()
+    const env = captured === undefined ? undefined : commandEnvironment(captured, environment)
     const ctx = new Context()
     await ctx.plugin(Subprocess)
     startRunnersAsNode(ctx.subprocess)
-    const path = await loginPath()
-    await ctx.plugin(manyRootsSandbox(path))
-    await ctx.plugin(PolicyService)
+    await ctx.plugin(manyRootsSandbox(env?.['PATH']))
+    await ctx.plugin(GrantPolicyOnly)
     // Every command is a job here, the ones a call waits for too, so the limit per owner is raised well above DSH's ten.
     await ctx.plugin(Jobs, { maxConcurrentJobsPerOwner: 200 })
     // A bundled app carries the Landlock launcher beside itself; DSH looks for it in node_modules.
@@ -258,10 +271,24 @@ export class HostShell implements FileChanges {
     // Not recursive, and an existing entry is left as it is: a link at ~/mr-robot is not followed to make anything where it points. The
     // Robots' calls refuse such a link (access.ts, ensureRobotDirectory).
     await mkdir(probeRoot).catch((error: unknown) => { if (errorCode(error) !== 'EEXIST') throw error })
-    const sandbox = await probeSandbox(ctx, kind, probeRoot, path)
-    const shell = new HostShell(ctx, home, path, sandbox, kind, await sandboxWritable(ctx, probeRoot))
+    const sandbox = await probeSandbox(ctx, kind, probeRoot, env)
+    const shell = new HostShell(ctx, home, env, environment, capture, sandbox, kind, await sandboxWritable(ctx, probeRoot))
     await shell.recheck()
     return shell
+  }
+
+  /**
+   * Capture the login environment again (cw-et7q): when this computer is paired, since the person may have changed their profile since the
+   * app started. A capture that fails keeps the environment the app had.
+   */
+  async refreshEnvironment(): Promise<void> {
+    const captured = await this.capture()
+    if (captured !== undefined) this.env = commandEnvironment(captured, this.environment)
+  }
+
+  /** The environment commands get now (for the tests and the app's own probes). */
+  get commandEnvironment(): Readonly<Record<string, string>> | undefined {
+    return this.env
   }
 
   /**
@@ -289,11 +316,13 @@ export class HostShell implements FileChanges {
   }
 
   /**
-   * Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy of its mode and roots. The way to
-   * the directory and the roots are checked before anything is made, on every call, since links can appear between calls (access.ts,
-   * ensureRobotDirectory and assertConfinableRoots).
+   * Where a call under `access` runs: the Robot's directory, made on first use, and the sandbox policy built from its grant (cw-o4fr): the
+   * mode, the Robot's directory, the grant's roots and the roots of its Workspace (access.ts, writeRoots). The way to the directory and the
+   * roots are checked before anything is made, on every call, since links can appear between calls (access.ts, ensureRobotDirectory and
+   * assertConfinableRoots). A call that carries the Robot's Workspace opens its session (cw-p4bm).
    */
   private async place(access: HostAccess): Promise<ChangePlace> {
+    await this.sessions.touch(access.robot, access.workspace)
     const directory = await ensureRobotDirectory(this.home, access)
     await assertConfinableRoots(this.home, access, this.writable)
     const extraRoots = await madeExtraRoots(this.home, access)
@@ -330,7 +359,7 @@ export class HostShell implements FileChanges {
         timeoutMs,
         onExpiry: 'none',
         sandboxPolicy: policy,
-        ...commandEnv(this.path),
+        ...commandEnv(this.env),
       })
       started = await this.ctx.shell.execute(spec)
     } catch (error) {
@@ -362,7 +391,9 @@ export class HostShell implements FileChanges {
     }
   }
 
+  /** The app quits: the Workspace sessions close, then DSH's layer (its jobs and processes) goes. */
   async dispose(): Promise<void> {
+    await this.sessions.closeAll()
     await this.ctx.fiber.dispose()
   }
 }

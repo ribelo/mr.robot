@@ -1,6 +1,7 @@
-/** The app's settings file: server address, host name, and the host token once paired. */
+/** The app's settings file: server address, host name, the host token once paired, and the commands' environment. */
 import { mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { DEFAULT_ENVIRONMENT, type EnvironmentConfig } from './environment.ts'
 
 export interface HostConfig {
   /** The Mr. Robot deployment; there is no built-in default (hs-ntbd). */
@@ -9,6 +10,24 @@ export interface HostConfig {
   hostId: string | null
   token: string | null
   autostart: boolean
+  /**
+   * What the Robots' commands get besides the OS user's login environment (v1.21, cw-et7q, cw-dkkw): `allow` keeps names DSH's scrub
+   * drops (SSH_AUTH_SOCK and GIT_* by default), `set` adds values (SSH_AUTH_SOCK of an agent a service Host should use). Edited in the
+   * file by hand; the app never writes secrets here.
+   */
+  environment: EnvironmentConfig
+}
+
+const strings = (value: unknown): string[] | undefined =>
+  Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? value : undefined
+
+const stringRecord = (value: unknown): Record<string, string> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) && Object.values(value).every((entry) => typeof entry === 'string') ? (value as Record<string, string>) : undefined
+
+/** The environment section as the file has it; what is missing or not of the right shape is the default. */
+export function parseEnvironmentConfig(value: unknown): EnvironmentConfig {
+  const section = typeof value === 'object' && value !== null ? (value as { allow?: unknown; set?: unknown }) : {}
+  return { allow: strings(section.allow) ?? DEFAULT_ENVIRONMENT.allow, set: stringRecord(section.set) ?? DEFAULT_ENVIRONMENT.set }
 }
 
 export class ConfigFile {
@@ -21,9 +40,9 @@ export class ConfigFile {
   read(defaultName: string): HostConfig {
     try {
       const value = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<HostConfig>
-      return { server: value.server ?? null, name: value.name ?? defaultName, hostId: value.hostId ?? null, token: value.token ?? null, autostart: value.autostart ?? true }
+      return { server: value.server ?? null, name: value.name ?? defaultName, hostId: value.hostId ?? null, token: value.token ?? null, autostart: value.autostart ?? true, environment: parseEnvironmentConfig(value.environment) }
     } catch {
-      return { server: null, name: defaultName, hostId: null, token: null, autostart: true }
+      return { server: null, name: defaultName, hostId: null, token: null, autostart: true, environment: DEFAULT_ENVIRONMENT }
     }
   }
 

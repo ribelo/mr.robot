@@ -20,8 +20,11 @@ export class HostNoSandbox extends Schema.TaggedError<HostNoSandbox>()('HostNoSa
 /** The app failed the call for another reason (an OS error, a copy that stopped), or the call got no answer while the Host stayed online. */
 export class HostCallFailed extends Schema.TaggedError<HostCallFailed>()('HostCallFailed', { message: Schema.String }) {}
 
+/** The Host's app speaks an older protocol than this Worker, so a call it does not know is not sent (v1.21, cw-jn59). */
+export class HostOutdated extends Schema.TaggedError<HostOutdated>()('HostOutdated', { message: Schema.String }) {}
+
 /** Every expected failure of a Host call. */
-export const HostCallError = Schema.Union([HostOffline, HostAccessLost, HostWriteDenied, HostNoSandbox, HostCallFailed])
+export const HostCallError = Schema.Union([HostOffline, HostAccessLost, HostWriteDenied, HostNoSandbox, HostCallFailed, HostOutdated])
 export type HostCallError = typeof HostCallError.Type
 
 /** What a Member DO answers a Host call with: what the Host answered, or why the call failed, encoded. */
@@ -29,7 +32,7 @@ export type HostCallReply<A> =
   | { readonly _tag: 'Answered'; readonly value: A }
   | { readonly _tag: 'Failed'; readonly error: typeof HostCallError.Encoded }
 
-const isHostCallError = Schema.is(HostCallError)
+export const isHostCallError = Schema.is(HostCallError)
 const encodeHostCallError = Schema.encodeSync(HostCallError)
 const decodeHostCallError = Schema.decodeUnknownSync(HostCallError)
 

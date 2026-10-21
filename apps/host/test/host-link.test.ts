@@ -11,7 +11,7 @@ import * as Effect from 'effect/Effect'
 import * as Scope from 'effect/Scope'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { makeHostClient, parseFrame } from '@mr-robot/host-protocol'
+import { HOST_PROTOCOL_VERSION, makeHostClient, parseFrame } from '@mr-robot/host-protocol'
 import { HostLink } from '../src/connection.ts'
 import { HostShell } from '../src/shell.ts'
 import { access, jobName } from './connected.ts'
@@ -21,6 +21,8 @@ let shell: HostShell
 let worker: WebSocketServer
 /** The Worker's side of each connection the app made, newest last. */
 const sockets: WebSocket[] = []
+/** Every frame the Worker heard from the app. */
+const heard: string[] = []
 /** Whether the Worker takes the app's token. */
 let tokenValid = true
 
@@ -28,7 +30,10 @@ beforeAll(async () => {
   home = await mkdtemp(join(homedir(), '.mr-robot-host-link-'))
   shell = await HostShell.start({ home })
   worker = new WebSocketServer({ host: '127.0.0.1', port: 0, verifyClient: (_info, done) => done(tokenValid, 401) })
-  worker.on('connection', (socket) => sockets.push(socket))
+  worker.on('connection', (socket) => {
+    sockets.push(socket)
+    socket.on('message', (data) => heard.push(data.toString()))
+  })
   await new Promise((resolve) => worker.once('listening', resolve))
 })
 afterAll(async () => {
@@ -68,6 +73,18 @@ async function startJob(): Promise<string> {
 
 const state = (job: string) => shell.jobs.list('bot').find((entry) => entry.job === job)?.state
 
+describe('the heartbeat (v1.21, cw-jn59)', () => {
+  it('carries the version of the protocol the app speaks', async () => {
+    const { host } = link()
+    await vi.waitFor(() => expect(heard.map(parseFrame).some((parsed) => parsed?.t === 'hb')).toBe(true))
+    const beat = heard.map(parseFrame).find((parsed) => parsed?.t === 'hb')
+    expect(beat?.t === 'hb' && beat.d.protocolVersion).toBe(HOST_PROTOCOL_VERSION)
+    host.stop()
+    // The tests below count the connections from here.
+    sockets.length = 0
+  })
+})
+
 describe('a computer unpaired while its jobs run', () => {
   it('keeps them running over a dropped connection and stops them all when the Worker says it is unpaired', async () => {
     const { host, events } = link()
@@ -78,7 +95,10 @@ describe('a computer unpaired while its jobs run', () => {
     sockets.at(-1)!.close(4002, 'no heartbeat')
     await vi.waitFor(() => expect(sockets).toHaveLength(2), { timeout: 5000 })
     expect([state(first), state(second)]).toEqual(['running', 'running'])
+    // A Workspace session is open too (v1.21, cw-p4bm): unpairing closes it.
+    const session = await shell.sessions.touch('bot', { root: home, repository: home })
     sockets.at(-1)!.close(4001, 'unpaired')
+    await vi.waitFor(() => expect(session!.isOpen).toBe(false), { timeout: 5000 })
     await vi.waitFor(() => expect([state(first), state(second)]).toEqual(['killed', 'killed']), { timeout: 5000 })
     expect(events.unpaired).toBe(1)
     host.stop()

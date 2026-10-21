@@ -232,10 +232,12 @@ ipcMain.handle('pair', async (event) => {
     setState('pairing')
     const code = pairing.code
     // The signed-in page approves the code (hs-upeq); the token comes back here, never to the page.
-    void waitForApproval(config.server, code, () => pairingCancelled).then((paired) => {
+    void waitForApproval(config.server, code, () => pairingCancelled).then(async (paired) => {
       config = { ...config, hostId: paired.hostId, token: paired.token }
       configFile.write(config)
       pairing = undefined
+      // A new pairing reads the login environment again (cw-et7q): the person may have changed their profile since the app started.
+      await hostShell?.refreshEnvironment()
       connect()
     }).catch((error: unknown) => {
       pairing = undefined
@@ -269,7 +271,7 @@ void app.whenReady().then(() => {
   if (config.autostart) applyAutostart(true)
   changed()
   // The Landlock launcher ships beside the bundle (build.mjs); DSH would look for it in node_modules.
-  void HostShell.start({ landlockLauncher: join(__dirname, 'landlock-run') }).then((started) => {
+  void HostShell.start({ landlockLauncher: join(__dirname, 'landlock-run'), environment: config.environment }).then((started) => {
     hostShell = started
     connect()
     changed()

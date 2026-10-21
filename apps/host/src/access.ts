@@ -36,21 +36,42 @@ export async function ensureRobotDirectory(home: string, access: HostAccess): Pr
   return directory
 }
 
-/** The directories a command or a file change may change in workspace-write mode: the Robot's own, then the roots of its grant. */
+/**
+ * The write roots the Robot's Workspace adds on this computer (v1.21, cw-o4fr, cw-zuyu): with a worktree, the worktree and the repository's
+ * .git (git keeps a worktree's index, refs and objects there), and not the main working tree, so that Robots sharing a repository each
+ * change only their own checkout; without one, the root and the repository's .git.
+ */
+export function workspaceRoots(access: HostAccess): string[] {
+  const workspace = access.workspace
+  if (workspace === undefined) return []
+  const git = join(resolve(workspace.repository), '.git')
+  return [resolve(workspace.worktree ?? workspace.root), git]
+}
+
+/**
+ * The directories a command or a file change may change in workspace-write mode: the Robot's own, the roots of its grant, then the roots its
+ * Workspace adds. A Workspace root that lies in another root adds nothing (the repository's .git inside the root, a root the grant names
+ * already), and a root of the grant that lies in a Workspace root is covered by it; the rest are checked as every root is
+ * (assertConfinableRoots).
+ */
 export function writeRoots(home: string, access: HostAccess): string[] {
   const directory = robotDirectory(home, access.robot)
-  return [directory, ...access.roots.map((root) => expandPath(home, directory, root))]
+  const granted = access.roots.map((root) => expandPath(home, directory, root))
+  const added = workspaceRoots(access).filter((root, at, all) => ![directory, ...granted].some((other) => inside(other, root)) && !all.some((other, j) => j !== at && other !== root && inside(other, root)))
+  return [directory, ...granted.filter((root) => !added.some((workspace) => inside(workspace, root))), ...added]
 }
 
 /**
  * The extra roots of a workspace-write grant that the sandbox can confine to, each made on first use like the Robot's directory (the
- * sandbox binds only a directory that is there). A root that cannot be made is left out: nothing in it can be changed then.
+ * sandbox binds only a directory that is there). A root that cannot be made is left out: nothing in it can be changed then. The roots of
+ * the Workspace are never made: they are the owner's repository, and one that is gone is left out.
  */
 export async function madeExtraRoots(home: string, access: HostAccess): Promise<string[]> {
   if (access.mode !== 'workspace-write') return []
+  const workspace = new Set(workspaceRoots(access))
   const made: string[] = []
   for (const root of writeRoots(home, access).slice(1)) {
-    await mkdir(root, { recursive: true }).catch(() => undefined)
+    if (!workspace.has(root)) await mkdir(root, { recursive: true }).catch(() => undefined)
     if (await stat(root).then(() => true, () => false)) made.push(root)
   }
   return made
@@ -90,7 +111,7 @@ const comparable = (path: string): string => (process.platform === 'darwin' || p
  * starts at the OS user's home directory when the path lies in it, since what leads to the home is the OS's and not writable by the user,
  * and it ends at the first component that is not there yet.
  */
-async function linkOnTheWay(home: string, path: string): Promise<string | undefined> {
+export async function linkOnTheWay(home: string, path: string): Promise<string | undefined> {
   const start = inside(home, path) ? home : parse(path).root
   let current = start
   for (const part of relative(start, path).split(sep)) {

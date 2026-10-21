@@ -125,7 +125,7 @@ import { Jobs, type JobPlace, type JobRunner } from '../places/jobs.ts'
 import { HostRuns } from '../places/host-runner.ts'
 import { hostFacetKey, hostIdOfPlace, hostPlace, splitHostFacet, type Reach, type StoredPlace } from '../places/host-facet.ts'
 import { AmbiguousPlace, SandboxUnavailable, UnknownPlace, WriteDenied } from '../places/errors.ts'
-import { answerOf, HostNoSandbox, HostOffline, HostWriteDenied, type HostCallReply } from '../member/host-call.ts'
+import { answerOf, isHostCallError, HostNoSandbox, HostOffline, HostWriteDenied, type HostCallReply } from '../member/host-call.ts'
 import { withDistinctNames } from '../places/host-names.ts'
 import { parseJobId, type JobId } from '../places/job-id.ts'
 import type { PlacesReach } from '../agent/tools/places.ts'
@@ -2424,6 +2424,20 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // The mode and roots of the facet, and the Robot's directory on the Host (v1.16 ticket 02): the Host app enforces them.
     const { mode, roots } = hostAccessOf(this.store.get<HostAccessByFacet>(HOST_ACCESS), facet)
     return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.store.hostDirectory(), mode, roots } }
+  }
+
+  /**
+   * The Workspace picker (v1.21, cw-gx04): the directories in a directory of a Host, under this Robot's files facet there. A refusal (no
+   * grant, offline, an app too old for a Workspace) comes back as its sentence for the settings page.
+   */
+  async hostDirectories(hostId: string, path: string): Promise<{ readonly ok: true; readonly path: string; readonly directories: readonly string[]; readonly truncated: boolean } | { readonly ok: false; readonly message: string }> {
+    try {
+      const listing = answerOf(await (await this.hostOwnerStub(hostId)).hostListDirectory(hostId, this.store.requireConfig().id, path))
+      return { ok: true, ...listing }
+    } catch (error) {
+      if (isHostCallError(error)) return { ok: false, message: error.message }
+      throw error
+    }
   }
 
   private async hostOwnerStub(hostId: string) {

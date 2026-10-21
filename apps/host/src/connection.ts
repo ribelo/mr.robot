@@ -6,7 +6,7 @@
 import { hostname, platform } from 'node:os'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
-import { frame, HEARTBEAT_MS, parseFrame, serveHost, type HostNotification, type JobEnded } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, HOST_PROTOCOL_VERSION, parseFrame, serveHost, type Heartbeat, type HostNotification, type JobEnded } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import { findChrome, hasGraphicalSession, type HostChrome } from './chrome.ts'
 import { HostDownloads } from './copy.ts'
@@ -89,6 +89,8 @@ export class HostLink {
     this.stop()
     this.unsent.length = 0
     this.shell.jobs.stopAll()
+    // The Workspace sessions go too (cw-p4bm): their language servers serve nobody now.
+    void this.shell.sessions.closeAll()
   }
 
   private cleanup(): void {
@@ -98,8 +100,13 @@ export class HostLink {
     this.server = undefined
   }
 
+  /** What this app reports every HEARTBEAT_MS, with the version of the protocol it speaks (cw-jn59). */
+  report(): Heartbeat {
+    return { version: this.target.version, protocolVersion: HOST_PROTOCOL_VERSION, instance: this.shell.instance, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox, shell: this.shell.kind, ...(this.shell.problem === undefined ? {} : { shellProblem: this.shell.problem }) } }
+  }
+
   private beat(): void {
-    this.socket?.send(frame({ t: 'hb', d: { version: this.target.version, instance: this.shell.instance, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox, shell: this.shell.kind, ...(this.shell.problem === undefined ? {} : { shellProblem: this.shell.problem }) } } }))
+    this.socket?.send(frame({ t: 'hb', d: this.report() }))
   }
 
   private connect(): void {

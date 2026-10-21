@@ -7,11 +7,11 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { HostView } from '@mr-robot/protocol'
-import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, parseHeartbeat, SANDBOX_DENIED, SANDBOX_UNAVAILABLE, type HostAccess, type HostNotification, type JobEnded, type JobInfo, type ReceivedHeartbeat, type RunOutcome, type Sandbox } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, HOST_PROTOCOL_VERSION, makeHostClient, OFFLINE_AFTER_MS, parseFrame, parseHeartbeat, SANDBOX_DENIED, SANDBOX_UNAVAILABLE, type HostAccess, type HostNotification, type JobEnded, type JobInfo, type ReceivedHeartbeat, type RunOutcome, type Sandbox } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
 import { SPACE_ID } from '../env.ts'
 import type { Reach } from '../places/host-facet.ts'
-import { HostAccessLost, HostCallFailed, HostNoSandbox, HostOffline, HostWriteDenied } from './host-call.ts'
+import { HostAccessLost, HostCallFailed, HostNoSandbox, HostOffline, HostOutdated, HostWriteDenied } from './host-call.ts'
 
 export type HostGrant = 'browser' | 'files' | 'shell'
 
@@ -41,6 +41,10 @@ export interface HostEntry {
   readonly capabilities: HostView['capabilities']
   readonly users: readonly string[]
 }
+
+/** What a Robot and its owner are told when a Workspace call goes to an app older than this Worker (v1.21, cw-jn59). */
+export const HOST_OUTDATED = (host: string): string =>
+  `${host} runs an older Mr. Robot app than this server, so it cannot serve a Workspace: update the Mr. Robot app on ${host}.`
 
 /** What a Robot is told when a command would run confined on a computer that cannot confine it (ob-n72n). */
 export const NO_SANDBOX = (host: string, mode: string): string =>
@@ -443,9 +447,9 @@ export class HostHub {
       .map((row) => ({ robotId: row.robot_id, robotName: row.robot_name, action: row.action, detail: row.detail, outcome: row.outcome, exitCode: row.exit_code, at: row.at }))
   }
 
-  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string }, reach: Reach = 'granted'): Promise<A> {
+  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string }, reach: Reach = 'granted', protocol = 1): Promise<A> {
     try {
-      const sent = await this.send(id, robotId, grant, call, timeoutMs, reach)
+      const sent = await this.send(id, robotId, grant, call, timeoutMs, reach, protocol)
       if (sent.kind === 'cut') throw sent.offline ? new HostOffline({ message: sent.message }) : new HostCallFailed({ message: sent.message })
       if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: null })
       return sent.value
@@ -459,8 +463,10 @@ export class HostHub {
    * Send one call: its answer, or `cut` when it was sent and no answer came. It fails before sending (no access, offline, no sandbox) and
    * when the app refused the call (HostError).
    */
-  private async send<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs: number, reach: Reach): Promise<Sent<A>> {
+  private async send<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs: number, reach: Reach, protocol = 1): Promise<Sent<A>> {
     const { row, access: granted } = await this.authorize(id, robotId, grant)
+    // A call of a newer protocol than the app speaks is not sent: the app would not know it (cw-jn59).
+    if (protocol > this.protocolOf(row)) throw new HostOutdated({ message: HOST_OUTDATED(row.name) })
     // An escalated call is one the owner approved to run without the sandbox, once (ob-ifak); it never changes the grant.
     const access: HostAccess = reach === 'escalated' ? { ...granted, mode: 'full' } : granted
     if (grant !== 'browser' && access.mode !== 'full') {
@@ -484,6 +490,19 @@ export class HostHub {
     if (error?._tag === 'TimeoutError') return { kind: 'cut', message: `the host did not answer within ${Math.round(timeoutMs / 1000)} s`, offline: false }
     if (this.row(id)?.online !== 1) return { kind: 'cut', message: `the host "${this.row(id)?.name ?? id}" went offline`, offline: true }
     return { kind: 'cut', message: `the host call failed: ${String(error?.message ?? exit.cause)}`, offline: false }
+  }
+
+  /** The protocol version of the app, from its last heartbeat: 1 for an app from before v1.21, which does not say. */
+  private protocolOf(row: HostRow): number {
+    return this.heartbeatOf(row)?.protocolVersion ?? 1
+  }
+
+  /**
+   * A Workspace call (v1.21): one of the RPCs that need an app of HOST_PROTOCOL_VERSION, under the files facet; refused with
+   * HOST_OUTDATED when the app is older.
+   */
+  workspaceRun<A>(id: string, robotId: string, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 60_000, log?: { action: string; detail: string }): Promise<A> {
+    return this.run(id, robotId, 'files', call, timeoutMs, log, 'granted', HOST_PROTOCOL_VERSION)
   }
 
   /** What the last heartbeat said about the sandbox; undefined for an app from before v1.16, which does not say. */

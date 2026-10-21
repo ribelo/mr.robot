@@ -6,7 +6,7 @@ import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HostError, LISTING_MAX_FILES, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
+import { CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HOST_PROTOCOL_VERSION, HostError, LISTING_MAX_FILES, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -42,6 +42,22 @@ export const heldCommands = new Set<string>()
 export const hostJobCalls: string[] = []
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
 
+/** The fake disk's directories (v1.21, the Workspace picker), absolute; a file's directories count too. Cleared by closeHosts. */
+export const hostDirectories = new Set<string>()
+/** The Workspace sessions the Worker closed on the fake app, by the Robot's directory name. */
+export const workspaceCloses: string[] = []
+const FAKE_HOME = '/home/anna'
+const parentOf = (path: string): string => path.slice(0, Math.max(path.lastIndexOf('/'), 1))
+const expanded = (path: string): string => (path === '~' ? FAKE_HOME : path.startsWith('~/') ? `${FAKE_HOME}/${path.slice(2)}` : path.startsWith('/') ? path : `${FAKE_HOME}/${path}`).replace(/\/+$/, '') || '/'
+/** Every directory the fake disk knows: the listed ones, and those its files lie in. */
+const knownDirectories = (): Set<string> => {
+  const all = new Set<string>()
+  for (const path of [...hostDirectories, ...[...hostDisk.keys()].map(parentOf)]) {
+    for (let at = path; at !== '/' && at !== ''; at = parentOf(at)) all.add(at)
+  }
+  return all
+}
+
 /** Write roots that are symbolic links on the fake disk: like the app, it refuses a confined command under a grant naming one (deep review P1b). Cleared by closeHosts. */
 export const linkedRoots = new Set<string>()
 
@@ -54,7 +70,7 @@ const skippedPath = skipped
 
 
 /** A fake Mr. Robot app: pairs, connects, heartbeats and answers host calls (hs-xax9). Its notifications (notify frames) are kept in `notices`. */
-export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell; legacy?: boolean; owner?: string } = {}) {
+export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; platform?: string; shell?: Shell; legacy?: boolean; owner?: string; protocolVersion?: number } = {}) {
   const owner = options.owner ?? ANNA
   const platform = options.platform ?? 'linux'
   const start = await SELF.fetch('https://mr-robot.test/api/host/pair/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, platform }) })
@@ -197,6 +213,21 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     },
     BrowserOpen: () => Effect.fail(new HostError({ message: 'no Chrome in the fake host' })),
     BrowserClose: () => Effect.void,
+    ListDirectory: ({ path }) => {
+      const full = expanded(path)
+      const known = knownDirectories()
+      if (!known.has(full)) return Effect.fail(new HostError({ message: `ENOENT: no such directory, scandir '${full}'`, code: 'ENOENT' }))
+      return Effect.succeed({ path: full, directories: [...known].filter((dir) => parentOf(dir) === full).map((dir) => dir.slice(full.length + 1)).sort(), truncated: false })
+    },
+    Stat: ({ path }) => Effect.sync(() => {
+      const full = expanded(path)
+      const known = knownDirectories()
+      const kind = known.has(full) ? 'directory' as const : hostDisk.has(full) ? 'file' as const : 'missing' as const
+      let repository: string | null = null
+      for (let at = full; kind === 'directory' && repository === null && at !== '/' && at !== ''; at = parentOf(at)) if (known.has(`${at}/.git`) || hostDisk.has(`${at}/.git`)) repository = at
+      return { path: full, kind, link: linkedRoots.has(full) ? full : null, repository }
+    }),
+    WorkspaceClose: ({ robot }) => Effect.sync(() => { workspaceCloses.push(robot) }),
   })
   let current = socket
   /** The server of the current connection: interrupted when it drops, as the app's link does, so that a waiting Run call ends. */
@@ -212,7 +243,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
   // An app from before v1.16 says nothing of its sandbox, shell or run, and ignores the access of a call.
   const beat = (as = instance) => current.send(frame({ t: 'hb', d: options.legacy === true
     ? { version: '0.1.0', platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome' } }
-    : { version: '0.1.0', instance: as, platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full', shell: options.shell ?? 'bash' } } }))
+    : { version: '0.1.0', protocolVersion: options.protocolVersion ?? HOST_PROTOCOL_VERSION, instance: as, platform, hostname: 'desk', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: options.sandbox ?? 'full', shell: options.shell ?? 'bash' } } }))
   /** The app serves the Host RPCs on a socket: its first connection, and each time it comes back. */
   const serve = (on: WebSocket) => {
     current = on
@@ -290,6 +321,8 @@ export async function closeHosts(): Promise<void> {
   hostJobs.clear()
   heldCommands.clear()
   linkedRoots.clear()
+  hostDirectories.clear()
+  workspaceCloses.length = 0
   hostJobCalls.length = 0
   for (const socket of open.splice(0)) {
     try { socket.close(1000) } catch { /* closed */ }

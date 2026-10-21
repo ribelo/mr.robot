@@ -429,6 +429,14 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('DELETE', '/api/admin/skills/:name', (c, { name }) => admin(c).pipe(Effect.andThen(call(() => space(c.env).deleteSkill(name))), Effect.as({ ok: true })))
+  // The Workspace picker (v1.21, cw-gx04): the directories of a Host the Robot holds the files facet on. A refusal (no grant, offline, an
+  // app too old for a Workspace) is a 409 with its sentence.
+  .on('GET', '/api/robots/:id/hosts/:host/directories', (c, { id, host }) => Effect.gen(function* () {
+    yield* owner(c, id)
+    type Listing = { readonly ok: true; readonly path: string; readonly directories: readonly string[]; readonly truncated: boolean } | { readonly ok: false; readonly message: string }
+    const listing = yield* call((): Promise<Listing> => robot(c, id).hostDirectories(host, new URL(c.request.url).searchParams.get('path') ?? '~'))
+    return listing.ok ? { path: listing.path, directories: listing.directories, truncated: listing.truncated } : yield* Effect.fail(conflict(listing.message))
+  }))
   // Robot definitions (v1.18 ticket 04): Save as definition, the library's list, and the directory to commit by hand.
   .on('POST', '/api/robots/:id/definition', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)

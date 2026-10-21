@@ -1171,6 +1171,9 @@ export class Member extends DurableObject<Env> {
   /** List, search and delete under the files grant, done by the app in Node (v1.16 ticket 02); a delete is a write and obeys the mode and roots. */
   hostGlob(id: string, robotId: string, pattern: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Glob({ pattern, access }), 60_000, { action: 'glob', detail: pattern })) }
   hostGrep(id: string, robotId: string, input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Grep({ ...input, access }), 60_000, { action: 'grep', detail: input.pattern })) }
+  /** The Workspace picker (v1.21, cw-gx04): the directories in a directory of the Host, and what a path is there. Reads under the files facet. */
+  hostListDirectory(id: string, robotId: string, path: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.ListDirectory({ path, access }))) }
+  hostStat(id: string, robotId: string, path: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.Stat({ path, access }))) }
   hostDelete(id: string, robotId: string, path: string, reach: Reach = 'granted') { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Delete({ path, access }), 60_000, { action: reach === 'escalated' ? 'delete (escalated)' : 'delete', detail: path }, reach)) }
   hostActions(id: string): HostAction[] { return this.hosts.actions(id) }
   hostBrowserOpen(id: string, robotId: string, robotName: string): Promise<HostCallReply<string>> { return replyOf(this.hosts.openBrowser(id, robotId, robotName)) }
