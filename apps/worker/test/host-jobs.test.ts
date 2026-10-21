@@ -243,6 +243,15 @@ describe('jobs lost when the Host goes (ob-cgn1)', () => {
     await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${jobId} finished: exit 0]`), { timeout: 10_000 })
   })
 
+  it('a service Host that is stopped says so, and the Robot hears its jobs failed at once (v1.21, cw-dr33)', async () => {
+    const desk = await fakeHost()
+    const id = await robotOn(desk)
+    const jobId = await startJob(id, 'make all')
+    scripts.set(id, [{ text: '' }])
+    await desk.stopService()
+    await vi.waitFor(() => expect(wakes(id)[0]).toContain(`[Desk job ${jobId} failed: the Mr. Robot app on Desk was stopped while it ran]`), { timeout: 10_000 })
+  })
+
   it('an app that restarted has lost its jobs: the Robot is woken as failed, once, as soon as the new run says hello', async () => {
     const desk = await fakeHost()
     const id = await robotOn(desk)

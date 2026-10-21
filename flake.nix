@@ -14,5 +14,7 @@
         host = import ./apps/host/package.nix { inherit pkgs; };
         default = self.packages.${pkgs.stdenv.hostPlatform.system}.host;
       });
+      # The Host app as an always-on service (v1.21 ticket 09): imports = [ mr-robot.nixosModules.host ].
+      nixosModules.host = import ./infra/host/module.nix;
     };
 }

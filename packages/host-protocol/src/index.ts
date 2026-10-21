@@ -317,6 +317,12 @@ export const BrowserClose = Rpc.make('BrowserClose', {
  */
 export const HOST_PROTOCOL_VERSION = 2
 
+/**
+ * The close code of an app that stops on purpose (v1.21 ticket 09, cw-dr33): a service told to stop by systemd or launchd. Its jobs end
+ * with it, so the Worker tells the Robots at once instead of waiting for the app to come back.
+ */
+export const HOST_STOPPING = 4003
+
 /** The most entries ListDirectory answers with. */
 export const LIST_DIRECTORY_MAX = 500
 

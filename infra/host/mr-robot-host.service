@@ -1,0 +1,23 @@
+# The Mr. Robot Host app as a systemd service on a Linux that is not NixOS (v1.21 ticket 09, cw-dr33).
+# Install the app (it provides mr-robot-host), make a user for it, pair it once as that user
+# (sudo -u mr-robot-host mr-robot-host pair <server>), then:
+#   sudo cp mr-robot-host.service /etc/systemd/system/ && sudo systemctl enable --now mr-robot-host
+# Robots act on this computer as that user: it is the real boundary.
+[Unit]
+Description=Mr. Robot Host (service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mr-robot-host
+Environment=HOME=/var/lib/mr-robot-host
+ExecStart=/usr/bin/mr-robot-host --service
+Restart=always
+RestartSec=5
+# A stop: the app tells the server it stops (the Robots hear their jobs end), then its processes go.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

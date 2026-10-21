@@ -6,7 +6,7 @@ import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import { expect } from 'vitest'
-import { contentHash, CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HOST_PROTOCOL_VERSION, HostError, INSTRUCTIONS_MAX_BYTES, lineEndingOf, LISTING_MAX_FILES, HostRpcs, STALE_CONTENT, type HostSkillEntry, type WorkspaceContext, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
+import { contentHash, CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HOST_PROTOCOL_VERSION, HOST_STOPPING, HostError, INSTRUCTIONS_MAX_BYTES, lineEndingOf, LISTING_MAX_FILES, HostRpcs, STALE_CONTENT, type HostSkillEntry, type WorkspaceContext, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -407,9 +407,9 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     for (const text of unsent.splice(0)) on.send(text)
   }
   /** The connection drops: the app stops serving it. */
-  const disconnect = async () => {
+  const disconnect = async (code = 1000) => {
     if (serving !== undefined) await Effect.runPromise(Fiber.interrupt(serving))
-    current.close(1000)
+    current.close(code)
   }
   /** The same run of the app connects again. */
   const reconnect = async () => {
@@ -453,6 +453,8 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     },
     /** The connection drops and stays down. */
     drop: async () => { await disconnect(); await new Promise((resolve) => setTimeout(resolve, 100)) },
+    /** The app is stopped as a service (v1.21 ticket 09): it closes with HOST_STOPPING. */
+    stopService: async () => { await disconnect(HOST_STOPPING); await new Promise((resolve) => setTimeout(resolve, 150)) },
     /** After a drop, the same run of the app connects again. */
     back: reconnect,
     /** The app restarts: a new run, with no jobs, connected again. */

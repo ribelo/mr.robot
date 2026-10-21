@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Mr. Robot Host app as a launchd daemon on macOS (v1.21 ticket 09, cw-dr33): no window and no display.
+  Put the service bundle (apps/host/dist/service.cjs with dist/runners and dist/node_modules beside it) in /usr/local/lib/mr-robot-host,
+  pair once as the user (sudo -u mr-robot-host node /usr/local/lib/mr-robot-host/service.cjs pair <server>), then:
+    sudo cp ai.mr-robot.host.plist /Library/LaunchDaemons/ && sudo launchctl bootstrap system /Library/LaunchDaemons/ai.mr-robot.host.plist
+  launchd sends SIGTERM on a stop and waits ExitTimeOut seconds: the app tells the server it stops first.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.mr-robot.host</string>
+  <key>UserName</key><string>mr-robot-host</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/usr/local/lib/mr-robot-host/service.cjs</string>
+    <string>--service</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/mr-robot-host</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ExitTimeOut</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/Library/Logs/mr-robot-host.log</string>
+  <key>StandardErrorPath</key><string>/Library/Logs/mr-robot-host.log</string>
+</dict>
+</plist>

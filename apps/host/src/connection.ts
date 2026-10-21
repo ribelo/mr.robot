@@ -6,7 +6,7 @@
 import { hostname, platform } from 'node:os'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
-import { frame, HEARTBEAT_MS, HOST_PROTOCOL_VERSION, parseFrame, serveHost, type Heartbeat, type HostNotification, type JobEnded } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, HOST_PROTOCOL_VERSION, HOST_STOPPING, parseFrame, serveHost, type Heartbeat, type HostNotification, type JobEnded } from '@mr-robot/host-protocol'
 import WebSocket from 'ws'
 import { findChrome, hasGraphicalSession, type HostChrome } from './chrome.ts'
 import { HostDownloads } from './copy.ts'
@@ -54,7 +54,8 @@ export class HostLink {
   private readonly downloads: HostDownloads
 
   constructor(
-    private readonly target: { server: string; hostId: string; token: string; version: string },
+    /** `service`: a service Host (v1.21, cw-ixto), which offers no browser and reports no graphical session whatever the display. */
+    private readonly target: { server: string; hostId: string; token: string; version: string; service?: boolean },
     private readonly shell: HostShell,
     private readonly chrome: HostChrome,
     private readonly events: LinkEvents,
@@ -81,6 +82,19 @@ export class HostLink {
     this.socket?.close(1000)
   }
 
+  /** The service is told to stop (cw-dr33): the Worker hears it (HOST_STOPPING), so the Robots learn at once that their jobs end. */
+  stopService(): Promise<void> {
+    this.stopped = true
+    this.cleanup()
+    const socket = this.socket
+    if (socket === undefined || socket.readyState !== WebSocket.OPEN) return Promise.resolve()
+    return new Promise((done) => {
+      const timer = setTimeout(done, 3000)
+      socket.once('close', () => { clearTimeout(timer); done() })
+      socket.close(HOST_STOPPING, 'the service is stopping')
+    })
+  }
+
   /**
    * End the link because this computer is no longer paired here (unpaired from the page or the profile, its token refused, or moved to
    * another server): every job it runs for Robots stops too, since none of them can report anywhere now.
@@ -102,7 +116,7 @@ export class HostLink {
 
   /** What this app reports every HEARTBEAT_MS, with the version of the protocol it speaks (cw-jn59). */
   report(): Heartbeat {
-    return { version: this.target.version, protocolVersion: HOST_PROTOCOL_VERSION, instance: this.shell.instance, platform: platform(), hostname: hostname(), capabilities: { graphical: hasGraphicalSession(), chrome: findChrome(), sandbox: this.shell.sandbox, shell: this.shell.kind, ...(this.shell.problem === undefined ? {} : { shellProblem: this.shell.problem }) } }
+    return { version: this.target.version, protocolVersion: HOST_PROTOCOL_VERSION, instance: this.shell.instance, platform: platform(), hostname: hostname(), capabilities: { graphical: this.target.service !== true && hasGraphicalSession(), chrome: this.target.service === true ? null : findChrome(), sandbox: this.shell.sandbox, shell: this.shell.kind, ...(this.shell.problem === undefined ? {} : { shellProblem: this.shell.problem }) } }
   }
 
   private beat(): void {

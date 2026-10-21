@@ -1222,7 +1222,7 @@ export class Member extends DurableObject<Env> {
 
   override async webSocketClose(socket: WebSocket, code: number): Promise<void> {
     try { socket.close(code === 1005 ? 1000 : code) } catch { /* closed */ }
-    await this.hosts.closed(socket)
+    await this.hosts.closed(socket, code)
   }
 
   /** Delivery to devices; a test subclass records instead of sending. */

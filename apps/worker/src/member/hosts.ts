@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Scope from 'effect/Scope'
 import type { HostView } from '@mr-robot/protocol'
-import { frame, HEARTBEAT_MS, HOST_PROTOCOL_VERSION, makeHostClient, OFFLINE_AFTER_MS, parseFrame, parseHeartbeat, SANDBOX_DENIED, SANDBOX_UNAVAILABLE, type HostAccess, type HostNotification, type JobEnded, type JobInfo, type ReceivedHeartbeat, type RunOutcome, type Sandbox } from '@mr-robot/host-protocol'
+import { frame, HEARTBEAT_MS, HOST_PROTOCOL_VERSION, HOST_STOPPING, makeHostClient, OFFLINE_AFTER_MS, parseFrame, parseHeartbeat, SANDBOX_DENIED, SANDBOX_UNAVAILABLE, type HostAccess, type HostNotification, type JobEnded, type JobInfo, type ReceivedHeartbeat, type RunOutcome, type Sandbox } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
 import { SPACE_ID } from '../env.ts'
 import type { Reach } from '../places/host-facet.ts'
@@ -261,7 +261,7 @@ export class HostHub {
     return true
   }
 
-  async closed(socket: WebSocket): Promise<boolean> {
+  async closed(socket: WebSocket, code?: number): Promise<boolean> {
     const tag = this.ctx.getTags(socket)[0] ?? ''
     if (tag.startsWith('relay-')) {
       const [side, session] = tag.slice('relay-'.length).split(/:(.*)/s) as [string, string]
@@ -277,7 +277,9 @@ export class HostHub {
       this.ctx.storage.sql.exec('UPDATE host SET online = 0 WHERE id = ?', id)
       await this.drop(id)
       await this.report(id)
-      await this.armJobsLost(id)
+      // An app that said it stops (a service stopped by systemd or launchd) ends its jobs with it: the Robots hear now.
+      if (code === HOST_STOPPING) await this.loseJobs(id, (name) => `the Mr. Robot app on ${name} was stopped while it ran`)
+      else await this.armJobsLost(id)
     }
     return true
   }

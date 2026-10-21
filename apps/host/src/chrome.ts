@@ -2,7 +2,7 @@
  * The host browser (hs-zmbc): the installed Chrome or Chromium, started with its own "Mr. Robot"
  * profile and a visible window, DevTools on localhost only. It stays open between tasks.
  */
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { delimiter, isAbsolute, join, win32 } from 'node:path'
 
@@ -34,7 +34,25 @@ export function findChrome(): string | null {
 
 /** A graphical session the browser can open a window in (a Windows desktop session always has one: the app itself runs in it). */
 export function hasGraphicalSession(): boolean {
-  return process.platform === 'darwin' || process.platform === 'win32' || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
+  return hasDisplay()
+}
+
+/**
+ * Whether this process can show a window (v1.21, cw-ixto): the check asks for a display, not for the OS. Linux: an X or Wayland display
+ * in the environment. macOS: a window-server (Aqua) session, which launchd agents of a logged-in user have and daemons do not. Windows:
+ * an interactive session, which a service (session 0) has none of.
+ */
+export function hasDisplay(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, macSession: () => string = launchdSession): boolean {
+  if (platform === 'linux' || platform === 'freebsd' || platform === 'openbsd') return Boolean(env['DISPLAY'] || env['WAYLAND_DISPLAY'])
+  if (platform === 'darwin') return macSession() === 'Aqua'
+  if (platform === 'win32') return Boolean(env['SESSIONNAME']) && env['SESSIONNAME'] !== 'Services'
+  return false
+}
+
+/** The launchd session this process runs in (Aqua for a logged-in user's window server; Background or System for a daemon). */
+function launchdSession(): string {
+  const answer = spawnSync('launchctl', ['managername'], { encoding: 'utf8', timeout: 5000 })
+  return answer.status === 0 ? answer.stdout.trim() : ''
 }
 
 export class HostChrome {

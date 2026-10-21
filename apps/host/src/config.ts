@@ -54,6 +54,17 @@ export class ConfigFile {
   }
 }
 
+/**
+ * Where the app keeps host.json when Electron does not say (the service entry, v1.21 ticket 09): the same directory as the desktop app,
+ * so that one pairing serves both. MR_ROBOT_HOST_CONFIG overrides it.
+ */
+export function defaultConfigDirectory(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, home = env['HOME'] ?? env['USERPROFILE'] ?? '.'): string {
+  if (env['MR_ROBOT_HOST_CONFIG']) return env['MR_ROBOT_HOST_CONFIG']
+  if (platform === 'win32') return join(env['APPDATA'] ?? join(home, 'AppData', 'Roaming'), 'mr-robot-host')
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'mr-robot-host')
+  return join(env['XDG_CONFIG_HOME'] || join(home, '.config'), 'mr-robot-host')
+}
+
 /** A server address as typed: https assumed, trailing slashes dropped. */
 export function normalizeServer(input: string): string {
   const trimmed = input.trim().replace(/\/+$/, '')

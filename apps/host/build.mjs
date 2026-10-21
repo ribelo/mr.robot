@@ -26,6 +26,9 @@ const __importMetaResolve = (specifier) => {
   },
 }
 await build({ entryPoints: ['src/main.ts'], bundle: true, platform: 'node', format: 'cjs', target: 'node22', outfile: 'dist/main.cjs', external: ['electron'], sourcemap: true, ...commonJs })
+// The service entry (v1.21 ticket 09): the same modules without Electron; electron is not external here, so a bundle that reached for it
+// would fail to build rather than fail on a server.
+await build({ entryPoints: ['src/service.ts'], bundle: true, platform: 'node', format: 'cjs', target: 'node22', outfile: 'dist/service.cjs', sourcemap: true, ...commonJs })
 await build({ entryPoints: ['src/preload.ts'], bundle: true, platform: 'node', format: 'cjs', target: 'node22', outfile: 'dist/preload.cjs', external: ['electron'] })
 // A script that runs the Host's shell on its own, to check the bundle on a machine (see docs/hosts.md): node dist/shell-check.cjs
 await build({ entryPoints: ['src/shell-check.ts'], bundle: true, platform: 'node', format: 'cjs', target: 'node22', outfile: 'dist/shell-check.cjs', external: ['electron'], ...commonJs })

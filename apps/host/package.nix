@@ -45,8 +45,8 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
 
   installPhase = ''
     runHook preInstall
-    mkdir -p $out/share/mr-robot-host
-    cp apps/host/dist/main.cjs apps/host/dist/preload.cjs apps/host/dist/window.html apps/host/dist/shell-check.cjs $out/share/mr-robot-host/
+    mkdir -p $out/share/mr-robot-host $out/bin
+    cp apps/host/dist/main.cjs apps/host/dist/preload.cjs apps/host/dist/window.html apps/host/dist/shell-check.cjs apps/host/dist/service.cjs $out/share/mr-robot-host/
     # DSH's Landlock launcher (build.mjs copies it beside the bundle); the app points DSH at it.
     cp apps/host/dist/landlock-run $out/share/mr-robot-host/
     # DSH's process runner and koffi, which start every command in a systemd scope of its own (build.mjs).
@@ -57,10 +57,23 @@ pkgs.stdenv.mkDerivation (finalAttrs: {
       patchelf --add-rpath ${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]} "$binary"
     done
     # Autostart entries run the command from the user's profile, so they survive updates.
-    makeWrapper ${pkgs.electron}/bin/electron $out/bin/mr-robot-host \
+    makeWrapper ${pkgs.electron}/bin/electron $out/libexec/mr-robot-host-desktop \
       --add-flags $out/share/mr-robot-host/main.cjs \
       --set MR_ROBOT_HOST_EXEC mr-robot-host \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bubblewrap pkgs.systemd ]}
+    # The service entry (v1.21 ticket 09): the same modules under plain Node, no Electron and no display.
+    makeWrapper ${pkgs.nodejs_24}/bin/node $out/libexec/mr-robot-host-service \
+      --add-flags $out/share/mr-robot-host/service.cjs \
+      --prefix PATH : ${lib.makeBinPath [ pkgs.bubblewrap pkgs.git ]}
+    # One command: "mr-robot-host --service" and "mr-robot-host pair <server>" run the service entry, anything else the desktop app.
+    cat > $out/bin/mr-robot-host <<'EOF'
+    #!${pkgs.runtimeShell}
+    case "''${1:-}" in
+      --service|pair|--help) exec ${placeholder "out"}/libexec/mr-robot-host-service "$@" ;;
+      *) exec ${placeholder "out"}/libexec/mr-robot-host-desktop "$@" ;;
+    esac
+    EOF
+    chmod +x $out/bin/mr-robot-host
     # The shell check of the installed app (src/shell-check.ts), with the app's program as Node.
     makeWrapper ${pkgs.electron}/bin/electron $out/bin/mr-robot-host-shell-check \
       --add-flags $out/share/mr-robot-host/shell-check.cjs \
