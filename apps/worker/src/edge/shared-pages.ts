@@ -11,7 +11,7 @@
 import { escapeHtml } from '../platform/markdown-html.ts'
 import { HTML_PAGE_CSP, markdownPageCsp } from '../pages/page-html.ts'
 import { shareTokenHash, signedShareToken } from '../pages/share-token.ts'
-import type { Env } from '../env.ts'
+import { SPACE_ID, type Env } from '../env.ts'
 import { pdfResponse } from './api.ts'
 
 const SHARED_PATH = new URLPattern({ pathname: '/p/:token/:part?' })
@@ -47,6 +47,8 @@ export async function sharedPageChannel(request: Request, env: Env): Promise<Res
   if (signed === undefined) return notFound()
   const shared = await env.MEMBER.getByName(signed.memberId).sharedPageOf(signed.token).catch(() => null)
   if (shared === null) return notFound()
+  // The share follows its owner: a Member no longer in the Space shares nothing (v1.20.1, cross-review #3).
+  if (!(await env.SPACE.getByName(SPACE_ID).memberActive(signed.memberId).catch(() => false))) return notFound()
   const robot = env.ROBOT.getByName(shared.robotId)
   const origin = new URL(request.url).origin
   try {

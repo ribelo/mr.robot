@@ -20,6 +20,9 @@ export interface Duty {
   run(now: number): Promise<void>
 }
 
+/** How soon a due duty that could not run is tried again: the Robot's heartbeat. */
+export const DUTY_RETRY_MS = 30_000
+
 export class Duties {
   private readonly duties: Duty[] = []
 
@@ -34,11 +37,14 @@ export class Duties {
     return status !== 'deleted' && (duty.scope === 'alive' || status === 'active')
   }
 
-  /** The earliest moment any duty in scope has planned; undefined when none has. */
+  /**
+   * The earliest moment any duty in scope has planned; undefined when none has. A moment already past (a duty that was due but refused,
+   * the Robot being busy) is tried again a retry later, never in the past (v1.20.1: that spun the alarm until the Robot was idle).
+   */
   nextAt(now: number, status: string): number | undefined {
     const moments = this.duties.filter((duty) => this.inScope(duty, status)).flatMap((duty) => {
       const at = duty.nextAt(now)
-      return at === undefined ? [] : [at]
+      return at === undefined ? [] : [at <= now ? now + DUTY_RETRY_MS : at]
     })
     return moments.length === 0 ? undefined : Math.min(...moments)
   }

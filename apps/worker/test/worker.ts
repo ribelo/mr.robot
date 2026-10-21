@@ -453,6 +453,11 @@ export class Robot extends ProductionRobot {
   }
 
   /** This month's tokens per usage source (v1.20 ticket 01). */
+  /** This month's cost in USD per usage source (v1.20.1). */
+  async costBySourceForTest(): Promise<Record<string, number>> {
+    return Object.fromEntries(this.store.sql.exec<{ source: string; cost: number }>('SELECT source, SUM(cost_usd) AS cost FROM usage GROUP BY source').toArray().map((row) => [row.source, row.cost]))
+  }
+
   async usageBySourceForTest(): Promise<Record<string, number>> {
     return Object.fromEntries(this.store.sql.exec<{ source: string; tokens: number }>('SELECT source, SUM(input_tokens + output_tokens) AS tokens FROM usage GROUP BY source').toArray().map((row) => [row.source, row.tokens]))
   }

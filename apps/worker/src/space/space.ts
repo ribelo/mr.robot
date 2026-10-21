@@ -222,6 +222,8 @@ const invite = (email: string, role: MemberRole = 'member') => Effect.gen(functi
 const remove = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run("UPDATE member SET status = 'removed' WHERE id = ?", memberId)
+  // A removed Member's shared Pages stop being public (v1.20.1, cross-review #3).
+  yield* remote((env) => env.MEMBER.getByName(memberId).stopAllSharing().catch((error: unknown) => console.warn('shares not stopped', error)))
   yield* orphaned({ kind: 'member', memberId })
   const owned = yield* sql.all<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId)
   yield* Effect.forEach(owned, ({ id }) => endThreadsOf(id), { discard: true })
@@ -1451,6 +1453,11 @@ export class Space extends DurableObject<Env> {
   updateSettings(patch: Partial<SpaceSettings> & { models?: readonly ModelOption[] }, by?: string): Promise<SpaceSettings & { defaultModelMoved?: DefaultModelMoved }> { return this.run(updateSettings(patch, by)) }
   limitsFor(memberId: string): Promise<SpendLimits> { return this.run(limitsFor(memberId)) }
   memberCosts(memberId: string): Promise<MemberCosts> { return this.run(memberCosts(memberId)) }
+  /** Whether a Member is active now: a shared Page of a removed one is not served (v1.20.1). */
+  memberActive(memberId: string): boolean {
+    return this.ctx.storage.sql.exec<{ status: string }>('SELECT status FROM member WHERE id = ?', memberId).toArray()[0]?.status === 'active'
+  }
+
   reachable(memberId: string): Promise<RobotSummary[]> { return this.run(reachable(memberId)) }
   fleet(): Promise<RobotSummary[]> { return this.run(fleet) }
   entry(robotId: string): Promise<RegistryEntry | undefined> { return this.run(entry(robotId)) }

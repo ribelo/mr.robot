@@ -972,6 +972,11 @@ export class Member extends DurableObject<Env> {
   }
 
   /** Every shared Page of this Member, newest first (dp-zq16). */
+  /** Every share of this Member ends (the Member was removed, v1.20.1). */
+  async stopAllSharing(): Promise<void> {
+    this.ctx.storage.sql.exec('DELETE FROM shared_page')
+  }
+
   async sharedPages(origin: string): Promise<SharedPageView[]> {
     const rows = this.ctx.storage.sql.exec<SharedPageRow>('SELECT * FROM shared_page ORDER BY created_at DESC').toArray()
     return Promise.all(rows.map((row) => this.sharedView(row, origin)))

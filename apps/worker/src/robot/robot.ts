@@ -328,6 +328,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }))
     this.duties.register(dreamCloseDuty({
       ...this.idleHost(),
+      dreamingOn: async () => store.requireConfig().dreaming ?? (await this.space().settings()).defaultDreaming,
       nextDreamHour: (after) => nextRun({ kind: 'daily', time: DREAM_TIME }, store.requireConfig().timeZone, after, after) ?? after + 86_400_000,
       eventsSinceCompaction: () => {
         const live = store.requireConfig().liveSessionId
@@ -1977,7 +1978,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       sums.set(bucket, { input: sum.input + (usage.inputTokens ?? 0), output: sum.output + (usage.outputTokens ?? 0), cached: sum.cached + (usage.cacheReadTokens ?? 0) })
     }
     if (sums.size === 0) return
-    const price = (await this.space().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.price
+    // The tokens are the model's that ran the Turn: the dream's own route when it has one (v1.20.1).
+    const model = this.turnRoute ?? config.model
+    const price = (await this.space().modelList()).find((option) => option.provider === model.provider && option.model === model.model)?.price
     for (const [bucket, { input, output, cached }] of sums) {
       if (input === 0 && output === 0) continue
       const cost = price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000
@@ -3794,6 +3797,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const document = await this.pageHtml(path, origin)
     const cached = await cachedPdf(this.env.FILES, config.id, path, document.version)
     if (cached !== undefined) return { kind: 'pdf', title: document.title, pdf: cached }
+    // A paused Robot, or one in setup, renders no PDF: its Pages still serve (v1.20.1, cross-review #12).
+    if (config.status !== 'active' && config.status !== 'blocked') return { kind: 'unavailable' }
     if (await this.checkLimits()) return { kind: 'unavailable' }
     const taken = await this.env.MEMBER.getByName(config.ownerId).takePdfRender(share?.tokenHash ?? null, Date.now())
     if (taken !== 'taken') return { kind: 'limited', message: taken === 'link-limit' ? 'This Page was printed to PDF too often in the last hour; try again later.' : 'The PDFs of these Pages were printed too often today; try again tomorrow.' }

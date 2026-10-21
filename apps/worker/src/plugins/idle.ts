@@ -182,7 +182,7 @@ export const DREAM_TIME = '03:00'
  * by the idle sequence (snapshot, sweep, compaction), whatever its size, so the night starts from a closed day. A Robot busy then closes
  * at its next idle moment of that alarm, or the next night. A Robot with dreaming off has no dream hour.
  */
-export function dreamCloseDuty(host: IdleHost & { readonly nextDreamHour: (after: number) => number; readonly eventsSinceCompaction: () => boolean }): Duty {
+export function dreamCloseDuty(host: IdleHost & { readonly nextDreamHour: (after: number) => number; readonly eventsSinceCompaction: () => boolean; readonly dreamingOn: () => Promise<boolean> }): Duty {
   return {
     name: 'dream-hour-close',
     order: 95,
@@ -194,6 +194,8 @@ export function dreamCloseDuty(host: IdleHost & { readonly nextDreamHour: (after
       if (due === undefined) return host.store.set(DREAM_CLOSE_AT, host.nextDreamHour(now))
       if (due > now || !host.idleNow()) return
       host.store.set(DREAM_CLOSE_AT, host.nextDreamHour(now))
+      // The Space's default counts when the Robot has no setting of its own (v1.20.1, cross-review #4).
+      if (!(await host.dreamingOn())) return
       if (!host.eventsSinceCompaction()) return
       // The idle plan is replaced: the chapter closes now.
       host.store.delete(IDLE_PLAN)
