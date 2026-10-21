@@ -3,6 +3,7 @@ import type { BoxView, RobotPanel } from '@mr-robot/protocol'
 import { TaskList } from './TaskSheets.tsx'
 import { ThreadCard } from './ChatView.tsx'
 import { CostBreakdownView } from './CostBreakdown.tsx'
+import { WorkspacePanel } from './WorkspacePanel.tsx'
 
 export interface PanelProps {
   readonly panel: RobotPanel
@@ -74,6 +75,7 @@ export function Panel({ panel, onOpenTask, onEditProfile, onOpenScreen, onAdvanc
               {panel.threads.length === 0 ? <div className="muted">No Threads.</div> : <ul className="thread-list">{panel.threads.map((thread) => <li key={thread.id}><ThreadCard thread={thread} /></li>)}</ul>}
             </>
           )}
+          {panel.canEdit && panel.settings.workspace != null ? <WorkspacePanel robotId={panel.summary.id} workspace={panel.settings.workspace} /> : null}
           {panel.box === undefined ? null : <BoxSection box={panel.box} {...(onStopBox === undefined ? {} : { onStop: onStopBox })} {...(onStopJob === undefined ? {} : { onStopJob })} now={now} />}
           <div className="panel-links">
             <button type="button" className="link" onClick={onFiles}>Files</button>

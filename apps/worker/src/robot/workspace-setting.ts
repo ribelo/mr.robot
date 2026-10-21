@@ -15,6 +15,9 @@ export const WORK_DETAILS = 'work-details'
 export const robotWorkDetails = (own: WorkDetails | undefined, setting: WorkspaceSetting | undefined): WorkDetails | undefined =>
   own ?? (setting === undefined ? undefined : 'code')
 
+/** What the Workspace panel asked gets: a JSON value, or why there is none. */
+export type WorkspacePanelAnswer = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly message: string }
+
 /** What the Host said of a root (the Stat RPC). */
 export interface RootFacts {
   readonly path: string

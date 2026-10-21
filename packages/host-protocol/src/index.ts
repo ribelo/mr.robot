@@ -459,10 +459,39 @@ export const Lsp = Rpc.make('Lsp', {
   error: HostError,
 })
 
-/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
-export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory', 'WorkspaceOpen', 'WorkspaceState', 'SkillLoad', 'CreateWorktree', 'Lsp']
+/**
+ * One directory of the Workspace for the owner's panel (v1.21 ticket 08, cw-1wrt): its entries (directories first, then files, sorted,
+ * at most LIST_DIRECTORY_MAX), `path` relative to the checkout the Robot works in (its worktree, else the root); .git is not listed.
+ */
+export const WorkspaceFiles = Rpc.make('WorkspaceFiles', {
+  payload: { path: Schema.String, access: HostAccess },
+  success: Schema.Struct({
+    path: Schema.String,
+    entries: Schema.Array(Schema.Struct({ name: Schema.String, kind: Schema.Literals(['directory', 'file', 'link', 'other']), size: Schema.NullOr(Schema.Number) })),
+    truncated: Schema.Boolean,
+  }),
+  error: HostError,
+})
 
-export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory, WorkspaceOpen, WorkspaceState, SkillLoad, CreateWorktree, Lsp) {}
+/**
+ * The repository's state for the owner's panel (cw-1wrt): the branch, `git status` and the last twenty commits of the checkout the
+ * Robot works in. The app runs git read-only with the repository's own programs off (`-c core.fsmonitor=false --no-optional-locks`,
+ * no hooks, no pager, no external diff).
+ */
+export const GitState = Rpc.make('GitState', {
+  payload: { access: HostAccess },
+  success: Schema.Struct({
+    branch: Schema.String,
+    status: Schema.Array(Schema.Struct({ code: Schema.String, path: Schema.String })),
+    log: Schema.Array(Schema.Struct({ hash: Schema.String, subject: Schema.String, author: Schema.String, at: Schema.Number })),
+  }),
+  error: HostError,
+})
+
+/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
+export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory', 'WorkspaceOpen', 'WorkspaceState', 'SkillLoad', 'CreateWorktree', 'Lsp', 'WorkspaceFiles', 'GitState']
+
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory, WorkspaceOpen, WorkspaceState, SkillLoad, CreateWorktree, Lsp, WorkspaceFiles, GitState) {}
 
 /** The sandbox state of a Host, as its heartbeat reports it. */
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])

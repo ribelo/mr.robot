@@ -1192,6 +1192,9 @@ export class Member extends DurableObject<Env> {
   hostCreateWorktree(id: string, robotId: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.CreateWorktree({ access }), 120_000, { action: 'create worktree', detail: cwd }, cwd)) }
   /** A language-server query in the Robot's Workspace (v1.21 ticket 06, cw-lx4f): zero-based position, file from the current directory. */
   hostLsp(id: string, robotId: string, input: { operation: LspOperation; file: string; line: number; character: number }, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.Lsp({ ...input, access }), 120_000, undefined, cwd)) }
+  /** The owner's Workspace panel (v1.21 ticket 08, cw-1wrt): a directory of the checkout, and git's state of it. Reads; not logged. */
+  hostWorkspaceFiles(id: string, robotId: string, path: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.WorkspaceFiles({ path, access }))) }
+  hostGitState(id: string, robotId: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.GitState({ access }))) }
   /** The body of a Host skill (cw-s2rt). */
   hostSkillLoad(id: string, robotId: string, name: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.SkillLoad({ name, access }), 30_000, { action: 'skill', detail: name }, cwd)) }
   /** The Robot moves within its Workspace (v1.21, cw-llvx): the app checks the directory; the Robot keeps it. */

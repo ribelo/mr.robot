@@ -201,6 +201,10 @@ const make = Effect.gen(function* () {
     setHostSharing: (id: string, sharing: 'private' | 'space') => send('PATCH', `/api/hosts/${enc(id)}`, { sharing }),
     unpairHost: (id: string) => send('DELETE', `/api/hosts/${enc(id)}`),
     hostActions: (id: string) => get(Schema.Array(HostAction), `/api/hosts/${enc(id)}/actions`),
+    /** The Workspace panel (v1.21, cw-1wrt). */
+    workspaceWhere: (robotId: string) => get(Schema.Struct({ cwd: Schema.String }), `/api/robots/${enc(robotId)}/workspace`),
+    workspaceFiles: (robotId: string, path: string) => get(Schema.Struct({ path: Schema.String, entries: Schema.Array(Schema.Struct({ name: Schema.String, kind: Schema.Literals(['directory', 'file', 'link', 'other']), size: Schema.NullOr(Schema.Number) })), truncated: Schema.Boolean }), `/api/robots/${enc(robotId)}/workspace/files?path=${enc(path)}`),
+    workspaceGit: (robotId: string) => get(Schema.Struct({ branch: Schema.String, status: Schema.Array(Schema.Struct({ code: Schema.String, path: Schema.String })), log: Schema.Array(Schema.Struct({ hash: Schema.String, subject: Schema.String, author: Schema.String, at: Schema.Number })) }), `/api/robots/${enc(robotId)}/workspace/git`),
     /** The Code view's calls of a page, in full from the log (v1.21, cw-sc3z). */
     toolCalls: (robotId: string, body: ToolCallsRequest) => request(ToolCallDetails, 'POST', `/api/robots/${enc(robotId)}/conversation/calls`, body),
     /** The Workspace picker (v1.21, cw-gx04): the directories in a directory of a Host the Robot holds the files facet on. */

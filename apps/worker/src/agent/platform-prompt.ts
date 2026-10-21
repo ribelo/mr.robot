@@ -22,7 +22,21 @@ export interface PromptInput {
   readonly connectionInstructions?: ReadonlyArray<{ readonly label: string; readonly instructions: string }>
   /** The platform skills this Robot is shown now (v1.15 ticket 12): the index of the platform-skills section. */
   readonly platformSkills?: ReadonlyArray<{ readonly name: string; readonly description: string }>
+  /** The Robot's Workspace (v1.21, cw-xbx3): only what does not change with a cd. */
+  readonly workspace?: PromptWorkspace
 }
+
+/** The static facts of a Workspace for the runtime section. */
+export interface PromptWorkspace {
+  readonly host: string
+  readonly root: string
+  readonly repository: string
+  readonly shell: string
+}
+
+/** The runtime section's Workspace line (cw-xbx3): the Host, the root, the repository and the shell; never the current directory. */
+export const workspaceLine = (workspace: PromptWorkspace): string =>
+  `- Workspace: ${workspace.root} on ${workspace.host} (repository ${workspace.repository}, ${workspace.shell}); use on "workspace", and working_directory for where you are in it.`
 
 export interface PlatformSection {
   readonly name: string
@@ -239,7 +253,7 @@ const docs: PlatformSection = { name: 'docs', render: () => `## ${docsIndex()}` 
  */
 const runtime: PlatformSection = {
   name: 'runtime',
-  render: ({ config, owner, capabilities, connectionInstructions }) => lines(
+  render: ({ config, owner, capabilities, connectionInstructions, workspace }) => lines(
     '## Runtime',
     `- You are ${config.identity.name}, a Robot of ${owner.name}. Your model is ${config.model.model} on ${config.model.provider}, thinking ${config.model.effort}.`,
     // The same line as the owner of my_capabilities (ux-nwi1, ux-xzdh).
@@ -247,6 +261,7 @@ const runtime: PlatformSection = {
     `- Time zone: ${config.timeZone}.`,
     `- Language: answer in the language ${owner.name} writes in; write files, notes and skills in English; USER.md may override this.`,
     capabilities !== undefined && config.status !== 'setup' && hostsOf(capabilities).length > 0 && `- Hosts: ${hostsOf(capabilities).map(hostLine).join('; ')}.`,
+    workspace !== undefined && workspaceLine(workspace),
     ...(config.status === 'setup' ? [] : (connectionInstructions ?? []).map((entry) => `- Instructions for ${entry.label}: ${entry.instructions}`)),
     capabilities !== undefined && config.status !== 'setup' && '- Your levels (call my_capabilities for what each item does):',
     capabilities !== undefined && config.status !== 'setup' && levelSummary(capabilities),

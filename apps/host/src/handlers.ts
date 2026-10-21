@@ -6,6 +6,7 @@ import * as Effect from 'effect/Effect'
 import { downloadFile, HostError, HostRpcs, uploadFile, type CopyIo, type HostAccess } from '@mr-robot/host-protocol'
 import { resolve } from 'node:path'
 import { workspaceContext } from './workspace-context.ts'
+import { checkoutFiles, gitState } from './workspace-panel.ts'
 import WebSocket from 'ws'
 import type { HostChrome } from './chrome.ts'
 import { fileSize, nodeCopyIo, sourceFile, type HostDownloads } from './copy.ts'
@@ -13,6 +14,12 @@ import { HostDisk } from './files.ts'
 import type { HostShell } from './shell.ts'
 
 const fail = (error: unknown) => new HostError({ message: error instanceof Error ? error.message : String(error), ...(typeof (error as { code?: unknown }).code === 'string' ? { code: (error as { code: string }).code } : {}) })
+
+/** The checkout a Robot works in: its worktree, else its Workspace's root. */
+const checkoutOf = (access: HostAccess): string => {
+  if (access.workspace === undefined) throw Object.assign(new Error('This call names no Workspace.'), { code: 'ENOENT' })
+  return access.workspace.worktree ?? access.workspace.root
+}
 
 /** The directory a Workspace call works in: its current directory, else the Workspace's root. */
 const where = (access: HostAccess): string => access.cwd ?? access.workspace?.root ?? '.'
@@ -104,6 +111,9 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
     WorkspaceOpen: ({ access, skillsDigest }) => Effect.tryPromise({ try: () => context(access, null, skillsDigest), catch: fail }),
     WorkspaceState: ({ access, known, skillsDigest }) => Effect.tryPromise({ try: () => context(access, known, skillsDigest), catch: fail }),
     CreateWorktree: ({ access }) => Effect.tryPromise({ try: () => shell.createWorktree(access), catch: fail }),
+    // The owner's Workspace panel (ticket 08): the checkout the Robot works in, read-only.
+    WorkspaceFiles: ({ path, access }) => Effect.tryPromise({ try: () => checkoutFiles(checkoutOf(access), path), catch: fail }),
+    GitState: ({ access }) => Effect.tryPromise({ try: () => gitState(checkoutOf(access), shell.commandEnvironment), catch: fail }),
     // Language servers (ticket 06): the Workspace's session owns them; the root is the worktree when there is one.
     Lsp: ({ operation, file, line, character, access }) => Effect.tryPromise({
       try: async (signal) => {

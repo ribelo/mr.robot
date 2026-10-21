@@ -64,12 +64,12 @@ import type { RobotHost, WorkspaceHost } from '../agent/host.ts'
 import { type NotifyHost } from '../agent/tools/notify.ts'
 import { maskSecrets, type SecretHost } from '../agent/tools/secrets.ts'
 import { type DirectoryEntry, type MessagingHost, type RobotsHost } from '../agent/tools/messaging.ts'
-import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platform-prompt.ts'
+import { PLATFORM_SECTIONS, platformPrompt, setupPrompt, type PromptWorkspace } from '../agent/platform-prompt.ts'
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { CredentialSave } from '@mr-robot/protocol'
 import type { ChainEntry, GrantLevel, SpaceSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource, WorkspaceChoice, WorkspaceSetting, ToolCallDetails, ToolCallsRequest } from '@mr-robot/protocol'
-import { checkRoot, sameWorkspace, WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace } from './workspace-setting.ts'
+import { checkRoot, sameWorkspace, WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace, type WorkspacePanelAnswer } from './workspace-setting.ts'
 import { baselineText, changesText, stateAfter, WORKSPACE_CHAIN, WORKSPACE_SKILLS, type ChainState, type SkillsState } from './workspace-context.ts'
 import { WorkspaceInstructions } from '../plugins/workspace-instructions.ts'
 import type { WorkspaceContext } from '@mr-robot/host-protocol'
@@ -2581,6 +2581,25 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * The Workspace picker (v1.21, cw-gx04): the directories in a directory of a Host, under this Robot's files facet there. A refusal (no
    * grant, offline, an app too old for a Workspace) comes back as its sentence for the settings page.
    */
+  /**
+   * The owner's Workspace panel (v1.21 ticket 08, cw-1wrt): where the Robot is (from the platform, no Host call), a directory of its
+   * checkout, or git's state of it (through the Host). A refusal (no Workspace, offline, an older app) comes back as its sentence.
+   */
+  async workspacePanel(ask: { readonly kind: 'where' } | { readonly kind: 'files'; readonly path: string } | { readonly kind: 'git' }): Promise<WorkspacePanelAnswer> {
+    const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
+    if (setting === undefined) return { ok: false, message: 'This Robot has no Workspace.' }
+    if (ask.kind === 'where') return { ok: true, value: { setting, cwd: this.directoryOf(undefined) } }
+    try {
+      const owner = await this.hostOwnerStub(setting.hostId)
+      const robotId = this.store.requireConfig().id
+      const reply: HostCallReply<unknown> = ask.kind === 'files' ? await owner.hostWorkspaceFiles(setting.hostId, robotId, ask.path) : await owner.hostGitState(setting.hostId, robotId)
+      return { ok: true, value: answerOf(reply) }
+    } catch (error) {
+      if (isHostCallError(error)) return { ok: false, message: error.message }
+      throw error
+    }
+  }
+
   async hostDirectories(hostId: string, path: string): Promise<{ readonly ok: true; readonly path: string; readonly directories: readonly string[]; readonly truncated: boolean } | { readonly ok: false; readonly message: string }> {
     try {
       const listing = answerOf(await (await this.hostOwnerStub(hostId)).hostListDirectory(hostId, this.store.requireConfig().id, path))
@@ -4477,7 +4496,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.knownCatalog === undefined ? undefined : capabilityItems(this.knownCatalog, this.store.effectiveGrants())
   }
 
-  private capabilityInput(): { capabilities?: CapabilityItem[]; connectionInstructions?: Array<{ label: string; instructions: string }>; platformSkills?: Array<{ name: string; description: string }> } {
+  private capabilityInput(): { capabilities?: CapabilityItem[]; connectionInstructions?: Array<{ label: string; instructions: string }>; platformSkills?: Array<{ name: string; description: string }>; workspace?: PromptWorkspace } {
     const items = this.capabilityItems()
     // The owner's words about each Connection this Robot holds at allow or ask (v1.15, gb-j887).
     const instructions = this.knownConnections
@@ -4487,7 +4506,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     const granted = new Set(usableNames(this.store.effectiveGrants().tools))
     const skills = config.status === 'setup' ? [] : platformSkillsFor(this.platformSkillAudience(granted)).map((skill) => ({ name: skill.name, description: skill.description }))
-    return { ...(items === undefined ? {} : { capabilities: items }), ...(instructions.length === 0 ? {} : { connectionInstructions: instructions }), ...(skills.length === 0 ? {} : { platformSkills: skills }) }
+    // The Workspace line (v1.21, cw-xbx3): static, the current directory and the worktree stay out so the prompt cache holds across a cd.
+    const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
+    const host = setting === undefined ? undefined : this.knownHosts.find((entry) => entry.id === setting.hostId)
+    const workspace: PromptWorkspace | undefined = setting === undefined ? undefined : { host: host?.name ?? setting.host, root: setting.root, repository: setting.repository, shell: host?.capabilities?.shell ?? (host?.platform === 'win32' ? 'pwsh' : 'bash') }
+    return { ...(items === undefined ? {} : { capabilities: items }), ...(instructions.length === 0 ? {} : { connectionInstructions: instructions }), ...(skills.length === 0 ? {} : { platformSkills: skills }), ...(workspace === undefined ? {} : { workspace }) }
   }
 
   /** The my_capabilities tool: the list as it is now, read fresh. */

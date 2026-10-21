@@ -350,6 +350,15 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       if (operation === 'hover') return Effect.succeed({ kind: 'hover' as const, hover: { contents: 'function greet(name: string): string' } })
       return Effect.succeed({ kind: 'locations' as const, locations: [{ uri: `file://${path}`, range: { start: { line, character }, end: { line, character: character + 5 } } }], resolvedWorkspaceUri: `file://${access.workspace?.root ?? ''}` })
     },
+    // The owner's Workspace panel (the app's tests run real git): the files under the checkout, and a fixed git state.
+    WorkspaceFiles: ({ path, access }) => {
+      const checkout = access.workspace?.worktree ?? access.workspace?.root ?? ''
+      const full = path === '' ? checkout : normal(`${checkout}/${path}`)
+      const directories = [...knownDirectories()].filter((dir) => parentOf(dir) === full && !dir.endsWith('/.git')).map((dir) => ({ name: dir.slice(full.length + 1), kind: 'directory' as const, size: null }))
+      const files = [...hostDisk.keys()].filter((file) => parentOf(file) === full).map((file) => ({ name: file.slice(full.length + 1), kind: 'file' as const, size: hostDisk.get(file)!.length }))
+      return Effect.succeed({ path, entries: [...directories.sort((a, b) => (a.name < b.name ? -1 : 1)), ...files.sort((a, b) => (a.name < b.name ? -1 : 1))], truncated: false })
+    },
+    GitState: () => Effect.succeed({ branch: 'main', status: [{ code: ' M', path: 'src/a.ts' }], log: [{ hash: 'c0ffee0000000000000000000000000000000000', subject: 'first commit', author: 'Anna', at: 1_790_000_000_000 }] }),
     SkillLoad: ({ name, access }) => {
       const repository = access.workspace?.repository ?? ''
       for (const path of [`${repository}/.agents/skills/${name}/SKILL.md`, `${FAKE_HOME}/.agents/skills/${name}/SKILL.md`]) {

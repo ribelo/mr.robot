@@ -131,6 +131,16 @@ const TIME_ZONE_HEADER = 'X-Time-Zone'
 
 const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
 
+/** One read of the Workspace panel: the owner's; a refusal is a 409 with its sentence. */
+function workspacePanel(c: ApiContext, id: string, ask: { kind: 'where' } | { kind: 'files'; path: string } | { kind: 'git' }) {
+  return Effect.gen(function* () {
+    yield* owner(c, id)
+    type Answer = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly message: string }
+    const answer = yield* call((): Promise<Answer> => robot(c, id).workspacePanel(ask))
+    return answer.ok ? answer.value : yield* Effect.fail(conflict(answer.message))
+  })
+}
+
 /** A list of the whole Space: scope=space ('home' from a client before v1.18, for one release). */
 function wholeSpaceAsked(query: URLSearchParams): boolean {
   const scope = query.get('scope')
@@ -438,6 +448,10 @@ export const api = new Router<ApiContext>()
     const listing = yield* call((): Promise<Listing> => robot(c, id).hostDirectories(host, new URL(c.request.url).searchParams.get('path') ?? '~'))
     return listing.ok ? { path: listing.path, directories: listing.directories, truncated: listing.truncated } : yield* Effect.fail(conflict(listing.message))
   }))
+  // The Workspace panel (v1.21 ticket 08, cw-1wrt): where the Robot is, a directory of its checkout, git's state. The owner's.
+  .on('GET', '/api/robots/:id/workspace', (c, { id }) => workspacePanel(c, id, { kind: 'where' }))
+  .on('GET', '/api/robots/:id/workspace/files', (c, { id }) => workspacePanel(c, id, { kind: 'files', path: new URL(c.request.url).searchParams.get('path') ?? '' }))
+  .on('GET', '/api/robots/:id/workspace/git', (c, { id }) => workspacePanel(c, id, { kind: 'git' }))
   // Robot definitions (v1.18 ticket 04): Save as definition, the library's list, and the directory to commit by hand.
   .on('POST', '/api/robots/:id/definition', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
