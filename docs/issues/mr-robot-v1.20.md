@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.20 — Memory that works at night: the snapshot before compaction, warming then closing, search instead of injection, people pages, dreaming"
-status: ready-for-agent
+status: done
 story-prefix: dm
 parent: mr-robot-v1.19.md
 ---

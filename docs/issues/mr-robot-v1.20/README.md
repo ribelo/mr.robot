@@ -11,4 +11,4 @@ Spec: ../mr-robot-v1.20.md. Needs v1.18 (sweep, file history) and v1.19 (chapter
 | 04 | [People pages](04-people-pages.md) | 03 | done |
 | 05 | [Dreaming](05-dreaming.md) | 01, 02, 03 | done |
 | 06 | [Mr. Robot as steward](06-chief-steward.md) | 04, 05 | done |
-| 07 | [Glossary and docs](07-glossary-docs.md) | 01, 02, 03, 04, 05, 06 | ready-for-agent |
+| 07 | [Glossary and docs](07-glossary-docs.md) | 01, 02, 03, 04, 05, 06 | done |

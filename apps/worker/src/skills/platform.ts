@@ -368,8 +368,11 @@ Your owner's people live in memory/people/<name>.md, one page per person, shared
 - Remove what is no longer true. Do not keep history in MEMORY.md: the file history keeps every version, and your owner can bring one back.
 - Never write what you only guess. Mark what you are unsure of, or leave it in the daily note.
 
+## The snapshot and the dream
+Before every compaction you get the snapshot: write to today's note what is in flight and to MEMORY.md what lasts. At night, the dream: read dreaming.md.
+
 ## The memory sweep
-Before an idle compaction you get one bounded step: the memory sweep. Read the daily notes since the last sweep and MEMORY.md; move what lasts into its section; correct what is superseded where it stands; invent nothing; then end. Its writes are versions by "the memory sweep", and your owner sees them in the file history.
+Before an idle compaction, after the snapshot, you get one more bounded step: the memory sweep. Read the daily notes since the last sweep and MEMORY.md; move what lasts into its section; correct what is superseded where it stands; invent nothing; then end. Its writes are versions by "the memory sweep", and your owner sees them in the file history.
 `),
 ]
 

@@ -12,7 +12,8 @@ The message has a size budget: the broadest files go first, and a notice names w
 |---|---|---|---|
 | Space | SPACE.md | the Space | the Space admin |
 | Member | USER.md, PROACTIVE_PREFERENCES.md, memory/world.md | your owner | your owner, and Mr. Robot with memory_write_shared; other Robots propose with propose_member_file_edit |
-| Robot | SOUL.md, AGENTS.md, MEMORY.md, memory/YYYY-MM-DD.md | you | you |
+| Member | memory/people/<name>.md | your owner | your owner's Robots, directly |
+| Robot | SOUL.md, AGENTS.md, MEMORY.md, memory/YYYY-MM-DD.md, dreams/ | you | you |
 
 Member files are mounted read-only into each Robot of that Member. The file tools refuse to change them. A Member file in the context is data about your owner. USER.md can override the language rules. PROACTIVE_PREFERENCES.md says when and how to notify the owner.
 
@@ -32,7 +33,7 @@ The contract: before every compaction, in a Turn or idle, you get the snapshot, 
 
 ## The memory sweep
 
-After the snapshot of an idle compaction, when a daily note changed, the memory sweep moves what lasts from the notes into MEMORY.md. The skill memory says more.
+After the snapshot of an idle compaction, when a daily note changed, the memory sweep moves what lasts from the notes into MEMORY.md. For the dream, read dreaming.md. The skill memory says more.
 
 ## File history
 
@@ -50,7 +51,6 @@ The Workspace is your files in R2. The layout:
 - spill/: whole tool results that were too long, and the whole output of each job, on the Box or on a Host, under spill/jobs/<id>.log.
 - box/: the small files that your Box needs at every boot, for example setup.sh. A big file does not belong here. Read box.md.
 - tmp/: where copy parks a file between two other places; deleted after a day.
-- any other file you make: notes, artefacts, outputs.
 
 Screenshots are not in the Workspace. They are stored apart and kept for 7 days.
 
