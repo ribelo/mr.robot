@@ -425,6 +425,11 @@ export class Robot extends ProductionRobot {
 
   /** Skip the setup interview: the Robot becomes active with its current Grants. */
   /** The chain's resume time came (as the alarm sees it). */
+  /** This month's tokens per usage source (v1.20 ticket 01). */
+  async usageBySourceForTest(): Promise<Record<string, number>> {
+    return Object.fromEntries(this.store.sql.exec<{ source: string; tokens: number }>('SELECT source, SUM(input_tokens + output_tokens) AS tokens FROM usage GROUP BY source').toArray().map((row) => [row.source, row.tokens]))
+  }
+
   async resumeChainDueForTest(): Promise<number | null> {
     const at = this.store.get<number>('chain-resume-at') ?? null
     if (at !== null) this.store.set('chain-resume-at', 1)
@@ -554,6 +559,12 @@ export class Robot extends ProductionRobot {
   }
 
   /** The next idle moment is now, and the alarm with it. */
+  /** An idle compaction is planned and due now. */
+  async planIdleForTest(): Promise<void> {
+    this.store.set('idle-plan', [{ at: Date.now() - 1, action: 'compact' }])
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
+  }
+
   async idleDueForTest(): Promise<void> {
     const plan = this.store.get<Array<{ at: number; action: string }>>('idle-plan') ?? []
     if (plan.length > 0) this.store.set('idle-plan', [{ ...plan[0]!, at: Date.now() - 1 }, ...plan.slice(1)])

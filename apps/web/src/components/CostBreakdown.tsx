@@ -5,10 +5,11 @@ const usd = (amount: number): string => `$${amount.toFixed(2)}`
 /** The lines of a month's cost by source (ao-zbld); a model line other than the Robot's own shows only when it cost something. */
 export function costLines(breakdown: CostBreakdown): Array<{ label: string; amount: number; sub?: true }> {
   return [
-    { label: 'Model', amount: breakdown.model.robot + breakdown.model.review + breakdown.model.subagent },
-    ...(breakdown.model.review > 0 || breakdown.model.subagent > 0 ? [{ label: 'Robot', amount: breakdown.model.robot, sub: true as const }] : []),
+    { label: 'Model', amount: breakdown.model.robot + breakdown.model.review + breakdown.model.subagent + breakdown.model.memory },
+    ...(breakdown.model.review > 0 || breakdown.model.subagent > 0 || breakdown.model.memory > 0 ? [{ label: 'Robot', amount: breakdown.model.robot, sub: true as const }] : []),
     ...(breakdown.model.review > 0 ? [{ label: 'Auto review', amount: breakdown.model.review, sub: true as const }] : []),
     ...(breakdown.model.subagent > 0 ? [{ label: 'Subagents', amount: breakdown.model.subagent, sub: true as const }] : []),
+    ...(breakdown.model.memory > 0 ? [{ label: 'Memory', amount: breakdown.model.memory, sub: true as const }] : []),
     { label: 'Browser', amount: breakdown.browser },
     { label: 'Box', amount: breakdown.box },
     { label: 'Services', amount: breakdown.services },

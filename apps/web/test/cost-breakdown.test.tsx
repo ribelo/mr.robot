@@ -11,7 +11,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const breakdown: CostBreakdown = { model: { robot: 1.2, review: 0.1, subagent: 0.3 }, browser: 0.09, box: 0.05, services: 0.25, total: 1.99 }
+const breakdown: CostBreakdown = { model: { robot: 1.2, review: 0.1, subagent: 0.3, memory: 0 }, browser: 0.09, box: 0.05, services: 0.25, total: 1.99 }
 const identity = { name: 'Sales', title: '', description: '', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }
 const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity, lastLine: '', lastAt: 0, unread: false } as const
 const usage = { month: '2026-10', inputTokens: 1000, outputTokens: 100, costUsd: 1.99, breakdown, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } } as const

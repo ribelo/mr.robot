@@ -14,6 +14,8 @@ export const FileAuthor = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('chief'), name: Schema.String }),
   /** The memory sweep before an idle compaction (v1.18 ticket 03). */
   Schema.Struct({ kind: Schema.Literal('sweep') }),
+  /** The snapshot before a compaction (v1.20 ticket 01). */
+  Schema.Struct({ kind: Schema.Literal('snapshot') }),
   /** A person brought an earlier version back. */
   Schema.Struct({ kind: Schema.Literal('restore'), name: Schema.String, version: Schema.String }),
   /** Templates and migrations. */
@@ -30,6 +32,7 @@ export function authorLabel(author: FileAuthor): string {
     case 'person': return author.name
     case 'chief': return author.name
     case 'sweep': return 'the memory sweep'
+    case 'snapshot': return 'the snapshot'
     case 'restore': return `${author.name} (restored an earlier version)`
     case 'platform': return 'the platform'
     case 'unknown': return 'unknown (before file history)'

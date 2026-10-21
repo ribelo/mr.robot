@@ -5,7 +5,7 @@ Spec: ../mr-robot-v1.20.md. Needs v1.18 (sweep, file history) and v1.19 (chapter
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
 | 00 | [The duty seam, the bounded-step helper, and the moves out of robot.ts](00-duty-seam-and-plugins.md) | — | done |
-| 01 | [The bounded-step helper and the snapshot plugin](01-snapshot.md) | 00 | ready-for-agent |
+| 01 | [The bounded-step helper and the snapshot plugin](01-snapshot.md) | 00 | done |
 | 02 | [Warming, then closing](02-warming-then-closing.md) | 01 | ready-for-agent |
 | 03 | [memory_search and the end of note injection](03-memory-search.md) | 00 | ready-for-agent |
 | 04 | [People pages](04-people-pages.md) | 03 | ready-for-agent |

@@ -1,6 +1,11 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 
+type CompactionTrigger = Parameters<BasicCompactionEngine['compactIfNeeded']>[1]
+
+/** A pressure compaction put off for the snapshot. */
+class PutOff extends Error {}
+
 type SummarizeInput = Parameters<BasicCompactionEngine['summarize']>[0]
 type SummarizeResult = Awaited<ReturnType<BasicCompactionEngine['summarize']>>
 
@@ -24,9 +29,38 @@ export function compactionConfig(budget: number, modelWindow?: number): { headro
  * instruction rides as the last conversation message before DSH's summarization directive,
  * so it shapes what the checkpoint keeps without breaking the provider's prefix cache.
  */
-export function robotCompaction(instruction: string, onCompacted?: (sessionId: string) => void): typeof BasicCompactionEngine {
-  // Headroom is set by compose() from the budget; the instruction is the only behaviour change.
+export function robotCompaction(instruction: string, onCompacted?: (sessionId: string) => void, beforeCompaction?: (agent: Agent) => boolean): typeof BasicCompactionEngine {
+  // Headroom is set by compose() from the budget.
   return class RobotCompaction extends BasicCompactionEngine {
+    private trigger: CompactionTrigger | undefined
+    /** Asked once per decision: DSH's retries within one compactIfNeeded do not ask again. */
+    private asked = false
+
+    /**
+     * The snapshot (v1.20 ticket 01, dm-kg1p): when DSH has decided that pressure compacts now, the Robot is asked first. If it starts
+     * its snapshot, this compaction is put off and the next step boundary asks again; an overflow is never put off.
+     */
+    override async compactIfNeeded(agent: Agent, trigger: CompactionTrigger, signal: AbortSignal): ReturnType<BasicCompactionEngine['compactIfNeeded']> {
+      this.trigger = trigger
+      this.asked = false
+      try {
+        return await super.compactIfNeeded(agent, trigger, signal)
+      } catch (error) {
+        if (error instanceof PutOff) return null
+        throw error
+      } finally {
+        this.trigger = undefined
+      }
+    }
+
+    override compactRegion(...args: Parameters<BasicCompactionEngine['compactRegion']>): ReturnType<BasicCompactionEngine['compactRegion']> {
+      if (this.trigger === 'pressure' && !this.asked) {
+        this.asked = true
+        if (beforeCompaction?.(args[2]) === true) return Promise.reject(new PutOff())
+      }
+      return super.compactRegion(...args)
+    }
+
     protected override async summarize(input: SummarizeInput, agent: Agent, signal?: AbortSignal): Promise<SummarizeResult> {
       const result = await this.summarizeWithInstruction(input, agent, signal)
       onCompacted?.(String(agent.session.id))

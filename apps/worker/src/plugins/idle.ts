@@ -2,7 +2,8 @@
  * The Idle plugin (v1.14 ticket 09, moved out of robot.ts in v1.20 ticket 00): cache warming and idle compaction, as a duty on the
  * Robot's alarm. When a Turn ends with an empty queue the Robot plans its idle moments (robot/idle.ts); a Wake-up drops the plan.
  * A warming replays the last request for one output token; an idle compaction first runs the memory sweep (v1.18), a bounded
- * platform step, when a daily note changed since the last sweep, then compacts on the warm prefix and closes the chapter.
+ * platform step, when a daily note changed since the last sweep, then compacts on the warm prefix and closes the chapter. Before the
+ * sweep comes the snapshot (v1.20, snapshot.ts) when the chapter has events since the last snapshot or sweep: snapshot, sweep, compaction.
  */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -15,6 +16,7 @@ import { IDLE_MEMORY_STEPS, idlePlan, idleSettings, memorySweepNote, type IdleSt
 import type { RobotConfig, RobotStore } from '../robot/store.ts'
 import type { WorkspaceEntry } from '../workspace/workspace.ts'
 import type { FileAuthor } from '../workspace/file-history.ts'
+import { eventsSinceMark, MEMORY_STEP_TOOLS, setMemoryMark, SNAPSHOT_NOTE, SNAPSHOT_RECORD, SNAPSHOT_STEPS, workspaceOnly } from './snapshot.ts'
 
 /** The kv key of the idle plan: the moments left for warming or idle compaction. */
 export const IDLE_PLAN = 'idle-plan'
@@ -26,8 +28,6 @@ const SWEPT_AT = 'memory-swept-at'
 export const SWEEP_RECORD = 'plugin:mr-robot/memory-sweep'
 /** A warming much later than planned finds the cache gone: it is skipped. */
 const IDLE_LATE_MS = 5 * 60_000
-/** The file tools the sweep may use: on the Workspace only (the gate's fence). */
-export const MEMORY_STEP_TOOLS: ReadonlySet<string> = new Set(['read', 'write', 'edit', 'glob', 'grep'])
 
 /** What the Idle plugin asks of its Robot. */
 export interface IdleHost {
@@ -111,6 +111,29 @@ async function idleCompact(host: IdleHost): Promise<void> {
   const config = store.requireConfig()
   const { agent, ctx } = await host.agent()
   if (ctx.tokenMeter.measure(agent.session).totalTokens < idleSettings(config).idleCompactionFloorTokens) return
+  // Files a memory step wrote: the Trajectory names them (rm-hhxa, dm-r6km); each is a version by that step.
+  const writtenBy = async (kind: 'sweep' | 'snapshot', since: number) => {
+    const changed: string[] = []
+    for (const entry of await host.list('')) {
+      if (!host.isTracked(entry.path)) continue
+      const { by, at } = await host.writerOf(entry.path, entry.uploaded)
+      if (by.kind === kind && at >= since) changed.push(entry.path)
+    }
+    return changed
+  }
+  if (eventsSinceMark(store, config.liveSessionId, host.step.storedLength())) {
+    const started = Date.now()
+    await platformStep(agent, host.step, {
+      label: 'the snapshot',
+      instruction: wakeupMessage({ sender: { kind: 'platform' }, text: SNAPSHOT_NOTE, summary: 'Idle: snapshot before compaction', woke: { at: started, timeZone: config.timeZone } }),
+      steps: SNAPSHOT_STEPS,
+      tools: MEMORY_STEP_TOOLS,
+      args: workspaceOnly,
+      author: { kind: 'snapshot' },
+      usage: 'memory',
+      record: async () => ({ type: SNAPSHOT_RECORD, data: { paths: await writtenBy('snapshot', started) } }),
+    })
+  }
   const sweptAt = store.get<number>(SWEPT_AT) ?? 0
   const notes = (await host.list('memory')).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > sweptAt).map((entry) => entry.path).sort()
   if (notes.length > 0) {
@@ -120,21 +143,14 @@ async function idleCompact(host: IdleHost): Promise<void> {
       instruction: wakeupMessage({ sender: { kind: 'platform' }, text: memorySweepNote(notes), summary: 'Idle: memory sweep before compaction', woke: { at: started, timeZone: config.timeZone } }),
       steps: IDLE_MEMORY_STEPS,
       tools: MEMORY_STEP_TOOLS,
+      args: workspaceOnly,
       author: { kind: 'sweep' },
-      usage: 'robot',
-      // The Trajectory names what the sweep changed (rm-hhxa); each change is a version by the sweep in the file history.
-      record: async () => {
-        const changed: string[] = []
-        for (const entry of await host.list('')) {
-          if (!host.isTracked(entry.path)) continue
-          const { by, at } = await host.writerOf(entry.path, entry.uploaded)
-          if (by.kind === 'sweep' && at >= started) changed.push(entry.path)
-        }
-        return { type: SWEEP_RECORD, data: { notes, changed } }
-      },
+      usage: 'memory',
+      record: async () => ({ type: SWEEP_RECORD, data: { notes, changed: await writtenBy('sweep', started) } }),
     })
     store.set(SWEPT_AT, started)
   }
+  setMemoryMark(store, config.liveSessionId, host.step.storedLength())
   if (store.activeTurn() === undefined && store.pendingWakeups() === 0) {
     const startSeq = host.step.storedLength()
     await ctx.compaction.compactNow(agent, AbortSignal.timeout(300_000)).catch((error: unknown) => console.warn('idle compaction did not run', error))

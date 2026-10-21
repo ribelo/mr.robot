@@ -23,7 +23,7 @@ const panel: RobotPanel = {
   },
   tasks: [],
   screen: { path: 'screens/last.png', url: '/api/robots/r-1/screen', at: 0 },
-  usage: { month: '2026-10', inputTokens: 12000, outputTokens: 3000, costUsd: 0.42, breakdown: { model: { robot: 0.42, review: 0, subagent: 0 }, browser: 0, box: 0, services: 0, total: 0.42 }, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } },
+  usage: { month: '2026-10', inputTokens: 12000, outputTokens: 3000, costUsd: 0.42, breakdown: { model: { robot: 0.42, review: 0, subagent: 0, memory: 0 }, browser: 0, box: 0, services: 0, total: 0.42 }, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } },
   canEdit: true,
   takeover: null,
 }

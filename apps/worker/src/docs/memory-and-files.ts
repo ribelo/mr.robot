@@ -26,13 +26,17 @@ A Robot edits its own files freely. When it changes SOUL.md, it tells the owner.
 - Never write passwords, tokens or other credentials in a file.
 - Write files, notes and skills in English, unless USER.md says otherwise.
 
+## The snapshot
+
+The contract: before every compaction, in a Turn or idle, you get the snapshot, one bounded step. It is skipped when nothing happened in the chapter since the last snapshot or sweep. Its instruction: "Compaction is about to replace your context with a summary. Write to your daily note what is in flight (what you are doing, what remains, what you decided) and to MEMORY.md what lasts. Do not reply to the owner. Then end." In a Turn, it ends: then go on with your work. It has 3 model steps and only the file tools on the Workspace. Its writes are versions by the snapshot; the Trajectory names the files; its cost is memory's.
+
 ## The memory sweep
 
-Before an idle compaction you get one bounded step, the memory sweep, when a daily note changed since the last one. Read the changed notes and MEMORY.md, move what lasts into its section, correct what is superseded, invent nothing, then stop. The skill memory says more.
+After the snapshot of an idle compaction, when a daily note changed, the memory sweep moves what lasts from the notes into MEMORY.md. The skill memory says more.
 
 ## File history
 
-Every write to a Persona file, a daily note, a Member file or SPACE.md keeps the version it replaces, with who wrote it: you, a person, Mr. Robot, the memory sweep or a restore. The owner sees the history in the Files view and can restore a version; you get a note naming the restore. The last 50 versions of a file are kept, for 90 days. You cannot read or change the history.
+Every write to a Persona file, a daily note, a Member file or SPACE.md keeps the old version and its author. The owner can restore a version; you get a note. 50 versions per file are kept, for 90 days.
 
 ## The Workspace
 
@@ -45,7 +49,7 @@ The Workspace is your files in R2. The layout:
 - docs/: the product docs, and the platform skills under docs/skills/<name>/SKILL.md. The platform owns this folder. It is read-only. You cannot write, edit or delete there. A deploy updates it. Start over and Reset everything never remove it.
 - spill/: whole tool results that were too long, and the whole output of each job, on the Box or on a Host, under spill/jobs/<id>.log.
 - box/: the small files that your Box needs at every boot, for example setup.sh. A big file does not belong here. Read box.md.
-- tmp/: a file that copy parks here while it moves between two places other than the Workspace. It is deleted when the copy ends; anything in tmp/ older than a day is deleted too.
+- tmp/: where copy parks a file between two other places; deleted after a day.
 - any other file you make: notes, artefacts, outputs.
 
 Screenshots are not in the Workspace. They are stored apart and kept for 7 days.
@@ -56,5 +60,5 @@ The file tools are read, write, edit, delete_file, glob and grep, and copy moves
 
 ## Files view
 
-The owner sees the Workspace in the Files view. Persona files are first, then daily notes, skills, Pages (with Open as Page) and other files. The owner can open, edit, save and delete a file. A save by the owner reaches you as a note at your next Turn. The docs show as read-only.
+The owner sees the Workspace in the Files view and can open, edit, save and delete a file. A save by the owner reaches you as a note at your next Turn.
 `

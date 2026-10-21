@@ -1404,12 +1404,13 @@ export const ModelOption = Schema.Struct({
 export type ModelOption = typeof ModelOption.Type
 
 /** Where a cost comes from (v1.14, ao-zbld): the model (the Robot, its reviewer, its Subagents), the browser, the Box, paid services. */
-export const UsageSource = Schema.Literals(['robot', 'review', 'subagent', 'browser', 'box', 'services'])
+/** memory: the steps that tend memory, the snapshot, the sweep and the dream (v1.20, dm-pifl). */
+export const UsageSource = Schema.Literals(['robot', 'review', 'subagent', 'memory', 'browser', 'box', 'services'])
 export type UsageSource = typeof UsageSource.Type
 
 /** A month's cost by source, in USD, with the total (ao-zbld, ao-nkkb). */
 export const CostBreakdown = Schema.Struct({
-  model: Schema.Struct({ robot: Schema.Number, review: Schema.Number, subagent: Schema.Number }),
+  model: Schema.Struct({ robot: Schema.Number, review: Schema.Number, subagent: Schema.Number, memory: Schema.Number }),
   browser: Schema.Number,
   box: Schema.Number,
   services: Schema.Number,
@@ -1420,9 +1421,9 @@ export type CostBreakdown = typeof CostBreakdown.Type
 /** The breakdown of cost rows; a source without rows costs 0. */
 export function costBreakdown(rows: ReadonlyArray<{ readonly source: UsageSource; readonly costUsd: number }>): CostBreakdown {
   const of = (source: UsageSource) => rows.filter((row) => row.source === source).reduce((sum, row) => sum + row.costUsd, 0)
-  const model = { robot: of('robot'), review: of('review'), subagent: of('subagent') }
+  const model = { robot: of('robot'), review: of('review'), subagent: of('subagent'), memory: of('memory') }
   const [browser, box, services] = [of('browser'), of('box'), of('services')]
-  return { model, browser, box, services, total: model.robot + model.review + model.subagent + browser + box + services }
+  return { model, browser, box, services, total: model.robot + model.review + model.subagent + model.memory + browser + box + services }
 }
 
 export const UsageView = Schema.Struct({

@@ -42,6 +42,8 @@ export interface CompositionInput {
   readonly compactionInstruction: string
   /** Called after a compaction replaced a session's context with a checkpoint (the Robot's or a Subagent's). */
   readonly onCompacted?: (sessionId: string) => void
+  /** Asked when pressure compacts in a Turn: true puts it off for the snapshot (compaction.ts). */
+  readonly beforeCompaction?: (agent: Agent) => boolean
   /** The Robot's platform-step fence: while a step runs, only its tools run (platform-step.ts). */
   readonly fence?: StepFence
   /** The model's output as it streams (pl-jzr7): text and thinking deltas, start and end of an attempt. */
@@ -113,7 +115,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     await ctx.plugin(gatedToolRuntime(() => gate), {})
     // While a platform step runs, a call of a tool it does not allow is denied before the tool body (platform-step.ts).
     const fence = input.fence
-    if (fence !== undefined) ctx.tools.guard((execution) => fence.refusal(execution.name))
+    if (fence !== undefined) ctx.tools.guard((execution) => fence.refusal(execution.name, (execution.arguments ?? {}) as Readonly<Record<string, unknown>>))
     for (const { plugin, config, gate: mountGate } of input.mounts) {
       gate = mountGate
       try {
@@ -126,7 +128,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
     await ctx.plugin(WorkspaceSpillStore, input.spill)
     await ctx.plugin(SpillPolicy, { maxInlineTokens: maxInlineTokens(input.contextBudget) })
-    await ctx.plugin(robotCompaction(input.compactionInstruction, input.onCompacted), compactionConfig(input.contextBudget, input.modelWindow))
+    await ctx.plugin(robotCompaction(input.compactionInstruction, input.onCompacted, input.beforeCompaction), compactionConfig(input.contextBudget, input.modelWindow))
     await ctx.plugin(AgentRegistry)
     if (input.onStream !== undefined) {
       const onStream = input.onStream

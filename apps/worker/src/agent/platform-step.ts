@@ -10,25 +10,46 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { UsageSource } from '@mr-robot/protocol'
 import type { FileAuthor } from '../workspace/file-history.ts'
 
+type ArgsCheck = (tool: string, args: Readonly<Record<string, unknown>>) => string | undefined
+
 /** The tools a platform step may call: every other one fails with a plain reason while it runs. */
 export class StepFence {
   private allowed: ReadonlySet<string> | undefined
   private label = ''
+  private argsCheck: ArgsCheck | undefined
+  private steps = 0
 
-  /** While a step runs: the tool names it allows. */
-  open(label: string, tools: ReadonlySet<string>): void {
+  /** A platform step runs now (with or without an allow-list). */
+  inStep(): boolean {
+    return this.steps > 0
+  }
+
+  enter(): void {
+    this.steps += 1
+  }
+
+  leave(): void {
+    this.steps = Math.max(0, this.steps - 1)
+  }
+
+  /** While a step runs: the tool names it allows, and a check of a call's arguments. */
+  open(label: string, tools: ReadonlySet<string>, argsCheck?: ArgsCheck): void {
     this.label = label
     this.allowed = tools
+    this.argsCheck = argsCheck
   }
 
   close(): void {
     this.allowed = undefined
+    this.argsCheck = undefined
   }
 
-  /** Why this tool may not run now: a step runs and does not allow it; undefined when it may. */
-  refusal(tool: string): string | undefined {
-    if (this.allowed === undefined || this.allowed.has(tool)) return undefined
-    return `${tool} is not available during ${this.label}; use only ${[...this.allowed].join(', ') || 'no tool'}.`
+  /** Why this call may not run now: a step runs and does not allow it; undefined when it may. */
+  refusal(tool: string, args: Readonly<Record<string, unknown>> = {}): string | undefined {
+    if (this.allowed === undefined) return undefined
+    if (!this.allowed.has(tool)) return `${tool} is not available during ${this.label}; use only ${[...this.allowed].join(', ') || 'no tool'}.`
+    const refused = this.argsCheck?.(tool, args)
+    return refused === undefined ? undefined : `${tool} during ${this.label}: ${refused}.`
   }
 }
 
@@ -53,6 +74,8 @@ export interface PlatformStep {
   readonly steps: number
   /** The tools it may call; undefined: the Robot's tools as in a Turn. */
   readonly tools?: ReadonlySet<string>
+  /** A check of an allowed tool's arguments (the Workspace only, for example). */
+  readonly args?: ArgsCheck
   /** Who its Workspace writes are by; undefined: the Robot. */
   readonly author?: FileAuthor
   /** The usage source it is booked under; undefined: the Turn it runs in books it. */
@@ -68,14 +91,16 @@ export async function platformStep(agent: Agent, host: PlatformStepHost, step: P
   const stop = host.onEvent((session, event) => {
     if (session === agent.session && event.type === 'step/start' && ++steps >= step.steps) agent.cancel({ kind: 'user' }, { keepInbox: true })
   })
-  if (step.tools !== undefined) host.fence.open(step.label, step.tools)
+  host.fence.enter()
+  if (step.tools !== undefined) host.fence.open(step.label, step.tools, step.args)
   host.writeAs(step.author)
   try {
     agent.followup(step.instruction)
     await agent.whenIdle()
   } finally {
     stop()
-    host.fence.close()
+    host.fence.leave()
+    if (step.tools !== undefined) host.fence.close()
     host.writeAs(undefined)
   }
   const record = await step.record?.(startSeq)

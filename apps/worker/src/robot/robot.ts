@@ -177,8 +177,9 @@ import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import { Duties } from './duties.ts'
-import { StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
+import { platformStep, StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
 import { idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
+import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
 import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
 import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
 import { boxIdleDuty } from '../plugins/places.ts'
@@ -234,10 +235,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private readonly duties = new Duties()
   /** The tools a running platform step allows (platform-step.ts). */
   private readonly fence = new StepFence()
+  /** The snapshot of a Turn that pressure would compact (plugins/snapshot.ts). */
+  private readonly turnSnapshot: TurnSnapshot
+
+  private makeTurnSnapshot(): TurnSnapshot {
+    return new TurnSnapshot({
+    store: this.store,
+    step: this.stepHost(),
+    liveSessionId: () => this.store.requireConfig().liveSessionId,
+    timeZone: () => this.store.requireConfig().timeZone,
+    writtenSince: (since) => this.writtenBy('snapshot', since),
+    background: (work) => this.ctx.waitUntil(work.catch((error: unknown) => console.warn('snapshot record not written', error))),
+    })
+  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.store = new RobotStore(ctx.storage)
+    this.turnSnapshot = this.makeTurnSnapshot()
     // An existing Mr. Robot gets the default compaction instruction once, unless one was set (rb-yagl).
     const existing = this.store.config()
     if (existing?.kind === 'mr-robot' && this.store.get('mr-compaction-default') === undefined) {
@@ -755,6 +770,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A block is remembered for its own Turn only (rb-kank).
     this.blockedThisTurn.clear()
     const turn = this.store.activeTurn()
+    // A snapshot still running when its Turn ends ends with it.
+    this.turnSnapshot.finish()
     this.store.endTurn(wakeup.id)
     this.store.delete(QUIET_DUE)
     await this.afterTurn(wakeup, turn)
@@ -1314,6 +1331,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.search.track(next, seed.inheritedEventCount)
       this.store.chapters.close(from, 'compaction', now, events)
       this.store.openChapter(next, { sessionId: from, seq: events.length - 1 }, seed.inheritedEventCount, now, seed.events.length)
+      // The new chapter's seed is not an event to snapshot (v1.20).
+      setMemoryMark(this.store, next, seed.events.length)
       if (this.store.get<string>('memory-baseline') === from) this.store.set('memory-baseline', next)
       this.store.delete(CHAPTER_COMPACTED)
       this.store.updateConfig(() => ({ liveSessionId: next }), false)
@@ -1858,20 +1877,36 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Add one Turn's tokens and cost to this Robot's and its owner's monthly counters. */
   private async accountTurn(startSeq: number, source: UsageSource = 'robot'): Promise<void> {
     const config = this.store.requireConfig()
-    let input = 0
-    let output = 0
-    let cached = 0
+    // An in-Turn snapshot's events are booked under memory (v1.20, dm-pifl).
+    const ranges = (this.store.get<MemoryRange[]>(MEMORY_RANGES) ?? []).filter((range) => range.sessionId === config.liveSessionId)
+    this.store.delete(MEMORY_RANGES)
+    const sums = new Map<UsageSource, { input: number; output: number; cached: number }>()
     for (const event of readStoredEvents(this.ctx.storage.sql, config.liveSessionId, startSeq)) {
       const usage = (event.data as { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } }).usage
       if (usage === undefined) continue
-      input += usage.inputTokens ?? 0
-      output += usage.outputTokens ?? 0
-      cached += usage.cacheReadTokens ?? 0
+      const bucket: UsageSource = ranges.some((range) => event.seq >= range.from && event.seq < range.to) ? 'memory' : source
+      const sum = sums.get(bucket) ?? { input: 0, output: 0, cached: 0 }
+      sums.set(bucket, { input: sum.input + (usage.inputTokens ?? 0), output: sum.output + (usage.outputTokens ?? 0), cached: sum.cached + (usage.cacheReadTokens ?? 0) })
     }
-    if (input === 0 && output === 0) return
+    if (sums.size === 0) return
     const price = (await this.space().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.price
-    const cost = price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000
-    await this.recordUsage(source, input, output, cost)
+    for (const [bucket, { input, output, cached }] of sums) {
+      if (input === 0 && output === 0) continue
+      const cost = price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000
+      await this.recordUsage(bucket, input, output, cost)
+    }
+  }
+
+  /** The tracked Workspace files a memory step wrote since a moment, by their author in the file history. */
+  private async writtenBy(kind: 'snapshot' | 'sweep', since: number): Promise<string[]> {
+    const id = this.store.requireConfig().id
+    const changed: string[] = []
+    for (const entry of await this.run(this.workspace.list(''))) {
+      if (!isTrackedFile(entry.path)) continue
+      const { by, at } = authorOf((await this.env.FILES.head(`${workspacePrefix(id)}${entry.path}`))?.customMetadata, entry.uploaded)
+      if (by.kind === kind && at >= since) changed.push(entry.path)
+    }
+    return changed
   }
 
   /** One cost on this Robot's and its owner's monthly counters, under its source (ao-zbld). */
@@ -1944,10 +1979,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       // A compacted context lost the memory baseline; the next step brings it back fresh (pl-552r). The Robot's own compaction
       // also closes its chapter once nothing runs in it (v1.19, ec-srfn).
       fence: this.fence,
+      beforeCompaction: (agent) => this.turnSnapshot.beforeCompaction(agent),
       onCompacted: (sessionId) => {
         if (sessionId.startsWith('sa-')) return this.store.delete(`memory-baseline:${sessionId}`)
         this.store.delete('memory-baseline')
         if (sessionId === this.store.requireConfig().liveSessionId) this.store.set(CHAPTER_COMPACTED, sessionId)
+        this.turnSnapshot.compacted()
       },
       onStream: (frame) => this.streamed(frame),
       onRequest: (options) => {
@@ -3649,18 +3686,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       if (file !== undefined) await this.run(ws.write(`${draft}/${path}`, file.body, file.contentType, { kind: 'platform' }))
     }
     // The owner scrub: one bounded step of the Robot on its own model (rm-gv6s).
-    const { agent, ctx } = await this.agent()
-    let steps = 0
-    const stop = ctx.on('session/event', (session, event) => {
-      if (session === agent.session && event.type === 'step/start' && ++steps >= DEFINITION_SCRUB_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
+    const { agent } = await this.agent()
+    await platformStep(agent, this.stepHost(), {
+      label: 'the definition scrub',
+      instruction: wakeupMessage({ sender: { kind: 'platform' }, text: definitionScrubNote(draft), summary: `Saving as the definition ${slug}`, woke: { at: Date.now(), timeZone: config.timeZone } }),
+      steps: DEFINITION_SCRUB_STEPS,
+      tools: MEMORY_STEP_TOOLS,
+      args: workspaceOnly,
+      usage: 'robot',
     })
-    try {
-      agent.followup(wakeupMessage({ sender: { kind: 'platform' }, text: definitionScrubNote(draft), summary: `Saving as the definition ${slug}`, woke: { at: Date.now(), timeZone: config.timeZone } }))
-      await agent.whenIdle()
-    } finally {
-      stop()
-    }
-    await ctx.sessions.flush(agent.session)
     const files = new Map<string, Uint8Array>()
     for (const entry of await this.run(ws.list(draft))) {
       const file = await this.run(ws.read(entry.path))

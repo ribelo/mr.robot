@@ -48,12 +48,14 @@ describe('the memory sweep (rm-glmd, rm-5org, rm-hhxa)', () => {
     await say(id, 'Remember that I moved to Gdańsk.', [{ calls: [write('memory/2026-10-21.md', '- Anna moved to Gdańsk on 20 October.\n')] }, { say: 'Noted.' }])
     const turnRequests = requests.get(id)!.length
     scripts.set(id, [
+      // The snapshot (v1.20) comes first: nothing to add.
+      { text: '' },
       { calls: [write('MEMORY.md', '# MEMORY.md\n\n## Facts\n- Anna lives in Gdańsk.\n\n## Preferences\n\n## Commitments\n')] },
       { text: '' },
       { text: 'SUMMARY: Anna moved to Gdańsk.' },
     ])
     await idleMoment(id)
-    const sweep = requests.get(id)![turnRequests]!
+    const sweep = requests.get(id)![turnRequests + 1]!
     expect(sweep.model).toBe('stub')
     const instruction = JSON.stringify(sweep.messages.at(-1))
     expect(instruction).toContain('Memory sweep')

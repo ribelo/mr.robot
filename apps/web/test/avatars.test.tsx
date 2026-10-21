@@ -19,7 +19,7 @@ const summary: RobotSummary = {
   id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null,
   identity, lastLine: 'Done.', lastAt: 0, unread: false,
 }
-const usage = { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, breakdown: { model: { robot: 0, review: 0, subagent: 0 }, browser: 0, box: 0, services: 0, total: 0 }, limit: { limit: { kind: 'none' as const }, from: 'space' as const } }
+const usage = { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, breakdown: { model: { robot: 0, review: 0, subagent: 0, memory: 0 }, browser: 0, box: 0, services: 0, total: 0 }, limit: { limit: { kind: 'none' as const }, from: 'space' as const } }
 const panel: RobotPanel = {
   summary,
   settings: {
