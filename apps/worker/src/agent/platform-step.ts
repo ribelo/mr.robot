@@ -12,11 +12,23 @@ import type { FileAuthor } from '../workspace/file-history.ts'
 
 type ArgsCheck = (tool: string, args: Readonly<Record<string, unknown>>) => string | undefined
 
-/** The tools a platform step may call: every other one fails with a plain reason while it runs. */
+/** The tools that are never fenced: run_code only carries a program; the calls it makes are what a fence judges (v1.20.1). */
+const TRANSPARENT = new Set(['run_code'])
+
+/** What a fence saw while one owner held it. */
+export interface FenceTally {
+  /** Calls it let run. */
+  readonly allowed: number
+  /** Calls it refused. */
+  readonly refused: number
+}
+
+/**
+ * The tools a platform step may call (v1.20, made owned in v1.20.1): every other one fails with a plain reason while it is held. One owner
+ * holds it at a time; only the owner's token closes it, so a step inside another (a snapshot in a dream) cannot lift the outer fence.
+ */
 export class StepFence {
-  private allowed: ReadonlySet<string> | undefined
-  private label = ''
-  private argsCheck: ArgsCheck | undefined
+  private held: { readonly token: symbol; readonly label: string; readonly allowed: ReadonlySet<string>; readonly argsCheck: ArgsCheck | undefined; allowedCalls: number; refusedCalls: number } | undefined
   private steps = 0
 
   /** A platform step runs now (with or without an allow-list). */
@@ -32,25 +44,46 @@ export class StepFence {
     this.steps = Math.max(0, this.steps - 1)
   }
 
-  /** While a step runs: the tool names it allows, and a check of a call's arguments. */
-  open(label: string, tools: ReadonlySet<string>, argsCheck?: ArgsCheck): void {
-    this.label = label
-    this.allowed = tools
-    this.argsCheck = argsCheck
+  /** Someone holds the fence now. */
+  isHeld(): boolean {
+    return this.held !== undefined
   }
 
-  close(): void {
-    this.allowed = undefined
-    this.argsCheck = undefined
+  /** Hold the fence: these tools only, and a check of their arguments. Undefined when another owner holds it already. */
+  open(label: string, tools: ReadonlySet<string>, argsCheck?: ArgsCheck): symbol | undefined {
+    if (this.held !== undefined) return undefined
+    const token = Symbol(label)
+    this.held = { token, label, allowed: tools, argsCheck, allowedCalls: 0, refusedCalls: 0 }
+    return token
   }
 
-  /** Why this call may not run now: a step runs and does not allow it; undefined when it may. */
+  /** Lift the fence, by its owner only; returns what it saw. */
+  close(token: symbol | undefined): FenceTally {
+    if (token === undefined || this.held?.token !== token) return { allowed: 0, refused: 0 }
+    const tally = { allowed: this.held.allowedCalls, refused: this.held.refusedCalls }
+    this.held = undefined
+    return tally
+  }
+
+  /** Why this call may not run now: a step holds the fence and does not allow it; undefined when it may. */
   refusal(tool: string, args: Readonly<Record<string, unknown>> = {}): string | undefined {
-    if (this.allowed === undefined) return undefined
-    if (!this.allowed.has(tool)) return `${tool} is not available during ${this.label}; use only ${[...this.allowed].join(', ') || 'no tool'}.`
-    const refused = this.argsCheck?.(tool, args)
-    return refused === undefined ? undefined : `${tool} during ${this.label}: ${refused}.`
+    const held = this.held
+    if (held === undefined || TRANSPARENT.has(tool)) return undefined
+    const refused = !held.allowed.has(tool)
+      ? `${tool} is not available during ${held.label}; use only ${[...held.allowed].join(', ') || 'no tool'}.`
+      : (() => {
+          const reason = held.argsCheck?.(tool, args)
+          return reason === undefined ? undefined : `${tool} during ${held.label}: ${reason}.`
+        })()
+    if (refused === undefined) held.allowedCalls += 1
+    else held.refusedCalls += 1
+    return refused
   }
+}
+
+/** Whether a step did its work: it ran at least one allowed tool, or the model ended it with nothing refused. Marks advance only then. */
+export function stepRan(tally: FenceTally, endedByModel: boolean): boolean {
+  return tally.allowed > 0 || (endedByModel && tally.refused === 0)
 }
 
 export interface PlatformStepHost {
@@ -84,28 +117,45 @@ export interface PlatformStep {
   readonly record?: (startSeq: number) => Promise<{ readonly type: string; readonly data: Record<string, unknown> } | undefined>
 }
 
-/** Run one platform step on the agent and wait for it to end; returns the seq it started at. */
-export async function platformStep(agent: Agent, host: PlatformStepHost, step: PlatformStep): Promise<number> {
+/** What a step did: where it started, what its fence saw, and whether the model ended it (not the step limit). */
+export interface StepOutcome {
+  readonly startSeq: number
+  readonly tally: FenceTally
+  readonly endedByModel: boolean
+  /** It did its work (stepRan). */
+  readonly ran: boolean
+}
+
+/**
+ * Run one platform step on the agent and wait for it to end. The step limit lets exactly `steps` model steps run: the agent is cancelled
+ * at the start of the one after (v1.20.1; it was one short).
+ */
+export async function platformStep(agent: Agent, host: PlatformStepHost, step: PlatformStep): Promise<StepOutcome> {
   const startSeq = host.storedLength()
   let steps = 0
+  let cut = false
   const stop = host.onEvent((session, event) => {
-    if (session === agent.session && event.type === 'step/start' && ++steps >= step.steps) agent.cancel({ kind: 'user' }, { keepInbox: true })
+    if (session === agent.session && event.type === 'step/start' && ++steps > step.steps) {
+      cut = true
+      agent.cancel({ kind: 'user' }, { keepInbox: true })
+    }
   })
   host.fence.enter()
-  if (step.tools !== undefined) host.fence.open(step.label, step.tools, step.args)
+  const token = step.tools === undefined ? undefined : host.fence.open(step.label, step.tools, step.args)
   host.writeAs(step.author)
+  let tally: FenceTally = { allowed: 0, refused: 0 }
   try {
     agent.followup(step.instruction)
     await agent.whenIdle()
   } finally {
     stop()
     host.fence.leave()
-    if (step.tools !== undefined) host.fence.close()
+    tally = host.fence.close(token)
     host.writeAs(undefined)
   }
   const record = await step.record?.(startSeq)
   if (record !== undefined) appendPluginRecord(agent.session, record.type as never, record.data as never)
   await host.flush()
   if (step.usage !== undefined) await host.account(startSeq, step.usage)
-  return startSeq
+  return { startSeq, tally, endedByModel: !cut, ran: step.tools === undefined || stepRan(tally, !cut) }
 }

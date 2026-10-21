@@ -47,7 +47,7 @@ export async function safetyNet(host: VoiceHost, agent: Agent, input: { readonly
   await host.step.flush()
   const turn = host.events(input.startSeq)
   if (host.said(turn) || host.reactedOnly(turn) || turn.some((event) => event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')) return
-  const stepStart = await platformStep(agent, host.step, { label: 'the safety net', instruction: wakeupMessage({ sender: { kind: 'platform' }, text: input.note, summary: '' }), steps: input.steps })
+  const { startSeq: stepStart } = await platformStep(agent, host.step, { label: 'the safety net', instruction: wakeupMessage({ sender: { kind: 'platform' }, text: input.note, summary: '' }), steps: input.steps })
   const step = host.events(stepStart)
   if (host.said(step) || !input.byOwner()) return
   const textOf = (events: readonly SessionEvent[]) => events.filter((event) => event.type === 'assistant/message')

@@ -42,14 +42,31 @@ export function chapterSeed(events: readonly SessionEvent[], projections: readon
     return content.some((block) => block.type === 'tool-call' && !answered.has(String(block.id)))
   })
   const nodes = open < 0 ? fold.nodes : fold.nodes.slice(0, open)
+  // DSH's token meter reads each assistant message inside its step (v1.20.1): the seed carries the step/start of each assistant message it
+  // copies, and the step/end before the next one, or the seed's measure throws and no later compaction can run in the chapter.
+  const stepStarts = new Map(log.filter((event) => event.type === 'step/start').map((event) => [`${String(event.data['turn'])}/${String(event.data['step'])}`, event]))
+  let openStep: { turn: unknown; step: unknown } | undefined
+  const closeStep = () => {
+    if (openStep === undefined) return
+    push({ type: 'step/end', time, data: { turn: openStep.turn, step: openStep.step } })
+    openStep = undefined
+  }
   for (const seq of nodes) {
     const event = log[seq]!
+    if (event.type === 'assistant/message') {
+      closeStep()
+      const original = stepStarts.get(`${String(event.data['turn'])}/${String(event.data['step'])}`)
+      push({ type: 'step/start', time: original?.time ?? event.time, data: original?.data ?? { turn: event.data['turn'], step: event.data['step'] } })
+      openStep = { turn: event.data['turn'], step: event.data['step'] }
+    }
     const projected = fold.projectedMessages.get(SessionSeq(seq)) as unknown as Record<string, unknown> | undefined
     if (event.type === 'user/message') {
       push({ type: event.type, time: event.time, data: projected ?? event.data, surfaceOp: 'append' })
       continue
     }
     const data: Record<string, unknown> = { ...event.data, ...(projected === undefined ? {} : { message: projected }) }
+    // The usage an assistant message reported measured the closing chapter's context, not the seed's: the meter estimates instead.
+    if (event.type === 'assistant/message') delete data['usage']
     if (event.type === 'developer/message' && data['headerSeq'] !== undefined) {
       // A tool addition names its tool's definition in an earlier header: the seed's header holds every current tool, and an
       // addition of a tool that is gone since says nothing the header does not.
@@ -63,6 +80,7 @@ export function chapterSeed(events: readonly SessionEvent[], projections: readon
     }
     push({ type: event.type, time: event.time, data, surfaceOp: 'append' })
   }
+  closeStep()
   push({ type: 'turn/end', time, data: { turn, reason: { kind: 'forked' } } })
   const marker = push({ type: 'session/end-seed', time, data: { inherited: true } })
   return { events: out as unknown as SessionEvent[], inheritedEventCount: marker }

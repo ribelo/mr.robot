@@ -114,7 +114,7 @@ export function dreamDuty(host: DreamHost): Duty {
       const since = host.store.get<number>(DREAMED_AT) ?? 0
       const evidence = await host.evidence(since)
       if (isEmptyEvidence(evidence)) return
-      host.store.set(DREAMED_AT, now)
+      // DREAMED_AT moves when the dream did its work (robot.ts, at the dream's end), never before it ran (v1.20.1).
       host.dream(evidence, now)
     },
   }

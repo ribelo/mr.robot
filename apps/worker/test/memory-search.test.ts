@@ -2,16 +2,25 @@
  * memory_search and the end of note injection (v1.20 ticket 03, dm-cl1p, dm-hmet, dm-yn3q, dm-vh11, dm-g4in, dm-zpoo).
  */
 import { env, reset } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { FileHistoryView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts, type StubReply } from './stub-llm.ts'
+import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const STUB = { provider: 'stub', model: 'stub' }
 
+/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
+const MODES = [['code mode', true], ['direct calls', false]] as const
+let codeMode = true
+
+afterEach(() => {
+  programmed.on = false
+})
+
 beforeEach(async () => {
+  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -23,7 +32,7 @@ async function staff(tools: Record<string, string> = {}): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow', ...tools }, skills: [], recipients: [], secrets: [] }, subagentModels: [STUB] } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants: { tools: { files: 'allow', ...tools }, skills: [], recipients: [], secrets: [] }, subagentModels: [STUB] } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -42,10 +51,16 @@ type Match = { path: string; scope: string; lines: string; date: string | null; 
 async function search(id: string, query: string): Promise<Match[]> {
   await turn(id, `find ${query}`, [{ calls: [{ name: 'memory_search', args: { query } }] }, { say: 'Found.' }])
   const request = requests.get(id)!.findLast((entry) => results(entry).some((text) => text.includes('"matches"')))!
-  return (JSON.parse(results(request).findLast((text) => text.includes('"matches"'))!) as { matches: Match[] }).matches
+  // In code mode the program returns the list of its calls' results.
+  const parsed = JSON.parse(results(request).findLast((text) => text.includes('"matches"'))!) as { matches: Match[] } | Array<{ matches: Match[] }>
+  return (Array.isArray(parsed) ? parsed[0]! : parsed).matches
 }
 
-describe('daily notes leave the context (dm-cl1p, dm-vh11)', () => {
+describe.each(MODES)('daily notes leave the context (dm-cl1p, dm-vh11), %s', (_mode, code) => {
+  beforeEach(() => {
+    codeMode = code
+  })
+
   it('keeps the notes out of the memory message and tells the Robot to search', async () => {
     const id = await staff()
     const today = new Date().toISOString().slice(0, 10)
@@ -60,7 +75,11 @@ describe('daily notes leave the context (dm-cl1p, dm-vh11)', () => {
   })
 })
 
-describe('memory_search (dm-hmet, dm-yn3q)', () => {
+describe.each(MODES)('memory_search (dm-hmet, dm-yn3q), %s', (_mode, code) => {
+  beforeEach(() => {
+    codeMode = code
+  })
+
   it('ranks paragraphs over the indexed set with path, lines, date and snippet, and follows every writer', async () => {
     const id = await staff()
     await turn(id, 'notes', [
@@ -116,6 +135,7 @@ describe('memory_search (dm-hmet, dm-yn3q)', () => {
     scripts.set(`${id}:sub`, [{ text: 'REPORT: done.' }])
     await turn(id, 'delegate', [{ calls: [{ name: 'subagent', args: { description: 'Look', prompt: 'Look it up.', ...STUB } }] }, { text: 'Started.' }, { say: 'Done.' }])
     const child = requests.get(`${id}:sub`)?.[0]
-    expect(child?.tools?.map((entry) => entry.name)).toContain('memory_search')
+    // In code mode the child calls it from its program: the SDK names it.
+    expect(JSON.stringify(child)).toContain('memory_search')
   }, 60_000)
 })

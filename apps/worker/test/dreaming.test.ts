@@ -3,16 +3,25 @@
  * Robot with something to look back at dreams on the dream model, with its inputs, its tools only, one morning question, and its outputs.
  */
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { Conversation, FileHistoryView, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts, type StubReply } from './stub-llm.ts'
+import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const DREAMER = { provider: 'stub', model: 'dreamer', effort: 'off' }
 
+/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
+const MODES = [['code mode', true], ['direct calls', false]] as const
+let codeMode = true
+
+afterEach(() => {
+  programmed.on = false
+})
+
 beforeEach(async () => {
+  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -24,7 +33,7 @@ async function staff(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['files', 'web'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants: { tools: ['files', 'web'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -46,7 +55,11 @@ const userText = (request: GenerateOptions) => JSON.stringify(request.messages.f
 const toolTexts = (request: GenerateOptions) => request.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 const dreamDate = (request: GenerateOptions) => /dreams\/(\d{4}-\d{2}-\d{2})\.md/.exec(userText(request))![1]!
 
-describe('the dream (dm-hx44, dm-ox7j, dm-pzxk, dm-alok, dm-4ybd, dm-s11z, dm-vjnv)', () => {
+describe.each(MODES)('the dream, %s (dm-hx44, dm-ox7j, dm-pzxk, dm-alok, dm-4ybd, dm-s11z, dm-vjnv)', (_mode, code) => {
+  beforeEach(() => {
+    codeMode = code
+  })
+
   it('dreams on the Space\'s dream model with its inputs and tools, writes its outputs, asks once, and books memory', async () => {
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { defaultDreamModel: DREAMER } })
     const id = await staff()
@@ -124,5 +137,40 @@ describe('the dream (dm-hx44, dm-ox7j, dm-pzxk, dm-alok, dm-4ybd, dm-s11z, dm-vj
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { defaultDreaming: false } })
     await dreamHour(id)
     expect(requests.get(id)!.length).toBe(count)
+  }, 60_000)
+
+  it('keeps its fence through a pressure compaction, with no snapshot inside it (v1.20.1)', async () => {
+    const id = await staff()
+    await turn(id, 'note', [{ calls: [write('memory/2026-10-21.md', '- a note\n')] }, { say: 'Noted.' }])
+    // A small budget for the dream only: its first long step puts it under pressure.
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { contextBudget: 8000 } })
+    const before = requests.get(id)!.length
+    scripts.set(id, [
+      { text: 'Looking back over a long day. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'workspace', file_path: 'MEMORY.md' } }] },
+      ...Array.from({ length: 3 }, (): StubReply => (request) => (request.purpose === 'compaction' ? { text: 'SUMMARY: a dream.' } : { calls: [{ name: 'say', args: { text: 'Good morning!' } }] })),
+      (request) => (request.purpose === 'compaction' ? { text: 'SUMMARY: a dream.' } : { calls: [write(`dreams/${dreamDate(requests.get(id)!.slice(before)[0]!)}.md`, '# Dream\n')] }),
+      { text: '' },
+    ])
+    await dreamHour(id)
+    const dream = requests.get(id)!.slice(before)
+    expect(dream.some((request) => request.purpose === 'compaction')).toBe(true)
+    expect(dream.some((request) => userText(request).includes('Compaction is about to replace'))).toBe(false)
+    const results = dream.flatMap((request) => toolTexts(request)).join('\n')
+    expect(results).toContain('say is not available during the dream')
+    expect((await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.some((item) => item.kind === 'reply' && item.text === 'Good morning!')).toBe(false)
+  }, 60_000)
+
+  it('leaves the night unread when the dream ran no allowed tool (v1.20.1)', async () => {
+    const id = await staff()
+    await turn(id, 'note', [{ calls: [write('memory/2026-10-21.md', '- a note\n')] }, { say: 'Noted.' }])
+    scripts.set(id, [{ calls: [{ name: 'say', args: { text: 'Hi!' } }] }, { text: '' }])
+    await dreamHour(id)
+    const dreams = () => requests.get(id)!.filter((request) => userText(request).includes('Dream: it is night')).length
+    const first = dreams()
+    expect(first).toBeGreaterThan(0)
+    // The next night the same evidence is still there: it dreams again.
+    scripts.set(id, [{ calls: [write('dreams/again.md', '# Again\n')] }, { text: '' }])
+    await dreamHour(id)
+    expect(dreams()).toBeGreaterThan(first)
   }, 60_000)
 })

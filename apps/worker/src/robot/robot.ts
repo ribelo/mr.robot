@@ -180,9 +180,9 @@ import { Duties } from './duties.ts'
 import { nextRun } from './schedule.ts'
 import { isPeoplePage, isPeoplePath, PEOPLE_INDEX, PEOPLE_TEMPLATE_PATH } from '../member/people.ts'
 import { INDEX_BATCH, isIndexedRobotPath, MemoryIndex, versionOf as memoryVersion, type MemoryMatch } from './memory-index.ts'
-import { platformStep, StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
+import { platformStep, StepFence, stepRan, type PlatformStepHost } from '../agent/platform-step.ts'
 import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
-import { CHIEF_DREAM_TOOLS, cutSection, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote, type DreamEvidence } from '../plugins/dream.ts'
+import { CHIEF_DREAM_TOOLS, cutSection, DREAMED_AT, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote, type DreamEvidence } from '../plugins/dream.ts'
 import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
 import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
 import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
@@ -317,12 +317,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       store,
       nextDreamHour: (after) => nextRun({ kind: 'daily', time: DREAM_TIME }, store.requireConfig().timeZone, after, after) ?? after + 86_400_000,
       dreamingOn: async () => store.requireConfig().dreaming ?? (await this.space().settings()).defaultDreaming,
-      idleNow: () => store.activeTurn() === undefined && store.pendingWakeups() === 0 && this.pumping === undefined,
+      idleNow: () => store.activeTurn() === undefined && store.pendingWakeups() === 0 && this.pumping === undefined && this.platformTurn === undefined,
       evidence: (since) => this.dreamEvidence(since),
       dream: (evidence, now) => {
         const config = store.requireConfig()
         const date = new Intl.DateTimeFormat('en-CA', { timeZone: config.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now - 6 * 3_600_000)
-        store.enqueue('platform', { kind: 'platform' }, dreamNote(this.owner().name, date, evidence, config.kind === 'mr-robot'), { dream: true, summary: 'Dream' }, now)
+        store.enqueue('platform', { kind: 'platform' }, dreamNote(this.owner().name, date, evidence, config.kind === 'mr-robot'), { dream: true, dreamAt: now, summary: 'Dream' }, now)
         this.drain()
       },
     }))
@@ -360,7 +360,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       store: this.store,
       agent: () => this.agent() as never,
       step: this.stepHost(),
-      idleNow: () => this.store.activeTurn() === undefined && this.store.pendingWakeups() === 0 && this.pumping === undefined,
+      idleNow: () => this.store.activeTurn() === undefined && this.store.pendingWakeups() === 0 && this.pumping === undefined && this.platformTurn === undefined,
+      asTurn: (work) => this.asTurn(work),
       lastRequest: () => this.lastRequest,
       modelList: () => this.space().modelList(),
       adapter: (provider, window, model, wire) => this.adapter(provider, window, model, wire),
@@ -699,8 +700,26 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.program(Programs.setNextDue(at))
   }
 
+  /** The platform step running as a Turn of its own (idle steps, the definition scrub), if one is (v1.20.1). */
+  private platformTurn: string | undefined
+
+  /** Run platform work as a Turn of its own: Wake-ups queue behind it, then the queue drains. */
+  private async asTurn<A>(work: () => Promise<A>, label = 'platform step'): Promise<A> {
+    if (this.platformTurn !== undefined || this.store.activeTurn() !== undefined || this.pumping !== undefined) throw Object.assign(new Error('the Robot is working; try again when it is done'), { name: 'Conflict', status: 409 })
+    this.platformTurn = label
+    try {
+      return await work()
+    } finally {
+      this.platformTurn = undefined
+      if (this.store.pendingWakeups() > 0) this.drain()
+      await this.rearm()
+    }
+  }
+
   protected drain(): void {
     this.deliverSteers()
+    // A platform step holds the Turn: the queue waits for it (v1.20.1).
+    if (this.platformTurn !== undefined) return
     if (this.pumping !== undefined) return
     this.pumping = this.pump()
       .catch((error: unknown) => this.failed(error))
@@ -749,6 +768,22 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.refreshPersona()
     // The memory index catches up a bounded number of files per Turn (v1.20, dm-yn3q).
     await this.catchUpMemoryIndex().catch((error: unknown) => console.warn('memory index not caught up', error))
+    // The dream's fence holds before its Wake-up reaches the agent, so no step of it runs unfenced (v1.20.1).
+    let stopDream = () => {}
+    let dreamToken: symbol | undefined
+    let dreamCut = false
+    if (dream) {
+      dreamToken = this.fence.open('the dream', this.store.requireConfig().kind === 'mr-robot' ? CHIEF_DREAM_TOOLS : DREAM_TOOLS, dreamArgsCheck())
+      this.writer = { kind: 'dream' }
+      let steps = 0
+      // Exactly DREAM_STEPS model steps: cancelled at the start of the one after (v1.20.1).
+      stopDream = ctx.on('session/event', (session, event) => {
+        if (session === agent.session && event.type === 'step/start' && ++steps > DREAM_STEPS) {
+          dreamCut = true
+          agent.cancel({ kind: 'user' }, { keepInbox: true })
+        }
+      })
+    }
     if (!resuming) {
       // An approved tool call runs first, exactly as stored, and its result is what the Wake-up says (sk-ed7r).
       const toolCallAnswer = wakeup.kind === 'platform' ? wakeup.payload['toolCallAnswer'] as ToolCallAnswerWake | undefined : undefined
@@ -776,15 +811,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         summary: 'Resumed after a restart',
       }))
     }
-    let stopDream = () => {}
-    if (dream) {
-      this.fence.open('the dream', this.store.requireConfig().kind === 'mr-robot' ? CHIEF_DREAM_TOOLS : DREAM_TOOLS, dreamArgsCheck())
-      this.writer = { kind: 'dream' }
-      let steps = 0
-      stopDream = ctx.on('session/event', (session, event) => {
-        if (session === agent.session && event.type === 'step/start' && ++steps >= DREAM_STEPS) agent.cancel({ kind: 'user' }, { keepInbox: true })
-      })
-    }
     // From here until the agent is idle, the owner's steers reach this Turn at its next step (ao-9570).
     this.runningAgent = agent
     this.deliverSteers()
@@ -800,10 +826,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       for (const message of late) agent.steer(message)
       await agent.whenIdle()
     }
+    // A snapshot still running when its Turn ends ends with it, before the safety net, so the net and the rest of the Turn have every tool.
+    this.turnSnapshot.finish(false)
     if (dream) {
       stopDream()
-      this.fence.close()
+      const tally = this.fence.close(dreamToken)
       this.writer = { kind: 'robot' }
+      // The night's evidence counts as read only when the dream did its work (v1.20.1): a refused or empty dream leaves it for the next.
+      if (stepRan(tally, !dreamCut) && typeof wakeup.payload['dreamAt'] === 'number') this.store.set(DREAMED_AT, wakeup.payload['dreamAt'])
       await this.afterDream().catch((error: unknown) => console.warn('dream not tidied', error))
     }
     // A Turn that ends without a say gets one bounded step to speak; an owner's gets its last words shown if the step stays silent. A dream does not speak.
@@ -818,8 +848,6 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // A block is remembered for its own Turn only (rb-kank).
     this.blockedThisTurn.clear()
     const turn = this.store.activeTurn()
-    // A snapshot still running when its Turn ends ends with it.
-    this.turnSnapshot.finish()
     this.store.endTurn(wakeup.id)
     this.store.delete(QUIET_DUE)
     await this.afterTurn(wakeup, turn)
@@ -3871,7 +3899,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   async saveAsDefinition(slug: string): Promise<DefinitionRow> {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) throw Object.assign(new Error('a definition name is lowercase letters, digits and dashes'), { name: 'Invalid', status: 400 })
-    if (this.store.activeTurn() !== undefined || this.pumping !== undefined) throw Object.assign(new Error('the Robot is working; save it as a definition when it is done'), { name: 'Conflict', status: 409 })
+    if (this.store.activeTurn() !== undefined || this.pumping !== undefined || this.platformTurn !== undefined) throw Object.assign(new Error('the Robot is working; save it as a definition when it is done'), { name: 'Conflict', status: 409 })
     const config = this.store.requireConfig()
     const ws = this.workspace
     const draft = `${DEFINITION_DRAFT}/${slug}`
@@ -3881,16 +3909,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const file = await this.run(ws.read(path))
       if (file !== undefined) await this.run(ws.write(`${draft}/${path}`, file.body, file.contentType, { kind: 'platform' }))
     }
-    // The owner scrub: one bounded step of the Robot on its own model (rm-gv6s).
+    // The owner scrub: one bounded step of the Robot on its own model (rm-gv6s), as a Turn of its own (v1.20.1).
     const { agent } = await this.agent()
-    await platformStep(agent, this.stepHost(), {
+    await this.asTurn(() => platformStep(agent, this.stepHost(), {
       label: 'the definition scrub',
       instruction: wakeupMessage({ sender: { kind: 'platform' }, text: definitionScrubNote(draft), summary: `Saving as the definition ${slug}`, woke: { at: Date.now(), timeZone: config.timeZone } }),
       steps: DEFINITION_SCRUB_STEPS,
       tools: MEMORY_STEP_TOOLS,
       args: workspaceOnly,
       usage: 'robot',
-    })
+    }), 'the definition scrub')
     const files = new Map<string, Uint8Array>()
     for (const entry of await this.run(ws.list(draft))) {
       const file = await this.run(ws.read(entry.path))

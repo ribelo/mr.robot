@@ -12,7 +12,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import { wakeupMessage } from '../agent/sources.ts'
-import type { PlatformStepHost } from '../agent/platform-step.ts'
+import { stepRan, type PlatformStepHost } from '../agent/platform-step.ts'
 import type { RobotStore } from '../robot/store.ts'
 
 export const SNAPSHOT_RECORD = 'plugin:mr-robot/snapshot'
@@ -61,9 +61,13 @@ export interface SnapshotHost {
   background(work: Promise<unknown>): void
 }
 
-/** The snapshot of a Turn: started when pressure would compact, ended after its steps or with the Turn. */
+/**
+ * The snapshot of a Turn: started when pressure would compact, ended after its steps or with the Turn (v1.20.1: fenced for exactly its
+ * steps). The steer is placed at a compaction boundary and reaches the model at the next step, so the step after the boundary is still the
+ * person's and runs with every tool; the fence holds from the next boundary for SNAPSHOT_STEPS steps, then the compaction runs.
+ */
 export class TurnSnapshot {
-  private running: { agent: Agent; startSeq: number; started: number; boundaries: number; messageId: string; seen: boolean } | undefined
+  private running: { agent: Agent; startSeq: number; started: number; boundaries: number; token: symbol | undefined } | undefined
 
   constructor(private readonly host: SnapshotHost) {}
 
@@ -71,28 +75,28 @@ export class TurnSnapshot {
   beforeCompaction(agent: Agent): boolean {
     const host = this.host
     if (String(agent.session.id) !== host.liveSessionId()) return false
-    // Inside another platform step (the safety net, an idle step) the compaction goes ahead: that step has its own instruction and limit.
-    if (this.running === undefined && host.step.fence.inStep()) return false
     const running = this.running
     if (running !== undefined) {
-      // The steer reaches the model one step later: the steps count from the first request that carries it.
-      running.seen ||= agent.session.snapshotEvents().some((event) => event.seq >= running.startSeq && event.type === 'user/message' && JSON.stringify(event.data).includes(running.messageId))
-      if (!running.seen) return true
       running.boundaries += 1
-      if (running.boundaries < SNAPSHOT_STEPS) return true
-      this.finish()
+      if (running.boundaries === 1) {
+        // The steer is claimed by the step that starts now: the snapshot's steps begin, and its fence with them.
+        running.token = host.step.fence.open('the snapshot', MEMORY_STEP_TOOLS, workspaceOnly)
+        host.step.writeAs({ kind: 'snapshot' })
+        return true
+      }
+      if (running.boundaries <= SNAPSHOT_STEPS) return true
+      this.finish(true)
       return false
     }
+    // Inside a platform step (the safety net, the dream, an idle step) the compaction goes ahead: that step has its own instruction and tools.
+    if (host.step.fence.inStep() || host.step.fence.isHeld()) return false
     // One snapshot before each compaction: once it ran, the compaction it was for goes ahead.
     if (host.store.get<string>(SNAPSHOT_TAKEN) === host.liveSessionId()) return false
     const length = host.step.storedLength()
     if (!eventsSinceMark(host.store, host.liveSessionId(), length)) return false
     const started = Date.now()
-    const message = wakeupMessage({ sender: { kind: 'platform' }, text: SNAPSHOT_NOTE_IN_TURN, summary: 'Snapshot before compaction', woke: { at: started, timeZone: host.timeZone() } })
-    this.running = { agent, startSeq: length, started, boundaries: 0, messageId: String(message.id), seen: false }
-    host.step.fence.open('the snapshot', MEMORY_STEP_TOOLS, workspaceOnly)
-    host.step.writeAs({ kind: 'snapshot' })
-    agent.steer(message)
+    this.running = { agent, startSeq: length, started, boundaries: 0, token: undefined }
+    agent.steer(wakeupMessage({ sender: { kind: 'platform' }, text: SNAPSHOT_NOTE_IN_TURN, summary: 'Snapshot before compaction', woke: { at: started, timeZone: host.timeZone() } }))
     return true
   }
 
@@ -101,19 +105,23 @@ export class TurnSnapshot {
     this.host.store.delete(SNAPSHOT_TAKEN)
   }
 
-  /** The snapshot's steps are over, or its Turn ended: the fence lifts, its usage is booked under memory, and the record is written. */
-  finish(): void {
+  /**
+   * The snapshot's steps are over (atBoundary: its compaction runs now), or its Turn ended: the fence lifts and its usage is booked under
+   * memory. The memory mark moves only when it did its work; it counts as the compaction's snapshot only when the compaction follows, so a
+   * Turn that ends first leaves the next compaction its own snapshot (v1.20.1).
+   */
+  finish(atBoundary = false): void {
     const running = this.running
     if (running === undefined) return
     this.running = undefined
     const host = this.host
-    host.step.fence.close()
-    host.step.writeAs(undefined)
+    const tally = host.step.fence.close(running.token)
+    if (running.token !== undefined) host.step.writeAs(undefined)
     const sessionId = String(running.agent.session.id)
     const to = host.step.storedLength()
-    host.store.set(MEMORY_RANGES, [...(host.store.get<MemoryRange[]>(MEMORY_RANGES) ?? []), { sessionId, from: running.startSeq, to }])
-    setMemoryMark(host.store, sessionId, to)
-    host.store.set(SNAPSHOT_TAKEN, sessionId)
-    host.background(host.writtenSince(running.started).then((paths) => appendPluginRecord(running.agent.session, SNAPSHOT_RECORD as never, { paths } as never)))
+    if (running.token !== undefined) host.store.set(MEMORY_RANGES, [...(host.store.get<MemoryRange[]>(MEMORY_RANGES) ?? []), { sessionId, from: running.startSeq, to }])
+    if (stepRan(tally, false)) setMemoryMark(host.store, sessionId, to)
+    if (atBoundary) host.store.set(SNAPSHOT_TAKEN, sessionId)
+    if (running.token !== undefined) host.background(host.writtenSince(running.started).then((paths) => appendPluginRecord(running.agent.session, SNAPSHOT_RECORD as never, { paths } as never)))
   }
 }

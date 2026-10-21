@@ -41,6 +41,22 @@ function isSafetyNetStep(options: GenerateOptions): boolean {
   return last?.role === 'user' && last.content.some((block) => block.type === 'text' && block.text.replace(/^\[[^\n]*\]\n/, '').startsWith(SAFETY_NET_PREFIX))
 }
 
+/**
+ * Code mode (v1.20.1): while programmed.on, when the request offers run_code and not a scripted tool, the scripted calls of one step
+ * become one run_code program that makes them in order, each failure caught and returned as "Error: <message>", so a script reads the
+ * same in both modes. The tests that run in both modes switch it on.
+ */
+export const programmed = { on: false }
+
+function inCodeMode(options: GenerateOptions, reply: StubReply): StubReply {
+  if (!programmed.on || typeof reply === 'function' || !('calls' in reply) || reply.calls === undefined || reply.calls.length === 0) return reply
+  const offered = new Set((options.tools ?? []).map((definition) => definition.name))
+  if (!offered.has('run_code') || reply.calls.every((call) => call.name === 'run_code' || offered.has(call.name))) return reply
+  const lines = reply.calls.map((call) => `try { out.push(await tools[${JSON.stringify(call.name)}](${JSON.stringify(call.args)})) } catch (error) { out.push('Error: ' + (error instanceof Error ? error.message : String(error))) }`)
+  const program = { name: 'run_code', args: { code: ['const out = []', ...lines, 'return out'].join('\n'), description: reply.calls.map((call) => call.name).join(', ') } }
+  return 'text' in reply ? { ...reply, calls: [program] } : { calls: [program] }
+}
+
 export class StubLlm extends LlmAdapter {
   constructor(private readonly robotId: string) {
     super()
@@ -79,6 +95,7 @@ export class StubLlm extends LlmAdapter {
         : { calls: [{ name: 'say', args }] }
     }
     if (typeof reply === 'function' || 'gate' in reply) throw new Error('StubLlm: a scripted reply function must return a plain reply')
+    reply = inCodeMode(options, reply) as typeof reply
     if ('hang' in reply) {
       await aborted
       return

@@ -37,6 +37,8 @@ export interface IdleHost {
   readonly step: PlatformStepHost
   /** No Turn runs and none is about to (the drain is not pumping). */
   idleNow(): boolean
+  /** Run the work as a Turn of its own: no other Turn starts until it ends (v1.20.1). */
+  asTurn<A>(work: () => Promise<A>): Promise<A>
   /** The last model request of the live session, to warm with. */
   lastRequest(): { readonly sessionId: string; readonly options: GenerateOptions } | undefined
   modelList(): Promise<readonly ModelOption[]>
@@ -107,6 +109,11 @@ async function warmCache(host: IdleHost): Promise<void> {
  * when a daily note changed since the last one (rm-l4t8); a Wake-up during it means the compaction does not happen now.
  */
 async function idleCompact(host: IdleHost, floor = true): Promise<void> {
+  // A Turn of its own (v1.20.1): Wake-ups that arrive meanwhile queue behind it and run after it, with every tool.
+  await host.asTurn(() => idleSequence(host, floor))
+}
+
+async function idleSequence(host: IdleHost, floor: boolean): Promise<void> {
   const store = host.store
   const config = store.requireConfig()
   const { agent, ctx } = await host.agent()
@@ -123,7 +130,7 @@ async function idleCompact(host: IdleHost, floor = true): Promise<void> {
   }
   if (eventsSinceMark(store, config.liveSessionId, host.step.storedLength())) {
     const started = Date.now()
-    await platformStep(agent, host.step, {
+    const snapshot = await platformStep(agent, host.step, {
       label: 'the snapshot',
       instruction: wakeupMessage({ sender: { kind: 'platform' }, text: SNAPSHOT_NOTE, summary: 'Idle: snapshot before compaction', woke: { at: started, timeZone: config.timeZone } }),
       steps: SNAPSHOT_STEPS,
@@ -133,12 +140,14 @@ async function idleCompact(host: IdleHost, floor = true): Promise<void> {
       usage: 'memory',
       record: async () => ({ type: SNAPSHOT_RECORD, data: { paths: await writtenBy('snapshot', started) } }),
     })
+    // The mark moves only when the snapshot did its work (v1.20.1).
+    if (snapshot.ran) setMemoryMark(store, config.liveSessionId, host.step.storedLength())
   }
   const sweptAt = store.get<number>(SWEPT_AT) ?? 0
   const notes = (await host.list('memory')).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > sweptAt).map((entry) => entry.path).sort()
   if (notes.length > 0) {
     const started = Date.now()
-    await platformStep(agent, host.step, {
+    const sweep = await platformStep(agent, host.step, {
       label: 'the memory sweep',
       instruction: wakeupMessage({ sender: { kind: 'platform' }, text: memorySweepNote(notes), summary: 'Idle: memory sweep before compaction', woke: { at: started, timeZone: config.timeZone } }),
       steps: IDLE_MEMORY_STEPS,
@@ -148,9 +157,12 @@ async function idleCompact(host: IdleHost, floor = true): Promise<void> {
       usage: 'memory',
       record: async () => ({ type: SWEEP_RECORD, data: { notes, changed: await writtenBy('sweep', started) } }),
     })
-    store.set(SWEPT_AT, started)
+    // The notes count as swept only when the sweep did its work (v1.20.1): a refused sweep reads them again next time.
+    if (sweep.ran) {
+      store.set(SWEPT_AT, started)
+      setMemoryMark(store, config.liveSessionId, host.step.storedLength())
+    }
   }
-  setMemoryMark(store, config.liveSessionId, host.step.storedLength())
   if (store.activeTurn() === undefined && store.pendingWakeups() === 0) {
     const startSeq = host.step.storedLength()
     await ctx.compaction.compactNow(agent, AbortSignal.timeout(300_000)).catch((error: unknown) => console.warn('idle compaction did not run', error))

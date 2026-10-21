@@ -42,6 +42,8 @@ async function compacted(id: string): Promise<void> {
   await turn(id, 'first', [{ text: 'Apartment on Mokotowska, 1 200 000 PLN. '.repeat(700), inputTokens: 7900 }])
   await turn(id, 'second', [{ say: 'After compaction.' }])
   expect((requests.get(id) ?? []).some((request) => request.purpose === 'compaction')).toBe(true)
+  // The budget back to its default: the seed keeps the long reply, which an 8 000 budget would compact again at once.
+  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { contextBudget: 128_000 } })
 }
 
 const chatRequests = (id: string) => (requests.get(id) ?? []).filter((request) => request.purpose !== 'compaction')

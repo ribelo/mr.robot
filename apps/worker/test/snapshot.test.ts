@@ -4,15 +4,24 @@
  * comes before the sweep; it is skipped when nothing happened. Its writes are versions by the snapshot, its usage is memory's.
  */
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, FileHistoryView, Trajectory } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts, type StubReply } from './stub-llm.ts'
+import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const NOTE = 'Compaction is about to replace your context with a summary.'
 
+/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
+const MODES = [['code mode', true], ['direct calls', false]] as const
+let codeMode = true
+
+afterEach(() => {
+  programmed.on = false
+})
+
 beforeEach(async () => {
+  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -24,7 +33,7 @@ async function staff(settings: Record<string, unknown> = {}): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, ...settings, grants: { tools: ['files', 'box'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, ...settings, grants: { tools: ['files', 'box'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -42,7 +51,10 @@ const allEvents = async (id: string) => {
   return [...older.flat(), ...live.events]
 }
 
-describe('the snapshot in a Turn (dm-kg1p, dm-77dg, dm-r6km, dm-pifl)', () => {
+describe.each(MODES)('the snapshot in a Turn, %s (dm-kg1p, dm-77dg, dm-r6km, dm-pifl)', (_mode, code) => {
+  beforeEach(() => {
+    codeMode = code
+  })
   it('runs three steps with the Workspace file tools only before a mid-Turn compaction, then the compaction and the Turn go on', async () => {
     const id = await staff({ contextBudget: 8000 })
     await turn(id, 'Find me a flat.', [
@@ -84,7 +96,37 @@ describe('the snapshot in a Turn (dm-kg1p, dm-77dg, dm-r6km, dm-pifl)', () => {
   }, 60_000)
 })
 
-describe('the snapshot while idle (dm-kg1p, dm-tjlb)', () => {
+describe.each(MODES)('the snapshot hands the Turn back, %s (v1.20.1)', (_mode, code) => {
+  beforeEach(() => {
+    codeMode = code
+  })
+
+  it('a Turn that ends inside its snapshot says through the safety net, and the compaction follows the snapshot', async () => {
+    const id = await staff({ contextBudget: 8000 })
+    await turn(id, 'Find me a flat.', [
+      { text: 'Apartment on Mokotowska, 1 200 000 PLN. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'workspace', file_path: 'SOUL.md' } }] },
+      { calls: [{ name: 'read', args: { on: 'workspace', file_path: 'AGENTS.md' } }] },
+      // The snapshot's first step: the note, then the model ends the Turn.
+      { calls: [write('memory/2026-10-21.md', '- In flight: the flat search.\n')] },
+      { text: 'Noted the search.' },
+    ])
+    const snapshots = () => requests.get(id)!.filter((request) => JSON.stringify(request.messages.at(-1)).includes(NOTE)).length
+    expect(snapshots()).toBe(1)
+    // The safety net ran with every tool: the owner got the last words or a say, not a refusal.
+    const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
+    expect(items.some((item) => item.kind === 'reply')).toBe(true)
+    // The compaction it was for runs after it (here in the safety net's step), with the note already written.
+    const seen = requests.get(id)!
+    const snapshotAt = seen.findIndex((request) => JSON.stringify(request.messages.at(-1)).includes(NOTE))
+    expect(seen.findIndex((request) => request.purpose === 'compaction')).toBeGreaterThan(snapshotAt)
+    expect((await api<FileHistoryView>(ANNA, `/api/robots/${id}/file/history?path=memory/2026-10-21.md`)).body.current?.by).toBe('the snapshot')
+  }, 60_000)
+})
+
+describe.each(MODES)('the snapshot while idle, %s (dm-kg1p, dm-tjlb)', (_mode, code) => {
+  beforeEach(() => {
+    codeMode = code
+  })
   async function idleMoment(id: string): Promise<void> {
     await testRobot(id).idleDueForTest()
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
