@@ -830,7 +830,8 @@ export const api = new Router<ApiContext>()
     return interrupted ? { ok: true } : yield* Effect.fail(conflict('this Subagent is not running'))
   }))
   // Stop the Robot's Box from its panel (ao-9q18): its kept folder is synced first.
-  .on('POST', '/api/robots/:id/box/stop', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopBox()))))
+  // The owner only, as every other destructive Box action (v1.20.1, cross-review #20).
+  .on('POST', '/api/robots/:id/box/stop', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).stopBox()))))
   // Stop one job of the Box from the panel (v1.15 ticket 07, gb-66kh); the Robot is told.
   .on('POST', '/api/robots/:id/box/jobs/:job/stop', (c, { id, job }) => owner(c, id).pipe(Effect.andThen(Effect.gen(function* () {
     const jobId = parseJobId(decodeURIComponent(job))

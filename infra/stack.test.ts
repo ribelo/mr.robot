@@ -53,7 +53,9 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     ComputerContainer: 'Cloudflare.Container',
   })
   // Home became Space (v1.18 ticket 09, rm-lseo): the binding SPACE keeps the namespace's logical id 'Home' and names the class Space, so the
-  // deploy renames the class (renamed_classes) instead of creating an empty one.
+  // deploy renames the class (renamed_classes) instead of creating an empty one. Alchemy's provider pushes renamed_classes when a logical id's
+  // previous class differs from its class (WorkerProvider.js, previousClassName !== binding.className); it computes that only at deploy, from
+  // the account's DO tags, so this offline plan asserts its input: the logical id Home with the class Space (v1.20.1).
   const space = plan.resources.Edge.props.env.SPACE
   expect(space).toEqual({ kind: 'Cloudflare.DurableObject', name: 'Home', className: 'Space' })
   expect(plan.resources.ComputerContainer.props).toMatchObject({ className: 'ComputerContainer', context: './infra/computer', instanceType: 'standard-1' })

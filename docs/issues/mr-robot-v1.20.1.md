@@ -1,6 +1,6 @@
 ---
 title: "Mr. Robot v1.20.1 — Review fixes for v1.18, v1.19, v1.20 and the cross-cutting findings"
-status: ready-for-agent
+status: done
 parent: mr-robot-v1.20.md
 ---
 

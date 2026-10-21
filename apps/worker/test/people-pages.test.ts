@@ -95,4 +95,29 @@ describe.each(MODES)('people pages (dm-wtn9, dm-s0gy, dm-p7l1, dm-ii3r), %s', (_
     await turn(BEN, bens, 'Jan?', [{ calls: [call('read', { file_path: 'memory/people/jan-kowalski.md' })] }, { say: 'No Jan.' }])
     expect(turnResults(bens, 'Jan?')).toContain('does not exist')
   }, 60_000)
+
+  it('the owner deletes and restores a page; two Robots writing two pages at once both land in INDEX.md (v1.20.1)', async () => {
+    const seller = await staff(ANNA, 'Seller')
+    const buyer = await staff(ANNA, 'Buyer')
+    const page = (name: string) => ({ calls: [call('write', { on: 'workspace', file_path: `memory/people/${name}.md`, content: `# ${name}\n\nRole: customer\n\n## Facts\n- 2026-10-21 Met.\n` })] })
+    scripts.set(seller, [page('jan-kowalski'), { say: 'Noted.' }])
+    scripts.set(buyer, [page('ewa-nowak'), { say: 'Noted.' }])
+    await Promise.all([api(ANNA, `/api/robots/${seller}/messages`, { body: { text: 'Jan' } }), api(ANNA, `/api/robots/${buyer}/messages`, { body: { text: 'Ewa' } })])
+    await Promise.all([settle(seller), settle(buyer)])
+    const index = () => api<{ text?: string }>(ANNA, `/api/robots/${seller}/file?path=memory/people/INDEX.md`).then((answer) => answer.body.text ?? '')
+    expect(await index()).toContain('jan-kowalski.md')
+    expect(await index()).toContain('ewa-nowak.md')
+    // The owner deletes Jan's page: gone from the Files and INDEX.md, its last version kept.
+    expect((await api(ANNA, `/api/robots/${seller}/file?path=memory/people/jan-kowalski.md`, { method: 'DELETE' })).status).toBe(200)
+    expect((await api(ANNA, `/api/robots/${seller}/file?path=memory/people/jan-kowalski.md`)).status).toBe(404)
+    expect(await index()).not.toContain('jan-kowalski.md')
+    const history = (await api<FileHistoryView>(ANNA, `/api/robots/${seller}/file/history?path=memory/people/jan-kowalski.md`)).body
+    expect(history.versions.length).toBeGreaterThan(0)
+    // Restored, it is back, by the owner.
+    expect((await api(ANNA, `/api/robots/${seller}/file/restore?path=memory/people/jan-kowalski.md`, { body: { version: history.versions[0]!.id } })).status).toBe(200)
+    expect((await api<{ text?: string }>(ANNA, `/api/robots/${seller}/file?path=memory/people/jan-kowalski.md`)).body.text).toContain('Met.')
+    expect(await index()).toContain('jan-kowalski.md')
+    // A deleted page that is not there is not "deleted".
+    expect((await api(ANNA, `/api/robots/${seller}/file?path=memory/people/nobody.md`, { method: 'DELETE' })).status).toBe(404)
+  }, 60_000)
 })

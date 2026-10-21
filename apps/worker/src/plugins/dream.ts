@@ -35,9 +35,11 @@ export interface DreamEvidence {
   readonly asks: ReadonlyArray<{ readonly id: string; readonly status: string; readonly purpose: string }>
   /** Asks answered at all since the last dream: the skip rule counts them, the note lists only the dismissed or rejected. */
   readonly answered: number
+  /** Attempts of this Robot closed since the last dream, whatever their outcome: the spec's skip rule counts every one (v1.20.1). */
+  readonly closedAttempts: number
 }
 
-export const isEmptyEvidence = (evidence: DreamEvidence): boolean => evidence.notes.length === 0 && evidence.attempts.length === 0 && evidence.answered === 0
+export const isEmptyEvidence = (evidence: DreamEvidence): boolean => evidence.notes.length === 0 && evidence.attempts.length === 0 && evidence.closedAttempts === 0 && evidence.answered === 0
 
 /** The dream's instruction (fixed) with its inputs. */
 export function dreamNote(owner: string, date: string, evidence: DreamEvidence, chief: boolean): string {

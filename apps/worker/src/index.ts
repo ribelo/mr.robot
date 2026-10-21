@@ -34,6 +34,8 @@ async function boxChannel(request: Request, env: Env): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'POST only' }, 405)
   const signed = await signedBoxToken(env.BOX_TOKEN_KEY, request.headers.get('authorization'))
   if (signed === undefined) return json({ error: 'a Box token is required' }, 401)
+  // A ws request is a few hundred bytes of JSON: a larger body is refused before it is read (v1.20.1, cross-review #9).
+  if (Number(request.headers.get('content-length') ?? 0) > 64 * 1024) return json({ error: 'the request is too large' }, 413)
   const reply = await env.ROBOT.getByName(signed.robotId).boxTransfer(signed.token, permitSecret(request.headers.get(PERMIT_HEADER)), await request.text())
   return new Response(reply.json, { status: reply.status, headers: { 'content-type': 'application/json' } })
 }

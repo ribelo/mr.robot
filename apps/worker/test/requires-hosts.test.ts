@@ -46,7 +46,11 @@ async function pairedHost(name: string) {
   return {
     hostId: paired.hostId,
     /** The app closes its connection: the Host is offline. */
-    drop: async () => { socket!.close(1000); await pause(100) },
+    // Polled until the Space says it is offline, not a fixed pause (v1.20.1, cross-review #15).
+    drop: async () => {
+      socket!.close(1000)
+      await until(async () => (await env.SPACE.getByName('space').hostsFor(annaId)).some((host) => host.id === paired.hostId && !host.online))
+    },
     /** The app connects again: the Host is online. */
     back: connect,
   }
@@ -84,6 +88,7 @@ async function needsYou(): Promise<string[]> {
 /** The recurring Task's next occurrence is due now, and the Robot's alarm rings. */
 async function occurrence(id: string): Promise<void> {
   await space().backdateTasksForTest(16 * 60_000)
+  // Not asserted true (v1.20.1, cross-review #16): under load the alarm may ring by itself before this call, which then answers false.
   await runDurableObjectAlarm(env.ROBOT.getByName(id))
   await settle(id)
 }
@@ -147,6 +152,10 @@ describe('A Robot that waits for its Hosts (v1.16 ticket 05)', () => {
     await create({ title: 'Clean the disk', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'recurring', schedule: { kind: 'interval', everyMinutes: 5 } } })
     await studio.drop()
     scripts.set(id, [{ text: 'Cleaned.' }])
+    await occurrence(id)
+    expect(await taskTurns(id)).toBe(1)
+    // And the held Host counts: its outage stops the next occurrence (cross-review #14).
+    await desk.drop()
     await occurrence(id)
     expect(await taskTurns(id)).toBe(1)
   })

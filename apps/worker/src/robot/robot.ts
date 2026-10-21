@@ -178,11 +178,12 @@ import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import { Duties } from './duties.ts'
 import { nextRun } from './schedule.ts'
-import { isPeoplePage, isPeoplePath, PEOPLE_INDEX, PEOPLE_TEMPLATE_PATH } from '../member/people.ts'
-import { INDEX_BATCH, isIndexedRobotPath, MemoryIndex, versionOf as memoryVersion, type MemoryMatch } from './memory-index.ts'
+import { isPeoplePage, isPeoplePath } from '../member/people.ts'
+import { MemoryIndex, versionOf as memoryVersion, type MemoryMatch } from './memory-index.ts'
+import { RobotMemory } from './robot-memory.ts'
 import { platformStep, StepFence, stepRan, type PlatformStepHost } from '../agent/platform-step.ts'
 import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
-import { CHIEF_DREAM_TOOLS, cutSection, DREAMED_AT, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote, type DreamEvidence } from '../plugins/dream.ts'
+import { CHIEF_DREAM_TOOLS, DREAMED_AT, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote } from '../plugins/dream.ts'
 import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
 import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
 import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
@@ -319,7 +320,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       nextDreamHour: (after) => nextRun({ kind: 'daily', time: DREAM_TIME }, store.requireConfig().timeZone, after, after) ?? after + 86_400_000,
       dreamingOn: async () => store.requireConfig().dreaming ?? (await this.space().settings()).defaultDreaming,
       idleNow: () => store.activeTurn() === undefined && store.pendingWakeups() === 0 && this.pumping === undefined && this.platformTurn === undefined,
-      evidence: (since) => this.dreamEvidence(since),
+      evidence: (since) => this.memory.dreamEvidence(since),
       dream: (evidence, now) => {
         const config = store.requireConfig()
         const date = new Intl.DateTimeFormat('en-CA', { timeZone: config.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now - 6 * 3_600_000)
@@ -782,7 +783,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.currentWakeup = wakeup.kind
     // The dream (v1.20 ticket 05): its route, its tools, its author, its step limit, its usage source.
     const dream = wakeup.payload['dream'] === true
-    this.turnRoute = dream ? await this.dreamRoute() : undefined
+    this.turnRoute = dream ? await this.memory.dreamRoute() : undefined
     // A compaction whose chapter did not close yet (the Robot slept right after it) closes it before the Turn.
     if (!resuming) await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
     await this.tidyWorkspace().catch((error: unknown) => console.warn('workspace not tidied', error))
@@ -860,7 +861,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.writer = { kind: 'robot' }
       // The night's evidence counts as read only when the dream did its work (v1.20.1): a refused or empty dream leaves it for the next.
       if (stepRan(tally, !dreamCut) && typeof wakeup.payload['dreamAt'] === 'number') this.store.set(DREAMED_AT, wakeup.payload['dreamAt'])
-      await this.afterDream().catch((error: unknown) => console.warn('dream not tidied', error))
+      await this.memory.afterDream().catch((error: unknown) => console.warn('dream not tidied', error))
     }
     // A Turn that ends without a say gets one bounded step to speak; an owner's gets its last words shown if the step stays silent. A dream does not speak.
     if (!dream) await this.speakUp(wakeup, agent).catch((error: unknown) => console.warn('safety net failed', error))
@@ -2706,132 +2707,51 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return withWriteMask(makeWorkspace(this.env.FILES, this.store.requireConfig().id, this.writer, (path, text, etag) => this.memoryWritten(path, text, etag)), (path) => MASKED_WRITES.test(path), (text) => this.mask(text))
   }
 
-  private memoryIndexCache: MemoryIndex | undefined
+  /** The memory index, the people pages and the dream's inputs (robot-memory.ts, v1.20.1). */
+  private readonly memory: RobotMemory = new RobotMemory({
+    env: this.env,
+    store: () => this.store,
+    sql: () => this.ctx.storage.sql,
+    workspace: () => this.workspace,
+    space: () => this.space(),
+    writer: () => this.writer,
+    ownerName: () => this.owner().name,
+  })
 
-  /** The full-text index of the Robot's memory (v1.20, memory-index.ts). */
   protected get memoryIndex(): MemoryIndex {
-    // Reset everything and Start over drop every table: the index is made again then.
-    if (this.memoryIndexCache === undefined || this.ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'memory_indexed'").toArray().length === 0) this.memoryIndexCache = new MemoryIndex(this.ctx.storage.sql)
-    return this.memoryIndexCache
+    return this.memory.index
   }
 
-  /** The dream's route: the Robot's dreamModel, else the Space's, else undefined (the Robot's own model). */
-  private async dreamRoute(): Promise<ModelChoice | undefined> {
-    const own = this.store.requireConfig().dreamModel
-    if (own != null) return own
-    return (await this.space().settings().catch(() => undefined))?.defaultDreamModel ?? undefined
-  }
-
-  /** What the day left (dm-pzxk): daily notes changed, chapters closed, Attempts failed or skipped, Asks dismissed or rejected, since `since`. */
-  private async dreamEvidence(since: number): Promise<DreamEvidence> {
-    const config = this.store.requireConfig()
-    const own = (await this.run(this.workspace.list('memory'))).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > since).map((entry) => entry.path).sort()
-    // Mr. Robot's dream also reads his owner's Robots' daily notes, through his deputy reads (dm-pt5b).
-    const theirs = config.kind !== 'mr-robot' ? [] : (await Promise.all((await this.space().reachable(config.ownerId).catch(() => [])).filter((robot) => robot.ownerId === config.ownerId && robot.id !== config.id && robot.kind === 'robot').map(async (robot) => {
-      const files = await this.env.ROBOT.getByName(robot.id).files().catch(() => [])
-      return files.filter((file) => file.group === 'daily' && file.updatedAt > since).map((file) => `${robot.identity.name} (${robot.id}): ${file.path}`)
-    }))).flat()
-    const notes = [...own, ...theirs]
-    const chapters = this.store.chapters.all().flatMap((chapter) => (chapter.state.kind === 'closed' && chapter.state.at > since ? [{ ordinal: chapter.ordinal, closedBy: chapter.state.by }] : []))
-    const caller = { kind: 'robot' as const, robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot' as const, robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }
-    const tasks = await this.space().listTasks(caller, { state: 'all', assignee: { kind: 'robot', robotId: config.id } }).catch(() => ({ tasks: [] as TaskView[] }))
-    const attempts = tasks.tasks.flatMap((task) => task.attempts.filter((attempt) => attempt.robotId === config.id && (attempt.finishedAt ?? 0) > since && (attempt.outcome === 'failed' || attempt.outcome === 'skipped')).map((attempt) => ({ taskId: task.id, title: task.title, outcome: attempt.outcome, line: attempt.firstLine })))
-    const answered = this.store.proposals().filter((proposal) => (proposal.answeredAt ?? 0) > since)
-    // A dismissed question is stored as rejected (store.ts): both are listed.
-    const asks = answered.filter((proposal) => String(proposal.status) === 'rejected').map((proposal) => ({ id: proposal.id, status: 'dismissed or rejected', purpose: proposal.purpose }))
-    return { notes, chapters, attempts, asks, answered: answered.length }
-  }
-
-  /** After the dream: the AGENTS.md section is cut to its limit (dm-4ybd). */
-  private async afterDream(): Promise<void> {
-    const agents = await this.run(this.workspace.readText('AGENTS.md'))
-    const cut = agents === undefined ? undefined : cutSection(agents, this.owner().name)
-    if (cut !== undefined) await this.run(this.workspace.write('AGENTS.md', cut, 'text/markdown; charset=utf-8', { kind: 'platform' }))
-  }
-
-  /** Every Workspace write reindexes an indexed file at once (dm-yn3q): the Robot's, the owner's, a memory step's, a restore. */
   private memoryWritten(path: string, text: string | undefined, etag: string | undefined): void {
-    if (!isIndexedRobotPath(path)) return
-    if (etag === undefined) return this.memoryIndex.remove('robot', path)
-    // A stream's text is not at hand: the next catch-up reads it.
-    if (text === undefined) return this.memoryIndex.index('robot', path, '', 'stale')
-    this.memoryIndex.index('robot', path, text, etag)
+    this.memory.written(path, text, etag)
   }
 
-  /**
-   * Bring the index up to date, at most INDEX_BATCH files (dm-yn3q): the Robot's indexed files whose etag changed or that are new, the ones
-   * gone, and the Member and Space files it reads by their content. Run at each Turn's start and before a search.
-   */
-  protected async catchUpMemoryIndex(limit = INDEX_BATCH): Promise<void> {
-    const index = this.memoryIndex
-    const config = this.store.requireConfig()
-    const ws = this.workspace
-    let budget = limit
-    const [memory, dreams, roots] = await Promise.all([
-      this.run(ws.list('memory')),
-      this.run(ws.list('dreams')),
-      Promise.all(['MEMORY.md', 'AGENTS.md', 'SOUL.md'].map((path) => this.run(ws.stat(path)))),
-    ])
-    const present = [...memory, ...dreams, ...roots.flatMap((entry) => (entry === undefined ? [] : [entry]))].filter((entry) => isIndexedRobotPath(entry.path))
-    const known = new Map(index.indexed('robot').map((row) => [row.path, row.version]))
-    for (const entry of present) {
-      if (budget <= 0) break
-      if (known.get(entry.path) === entry.etag) continue
-      const text = await this.run(ws.readText(entry.path))
-      index.index('robot', entry.path, text ?? '', entry.etag)
-      budget -= 1
-    }
-    const paths = new Set(present.map((entry) => entry.path))
-    for (const path of known.keys()) if (!paths.has(path)) index.remove('robot', path)
-    const [member, space] = await Promise.all([
-      Promise.all([this.env.MEMBER.getByName(config.ownerId).files(), this.env.MEMBER.getByName(config.ownerId).peoplePages()]).then(([files, people]) => ({ ...files, ...people })).catch(() => undefined),
-      this.space().spaceMemory().catch(() => undefined),
-    ])
-    const shared: Array<['member' | 'space', Record<string, string> | undefined]> = [['member', member as Record<string, string> | undefined], ['space', space === undefined ? undefined : { 'SPACE.md': space }]]
-    for (const [scope, files] of shared) {
-      if (files === undefined) continue
-      for (const [path, text] of Object.entries(files)) {
-        const version = memoryVersion(text)
-        if (index.version(scope, path) !== version) index.index(scope, path, text, version)
-      }
-      for (const row of index.indexed(scope)) if (!(row.path in files)) index.remove(scope, row.path)
-    }
+  protected catchUpMemoryIndex(limit?: number): Promise<void> {
+    return this.memory.catchUp(limit)
   }
 
-  /** memory_search (dm-hmet): the index caught up first, then the ranked matches. */
-  async memorySearch(query: string, limit?: number): Promise<MemoryMatch[]> {
-    await this.catchUpMemoryIndex()
-    return this.memoryIndex.search(query, limit)
+  memorySearch(query: string, limit?: number): Promise<MemoryMatch[]> {
+    return this.memory.search(query, limit)
   }
 
   run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
     return Effect.runPromise(effect)
   }
 
-  /** The owner's people pages (v1.20 ticket 04): mounted at memory/people/, written by this Robot directly, under its name. */
   peopleFile(path: string): Promise<string | undefined> {
-    return this.env.MEMBER.getByName(this.store.requireConfig().ownerId).peopleFile(path)
+    return this.memory.peopleFile(path)
   }
 
-  async peoplePaths(): Promise<string[]> {
-    const pages = await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).peoplePages().catch(() => ({}))
-    return [...new Set([PEOPLE_TEMPLATE_PATH, PEOPLE_INDEX, ...Object.keys(pages)])].sort()
+  peoplePaths(): Promise<string[]> {
+    return this.memory.peoplePaths()
   }
 
-  /** Only Mr. Robot deletes a people page: merging two pages of one person (v1.20, dm-kkgy). */
-  async removePeoplePage(path: string): Promise<void> {
-    const config = this.store.requireConfig()
-    if (config.kind !== 'mr-robot') throw new Error(`${path} is your owner's people page: correct it with write; only your owner deletes it, or Mr. Robot when he merges two pages of one person.`)
-    await this.env.MEMBER.getByName(config.ownerId).removePeoplePage(path)
-    this.memoryIndex.remove('member', path)
+  removePeoplePage(path: string): Promise<void> {
+    return this.memory.removePeoplePage(path)
   }
 
-  async writePeoplePage(path: string, content: string): Promise<void> {
-    const config = this.store.requireConfig()
-    // A memory step writes as itself; otherwise the page names this Robot.
-    const author: FileAuthor = this.writer.kind === 'robot' ? { kind: 'robot', name: config.identity.name } : this.writer
-    await this.env.MEMBER.getByName(config.ownerId).writePeoplePage(path, content, author)
-    this.memoryIndex.index('member', path, content, memoryVersion(content))
+  writePeoplePage(path: string, content: string): Promise<void> {
+    return this.memory.writePeoplePage(path, content)
   }
 
   memberFile(name: MemberFileName): Promise<string> {
@@ -4026,6 +3946,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Bring a kept version back (rm-7jo4): the restore is a new version, and the Robot hears who restored the file (rm-cvl8). */
   async restoreFile(path: string, version: string, by?: string): Promise<WorkspaceFileContent> {
     const normalized = normalizePath(path) ?? ''
+    // A people page's versions are the Member's; a restore is a new version by the owner, a deleted page comes back (v1.20.1).
+    if (isPeoplePage(normalized)) {
+      const member = this.env.MEMBER.getByName(this.store.requireConfig().ownerId)
+      const found = await member.memberFileVersion(normalized, version)
+      if (found === null) throw Object.assign(new Error(`no version ${version} of ${path}`), { name: 'NotFound', status: 404 })
+      await member.writePeoplePage(normalized, found.text, { kind: 'restore', name: by ?? this.owner().name, version })
+      this.memoryIndex.index('member', normalized, found.text, memoryVersion(found.text))
+      await this.changed()
+      return this.fileContent(normalized)
+    }
     const found = isTrackedFile(normalized) ? await this.workspace.history.read(normalized, version) : undefined
     if (found === undefined) throw Object.assign(new Error(`no version ${version} of ${path}`), { name: 'NotFound', status: 404 })
     const name = by ?? this.owner().name
@@ -4193,6 +4123,16 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** The owner deleted a file (a local skill, an old note). */
   async deleteFile(path: string, by?: string): Promise<void> {
     if (isDocsPath(path)) throw Object.assign(new Error(docsReadOnlyMessage(path)), { name: 'Invalid', status: 400 })
+    // A people page is the owner's (v1.20.1, v1.20-review #3): its row goes from the Member, its last version stays in the history.
+    const normalized = normalizePath(path)
+    if (normalized !== undefined && isPeoplePath(normalized)) {
+      if (!isPeoplePage(normalized)) throw Object.assign(new Error(`${normalized} is kept by the platform`), { name: 'Invalid', status: 400 })
+      if ((await this.memory.peopleFile(normalized)) === undefined) throw Object.assign(new Error(`no people page ${normalized}`), { name: 'NotFound', status: 404 })
+      await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).removePeoplePage(normalized)
+      this.memoryIndex.remove('member', normalized)
+      await this.changed()
+      return
+    }
     await this.run(this.workspace.remove(path, { kind: 'person', name: by ?? this.owner().name }))
     await this.memoryChanged(path, `${by ?? 'your owner'} (deleted)`)
     if (by !== undefined) {
