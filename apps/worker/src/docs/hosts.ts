@@ -26,9 +26,11 @@ The owner sets a mode for the files facet and for the shell facet:
 - read-only: you may change nothing.
 - full: you may change all that the OS user can. The command runs without a sandbox.
 
-The write tools follow the same mode and roots as run, except for /tmp.
+The write tools follow the mode and roots of run, except /tmp.
 
-When the mode denies a write, the result names the path. To get more, call the same tool again with escalate set to true and a reason. The owner gets one Ask. If the owner approves, the call runs once without the sandbox and you wake with the result. The grant does not change.
+When the mode denies a write, the result names the path. Call the same tool again with escalate and a reason: if the owner approves the one Ask, it runs once without the sandbox. The grant does not change.
+
+For a Workspace (a repository on a Host) read workspaces.md.
 
 On macOS and Windows the sandbox confines one folder, so workspace-write fails closed when the grant lists extra roots. A Host with no usable sandbox runs only full mode. Without PowerShell 7 on Windows no command runs.
 

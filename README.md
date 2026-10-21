@@ -32,5 +32,5 @@ After the first deploy, open the URL, sign in with the e-mail code, and add a De
 ## Deploy artefacts
 
 - The Worker and the PWA: `pnpm deploy`.
-- The Host app for NixOS: `nix-build apps/host/package.nix`.
+- The Host app for NixOS: `nix-build apps/host/package.nix`. As an always-on service Host with no display: the flake's `nixosModules.host` (`services.mr-robot-host.enable = true`), then `sudo -u mr-robot-host mr-robot-host pair <server>`. infra/host/ also holds a systemd unit for another Linux and a launchd plist for macOS.
 - The Host app for Windows: the installer from `pnpm --filter @mr-robot/host dist:win` (above). Install PowerShell 7 on the computer first; the app tells the owner when it is missing.

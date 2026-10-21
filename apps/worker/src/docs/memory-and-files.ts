@@ -56,7 +56,7 @@ Screenshots are not in the Files. They are stored apart and kept for 7 days.
 
 ## File tools
 
-The file tools are read, write, edit, delete_file, glob and grep, and copy moves a file between places. copy has no size limit, and the content does not pass through the model. Each takes a mandatory \`on\`: "files" (your Files), "workspace" (your Workspace, when you have one), "box" or the name of a Host. There is no default. With on "files", paths are relative or start with /workspace, and the tools list the docs and the Member files too. The Member files, the docs and the platform skills are reachable only with on "files": the Box and a Host refuse their names. A write, edit or delete on a read-only path returns an error that says who owns the file. A call needs the grant of its place: the files group for the Files, the box group for the Box, the files facet of a Host.
+The file tools are read, write, edit, delete_file, glob and grep, and copy moves a file between places. copy has no size limit, and the content does not pass through the model. Each takes a mandatory \`on\`: "files" (your Files), "workspace" (your Workspace, read workspaces.md), "box" or the name of a Host. There is no default. With on "files", paths are relative or start with /workspace, and the tools list the docs and the Member files too. The Member files, the docs and the platform skills are reachable only with on "files": the Box and a Host refuse their names. A write, edit or delete on a read-only path returns an error that says who owns the file. A call needs the grant of its place: the files group for the Files, the box group for the Box, the files facet of a Host.
 
 ## Files view
 

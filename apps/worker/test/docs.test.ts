@@ -7,7 +7,7 @@ import { api, settle, stubModels } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
-const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'dreaming', 'definitions', 'pages', 'connections', 'hosts', 'browser', 'providers', 'subagents', 'box', 'auto-review']
+const DOC_NAMES = ['mr-robot', 'members', 'robots', 'grants', 'tasks', 'asks-and-help', 'memory-and-files', 'dreaming', 'definitions', 'pages', 'connections', 'hosts', 'workspaces', 'browser', 'providers', 'subagents', 'box', 'auto-review']
 const DOC_PATHS = DOC_NAMES.map((name) => `docs/${name}.md`)
 const SKILL_PATHS = PLATFORM_SKILLS.map((skill) => `docs/skills/${skill.name}/SKILL.md`)
 
@@ -118,5 +118,23 @@ describe('the product docs (v1.11 ticket 02)', () => {
       const text = (await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=${path}`)).body.text ?? ''
       expect(text.split(/\s+/).length, path).toBeLessThan(900)
     }
+  })
+})
+
+describe('the Workspace docs (v1.21 ticket 11, cw-iunm)', () => {
+  /** A doc as the Robot reads it, from its Files. */
+  const read = async (id: string, name: string) => (await api<WorkspaceFileContent>(ANNA, `/api/robots/${id}/file?path=docs/${name}.md`)).body.text ?? ''
+
+  it('name the limits the stories state: the frame limit, the idle stop, the worktree rules, the credentials, what a service Host lacks', async () => {
+    const id = (await api<RobotSummary[]>(ANNA, '/api/robots')).body[0]!.id
+    await settle(id)
+    const workspaces = await read(id, 'workspaces')
+    for (const limit of ['at most 1 MiB to a computer', 'moves with copy', 'after 30 minutes without a query', 'committed content only', 'no untracked or ignored files', 'no fetch', 'no installed dependencies', 'not the main working tree', 'a Subagent cannot make one', 'within 65,536 bytes', 'no link out of it is followed', 'git runs as the OS user', 'Mr. Robot gives git no credential of its own', 'A platform skill always wins its name'])
+      expect(workspaces, limit).toContain(limit)
+    const hosts = await read(id, 'hosts')
+    for (const limit of ['git uses the OS user\'s SSH keys', 'Mr. Robot gives git no credential', 'A service Host runs the app with no window', 'no browser facet', 'no user systemd manager', 'A service restart ends its jobs', 'read workspaces.md'])
+      expect(hosts, limit).toContain(limit)
+    const files = await read(id, 'memory-and-files')
+    for (const limit of ['"files" (your Files)', 'read workspaces.md']) expect(files, limit).toContain(limit)
   })
 })

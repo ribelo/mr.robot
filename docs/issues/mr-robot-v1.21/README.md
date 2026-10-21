@@ -14,5 +14,5 @@ Spec: ../mr-robot-v1.21.md. Needs v1.20 merged. Frontier at the start: 01. Then 
 | 08 | [The Workspace panel and the static prompt line](08-workspace-panel.md) | 04, 05, 07 | done |
 | 09 | [The service Host](09-service-host.md) | 01 | done (one check by hand) |
 | 10 | [The chief, the Coding Robot definition, the Add form, the coding skill, the prompt bound](10-chief-definition-skill.md) | 02, 04, 07 | done |
-| 11 | [Glossary and docs](11-glossary-docs.md) | 02, 04, 05, 06, 07, 08, 09, 10 | ready-for-agent |
+| 11 | [Glossary and docs](11-glossary-docs.md) | 02, 04, 05, 06, 07, 08, 09, 10 | done |
 | 12 | [Acceptance: one ticket by a Coding Robot](12-acceptance.md) | 01 to 11 | ready-for-agent |

@@ -69,5 +69,5 @@ A Robot works in code mode by default. It writes a program that calls its tools,
 - tasks.md: Tasks, scheduled and recurring work, reminders.
 - asks-and-help.md: questions, credential requests and the chief rule.
 - memory-and-files.md: memory and the Files.
-- connections.md, hosts.md, browser.md, providers.md.
+- connections.md, hosts.md, workspaces.md, browser.md, providers.md.
 `
