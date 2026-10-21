@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react'
 import { useMeasuredRows, useRowWindow } from './row-window.ts'
-import type { Attachment, ChatItem, GrantLevels, ProposalView, TaskAction, ThreadEvent, ThreadView, WorkDetails } from '@mr-robot/protocol'
+import type { Attachment, ChatItem, GrantLevels, ProposalView, TaskAction, ThreadEvent, ThreadView, ToolCallDetail, WorkDetails } from '@mr-robot/protocol'
 import { Markdown } from './Markdown.tsx'
 import { ThinkingRow, ToolCards } from './WorkDetails.tsx'
 import { separatorTime } from '../time.ts'
@@ -29,6 +29,8 @@ export interface ChatViewProps {
   readonly now?: number
   /** How much of the Robot's work to show (pl-6eir); Compact by default. */
   readonly workDetails?: WorkDetails
+  /** At Code: the page's calls read in full from the log, by call id (cw-sc3z). */
+  readonly callDetails?: ReadonlyMap<string, ToolCallDetail>
   /** The reply and thinking streaming in now (pl-jzr7). */
   readonly stream?: { readonly text: string; readonly thinking: string }
   /** Messages sent but not yet in the Conversation, shown after its items (ap-3si6). */
@@ -55,7 +57,7 @@ const ROW_GAP_PX = 8
 const GAP_MS = 60 * 60 * 1000
 
 /** The simple chat view of a Conversation, in the style of the reference screens (robot-q4b2). */
-export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, onHelp, onReply, now, workDetails = 'compact', stream, robotId, highlight, scrollRef, following, pending = [], onRetry, robotColor }: ChatViewProps) {
+export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, onHelp, onReply, now, workDetails = 'compact', callDetails, stream, robotId, highlight, scrollRef, following, pending = [], onRetry, robotColor }: ChatViewProps) {
   const rows: ReactNode[] = []
   let lastAt = 0
   for (let index = 0; index < items.length; index += 1) {
@@ -83,7 +85,7 @@ export function ChatView({ items, meId, working, activity, canAnswer, onAnswer, 
         </div>,
       )
     }
-    rows.push(<div key={item.id} data-item={item.id} className={highlight === item.id ? 'chat-item search-hit' : 'chat-item'}><Item item={item} meId={meId} robotColor={robotColor} canAnswer={canAnswer} level={workDetails} {...(robotId === undefined ? {} : { robotId })} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onHelp === undefined ? {} : { onHelp })} {...(onReply === undefined ? {} : { onReply })} /></div>)
+    rows.push(<div key={item.id} data-item={item.id} className={highlight === item.id ? 'chat-item search-hit' : 'chat-item'}><Item item={item} meId={meId} robotColor={robotColor} canAnswer={canAnswer} level={workDetails} details={callDetails} {...(robotId === undefined ? {} : { robotId })} {...(onAnswer === undefined ? {} : { onAnswer })} {...(onHelp === undefined ? {} : { onHelp })} {...(onReply === undefined ? {} : { onReply })} /></div>)
   }
   for (const send of pending) rows.push(<PendingBubble key={`pending-${send.clientId}`} send={send} {...(onRetry === undefined ? {} : { onRetry })} />)
   const showThinking = workDetails === 'detailed' || workDetails === 'verbose'
@@ -157,7 +159,7 @@ function PendingBubble({ send, onRetry }: { send: PendingSend; onRetry?: (client
   )
 }
 
-function Item({ item, meId, canAnswer, onAnswer, onHelp, onReply, level, robotId, robotColor }: { robotColor: string | undefined; item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; onHelp?: ChatViewProps['onHelp']; onReply?: ChatViewProps['onReply']; level: WorkDetails; robotId?: string }) {
+function Item({ item, meId, canAnswer, onAnswer, onHelp, onReply, level, details, robotId, robotColor }: { robotColor: string | undefined; item: ChatItem; meId: string; canAnswer: boolean; onAnswer?: ChatViewProps['onAnswer']; onHelp?: ChatViewProps['onHelp']; onReply?: ChatViewProps['onReply']; level: WorkDetails; details?: ReadonlyMap<string, ToolCallDetail> | undefined; robotId?: string }) {
   switch (item.kind) {
     case 'message': {
       const own = item.sender.kind === 'member' && item.sender.memberId === meId
@@ -199,7 +201,7 @@ function Item({ item, meId, canAnswer, onAnswer, onHelp, onReply, level, robotId
     case 'thread':
       return <ThreadCard thread={item.thread} event={item.event} />
     case 'activity':
-      return level === 'compact' || item.calls === undefined ? (item.tools.length === 0 ? null : <ActivityLine tools={item.tools} />) : <ToolCards calls={item.calls} level={level} />
+      return level === 'compact' || item.calls === undefined ? (item.tools.length === 0 ? null : <ActivityLine tools={item.tools} />) : <ToolCards calls={item.calls} level={level} details={details} />
     case 'thinking':
       return level === 'detailed' || level === 'verbose' ? <ThinkingRow text={item.text} level={level} /> : null
     case 'proposal':

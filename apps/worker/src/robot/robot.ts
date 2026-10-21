@@ -68,7 +68,7 @@ import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platfor
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { CredentialSave } from '@mr-robot/protocol'
-import type { ChainEntry, GrantLevel, SpaceSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource, WorkspaceChoice, WorkspaceSetting } from '@mr-robot/protocol'
+import type { ChainEntry, GrantLevel, SpaceSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource, WorkspaceChoice, WorkspaceSetting, ToolCallDetails, ToolCallsRequest } from '@mr-robot/protocol'
 import { checkRoot, sameWorkspace, WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace } from './workspace-setting.ts'
 import { baselineText, changesText, stateAfter, WORKSPACE_CHAIN, WORKSPACE_SKILLS, type ChainState, type SkillsState } from './workspace-context.ts'
 import { WorkspaceInstructions } from '../plugins/workspace-instructions.ts'
@@ -3810,6 +3810,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.program(Views.trajectory(chapter))
   }
 
+
+  /** The Code view's calls of a page, in full from the log (v1.21, cw-sc3z). */
+  toolCalls(request: ToolCallsRequest): Promise<ToolCallDetails> {
+    return this.program(Views.toolCalls(request))
+  }
 
   conversation(): Promise<Conversation> {
     return this.program(Views.conversation())

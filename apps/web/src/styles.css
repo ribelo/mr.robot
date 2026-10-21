@@ -506,6 +506,16 @@ table.grid .muted { margin-top: 2px; }
 .tool-cards { display: flex; flex-direction: column; gap: 2px; max-width: 760px; width: 100%; margin: 0 auto; }
 .tool-card { font-size: 13px; color: var(--muted); }
 .tool-card-body { padding: 4px 0 10px 26px; display: flex; flex-direction: column; gap: 4px; }
+/* The Code view (v1.21): one look for a call in the Conversation and in the Trajectory. */
+.code-call { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text); }
+.code-call pre { margin: 0; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 480px; overflow: auto; font-size: 12px; white-space: pre; }
+.code-call-head { font-family: ui-monospace, monospace; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+.code-call ul { margin: 0; padding-left: 16px; max-height: 320px; overflow: auto; }
+.diff-added { background: color-mix(in srgb, #2ea043 18%, transparent); }
+.diff-removed { background: color-mix(in srgb, #f85149 18%, transparent); }
+.code-exit { color: #f85149; }
+.code-exit.ok { color: var(--muted); }
+.code-stderr { color: #f85149; }
 .tool-card-body pre { margin: 0; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 320px; overflow: auto; font-size: 12px; white-space: pre-wrap; color: var(--text); }
 .tool-card-label { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
 .tool-card-error { border-color: var(--danger) !important; color: var(--danger-text) !important; }

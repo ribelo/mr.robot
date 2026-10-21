@@ -60,7 +60,8 @@ import type { DefinitionRow } from '../definitions/library.ts'
 import * as Result from 'effect/Result'
 import { definitionArchive } from '../definitions/tarball.ts'
 import { fetchGrokPage } from '../definitions/grok-import.ts'
-import type { DefinitionView } from '@mr-robot/protocol'
+import type { DefinitionView, ToolCallDetails } from '@mr-robot/protocol'
+import { ToolCallsRequest } from '@mr-robot/protocol'
 import { memberAvatarObject } from '../space/space.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
@@ -577,6 +578,12 @@ export const api = new Router<ApiContext>()
     const chapter = chapterParam(c.request)
     if (chapter === null) return yield* Effect.fail(badRequest('chapter is a chapter number'))
     return yield* call(() => robot(c, id).trajectoryMasked(chapter))
+  }))
+  // The Code view (v1.21, cw-sc3z): the page's calls in full from the chapter log, for whoever may read the Conversation.
+  .on('POST', '/api/robots/:id/conversation/calls', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    const input = yield* decodeBody(c.request, ToolCallsRequest)
+    return yield* call((): Promise<ToolCallDetails> => robot(c, id).toolCalls(input))
   }))
   .on('POST', '/api/robots/:id/rewind', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)

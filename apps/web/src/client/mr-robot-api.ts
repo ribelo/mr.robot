@@ -16,6 +16,8 @@ import {
   PageContent, PageView, SharedPageView, SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   FileHistoryView, FileVersionContent, MarketplaceEntry, DefinitionView,
   type CredentialSave, type GroupPatch, type SpaceSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
+  ToolCallDetails,
+  type ToolCallsRequest,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
 
@@ -199,6 +201,8 @@ const make = Effect.gen(function* () {
     setHostSharing: (id: string, sharing: 'private' | 'space') => send('PATCH', `/api/hosts/${enc(id)}`, { sharing }),
     unpairHost: (id: string) => send('DELETE', `/api/hosts/${enc(id)}`),
     hostActions: (id: string) => get(Schema.Array(HostAction), `/api/hosts/${enc(id)}/actions`),
+    /** The Code view's calls of a page, in full from the log (v1.21, cw-sc3z). */
+    toolCalls: (robotId: string, body: ToolCallsRequest) => request(ToolCallDetails, 'POST', `/api/robots/${enc(robotId)}/conversation/calls`, body),
     /** The Workspace picker (v1.21, cw-gx04): the directories in a directory of a Host the Robot holds the files facet on. */
     hostDirectories: (robotId: string, hostId: string, path: string) => get(Schema.Struct({ path: Schema.String, directories: Schema.Array(Schema.String), truncated: Schema.Boolean }), `/api/robots/${enc(robotId)}/hosts/${enc(hostId)}/directories?path=${enc(path)}`),
 

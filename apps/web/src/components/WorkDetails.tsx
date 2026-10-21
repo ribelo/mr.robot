@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
-import type { ToolCallView, WorkDetails } from '@mr-robot/protocol'
+import type { ToolCallDetail, ToolCallView, WorkDetails } from '@mr-robot/protocol'
+import { codeCall } from './CodeRenderers.tsx'
 import {
   DisclosureRow,
   IconAlarmClockOutlineRegular,
@@ -61,26 +62,28 @@ function title(call: ToolCallView): string {
   return `${label}${detail.length > 80 ? detail.slice(0, 80) + '…' : detail}${call.name === 'copy' && !call.error ? copyTook(call.result) : ''}${call.error ? ' (failed)' : ''}`
 }
 
-function ToolCard({ call, initiallyOpen }: { call: ToolCallView; initiallyOpen: boolean }) {
+function ToolCard({ call, initiallyOpen, detail, code }: { call: ToolCallView; initiallyOpen: boolean; detail?: ToolCallDetail | undefined; code: boolean }) {
   const [open, setOpen] = useState(initiallyOpen)
+  // At Code (cw-sc3z) the call reads as code: the full call from the log when it came, else the clipped one, through the shared renderers.
+  const rendered = code ? codeCall(detail ?? call) : null
   return (
     <DisclosureRow className="tool-card" icon={toolIcon(call.name)} title={title(call)} open={open} expandable expandOnRowClick previewChevron onToggle={() => setOpen(!open)}>
-      <div className="tool-card-body">
+      {rendered !== null ? <div className="tool-card-body">{rendered}</div> : <div className="tool-card-body">
         {call.inner.length > 0 ? (
           <ul className="tool-card-inner">{call.inner.map((inner, index) => <li key={index}><code>{inner.name}</code> <span className="muted">{inner.args}</span></li>)}</ul>
         ) : null}
         <div className="tool-card-label">Input</div>
         <pre>{call.args}</pre>
         <div className="tool-card-label">{call.error ? 'Error' : 'Result'}</div>
-        <pre className={call.error ? 'tool-card-error' : undefined}>{call.result || '(empty)'}</pre>
-      </div>
+        <pre className={call.error ? 'tool-card-error' : undefined}>{(code ? detail?.result : undefined) ?? (call.result || '(empty)')}</pre>
+      </div>}
     </DisclosureRow>
   )
 }
 
-/** One step's tool calls as DSH tool cards (Standard: collapsed; Verbose: open) (pl-etps). */
-export function ToolCards({ calls, level }: { calls: readonly ToolCallView[]; level: WorkDetails }) {
-  return <div className="tool-cards">{calls.map((call) => <ToolCard key={call.id} call={call} initiallyOpen={level === 'verbose'} />)}</div>
+/** One step's tool calls as DSH tool cards (Standard: collapsed; Verbose and Code: open) (pl-etps, cw-sc3z). */
+export function ToolCards({ calls, level, details }: { calls: readonly ToolCallView[]; level: WorkDetails; details?: ReadonlyMap<string, ToolCallDetail> | undefined }) {
+  return <div className="tool-cards">{calls.map((call) => <ToolCard key={call.id} call={call} initiallyOpen={level === 'verbose' || level === 'code'} code={level === 'code'} detail={details?.get(call.id)} />)}</div>
 }
 
 /** The model's thinking, as the DSH conversation's Think row: collapsed at Detailed, open at Verbose. */
@@ -98,4 +101,5 @@ export const WORK_DETAILS: ReadonlyArray<{ id: WorkDetails; label: string; note:
   { id: 'standard', label: 'Standard', note: 'Each tool the Robot used as a collapsed card.' },
   { id: 'detailed', label: 'Detailed', note: 'Tool cards and the model\'s thinking, as in DeepSeek Harness.' },
   { id: 'verbose', label: 'Verbose', note: 'Everything open: inputs, results and thinking.' },
+  { id: 'code', label: 'Code', note: 'Every call in full as code: diffs, file fragments, commands with their output, search lists and locations.' },
 ]

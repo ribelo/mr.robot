@@ -45,7 +45,8 @@ export const MemberView = Schema.Struct({
 })
 export type MemberView = typeof MemberView.Type
 
-export const WorkDetails = Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])
+/** How much of the Robot's work the Conversation shows; 'code' (v1.21, cw-jy38) shows each call in full, read from the log. */
+export const WorkDetails = Schema.Literals(['compact', 'standard', 'detailed', 'verbose', 'code'])
 export type WorkDetails = typeof WorkDetails.Type
 /** The Member's theme choice: follow the system, or pin light or dark (ap-itj1). */
 export const ThemeChoice = Schema.Literals(['system', 'light', 'dark'])
@@ -105,7 +106,7 @@ export const MemberPreferences = Schema.Struct({
   /** Unpin: adopt the zone the app detected. */
   useDetectedTimeZone: Schema.optional(Schema.Literal(true)),
   quietHours: Schema.optional(Schema.NullOr(QuietHours)),
-  workDetails: Schema.optional(Schema.Literals(['compact', 'standard', 'detailed', 'verbose'])),
+  workDetails: Schema.optional(WorkDetails),
   theme: Schema.optional(ThemeChoice),
   /** The avatar colour; a picture keeps it behind (ux-2ft4). The picture itself goes through PUT /api/me/avatar. */
   avatarColor: Schema.optional(AvatarColor),
@@ -581,6 +582,8 @@ export const RobotSettings = Schema.Struct({
   hostAccess: Schema.optional(HostAccessByFacet),
   /** v1.21 (cw-gx04): the Robot's Workspace on a Host; null or absent: none. */
   workspace: Schema.optional(Schema.NullOr(WorkspaceSetting)),
+  /** v1.21 (cw-jy38): this Robot's Work details; null follows the Member's, or Code for a Robot with a Workspace (cw-1h3q). */
+  workDetails: Schema.optional(Schema.NullOr(WorkDetails)),
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -651,6 +654,8 @@ export const SettingsPatch = Schema.Struct({
   hostAccess: Schema.optional(HostAccessByFacet),
   /** v1.21 (cw-gx04): set the Workspace (checked on the Host first) or remove it with null. */
   workspace: Schema.optional(Schema.NullOr(WorkspaceChoice)),
+  /** v1.21 (cw-jy38): this Robot's Work details; null follows the default. */
+  workDetails: Schema.optional(Schema.NullOr(WorkDetails)),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 
@@ -719,8 +724,14 @@ export const RobotSummary = Schema.Struct({
   groupId: Schema.optional(Schema.String),
   /** Where it works (v1.21, cw-hiwf): its Workspace's Host and root; absent or null: no Workspace. */
   workspace: Schema.optional(Schema.NullOr(WorkspacePlace)),
+  /** Its Work details when they do not follow the person's (v1.21, cw-jy38, cw-1h3q): its own choice, else Code with a Workspace. */
+  workDetails: Schema.optional(WorkDetails),
 })
 export type RobotSummary = typeof RobotSummary.Type
+
+/** The Work details a person sees for a Robot (cw-jy38): the Robot's own, else the person's default, else Compact. */
+export const effectiveWorkDetails = (robot: { readonly workDetails?: WorkDetails | undefined } | undefined, member: WorkDetails | undefined): WorkDetails =>
+  robot?.workDetails ?? member ?? 'compact'
 
 // ---------------------------------------------------------------- Sidebar groups (ux-wxbm, ux-o7po, ux-xbvi, ux-oltg)
 
@@ -1272,6 +1283,18 @@ export const ToolCallView = Schema.Struct({
   inner: Schema.Array(Schema.Struct({ name: Schema.String, args: Schema.String })),
 })
 export type ToolCallView = typeof ToolCallView.Type
+
+/** One call read in full from the chapter log for the Code view (v1.21, cw-sc3z): its arguments' JSON and the result's text, masked. */
+export const ToolCallDetail = Schema.Struct({ itemId: Schema.String, id: Schema.String, name: Schema.String, args: Schema.String, result: Schema.String, error: Schema.Boolean })
+export type ToolCallDetail = typeof ToolCallDetail.Type
+
+/** The page's calls the Code view asks for: each activity item with the calls it shows. */
+export const ToolCallsRequest = Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String, calls: Schema.Array(Schema.String) })) })
+export type ToolCallsRequest = typeof ToolCallsRequest.Type
+
+/** What the log gave; `truncated` when the page's calls went past the size bound and some came clipped or not at all. */
+export const ToolCallDetails = Schema.Struct({ calls: Schema.Array(ToolCallDetail), truncated: Schema.Boolean })
+export type ToolCallDetails = typeof ToolCallDetails.Type
 
 const itemFields = { id: Schema.String, seq: Schema.Number, at: Schema.Number }
 

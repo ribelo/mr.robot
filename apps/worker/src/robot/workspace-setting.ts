@@ -3,11 +3,17 @@
  * Robot DO with the repository root the Host found, and the Robot's current directory in it. Pure; the Robot DO keeps the values, the
  * Host checks the root before they are kept and checks every change of directory.
  */
-import type { WorkspaceChoice, WorkspacePlace, WorkspaceSetting } from '@mr-robot/protocol'
+import type { WorkDetails, WorkspaceChoice, WorkspacePlace, WorkspaceSetting } from '@mr-robot/protocol'
 
 /** The Robot's keys: the setting, and its current directory there (the root until it moves). */
 export const WORKSPACE = 'workspace'
 export const WORKSPACE_CWD = 'workspace-cwd'
+/** The Robot's own Work details (v1.21, cw-jy38); absent: the default. */
+export const WORK_DETAILS = 'work-details'
+
+/** The Work details a Robot shows when they do not follow the person's (cw-1h3q): its own, else Code with a Workspace. */
+export const robotWorkDetails = (own: WorkDetails | undefined, setting: WorkspaceSetting | undefined): WorkDetails | undefined =>
+  own ?? (setting === undefined ? undefined : 'code')
 
 /** What the Host said of a root (the Stat RPC). */
 export interface RootFacts {

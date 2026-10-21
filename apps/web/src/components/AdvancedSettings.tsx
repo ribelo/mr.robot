@@ -2,12 +2,13 @@ import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS } from './danger-words.ts'
 import { useState, useEffect } from 'react'
-import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, DEFAULT_HOST_GRANT_ACCESS, type HostGrantAccess, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend, type WorkspaceChoice } from '@mr-robot/protocol'
+import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, DEFAULT_HOST_GRANT_ACCESS, type HostGrantAccess, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend, type WorkDetails, type WorkspaceChoice } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
 import { ReviewerSetting } from './ReviewerSetting.tsx'
 import { SubagentModels } from './SubagentModels.tsx'
 import { badRoots, HostAccessEditor } from './HostAccessEditor.tsx'
 import { WorkspacePicker } from './WorkspacePicker.tsx'
+import { WORK_DETAILS } from './WorkDetails.tsx'
 import { SaveButton, type SaveOutcome } from './SaveButton.tsx'
 import { parseRobotSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import * as Option from 'effect/Option'
@@ -85,6 +86,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       notifications: draft.notifications,
       spendLimit: spendLimit.value,
       ...(workspace === undefined ? {} : { workspace }),
+      workDetails: draft.workDetails ?? null,
     })
   }
   const mrRobot = panel.summary.kind === 'mr-robot'
@@ -95,6 +97,13 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         onChange={(chain) => setDraft({ ...draft, chain, model: { provider: chain[0]!.provider, model: chain[0]!.model, effort: chain[0]!.effort } })} />
       <label>Context budget: {Math.round(draft.contextBudget / 1000)}k tokens
         <input type="range" min={8000} max={maxBudget} step={8000} value={Math.min(draft.contextBudget, maxBudget)} onChange={(event) => setDraft({ ...draft, contextBudget: Number(event.target.value) })} />
+      </label>
+      <label>Work details
+        <select aria-label="Work details" value={draft.workDetails ?? ''} onChange={(event) => setDraft({ ...draft, workDetails: event.target.value === '' ? null : event.target.value as WorkDetails })}>
+          <option value="">{draft.workspace == null ? 'Your default' : 'Code (the default for a Robot with a Workspace)'}</option>
+          {WORK_DETAILS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+        </select>
+        <small className="muted">How much of this Robot's work its Conversation shows. Code shows every call in full: diffs, file fragments, commands and their output.</small>
       </label>
       <label className="check"><input type="checkbox" checked={draft.codeMode} onChange={(event) => setDraft({ ...draft, codeMode: event.target.checked })} />
         <span>Code mode<small>The Robot writes one program that calls its tools; off means direct tool calls.</small></span>

@@ -8,9 +8,9 @@ import { IDLE_PLAN } from '../plugins/idle.ts'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
-import type { HostAccessByFacet, NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch, WorkspaceSetting } from '@mr-robot/protocol'
+import type { HostAccessByFacet, NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch, WorkDetails, WorkspaceSetting } from '@mr-robot/protocol'
 import { HOST_ACCESS, parseHostAccess } from './host-access.ts'
-import { WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace } from './workspace-setting.ts'
+import { WORK_DETAILS, WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace } from './workspace-setting.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { currentMonth } from '../space/space.ts'
 import { SPACE_ID, type Env } from '../env.ts'
@@ -414,6 +414,7 @@ export const settingsWith = (defaults: SpaceDefaults) => Effect.gen(function* ()
     subagentModels: store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? [],
     hostAccess: store.get<HostAccessByFacet>(HOST_ACCESS) ?? {},
     workspace: store.get<WorkspaceSetting>(WORKSPACE) ?? null,
+    workDetails: store.get<WorkDetails>(WORK_DETAILS) ?? null,
   } as RobotSettings
 })
 
@@ -522,6 +523,11 @@ export const updateSettings = (patch: SettingsPatch, by?: string, workspace?: Ch
   store.transaction(() => {
     if (chain !== undefined) store.set('chain-active', nextActive)
     if (patch.grants !== undefined) store.setGrants(grantSetFrom(patch.grants))
+    // The Robot's Work details (cw-jy38); null follows the default again.
+    if (patch.workDetails !== undefined) {
+      if (patch.workDetails === null) store.delete(WORK_DETAILS)
+      else store.set(WORK_DETAILS, patch.workDetails)
+    }
     // A new Workspace starts the Robot at its root (cw-llvx); none removes both.
     if (workspace?.kind === 'kept') {
       if (workspace.setting === null) store.delete(WORKSPACE)

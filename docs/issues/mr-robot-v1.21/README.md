@@ -10,7 +10,7 @@ Spec: ../mr-robot-v1.21.md. Needs v1.20 merged. Frontier at the start: 01. Then 
 | 04 | [Instructions and skills from the Host](04-host-instructions-skills.md) | 02, 03 | done (one check by hand) |
 | 05 | [Worktrees](05-worktrees.md) | 04 | done (one check by hand) |
 | 06 | [LSP on the Host](06-lsp.md) | 04 | done (one check by hand) |
-| 07 | [The Code view: setting and renderers](07-code-view-renderers.md) | 02 | ready-for-agent |
+| 07 | [The Code view: setting and renderers](07-code-view-renderers.md) | 02 | done |
 | 08 | [The Workspace panel and the static prompt line](08-workspace-panel.md) | 04, 05, 07 | ready-for-agent |
 | 09 | [The service Host](09-service-host.md) | 01 | ready-for-agent |
 | 10 | [The chief, the Coding Robot definition, the Add form, the coding skill, the prompt bound](10-chief-definition-skill.md) | 02, 04, 07 | ready-for-agent |

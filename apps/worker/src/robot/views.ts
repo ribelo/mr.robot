@@ -16,8 +16,8 @@ import { formatCursor, parseCursor, type ChatCursor } from './chat-items.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, RobotStore, Wakeup } from './store.ts'
 import type { Chapter } from './chapters.ts'
-import type { BoxView, LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause, WorkspaceSetting } from '@mr-robot/protocol'
-import { WORKSPACE, workspacePlace } from './workspace-setting.ts'
+import type { BoxView, LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause, WorkDetails, WorkspaceSetting, ToolCallDetail, ToolCallDetails, ToolCallsRequest } from '@mr-robot/protocol'
+import { robotWorkDetails, WORK_DETAILS, WORKSPACE, workspacePlace } from './workspace-setting.ts'
 import { SubagentStore } from './subagent-store.ts'
 import { PAGE_TITLES } from '../pages/page.ts'
 
@@ -335,6 +335,65 @@ export const trajectoryAround = (itemId: string, before: number, after: number) 
   return { robotId: current.id, seq: centre, events, truncated } as TrajectoryExcerpt
 })
 
+/** How far around an activity row its calls are looked for, in events; the most items one request reads; the most text it returns. */
+const CALLS_REACH = 400
+const CALLS_MAX_ITEMS = 40
+const CALL_TEXT_MAX = 200_000
+const CALLS_TEXT_MAX = 2_000_000
+
+/**
+ * The Code view's calls (v1.21, cw-sc3z): for each activity item of the page, its calls read in full from its chapter's log (the chat
+ * rows hold clipped copies), masked, bounded by the page: at most CALLS_MAX_ITEMS items, CALL_TEXT_MAX per text, CALLS_TEXT_MAX in all.
+ */
+export const toolCalls = (request: ToolCallsRequest) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const mask = yield* (yield* RobotPlatform).masker()
+  const calls: ToolCallDetail[] = []
+  let used = 0
+  let truncated = request.items.length > CALLS_MAX_ITEMS
+  const clipped = (value: string) => {
+    const text = mask(value)
+    if (text.length <= CALL_TEXT_MAX) return text
+    truncated = true
+    return `${text.slice(0, CALL_TEXT_MAX)}… (${text.length - CALL_TEXT_MAX} more characters)`
+  }
+  for (const item of request.items.slice(0, CALLS_MAX_ITEMS)) {
+    const found = store.chat.find(item.id)
+    if (found === undefined || item.calls.length === 0) continue
+    const wanted = new Set(item.calls)
+    const from = Math.max(0, found.seq - CALLS_REACH)
+    const to = found.seq + CALLS_REACH
+    const events = isCold(store, found.sessionId)
+      ? (yield* logOf(found.sessionId)).filter((event) => event.seq >= from && event.seq <= to)
+      : store.sql.exec<{ event: string }>('SELECT event FROM session_event WHERE session_id = ? AND seq BETWEEN ? AND ? ORDER BY seq', found.sessionId, from, to).toArray().map((row) => JSON.parse(row.event) as { seq: number; type: string; data: Record<string, unknown> })
+    const started = new Map<string, { name: string; args: string }>()
+    for (const event of events) {
+      const data = event.data as Record<string, unknown>
+      if (event.type === 'tool/call' && wanted.has(String(data['callId']))) {
+        const raw = data['arguments']
+        let args = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {})
+        try { args = JSON.stringify(JSON.parse(args), null, 2) } catch { /* as written */ }
+        started.set(String(data['callId']), { name: String(data['name']), args })
+      }
+      if (event.type !== 'tool/result') continue
+      const message = data['message'] as { toolCallId?: string; isError?: boolean; content?: Array<{ type: string; text?: string }> } | undefined
+      const id = String(message?.toolCallId)
+      const call = started.get(id)
+      if (call === undefined) continue
+      started.delete(id)
+      const result = (message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('') || String((data['error'] as { message?: string } | undefined)?.message ?? '')
+      const detail: ToolCallDetail = { itemId: item.id, id, name: call.name, args: clipped(call.args), result: clipped(result), error: message?.isError === true || data['error'] !== undefined }
+      if (used + detail.args.length + detail.result.length > CALLS_TEXT_MAX) {
+        truncated = true
+        break
+      }
+      used += detail.args.length + detail.result.length
+      calls.push(detail)
+    }
+  }
+  return { calls, truncated } as ToolCallDetails
+})
+
 /** Text search over the live Conversation, newest first, paged (cd-ggem); snippets are masked like the chat. */
 export const searchConversation = (query: string, page: number) => Effect.gen(function* () {
   const store = yield* RobotState
@@ -532,7 +591,7 @@ export const report = Effect.gen(function* () {
   const last = store.get('failed-wakeup') !== undefined
     ? { text: 'Could not finish its last task. Open to see why.', at: newest?.at ?? Date.now() }
     : line
-  const entry: RegistryEntry = {
+  let entry: RegistryEntry = {
     id: current.id, ownerId: current.ownerId, kind: current.kind, identity: current.identity, sharing: current.sharing,
     status: current.status, fleetState: yield* fleetState, lastLine: last?.text ?? '', lastAt: last?.at ?? current.createdAt,
     accounts: chainAccounts(chainOf(current)),
@@ -541,6 +600,8 @@ export const report = Effect.gen(function* () {
     subagents: yield* subagentLines,
     workspace: workspacePlace(store.get<WorkspaceSetting>(WORKSPACE)),
   }
+  const shown = robotWorkDetails(store.get<WorkDetails>(WORK_DETAILS), store.get<WorkspaceSetting>(WORKSPACE))
+  if (shown !== undefined) entry = { ...entry, workDetails: shown }
   yield* Effect.promise(() => platform.env.SPACE.getByName(SPACE_ID).robotChanged(entry))
 })
 

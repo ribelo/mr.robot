@@ -13,6 +13,8 @@ import { renderResult } from './components/AtomView.tsx'
 import { go, goBack, useRoute, type Route } from './route.ts'
 import { Avatar } from './components/Avatar.tsx'
 import { ChatView } from './components/ChatView.tsx'
+import { useCodeCalls } from './components/use-code-calls.ts'
+import { effectiveWorkDetails } from '@mr-robot/protocol'
 import { Composer } from './components/Composer.tsx'
 import { ChatScroll } from './components/ChatScroll.tsx'
 import { useChatPages } from './components/chat-pages.ts'
@@ -145,7 +147,8 @@ type Sheet = { kind: 'profile'; robotId: string } | { kind: 'task'; taskId: stri
 
 function RobotView({ route, me, robot, onSheet }: { route: Extract<Route, { page: 'robot' }>; me: Me; robot: RobotSummary | undefined; onSheet: (sheet: Sheet) => void }) {
   const id = route.id
-  const details = me.workDetails !== 'compact'
+  // The Robot's Work details, else the person's (v1.21, cw-jy38).
+  const details = effectiveWorkDetails(robot, me.workDetails) !== 'compact'
   const conversationResult = useAtomValue(conversationAtom(details ? `${id}|details` : id))
   const panelResult = useAtomValue(panelAtom(id))
   const refreshConversation = useAtomRefresh(conversationAtom(details ? `${id}|details` : id))
@@ -173,13 +176,15 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
   const id = route.id
   const command = useCommand()
   // The newest page is the conversation the app reads; the reader scrolls back through older pages (v1.19, ec-n0uh).
-  const details = me.workDetails !== 'compact'
+  const level = effectiveWorkDetails(robot, me.workDetails)
+  const details = level !== 'compact'
   const loadOlder = useCallback(async (before: string) => {
     const exit = await command((api) => api.conversation(id, details, before), [])
     return Exit.isSuccess(exit) ? exit.value : undefined
   }, [command, id, details])
   const pages = useChatPages(conversation, loadOlder)
   const items = pages.items
+  const callDetails = useCodeCalls(id, items, level)
   const [replyingInstead, setReplyingInstead] = useState(false)
   const [search, setSearch] = useState<{ query: string; index: number }>()
   const [failure, setFailure] = useState<string>()
@@ -265,7 +270,7 @@ export function RobotConversation({ route, me, robot, conversation, panel, strea
         <ChatScroll itemCount={items.length + outgoing.pending.length} prepended={pages.prepended} onTop={() => void pages.older()} pinSignal={sentCount} growth={(stream?.text.length ?? 0) + (stream?.thinking.length ?? 0) + (conversation.working ? 1 : 0)}>
           {(scrollRef, following) => (<>
           {failure === undefined ? null : <div className="retry"><ErrorState title="That did not work" message={failure} /></div>}
-          <ChatView robotColor={identity.avatarColor} items={items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={me.workDetails ?? 'compact'} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} pending={outgoing.pending} onRetry={outgoing.retry} />
+          <ChatView robotColor={identity.avatarColor} items={items} meId={me.id} robotId={id} scrollRef={scrollRef} following={following} {...(current === undefined ? {} : { highlight: current })} working={conversation.working} workDetails={level} callDetails={callDetails} {...(stream === null ? {} : { stream })} {...(conversation.activity === undefined ? {} : { activity: conversation.activity })} canAnswer={panel.canEdit} onAnswer={(proposal, approve, approved, scope, note) => void answer(proposal, approve, approved, scope, note)} onHelp={(proposal, text) => void answerHelp(proposal, text)} pending={outgoing.pending} onRetry={outgoing.retry} />
           {conversation.canRetry === true && panel.canEdit && !conversation.working ? (
             <div className="retry">
               <button type="button" className="button" onClick={() => void command((api) => api.retry(id), [keys.robot(id)]).then((exit) => setFailure(exitFailure(exit)))}>Try again</button>

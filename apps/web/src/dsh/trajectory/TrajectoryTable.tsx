@@ -41,6 +41,7 @@ import type { TrajectoryKey, TrajectoryTranslate } from './locales.ts'
 import { COMPACTION_INTERRUPTED_ERROR } from './copy-codes.ts'
 import { codeProgram, PTC_TOOL_NAME, type CodeProgram } from './code-program.ts'
 import css from './TrajectoryTable.module.css'
+import { codeCall } from '../../components/CodeRenderers.tsx'
 
 const BOTTOM_FOLLOW_THRESHOLD_PX = 2
 const OLDER_LOAD_THRESHOLD_PX = 48
@@ -3295,6 +3296,10 @@ export function TrajectoryTable({
                 {selectedProgram !== undefined && selectedProgram.description !== '' && (
                   <p className={css.programDescription}>{selectedProgram.description}</p>
                 )}
+                {/* Mr. Robot (v1.21, cw-sc3z): a file, command, search or lsp call reads as in the Conversation's Code view. */}
+                {(selected.cell.kind === 'tool' || selected.cell.kind === 'subtool') && selected.cell.toolName !== undefined
+                  ? codeCall({ name: selected.cell.toolName, args: selected.cell.inputDetail ?? '', result: selected.cell.outputDetail ?? '', error: selected.cell.isError === true })
+                  : null}
                 <dl
                   className={`${css.overview} ${css.summaryScrollRegion}`}
                   data-summary-scroll-region=""
