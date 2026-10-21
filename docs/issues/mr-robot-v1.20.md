@@ -84,6 +84,7 @@ Rules the owner set: everything is a plugin, so each mechanism can grow without 
 
 ## Implementation Decisions
 
+- **Ticket 00 first: the duty seam and the bounded-step helper**, with the moves the plugin audit lists; the three steps are built on them.
 - **Three steps, three plugins, one contract shape.** Snapshot, sweep and dream are each a Robot plugin in the DSH sense (apps/worker/src/plugins/), each with: a trigger, a fixed instruction, a step limit, a skip rule, a tool allow-list, a usage source and a Trajectory record. They share one helper that runs "one bounded platform step on this agent with these tools and this instruction" so that none of them reimplements the loop. The idle plugins of v1.14 are refactored onto the same helper, not duplicated.
 - **Snapshot contract.** Trigger: the compaction engine's decision that a compaction is due (the Robot's compaction subclass asks the plugin before summarising); in a Turn this happens at the budget, idle it happens as the sweep's first half. Instruction: "Compaction is about to replace your context with a summary. Write to your daily note what is in flight (what you are doing, what remains, what you decided) and to MEMORY.md what lasts. Do not reply to the owner. Then end." Step limit: 3 model steps. Tools: the file tools on the Workspace only. Skip: no event in the chapter since the last snapshot or sweep. Record: a session record plugin:mr-robot/snapshot with the paths written; file versions by author snapshot; usage source memory. The sweep (v1.18) keeps its own instruction and runs after the snapshot when both are due, in one step sequence, so an idle compaction sees: snapshot, sweep, compaction.
 - **Warming then closing.** The idle plan becomes: warm at 54, 108, 162; at 216 run sweep (with its snapshot) and compact; a Wake-up before 216 cancels the plan as today. At the dream hour, if the live chapter has events since the last compaction, the same sequence runs first. Mr. Robot's default idleCompaction flag is removed; the warming schedule implies the close.
@@ -93,6 +94,28 @@ Rules the owner set: everything is a plugin, so each mechanism can grow without 
 - **Dream contract.** Trigger: a DO alarm at 03:00 in the owner's time zone (the Member's zone; the Robot's zone when it differs), per Robot with dreaming on; skip when no daily note changed and no Attempt closed and no Ask was answered since the last dream. Model: Robot setting dreamModel with a Space default, else the Robot's model. The dream is a Turn with cause dream, its own chapter, step limit 12. Tools: file tools on the Workspace, memory_search, conversation_search, task_list, propose_skill, propose_member_file_edit, ask (one call allowed, enforced). Instruction (fixed, in the plugin): the inputs to read, the three outputs, the rules (write only your own files; propose the rest; at most one suggestion, only if PROACTIVE_PREFERENCES.md allows; do not greet; do not say). Inputs the plugin supplies in the Wake-up text: the list of chapters closed since the last dream, the Attempts failed or skipped, the Asks dismissed or rejected, with ids. Record: usage source memory; the Trajectory shows the dream like any Turn. Mr. Robot's dream gets his deputy reads for his Robots' notes and the people tidy instruction. The morning ask carries dismiss_on_move_on.
 - **Settings.** dreaming: boolean (default true), dreamModel: route | null, both on the Robot and as Space defaults; the Robot settings page and the deputy settings tool edit them.
 - **Glossary** per dm-1l9i.
+
+## Plugin audit (2026-10-21, added at the owner's request)
+
+"Everything is a plugin" is true of **capabilities** and false of **behaviour over time**. The capability plugins (apps/worker/src/plugins/, one per tool group or connector, each with tools, prompt rules and DSH seams) are the plugin layer the v1.3 ticket built, and the compaction engine, spill store and policy are DSH plugins mounted in compose. Everything that happens *between* Turns or *around* a call is hardwired into the Robot Durable Object class (robot.ts, 4,139 lines, 187 methods):
+
+| Mechanism | Where it lives today | Shape it should have |
+|---|---|---|
+| Idle plan, cache warming, idle compaction and its memory step | robot.ts (planIdle, runIdle, warmCache, idleCompact) + robot/idle.ts | a plugin registering a duty on the alarm seam |
+| Box idle stop | robot.ts (idleBox) | a duty of the places plugin |
+| The say safety net and its ten-minute steer | robot.ts (quietSteer, the turn-end fallback) + agent/say.ts | the say plugin, on the agent's turn-stopping event and a duty |
+| Auto review | robot.ts (reviewCall) + agent/auto-review.ts, wired into the ask gate host | a plugin providing the gate's review hook |
+| The external fence | per tool in agent/web.ts, agent/exa.ts and the connectors | one decorator in the gated tool runtime, driven by the tool's external flag |
+| Screenshot sweep, screen watch, outbox delivery, chain resume, sign-in capture expiry | robot.ts, each a line in runAlarm | duties of the plugin that owns the thing (browser, messaging, providers, connections) |
+| Tasks firing, parked release, draining Wake-ups, Subagent resume | robot.ts runAlarm | **stay in the core**: they are the Robot's loop, not a behaviour mounted on it |
+
+The alarm handler (runAlarm) is a fixed list of twelve calls in a fixed order; every mechanism of v1.14 to v1.17 added one line there and a few hundred lines to the class. v1.20 would add three more (the snapshot, the dream, the dream-hour close). The fix is one seam and one helper, built before the three steps:
+
+- **The duty seam.** A service the Robot DO provides to its composition: register a named duty with nextAt(now), run(now) and an order. The alarm computes the earliest nextAt over the registered duties and the core's own moments (Tasks, parked Wake-ups, the Box), runs the due duties in declared order after the core's work, and re-arms. A duty never touches the Turn loop; it asks the core whether the Robot is idle and asks for a bounded step.
+- **The bounded-step helper.** platformStep(agent, instruction, tool allow-list, step limit, usage source): one place that runs a platform-initiated step, records it in the Trajectory and books its usage. The snapshot, the sweep, the idle memory step and the dream are four callers of one function.
+- **The moves that come with it** (mechanical, each behind its existing tests): idle warming and compaction to an Idle plugin on the duty seam; the Box idle stop to the places plugin; the safety net and its steer to the say plugin; Auto review to a plugin that supplies the review hook; the fence to the tool runtime decorator; screenshot sweep, screen watch, outbox delivery, chain resume and capture expiry to their owners' plugins as duties. The core keeps Tasks, parked Wake-ups, draining and Subagent resume.
+
+What this buys: v1.20's three steps are three small plugins on two shared pieces; robot.ts shrinks by the behaviours that are not the loop; a new behaviour (a routine on a Discord reaction, a weekly report) is one plugin and no line in the core.
 
 ## Testing Decisions
 
