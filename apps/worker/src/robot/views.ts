@@ -13,7 +13,8 @@ import { invalid, notFound } from '../platform/durable.ts'
 import { homeDefaults, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
 import { projectChat } from './projection.ts'
 import { chainAccounts, chainOf } from './chain.ts'
-import type { RobotConfig, Wakeup } from './store.ts'
+import type { RobotConfig, RobotStore, Wakeup } from './store.ts'
+import type { Chapter } from './chapters.ts'
 import type { BoxView, LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause } from '@mr-robot/protocol'
 import { SubagentStore } from './subagent-store.ts'
 import { PAGE_TITLES } from '../pages/page.ts'
@@ -40,11 +41,14 @@ export const subagentLines = Effect.gen(function* () {
   return new SubagentStore(store.sql).running().map((row): SubagentLine => ({ id: row.id, label: row.label, since: row.startedAt, activity: runningTool(readStoredEvents(store.sql, row.id)) ?? null }))
 })
 
-/** A Robot's Subagents of its live Conversation, newest first (the API and the PWA). */
+/** How many of its newest Subagents a Robot lists. */
+const SUBAGENTS_SHOWN = 50
+
+/** A Robot's Subagents of its Conversation, newest first (the API and the PWA). */
 export const subagents = Effect.gen(function* () {
   const store = yield* RobotState
   const current = yield* config
-  return new SubagentStore(store.sql).of(current.liveSessionId).map((row): SubagentView => ({
+  return new SubagentStore(store.sql).ofConversation(SUBAGENTS_SHOWN).map((row): SubagentView => ({
     id: row.id, label: row.label, mode: row.mode, model: { provider: row.provider, model: row.model, effort: row.effort }, status: row.status,
     startedAt: row.startedAt, finishedAt: row.finishedAt, result: row.report === null ? null : (row.report.split('\n')[0] ?? '').slice(0, 200),
     activity: row.status === 'running' ? runningTool(readStoredEvents(store.sql, row.id)) ?? null : null,
@@ -104,33 +108,28 @@ export function runningTool(events: ReadonlyArray<{ type: string; data: unknown 
   return last === undefined ? undefined : last === 'run_code' ? (inner ?? 'code') : last
 }
 
-/** The chat (robot-q4b2): the session log projected, with open proposals always shown as questions. */
-export const conversation = (details = false) => Effect.gen(function* () {
-  const store = yield* RobotState
-  const current = yield* config
-  const events = readStoredEvents(store.sql, current.liveSessionId)
+/**
+ * One chapter's chat items (v1.19): its own events (not its seed) from `from` up to its cut, projected, with a card per delegation
+ * where the Robot started it (ao-15ui), which follows the Subagent's state.
+ */
+function chapterItems(store: RobotStore, chapter: Chapter, input: { readonly details: boolean; readonly avatarSeed: string; readonly from?: number }): ChatItem[] {
+  const from = Math.max(chapter.firstSeq, input.from ?? 0)
+  const within = (seq: number) => seq >= from && (chapter.cut === null || seq <= chapter.cut)
+  const events = readStoredEvents(store.sql, chapter.sessionId, from).filter((event) => within(event.seq))
   const items = projectChat({
-    details,
+    details: input.details,
     events,
-    assistantRepliesBefore: store.voiceFrom(current.liveSessionId),
-    notices: store.notices(current.liveSessionId),
+    assistantRepliesBefore: store.voiceFrom(chapter.sessionId),
+    notices: store.notices(chapter.sessionId).filter((notice) => notice.afterSeq >= from && (chapter.cut === null || notice.afterSeq <= chapter.cut + 1)),
     thread: (id) => store.thread(id)?.view,
-    avatarSeed: current.identity.avatarSeed,
+    avatarSeed: input.avatarSeed,
     proposal: (id) => {
       const row = store.proposal(id)
       return row === undefined ? undefined : proposalView(row)
     },
   })
-  // A proposal made inside a code-mode program has no direct tool result to project from (robot-vy9z);
-  // answered ones stay too, as the stream's record of the ask (rb-r0oj).
-  const shown = new Set(items.flatMap((item) => (item.kind === 'proposal' ? [item.proposal.id] : [])))
-  for (const row of store.proposals().filter((proposal) => proposal.createdAt >= current.createdAt && proposal.status !== 'superseded')) {
-    if (shown.has(row.id)) continue
-    const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
-    items.splice(position, 0, { kind: 'proposal', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
-  }
-  // One card per delegation (ao-15ui), where the Robot started it; it follows the Subagent's state.
-  for (const row of new SubagentStore(store.sql).of(current.liveSessionId).reverse()) {
+  for (const row of new SubagentStore(store.sql).of(chapter.sessionId).reverse()) {
+    if (!within(row.parentSeq) || row.status === 'archived') continue
     const position = items.findIndex((item) => item.seq >= row.parentSeq)
     const card: ChatItem = {
       kind: 'delegation', id: `delegation-${row.id}`, seq: row.parentSeq, at: row.startedAt, subagentId: row.id, label: row.label, mode: row.mode,
@@ -138,8 +137,42 @@ export const conversation = (details = false) => Effect.gen(function* () {
     }
     items.splice(position < 0 ? items.length : position, 0, card)
   }
-  const working = store.activeTurn() !== undefined
-  const activity = working ? runningTool(events) : undefined
+  return items
+}
+
+/**
+ * A proposal made inside a code-mode program has no direct tool result to project from (robot-vy9z); answered ones stay too, as the
+ * stream's record of the ask (rb-r0oj): the ones made since `since` and not shown yet go where their time puts them.
+ */
+function withProposals(store: RobotStore, items: ChatItem[], since: number): ChatItem[] {
+  const shown = new Set(items.flatMap((item) => (item.kind === 'proposal' ? [item.proposal.id] : [])))
+  for (const row of store.proposals().filter((proposal) => proposal.createdAt >= since && proposal.status !== 'superseded')) {
+    if (shown.has(row.id)) continue
+    const position = items.findLastIndex((item) => item.at <= row.createdAt) + 1
+    items.splice(position, 0, { kind: 'proposal', id: `proposal-${row.id}`, seq: items[position - 1]?.seq ?? 0, at: row.createdAt, proposal: proposalView(row) })
+  }
+  return items
+}
+
+/** What one Turn of the live chapter showed, from its first event (the Turn's end reads it, v1.19: never the history). */
+export const turnItems = (startSeq: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const live = store.chapters.get(current.liveSessionId)
+  if (live === undefined) return [] as ChatItem[]
+  const items = chapterItems(store, live, { details: false, avatarSeed: current.identity.avatarSeed, from: startSeq })
+  const first = store.sql.exec<{ event: string }>('SELECT event FROM session_event WHERE session_id = ? AND seq >= ? ORDER BY seq LIMIT 1', live.sessionId, startSeq).toArray()[0]
+  return withProposals(store, items, first === undefined ? Date.now() : (JSON.parse(first.event) as { time: number }).time)
+})
+
+/** The chat (robot-q4b2): every chapter of the Conversation projected, with open proposals always shown as questions. */
+export const conversation = (details = false) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const items = withProposals(store, store.chapters.chain().flatMap((chapter) => chapterItems(store, chapter, { details, avatarSeed: current.identity.avatarSeed })), current.createdAt)
+  const active = store.activeTurn()
+  const working = active !== undefined
+  const activity = active === undefined ? undefined : runningTool(readStoredEvents(store.sql, active.sessionId, active.startSeq))
   // A Page card shows the Page's title now, not the one it had when it was handed over (dp-e0rp).
   const titles = store.get<Record<string, string>>(PAGE_TITLES) ?? {}
   return {
@@ -207,13 +240,23 @@ export const trajectoryAround = (itemId: string, before: number, after: number) 
   const store = yield* RobotState
   const current = yield* config
   const mask = yield* (yield* RobotPlatform).masker()
-  const item = (yield* conversation()).items.find((entry) => entry.id === itemId)
-  const centre = item?.seq ?? (/^\d+$/.test(itemId) ? Number(itemId) : undefined)
-  if (centre === undefined) return yield* notFound(`no item "${itemId}" in this Conversation`)
+  // The item's chapter, newest first: what a diagnosis asks about is mostly recent (v1.19). A number is an event of the live chapter.
+  let found: { readonly seq: number; readonly sessionId: string } | undefined
+  for (const chapter of [...store.chapters.chain()].reverse()) {
+    const item = chapterItems(store, chapter, { details: false, avatarSeed: current.identity.avatarSeed }).find((entry) => entry.id === itemId)
+    if (item !== undefined) {
+      found = { seq: item.seq, sessionId: chapter.sessionId }
+      break
+    }
+  }
+  found ??= (yield* conversation()).items.flatMap((entry) => (entry.id === itemId ? [{ seq: entry.seq, sessionId: current.liveSessionId }] : []))[0]
+  found ??= /^\d+$/.test(itemId) ? { seq: Number(itemId), sessionId: current.liveSessionId } : undefined
+  if (found === undefined) return yield* notFound(`no item "${itemId}" in this Conversation`)
+  const centre = found.seq
   const reach = (count: number) => Math.min(Math.max(Math.trunc(count), 0), TRAJECTORY_REACH)
   const rows = store.sql.exec<{ event: string }>(
     'SELECT event FROM session_event WHERE session_id = ? AND seq BETWEEN ? AND ? ORDER BY seq',
-    current.liveSessionId, Math.max(0, centre - reach(before)), centre + reach(after),
+    found.sessionId, Math.max(0, centre - reach(before)), centre + reach(after),
   ).toArray()
   const events: TrajectoryEvent[] = []
   let used = 0
@@ -298,7 +341,8 @@ const childOf = (childId: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = yield* config
   const row = new SubagentStore(store.sql).get(childId)
-  if (row === undefined || row.parentSession !== current.liveSessionId) return yield* notFound('no such Subagent')
+  // A Subagent belongs to the chapter it ran in (v1.19, ec-h8ib); every chapter's stay readable.
+  if (row === undefined || store.chapters.get(row.parentSession) === undefined) return yield* notFound('no such Subagent')
   return row
 })
 
@@ -401,7 +445,13 @@ export const report = Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
-  const items = (yield* conversation()).items
+  // The last line is in the newest chapter that shows anything (v1.19): the history is never read for it.
+  let items: ChatItem[] = []
+  for (const chapter of store.chapters.latest(3)) {
+    items = chapterItems(store, chapter, { details: false, avatarSeed: current.identity.avatarSeed })
+    if (items.length > 0) break
+  }
+  items = withProposals(store, items, items[0]?.at ?? current.createdAt)
   const last = store.get('failed-wakeup') !== undefined
     ? { text: 'Could not finish its last task. Open to see why.', at: items.at(-1)?.at ?? Date.now() }
     : lastLine(items)

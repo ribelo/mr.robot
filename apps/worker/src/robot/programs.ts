@@ -942,6 +942,10 @@ export const rewind = (atSeq: number) => Effect.gen(function* () {
   yield* platform.releaseAgent()
   store.transaction(() => {
     store.addRewind(record)
+    // The new session is the next chapter, seeded from the live one up to the point (v1.19).
+    store.chapters.branch(current.liveSessionId, atSeq, now)
+    store.chapters.close(current.liveSessionId, 'rewind', now)
+    store.chapters.open(sessionId, { sessionId: current.liveSessionId, seq: atSeq }, atSeq + 1, now)
     // The seeded prefix keeps the voice it had (gb-psyl); what follows the rewind point is say only.
     store.setVoiceFrom(sessionId, Math.min(store.voiceFrom(current.liveSessionId), atSeq + 1))
     store.updateConfig(() => ({ liveSessionId: sessionId }))
@@ -961,12 +965,15 @@ export const rewind = (atSeq: number) => Effect.gen(function* () {
  */
 export const rewindBeforeTurn = (turn: number) => Effect.gen(function* () {
   const store = yield* RobotState
-  const events = readStoredEvents(store.sql, (yield* config).liveSessionId)
-  const start = events.findIndex((event) => event.type === 'turn/start' && (event.data as { turn?: number }).turn === turn)
+  const live = (yield* config).liveSessionId
+  const events = readStoredEvents(store.sql, live)
+  // The chapter's own Turns: its seed carries a closed Turn of the chapter before (v1.19).
+  const first = store.chapters.get(live)?.firstSeq ?? 0
+  const start = events.findIndex((event) => event.seq >= first && event.type === 'turn/start' && (event.data as { turn?: number }).turn === turn)
   if (start < 0) return yield* notFound(`no Turn ${turn} in this Conversation`)
-  let first = start
-  while (first > 0 && events[first - 1]!.type === 'agent/inbox/spliced') first -= 1
-  return yield* rewind(Math.max(0, events[first]!.seq - 1))
+  let at = start
+  while (at > first && events[at - 1]!.type === 'agent/inbox/spliced') at -= 1
+  return yield* rewind(Math.max(0, events[at]!.seq - 1))
 })
 
 /** Undo the latest rewind: its archived log becomes live again (robot-8v1t). */
@@ -981,6 +988,7 @@ export const undoRewind = (id: string) => Effect.gen(function* () {
   yield* platform.releaseAgent()
   store.transaction(() => {
     store.markRewindUndone(id, Date.now())
+    store.chapters.restore(record.archivedSessionId, record.liveSessionId, Date.now())
     store.updateConfig(() => ({ liveSessionId: record.archivedSessionId }))
   })
   yield* platform.changed()
@@ -1027,6 +1035,8 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   }
   store.transaction(() => {
     store.saveConfig(config)
+    // Its Conversation's first chapter (v1.19).
+    store.chapters.open(config.liveSessionId, null, 0, config.createdAt)
     // A Robot made since v1.15 always had say: no Conversation of it shows assistant text as replies (gb-psyl).
     store.set('voice-upgraded', true)
     // And it can ask its chief from the start (gb-qmnc).

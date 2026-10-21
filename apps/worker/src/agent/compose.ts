@@ -38,8 +38,8 @@ export interface CompositionInput {
   /** The model's real context window (the budget may be smaller). */
   readonly modelWindow?: number
   readonly compactionInstruction: string
-  /** Called after a compaction replaced the context with a checkpoint. */
-  readonly onCompacted?: () => void
+  /** Called after a compaction replaced a session's context with a checkpoint (the Robot's or a Subagent's). */
+  readonly onCompacted?: (sessionId: string) => void
   /** The model's output as it streams (pl-jzr7): text and thinking deltas, start and end of an attempt. */
   readonly onStream?: (frame: { type: 'start' | 'chunk' | 'end'; chunk?: { type: string; text?: string } }) => void
   /** Prompt sections, in order; text is read at every request so persona edits apply immediately. */

@@ -21,7 +21,8 @@ import { BOX_ROOT, WORKSPACE_ROOT } from '../places/files.ts'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
 import { IDLE_MEMORY_NOTE, IDLE_MEMORY_STEPS, idlePlan, idleSettings, type IdleStep } from './idle.ts'
-import { buildForkSeed, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { buildForkSeed, Session, SessionId, SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { chapterSeed } from '../agent/chapter-seed.ts'
 import type {
   HostView,
   WorkspaceFileContent,
@@ -71,7 +72,7 @@ import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts
 import type { CredentialSave } from '@mr-robot/protocol'
 import type { ChainEntry, GrantLevel, HomeSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
-import { readStoredEvents, storedLength } from '../agent/session-log.ts'
+import { readStoredEvents, storedHeader, storedLength, storeSession } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, UserMessage } from '@deepseek-ai/dsh-llm'
@@ -349,12 +350,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.releaseComposition()
     this.subagentRows.clear()
     const sql = this.ctx.storage.sql
-    for (const table of ['session_event', 'session_log', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
+    for (const table of ['session_event', 'session_log', 'chapter', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
     // Answered Asks go with the history; open ones are still decisions the owner owes.
     sql.exec("DELETE FROM proposal WHERE status != 'open'")
     this.store.search.clear()
-    for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen']) this.store.delete(key)
-    this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
+    for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen', CHAPTER_COMPACTED]) this.store.delete(key)
+    const next = this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
+    this.store.chapters.open(next.liveSessionId, null, 0, Date.now())
     await this.changed()
   }
 
@@ -386,8 +388,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** A Turn that ended in an error keeps its wake-up for "Try again"; a good Turn clears it. */
   private rememberFailure(wakeup: Wakeup, startSeq: number): boolean {
     const config = this.store.requireConfig()
-    const failed = readStoredEvents(this.ctx.storage.sql, config.liveSessionId)
-      .some((event) => event.seq >= startSeq && event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')
+    const failed = readStoredEvents(this.ctx.storage.sql, config.liveSessionId, startSeq)
+      .some((event) => event.type === 'turn/end' && (event.data as { reason?: { kind?: string } }).reason?.kind === 'error')
     if (failed) this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
     else this.store.delete('failed-wakeup')
     return failed
@@ -581,6 +583,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async runTurn(wakeup: Wakeup, resuming: boolean): Promise<void> {
     this.currentWakeup = wakeup.kind
+    // A compaction whose chapter did not close yet (the Robot slept right after it) closes it before the Turn.
+    if (!resuming) await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
     await this.tidyWorkspace().catch((error: unknown) => console.warn('workspace not tidied', error))
     // Hosts and Mr. Robot's reach decide which tools exist, so they are known before the composition.
     await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
@@ -641,6 +645,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.delete(QUIET_DUE)
     await this.afterTurn(wakeup, turn)
     this.planIdle()
+    await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
     await this.rearm()
     await this.changed()
   }
@@ -1232,7 +1237,45 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await ctx.sessions.flush(agent.session)
     }
     await this.accountTurn(startSeq)
+    await this.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
     await this.changed()
+  }
+
+  /**
+   * After a compaction of the live chapter (v1.19, ec-srfn): once no Turn and no Subagent runs in it, the chapter closes and the next one
+   * opens, a new session seeded with what the model sees now (the system prompt, the checkpoint and what came after it), linked to its
+   * parent. The session and the switch to it are stored in one transaction. A memory baseline the context holds stays current, so
+   * the memory plugin acts exactly as after the compaction (ec-ndqf). A seed DSH would refuse leaves the chapter live, as before chapters.
+   */
+  protected async rollChapter(): Promise<void> {
+    const from = this.store.requireConfig().liveSessionId
+    if (this.store.get<string>(CHAPTER_COMPACTED) !== from) return
+    if (this.store.activeTurn() !== undefined || this.subagentRows.running().length > 0) return
+    const projections = this.composition?.value.ctx.sessions.messageProjections ?? []
+    await this.releaseComposition()
+    const sql = this.ctx.storage.sql
+    const events = readStoredEvents(sql, from)
+    const header = storedHeader(sql, from)
+    if (header === undefined || events.length === 0) return this.store.delete(CHAPTER_COMPACTED)
+    const seed = chapterSeed(events, projections)
+    const now = Date.now()
+    const next = `s-${crypto.randomUUID()}`
+    const nextHeader = { ...header, id: SessionId(next), createdAt: now, isSeeded: true, parentSession: SessionId(from) }
+    try {
+      Session.create(SessionId(next), seed.events, nextHeader, SessionLogOffset(seed.inheritedEventCount), projections)
+    } catch (error) {
+      console.warn('chapter seed refused; the chapter stays live', error)
+      return this.store.delete(CHAPTER_COMPACTED)
+    }
+    this.store.transaction(() => {
+      storeSession(sql, nextHeader, seed.inheritedEventCount, seed.events)
+      this.store.search.track(next, seed.inheritedEventCount)
+      this.store.chapters.close(from, 'compaction', now)
+      this.store.chapters.open(next, { sessionId: from, seq: events.length - 1 }, seed.inheritedEventCount, now)
+      if (this.store.get<string>('memory-baseline') === from) this.store.set('memory-baseline', next)
+      this.store.delete(CHAPTER_COMPACTED)
+      this.store.updateConfig(() => ({ liveSessionId: next }), false)
+    })
   }
 
   /** The agent of the Turn that is running now; set while a steer can still reach it. */
@@ -1407,14 +1450,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const doneLine = this.store.get<string>(DONE_LINE)
     this.store.delete(DONE_LINE)
     if (turn?.task != null) {
-      const reply = failedTurn ? undefined : (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply').at(-1)
+      const reply = failedTurn ? undefined : (await this.program(Views.turnItems(startSeq))).filter((item) => item.kind === 'reply').at(-1)
       const firstLine = failedTurn ? 'The Turn failed.' : doneLine !== undefined ? doneLine : reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'
       await this.home().attemptFinished(turn.task.attemptId, failedTurn ? 'failed' : 'ok', firstLine).catch((error: unknown) => console.warn('attempt not finished', error))
     }
     if (failedTurn) await this.chainFailure(startSeq, causedByOwner(wakeup, this.store.requireConfig().ownerId) || this.store.get(`owner-steered:${wakeup.id}`) === true).catch((error: unknown) => console.warn('model chain not advanced', error))
     else await this.chainSucceeded().catch(() => undefined)
     const shown = (item: ChatItem) => item.kind !== 'message' || item.reaction !== null || item.sender.kind !== 'member'
-    if (!failedTurn && wakeup.kind !== 'task' && !(await this.conversation()).items.some((item) => item.seq >= startSeq && shown(item))) {
+    if (!failedTurn && wakeup.kind !== 'task' && !(await this.program(Views.turnItems(startSeq))).some(shown)) {
       // A Turn that ends with nothing to show (e.g. a reasoning model spent its output cap thinking) is not silent.
       const config = this.store.requireConfig()
       this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `${config.identity.name} finished without a reply. If this repeats, raise its context budget in Advanced settings.`, Date.now())
@@ -1439,7 +1482,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** "Finished": the Turn produced a reply and the person it concerns is not watching it live. */
   private async notifyFinished(wakeup: Wakeup, startSeq: number): Promise<void> {
-    const replies = (await this.conversation()).items.filter((item) => item.seq >= startSeq && item.kind === 'reply')
+    const replies = (await this.program(Views.turnItems(startSeq))).filter((item) => item.kind === 'reply')
     const last = replies.at(-1)
     if (last === undefined || last.kind !== 'reply') return
     const watcher = wakeup.sender.kind === 'member' ? wakeup.sender.memberId : undefined
@@ -1958,8 +2001,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       contextBudget: config.contextBudget,
       ...(contextWindow === undefined ? {} : { modelWindow: contextWindow }),
       compactionInstruction: config.compactionInstruction,
-      // A compacted context lost the memory baseline; the next step brings it back fresh (pl-552r).
-      onCompacted: () => this.store.delete('memory-baseline'),
+      // A compacted context lost the memory baseline; the next step brings it back fresh (pl-552r). The Robot's own compaction
+      // also closes its chapter once nothing runs in it (v1.19, ec-srfn).
+      onCompacted: (sessionId) => {
+        if (sessionId.startsWith('sa-')) return this.store.delete(`memory-baseline:${sessionId}`)
+        this.store.delete('memory-baseline')
+        if (sessionId === this.store.requireConfig().liveSessionId) this.store.set(CHAPTER_COMPACTED, sessionId)
+      },
       onStream: (frame) => this.streamed(frame),
       onRequest: (options) => {
         if (options.sessionId !== undefined) this.lastRequest = { sessionId: String(options.sessionId), options }
@@ -4123,6 +4171,8 @@ const SUBAGENT_DENIED_TOOLS = [
 export const REVIEW_RECORD = 'plugin:mr-robot/review'
 /** The last request of the Robot's session, kept for cache warming while idle (ao-jlr0). */
 const WARM_REQUEST = 'warm-request'
+/** The kv key of the live chapter a compaction ran in, until the chapter closes (v1.19). */
+export const CHAPTER_COMPACTED = 'chapter-compacted'
 /** A warming more than this late is skipped: the cache it would refresh is gone. */
 const IDLE_LATE_MS = 5 * 60_000
 

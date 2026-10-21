@@ -79,7 +79,7 @@ beforeAll(async () => {
   await settle(id)
   const now = Date.now()
   const seeded = await testRobot(id).seedYearForTest({ spans: SPANS, turnsPerSpan: TURNS_PER_SPAN, from: now - 365 * DAY, to: now - DAY, owner: { memberId: me.id, name: me.name }, early: 'zeppelin', late: 'quokka' })
-  numbers.push(`seeded                   ${seeded.ms} ms: ${seeded.events} events, ${(seeded.bytes / 1e6).toFixed(1)} MB, ${SPANS} spans`)
+  numbers.push(`seeded                   ${seeded.ms} ms: ${seeded.events} events, ${(seeded.bytes / 1e6).toFixed(1)} MB, ${SPANS} spans, ${seeded.chapters} chapters`)
   // The Robot sleeps: its memory is gone, the year is in its storage.
   await testRobot(id).restartForTest().catch(() => undefined)
 }, 600_000)
@@ -91,7 +91,7 @@ afterAll(() => {
 describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
   it.fails('opens the chat reading a bounded number of rows (ec-yxru)', async () => {
     const run = await measured(() => api<Conversation>(ANNA, `/api/robots/${id}/conversation`))
-    report('chat open', run, `${run.value.body.items.length} items`)
+    report('chat open', run, run.value.status === 200 ? `${run.value.body.items.length} items` : `status ${run.value.status}: ${JSON.stringify(run.value.body).slice(0, 200)}`)
     expect(run.value.status).toBe(200)
     expect(run.sessionRows).toBeLessThanOrEqual(CHAT_ROWS)
     expect(run.ms).toBeLessThan(CHAT_MS)
@@ -105,7 +105,7 @@ describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
     expect(run.ms).toBeLessThan(CHAT_MS)
   }, 300_000)
 
-  it.fails('opens the Trajectory reading one span (ec-elhb)', async () => {
+  it('opens the Trajectory reading one span (ec-elhb)', async () => {
     const run = await measured(() => api<{ events: unknown[] }>(ANNA, `/api/robots/${id}/trajectory`))
     report('trajectory', run, run.value.status === 200 ? `${run.value.body.events.length} events` : `status ${run.value.status}`)
     expect(run.value.status).toBe(200)
@@ -140,7 +140,7 @@ describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
     expect(logReads.length).toBeGreaterThan(0)
   }, 300_000)
 
-  it.fails('wakes a Turn after a sleep reading only its live span (ec-7s3l)', async () => {
+  it('wakes a Turn after a sleep reading only its live span (ec-7s3l)', async () => {
     await testRobot(id).restartForTest().catch(() => undefined)
     scripts.set(id, [{ say: 'Noted.' }])
     const run = await measured(async () => {

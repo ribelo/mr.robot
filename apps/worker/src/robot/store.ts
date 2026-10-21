@@ -6,6 +6,7 @@
 import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../agent/catalog.ts'
 import { SESSION_LOG_SCHEMA, storedLength } from '../agent/session-log.ts'
 import { ConversationIndex } from '../agent/conversation-search.ts'
+import { ChapterStore, registerChapters } from './chapters.ts'
 import * as Schema from 'effect/Schema'
 import { HOST_FACETS, hostFacetKey, splitHostFacet, StoredPlace } from '../places/host-facet.ts'
 import { HOST_ACCESS, HOST_DIRECTORY, mrRobotHostLevel, robotDirectoryName, unsharedMrRobotDirectory } from './host-access.ts'
@@ -190,7 +191,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 23
+const SCHEMA_VERSION = 24
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -303,6 +304,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // The Conversation as a chain of chapters (v1.19 ticket 02, ec-7oq8): every session so far is one, linked by its Rewinds.
+  24: [registerChapters],
   // A v1.15 Ask still open for box_run, host_run and the like would run a removed tool when approved (deep review P18): it is closed.
   23: [closeAsksForRemovedTools],
   // Every Member's Mr. Robot had one directory on a shared Host (deep review P8): his own from now on.
@@ -418,8 +421,10 @@ const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
 }
 
 export class RobotStore {
-  /** Full-text search over the live Conversation (cd-ggem). */
+  /** Full-text search over the Conversation (cd-ggem). */
   search!: ConversationIndex
+  /** The Conversation's chapters (v1.19). */
+  chapters!: ChapterStore
 
   constructor(private readonly storage: DurableObjectStorage) {
     this.prepare()
@@ -427,9 +432,11 @@ export class RobotStore {
 
   /** Create the tables; also after a deletion wiped the storage, so the same object can be created again. */
   prepare(): void {
-    this.migrate()
+    // The log's tables first: the chapters' migration registers the sessions in them.
     for (const statement of SESSION_LOG_SCHEMA) this.sql.exec(statement)
+    this.migrate()
     this.search = new ConversationIndex(this.sql, true, (sessionId) => this.voiceFrom(sessionId))
+    this.chapters = new ChapterStore(this.sql)
   }
 
   /**

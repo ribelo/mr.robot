@@ -56,6 +56,24 @@ export function readStoredEvents(sql: SqlStorage, id: string, from = 0): Session
     .map((row) => JSON.parse(row.event) as SessionEvent)
 }
 
+/** The stored header of a session; undefined when it does not exist. */
+export function storedHeader(sql: SqlStorage, id: string): SessionHeader | undefined {
+  const row = sql.exec<{ header: string }>('SELECT header FROM session_log WHERE id = ?', id).toArray()[0]
+  return row === undefined ? undefined : JSON.parse(row.header) as SessionHeader
+}
+
+/**
+ * A new session written whole in the caller's transaction: a chapter's seed (v1.19, ec-srfn), so that the switch to it and the
+ * session itself are stored together. DSH resumes it as it resumes any stored session.
+ */
+export function storeSession(sql: SqlStorage, header: SessionHeader, inheritedEventCount: number, events: readonly SessionEvent[]): void {
+  const meta = materializeCreateHeader(header)
+  const batch = materializeAppendBatch(events)
+  assertContiguous(meta.id, batch, 0)
+  sql.exec('INSERT INTO session_log (id, header, inherited, length) VALUES (?, ?, ?, ?)', meta.id, JSON.stringify(meta), inheritedEventCount, batch.length)
+  for (const event of batch) sql.exec('INSERT INTO session_event (session_id, seq, event) VALUES (?, ?, ?)', meta.id, event.seq, JSON.stringify(event))
+}
+
 /** Number of events stored for a session (0 when it does not exist yet). */
 export function storedLength(sql: SqlStorage, id: string): number {
   return sql.exec<{ length: number }>('SELECT length FROM session_log WHERE id = ?', id).toArray()[0]?.length ?? 0
@@ -109,7 +127,8 @@ export class SqliteSessionLog extends SessionPersistence {
       'INSERT INTO session_log (id, header, inherited, length) VALUES (?, ?, ?, 0)',
       meta.id, JSON.stringify(meta), inherited,
     )
-    this.index.track(meta.id)
+    // A seeded session's inherited events are its parent's: they are searched there (v1.19).
+    this.index.track(meta.id, inherited)
     return this.claim(meta.id, 'write')
   }
 

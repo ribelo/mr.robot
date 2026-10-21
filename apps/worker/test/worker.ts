@@ -8,6 +8,8 @@ import { fakeR2, testObjectStore } from './fake-r2.ts'
 import type { ObjectStore } from '../src/workspace/object-store.ts'
 import app from '../src/index.ts'
 import { QUIET_DUE } from '../src/robot/programs.ts'
+import { CHAPTER_COMPACTED } from '../src/robot/robot.ts'
+import type { Chapter } from '../src/robot/chapters.ts'
 import { currentMonth } from '../src/home/home.ts'
 import type { BoxBackend } from '../src/box/backend.ts'
 import { FakeChannel } from './fake-channel.ts'
@@ -151,23 +153,49 @@ export class Robot extends ProductionRobot {
    * A year of a busy Robot appended to its live Conversation through the persistence seam (v1.19 ticket 01); the agent in memory is stale
    * afterwards, so the test restarts the Robot. Returns how many events and bytes were written.
    */
-  async seedYearForTest(shape: YearShape): Promise<{ events: number; bytes: number; ms: number }> {
+  async seedYearForTest(shape: YearShape): Promise<{ events: number; bytes: number; ms: number; chapters: number }> {
     const started = Date.now()
-    const sessionId = this.store.requireConfig().liveSessionId
-    const existing = readStoredEvents(this.store.sql, sessionId)
-    const turn = Math.max(0, ...existing.flatMap((event) => (event.type === 'turn/start' ? [(event.data as { turn: number }).turn] : [])))
-    const position = { seq: existing.length, turn, nodes: [...foldSurface(existing).nodes] }
     const log = new SqliteSessionLog(new Context(), { storage: this.ctx.storage })
-    const handle = await log.open(SessionId(sessionId), 'write')
+    const at = (sessionId: string, turn: number) => {
+      const existing = readStoredEvents(this.store.sql, sessionId)
+      return { seq: existing.length, turn, nodes: [...foldSurface(existing).nodes] }
+    }
+    let live = this.store.requireConfig().liveSessionId
+    const position = at(live, Math.max(0, ...readStoredEvents(this.store.sql, live).flatMap((event) => (event.type === 'turn/start' ? [(event.data as { turn: number }).turn] : []))))
     let events = 0
     let bytes = 0
-    for (const span of yearSpans(shape, position)) {
-      await handle.append(span as unknown as SessionEvent[])
-      events += span.length
-      for (const event of span) bytes += JSON.stringify(event).length
+    let span = 0
+    for (const batch of yearSpans(shape, position)) {
+      const handle = await log.open(SessionId(live), 'write')
+      await handle.append(batch as unknown as SessionEvent[])
+      await handle.close()
+      events += batch.length
+      for (const event of batch) bytes += JSON.stringify(event).length
+      // Each span but the last ends in a compaction the Robot has seen: its chapter closes the way a Turn's end closes it.
+      if ((span += 1) === shape.spans) break
+      this.store.set(CHAPTER_COMPACTED, live)
+      await this.rollChapter()
+      live = this.store.requireConfig().liveSessionId
+      Object.assign(position, at(live, position.turn))
     }
-    await handle.close()
-    return { events, bytes, ms: Date.now() - started }
+    return { events, bytes, ms: Date.now() - started, chapters: this.store.chapters.all().length }
+  }
+
+  /** The chapter a Subagent belongs to: its parent session. */
+  async subagentChapterForTest(id: string): Promise<string | null> {
+    return this.store.sql.exec<{ parent_session: string }>('SELECT parent_session FROM subagent WHERE id = ?', id).toArray()[0]?.parent_session ?? null
+  }
+
+  /** The Conversation's chapters as stored (v1.19). */
+  async chaptersForTest(): Promise<Chapter[]> {
+    return this.store.chapters.all()
+  }
+
+  /** The Robot as v1.18 left it: no chapters; then the store opened again, as after the deploy (v1.19 ticket 02). */
+  async unchapterForTest(): Promise<void> {
+    this.store.sql.exec('DROP TABLE chapter')
+    this.store.sql.exec('UPDATE schema_version SET version = 23')
+    this.store.prepare()
   }
 
   /** Build (resume) the agent on the live Conversation, as the first Turn after a sleep does. */

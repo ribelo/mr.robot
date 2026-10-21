@@ -54,9 +54,9 @@ export class ConversationIndex {
     }
   }
 
-  /** Start keeping the index of a new session up to date as events are appended. */
-  track(sessionId: string): void {
-    this.sql.exec('INSERT OR IGNORE INTO chat_search_state (session_id, next_seq) VALUES (?, 0)', sessionId)
+  /** Start keeping the index of a new session up to date as events are appended, from its own first event. */
+  track(sessionId: string, from = 0): void {
+    this.sql.exec('INSERT OR IGNORE INTO chat_search_state (session_id, next_seq) VALUES (?, ?)', sessionId, from)
   }
 
   /** After an append: extend the index of a session that is already being kept (never starts a backfill). */
@@ -64,9 +64,9 @@ export class ConversationIndex {
     if (this.sql.exec('SELECT 1 FROM chat_search_state WHERE session_id = ?', sessionId).toArray().length > 0) this.catchUp(sessionId)
   }
 
-  /** Index every stored event of the session that is not indexed yet. */
-  catchUp(sessionId: string): void {
-    let next = this.sql.exec<{ next_seq: number }>('SELECT next_seq FROM chat_search_state WHERE session_id = ?', sessionId).toArray()[0]?.next_seq ?? 0
+  /** Index every stored event of the session that is not indexed yet; a session never indexed starts at `from` (its own first event). */
+  catchUp(sessionId: string, from = 0): void {
+    let next = this.sql.exec<{ next_seq: number }>('SELECT next_seq FROM chat_search_state WHERE session_id = ?', sessionId).toArray()[0]?.next_seq ?? from
     const legacy = this.assistantRepliesBefore(sessionId)
     for (;;) {
       const rows = this.sql.exec<{ seq: number; event: string }>(
@@ -93,26 +93,38 @@ export class ConversationIndex {
     this.sql.exec('DELETE FROM chat_search_state')
   }
 
-  /** Items matching every word of the query, newest first, a page at a time (page is 1-based). */
+  /**
+   * Items matching every word of the query in the Conversation, newest first, a page at a time (page is 1-based). The Conversation is
+   * every chapter on its chain, each from its own first event up to its cut (v1.19, ec-enqy); the live one is caught up first.
+   */
   search(sessionId: string, query: string, page: number): SearchPage {
     const terms = query.split(/\s+/).filter((term) => term !== '').slice(0, MAX_TERMS)
     if (terms.length === 0) throw new Error('give some words to search for')
     const number = Number.isInteger(page) && page >= 1 ? page : 1
     this.catchUp(sessionId)
+    // A chapter written before search existed, or before the index was rebuilt, is indexed at the first search that needs it.
+    const behind = this.sql.exec<{ session_id: string; first_seq: number }>(
+      `SELECT chapter.session_id, chapter.first_seq FROM chapter JOIN session_log ON session_log.id = chapter.session_id
+        LEFT JOIN chat_search_state ON chat_search_state.session_id = chapter.session_id
+        WHERE chapter.superseded = 0 AND (chat_search_state.next_seq IS NULL OR chat_search_state.next_seq < session_log.length)`,
+    ).toArray()
+    for (const chapter of behind) this.catchUp(chapter.session_id, chapter.first_seq)
     const offset = (number - 1) * SEARCH_PAGE_SIZE
-    const rows = this.query(sessionId, terms, offset)
+    const rows = this.query(terms, offset)
     const hits = rows.slice(0, SEARCH_PAGE_SIZE).map((row): SearchHit => ({ id: row.id, sender: row.kind === 'reply' ? null : row.sender, at: Number(row.at), snippet: snippet(row.text, terms) }))
     return { hits, nextPage: rows.length > SEARCH_PAGE_SIZE ? number + 1 : null }
   }
 
-  private query(sessionId: string, terms: readonly string[], offset: number): Array<{ id: string; kind: string; sender: string | null; at: number; text: string }> {
+  private query(terms: readonly string[], offset: number): Array<{ id: string; kind: string; sender: string | null; at: number; text: string }> {
     type Row = { id: string; kind: string; sender: string | null; at: number; text: string }
+    const chain = 'JOIN chapter ON chapter.session_id = chat_search.session_id AND chapter.superseded = 0 AND CAST(chat_search.seq AS INTEGER) >= chapter.first_seq AND (chapter.cut IS NULL OR CAST(chat_search.seq AS INTEGER) <= chapter.cut)'
+    const order = 'ORDER BY chapter.ordinal DESC, CAST(chat_search.seq AS INTEGER) DESC LIMIT ? OFFSET ?'
     if (this.mode === 'fts5') {
       const match = terms.map((term) => `"${term.replaceAll('"', '""')}"*`).join(' AND ')
       try {
         return this.sql.exec<Row>(
-          'SELECT id, kind, sender, at, text FROM chat_search WHERE chat_search MATCH ? AND session_id = ? ORDER BY CAST(seq AS INTEGER) DESC LIMIT ? OFFSET ?',
-          match, sessionId, SEARCH_PAGE_SIZE + 1, offset,
+          `SELECT chat_search.id, kind, sender, at, text FROM chat_search ${chain} WHERE chat_search MATCH ? ${order}`,
+          match, SEARCH_PAGE_SIZE + 1, offset,
         ).toArray()
       } catch {
         // A query the FTS5 syntax cannot express (only punctuation, say) matches nothing.
@@ -121,8 +133,8 @@ export class ConversationIndex {
     }
     const like = terms.map(() => "text LIKE ? ESCAPE '\\'").join(' AND ')
     return this.sql.exec<Row>(
-      `SELECT id, kind, sender, at, text FROM chat_search WHERE session_id = ? AND ${like} ORDER BY seq DESC LIMIT ? OFFSET ?`,
-      sessionId, ...terms.map((term) => `%${term.replace(/[\\%_]/g, '\\$&')}%`), SEARCH_PAGE_SIZE + 1, offset,
+      `SELECT chat_search.id, kind, sender, at, text FROM chat_search ${chain} WHERE ${like} ${order}`,
+      ...terms.map((term) => `%${term.replace(/[\\%_]/g, '\\$&')}%`), SEARCH_PAGE_SIZE + 1, offset,
     ).toArray()
   }
 }

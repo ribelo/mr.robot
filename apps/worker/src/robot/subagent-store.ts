@@ -56,6 +56,14 @@ export class SubagentStore {
     return this.sql.exec<Row>('SELECT * FROM subagent WHERE parent_session = ? ORDER BY started_at DESC', parentSession).toArray().map(fromSql)
   }
 
+  /** The newest children of the Conversation's chapters, up to each one's cut (v1.19: a Subagent belongs to the chapter it ran in); a Rewind's archived ones left it. */
+  ofConversation(limit: number): SubagentRow[] {
+    return this.sql.exec<Row>(
+      "SELECT subagent.* FROM subagent JOIN chapter ON chapter.session_id = subagent.parent_session AND chapter.superseded = 0 AND (chapter.cut IS NULL OR subagent.parent_seq <= chapter.cut) WHERE subagent.status != 'archived' ORDER BY subagent.started_at DESC LIMIT ?",
+      limit,
+    ).toArray().map(fromSql)
+  }
+
   running(): SubagentRow[] {
     return this.sql.exec<Row>("SELECT * FROM subagent WHERE status = 'running' ORDER BY started_at").toArray().map(fromSql)
   }

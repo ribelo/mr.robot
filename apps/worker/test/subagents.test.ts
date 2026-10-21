@@ -186,7 +186,8 @@ describe('cascades, cost and masking (ao-qy77, ao-3pl8, ao-xl6g, ao-2fgp, ao-6bo
     const turns = (await env.ROBOT.getByName(id).trajectory()).filter((event) => event.type === 'turn/start').length
     const rewound = await api(ANNA, `/api/robots/${id}/rewind`, { body: { beforeTurn: turns } })
     expect(rewound.status, JSON.stringify(rewound.body)).toBe(200)
-    expect(await list(id)).toEqual([])
+    // The delegation before the point stays in the Conversation (its chapter, up to the cut, v1.19); the one after it is archived.
+    expect((await list(id)).map((row) => [row.label, row.status])).toEqual([['Read the pages', 'interrupted']])
     expect(await testRobot(id).subagentStatusesForTest()).toContain('archived')
 
     expect((await api(ANNA, `/api/robots/${id}`, { method: 'DELETE', body: { confirm: 'New robot' } })).status).toBe(200)
