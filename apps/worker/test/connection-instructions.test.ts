@@ -69,7 +69,7 @@ describe('Connection instructions in the prompt', () => {
     expect(await runtime(id)).not.toContain('Instructions for')
   })
 
-  it("a Connection shared with the Home carries its owner's instructions to the Robots granted it", async () => {
+  it("a Connection shared with the Space carries its owner's instructions to the Robots granted it", async () => {
     const bot = await env.MEMBER.getByName(benId).addConnection({ kind: 'discord', label: 'Bot', account: 'Mr. Robot', services: [], shared: true, meta: {}, secrets: { token: 't' } })
     await api(BEN, `/api/connections/${bot.id}`, { method: 'PATCH', body: { instructions: 'Reply in the channel it came from.' } })
     const id = await robotWith({ [bot.id]: 'allow' })

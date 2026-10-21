@@ -5,7 +5,7 @@ import type { Conversation, Me, MissionView, RobotPanel, RobotSummary, TaskView 
 import { WindowedTable } from '../src/components/WindowedTable.tsx'
 
 const now = Date.now()
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeHome: false, drawer: false }, acceptTasksFrom: [] } as Me
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as Me
 const identity = (name: string) => ({ name, title: '', description: '', avatarColor: '#f4a03a', avatarSeed: name })
 const robot = (id: string, name: string, extra: Partial<RobotSummary> = {}): RobotSummary => ({ id, ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity: identity(name), lastLine: '', lastAt: 0, unread: false, ...extra })
 const task = (id: string, title: string, extra: Partial<TaskView> = {}): TaskView => ({
@@ -105,12 +105,12 @@ describe('Mission Control (v1.13 ticket 06)', () => {
     await waitFor(() => expect(calls.some((call) => call.path.startsWith('/api/mission') && call.path.includes('state=done'))).toBe(true))
   })
 
-  it('shows Whole Home only to the admin, who widens both tables with it (mc-m7gg)', async () => {
+  it('shows Whole Space only to the admin, who widens both tables with it (mc-m7gg)', async () => {
     await mission()
-    expect(screen.queryByRole('switch', { name: 'Whole Home' })).toBeNull()
+    expect(screen.queryByRole('switch', { name: 'Whole Space' })).toBeNull()
     cleanup()
     await mission({ ...me, role: 'admin' })
-    fireEvent.click(screen.getByRole('switch', { name: 'Whole Home' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Whole Space' }))
     await waitFor(() => expect(calls.some((call) => call.path.startsWith('/api/mission') && call.path.includes('scope=home'))).toBe(true))
   })
 

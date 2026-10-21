@@ -1,6 +1,6 @@
 /**
  * Mr. Robot's Cordis adapters for DSH seams that only need a thin bridge: credentials over the
- * Member/Home DOs (read-only inside a Robot: people manage keys in the PWA), the working directory,
+ * Member/Space DOs (read-only inside a Robot: people manage keys in the PWA), the working directory,
  * and the browser-use provider registration for Browser Rendering.
  */
 import { Service, type Context } from '@deepseek-ai/cordis'

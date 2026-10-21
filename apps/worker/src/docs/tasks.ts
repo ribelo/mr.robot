@@ -1,11 +1,11 @@
 export const TASKS = `# Tasks
 
-A Task is something to do: a title, instructions, who created it, who does it, when, and whether it is done. One list of work holds the Tasks of people and Robots. The Home keeps it.
+A Task is something to do: a title, instructions, who created it, who does it, when, and whether it is done. One list of work holds the Tasks of people and Robots. The Space keeps it.
 
 ## The doer
 
 The doer (assignee) of a Task is one of these:
-- a Member of the Home
+- a Member of the Space
 - a Robot
 - nobody: the Task waits on the list until somebody takes it. It never wakes anybody.
 
@@ -74,7 +74,7 @@ Moments are kept in the owner's profile zone unless a Task names its own. "Every
 
 ## Reminders for people
 
-A person's Task with a moment can carry "remind N minutes before". The Home sends one reminder per occurrence by Web Push and the desktop app; no Robot wakes. Quiet hours apply.
+A person's Task with a moment can carry "remind N minutes before". The Space sends one reminder per occurrence by Web Push and the desktop app; no Robot wakes. Quiet hours apply.
 
 ## Write good instructions
 

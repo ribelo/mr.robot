@@ -21,7 +21,7 @@ export function grantParameters(levels: readonly GrantLevel[], logins: 'secrets'
   })
   return {
     tools: list('Tool groups', { type: 'string', enum: TOOL_GROUP_NAMES }),
-    skills: list('Skill names from the Home library'),
+    skills: list('Skill names from the Space library'),
     recipients: list('Robot ids to message'),
     [logins]: list('Login entry names (see login_list)'),
     hosts: list('Host facets: "<hostId>:browser", "<hostId>:files" or "<hostId>:shell"'),

@@ -36,7 +36,7 @@ export interface ProductDoc {
 const doc = (name: string, summary: string, text: string): ProductDoc => ({ path: `${DOCS_DIRECTORY}/${name}.md`, summary, text })
 
 export const PRODUCT_DOCS: readonly ProductDoc[] = [
-  doc('mr-robot', 'What Mr. Robot is: Home, Members, Robots, Turns, the chief.', MR_ROBOT),
+  doc('mr-robot', 'What Mr. Robot is: Space, Members, Robots, Turns, the chief.', MR_ROBOT),
   doc('members', 'Members: what they own and share, the profile, avatars, the Robot list.', MEMBERS),
   doc('robots', 'Robots: creation and setup, Persona files, settings, Mr. Robot versus other Robots.', ROBOTS),
   doc('grants', 'Grant items and the levels allow, ask and deny; propose_grants; my_capabilities.', GRANTS),

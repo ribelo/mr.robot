@@ -88,7 +88,7 @@ describe('OpenCode Go key rotation (ticket 19)', () => {
   })
 })
 
-describe('OpenCode Go in the Home', () => {
+describe('OpenCode Go in the Space', () => {
   beforeEach(async () => {
     await reset()
     await api(ANNA, '/api/me')

@@ -95,7 +95,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       </label>
       <label>Browser
         <select aria-label="Browser backend" value={draft.browserBackend ?? ''} onChange={(event) => setDraft({ ...draft, browserBackend: event.target.value === '' ? null : (event.target.value as BrowserBackend) })}>
-          <option value="">Home default ({(catalog.browserBackends ?? []).find((option) => option.id === catalog.defaultBrowserBackend)?.label ?? 'Browser Run'})</option>
+          <option value="">Space default ({(catalog.browserBackends ?? []).find((option) => option.id === catalog.defaultBrowserBackend)?.label ?? 'Browser Run'})</option>
           {(catalog.browserBackends ?? []).map((option) => <option key={option.id} value={option.id} disabled={!option.available}>{option.label}{option.available ? '' : ' (not available)'}</option>)}
         </select>
         <small className="muted">{(catalog.browserBackends ?? []).find((option) => option.id === (draft.browserBackend ?? catalog.defaultBrowserBackend))?.note ?? ''} Takes effect the next time the Robot opens its browser; cookies and logins carry over.</small>
@@ -121,7 +121,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         <span>Auto review<small>Before each call of an item at allow, a reviewer model checks it. A call it denies becomes an Ask to you, with its reason. Items at ask keep asking you.</small></span>
       </label>
       <ReviewerSetting value={draft.reviewer} models={catalog.models} onChange={(reviewer) => setDraft({ ...draft, reviewer })}
-        fallback={`Home default (${settings.homeReviewer === null ? "this Robot's own model" : (catalog.models.find((option) => option.provider === settings.homeReviewer!.provider && option.model === settings.homeReviewer!.model)?.label ?? settings.homeReviewer.model)})`} />
+        fallback={`Space default (${settings.spaceReviewer === null ? "this Robot's own model" : (catalog.models.find((option) => option.provider === settings.spaceReviewer!.provider && option.model === settings.spaceReviewer!.model)?.label ?? settings.spaceReviewer.model)})`} />
 
       <h2>Tools</h2>
       <div className="muted">Platform tools: one item per tool group. Allow: the Robot uses it freely. Ask: each use waits for your answer. Deny: the Robot does not have it.{mrRobot ? ' Mr. Robot holds everything you can reach at allow unless you lower it here.' : ''}</div>
@@ -149,7 +149,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
         </div>
       )}
       <h2>Hosts</h2>
-      <div className="muted">Computers that run the Mr. Robot app: yours and the ones shared with the Home. Grant files, shell and browser of each computer on their own.</div>
+      <div className="muted">Computers that run the Mr. Robot app: yours and the ones shared with the Space. Grant files, shell and browser of each computer on their own.</div>
       <label className="check"><input type="checkbox" checked={draft.requiresHosts === true} onChange={(event) => setDraft({ ...draft, requiresHosts: event.target.checked })} />
         <span>Do not run while any of my Hosts is offline<small>The Hosts are the ones you granted this Robot a facet on. A recurring Task that finds one offline fails, naming it, and you hear once per outage. A scheduled Task waits for the Host and runs when it returns, if its deadline allows. Your messages always reach the Robot.</small></span>
       </label>
@@ -184,11 +184,11 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       <h2>Sharing and limits</h2>
       {mrRobot ? null : (
         <label className="check"><input type="checkbox" checked={draft.sharing === 'home'} onChange={(event) => setDraft({ ...draft, sharing: event.target.checked ? 'home' : 'private' })} />
-          <span>Shared with the Home<small>Other Members can talk to it and use it.</small></span>
+          <span>Shared with the Space<small>Other Members can talk to it and use it.</small></span>
         </label>
       )}
       <SpendLimitChoice label="Monthly spend limit" kinds={['home', 'none', 'usd']} draft={limitDraft} valid={Option.isSome(spendLimit)} onChange={setLimitDraft}
-        note={Option.isSome(spendLimit) ? `In effect: ${spendLimitText(effectiveSpendLimit(spendLimit.value, settings.homeSpendLimit))}` : undefined} />
+        note={Option.isSome(spendLimit) ? `In effect: ${spendLimitText(effectiveSpendLimit(spendLimit.value, settings.spaceSpendLimit))}` : undefined} />
 
       <div className="question-actions">
         {panel.summary.status === 'paused'

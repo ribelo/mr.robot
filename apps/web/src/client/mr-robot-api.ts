@@ -10,12 +10,12 @@ import * as FetchHttpClient from 'effect/http/FetchHttpClient'
 import * as HttpClient from 'effect/http/HttpClient'
 import * as HttpClientRequest from 'effect/http/HttpClientRequest'
 import {
-  AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, HomeSettingsSaved, HomeSettingsView, HostAction, HostPaired, HostPairing, HostView,
+  AdminView, Attachment, ConnectionNote, ConnectionView, PluginView, ConfiguredResult, Conversation, CreatedRobot, SpaceSettingsSaved, SpaceSettingsView, HostAction, HostPaired, HostPairing, HostView,
   LoginView, Me, MemberAvatar, MemberCosts, MemberView, SubagentView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
   PageContent, PageView, SharedPageView, SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
   FileHistoryView, FileVersionContent, MarketplaceEntry, DefinitionView,
-  type CredentialSave, type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
+  type CredentialSave, type GroupPatch, type SpaceSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
 
@@ -96,7 +96,7 @@ const make = Effect.gen(function* () {
     editDraft: (id: string, proposal: ProposalView, edit: { readonly body: string; readonly subject?: string }) => request(ProposalView, 'PATCH', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}/draft`, { revision: proposal.revision, ...edit }),
     /** "Always allow this" on a tool-call Ask (v1.17): the items go to allow for the Robot and the call runs. */
     alwaysAllow: (id: string, proposal: ProposalView) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}/always-allow`, { revision: proposal.revision }),
-    /** A credential Ask saved: the form's password goes to the Home through this call (v1.15). */
+    /** A credential Ask saved: the form's password goes to the Space through this call (v1.15). */
     saveCredential: (id: string, proposal: ProposalView, entry: Omit<CredentialSave, 'revision'>) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/proposals/${enc(proposal.id)}/credential`, { revision: proposal.revision, ...entry }),
     answerHelp: (id: string, proposal: ProposalView, text: string) => request(ProposalView, 'POST', `/api/robots/${enc(id)}/help/${enc(proposal.id)}`, { text }),
     pause: (id: string) => send('POST', `/api/robots/${enc(id)}/pause`),
@@ -113,8 +113,8 @@ const make = Effect.gen(function* () {
     deleteGroup: (id: string) => send('DELETE', `/api/robot-groups/${enc(id)}`),
     /** One page of Mission Control (v1.13 ticket 06), by query ("scope=home&state=open&fleetPage=2"). */
     mission: (query: string) => get(MissionView, `/api/mission?${query}`),
-    /** The active Members of the Home, for a Task's doer (v1.13). */
-    homeMembers: get(Schema.Array(MemberView), '/api/members'),
+    /** The active Members of the Space, for a Task's doer (v1.13). */
+    spaceMembers: get(Schema.Array(MemberView), '/api/members'),
     /** Tasks (v1.13): a page by query ("state=all&parent=t-…"), one Task, and its changes. */
     tasks: (query: string) => get(TaskPage, `/api/tasks${query === '' ? '' : `?${query}`}`),
     task: (id: string) => get(TaskView, `/api/tasks/${enc(id)}`),
@@ -181,11 +181,11 @@ const make = Effect.gen(function* () {
     checkAccount: (id: string) => send('POST', `/api/accounts/${enc(id)}/check`, {}),
 
     admin: get(AdminView, '/api/admin'),
-    homeSettings: get(HomeSettingsView, '/api/admin/settings'),
-    updateHomeSettings: (patch: HomeSettingsPatch) => request(HomeSettingsSaved, 'PATCH', '/api/admin/settings', patch),
+    spaceSettings: get(SpaceSettingsView, '/api/admin/settings'),
+    updateSpaceSettings: (patch: SpaceSettingsPatch) => request(SpaceSettingsSaved, 'PATCH', '/api/admin/settings', patch),
     setSkillRepository: (input: { readonly repo: string; readonly ref: string; readonly path: string; readonly token?: string }) => send('PUT', '/api/admin/skills/repository', input),
-    homeMemory: get(TextContent, '/api/home-memory'),
-    setHomeMemory: (content: string) => send('PUT', '/api/admin/home-memory', { content }),
+    spaceMemory: get(TextContent, '/api/space-memory'),
+    setSpaceMemory: (content: string) => send('PUT', '/api/admin/space-memory', { content }),
     setExaKey: (key: string | null) => request(ConfiguredResult, 'PUT', '/api/admin/exa', { key }),
     refreshModels: request(ModelListRefresh, 'POST', '/api/admin/models/refresh', {}),
     syncSkills: request(SkillsSynced, 'POST', '/api/admin/skills/sync', {}),

@@ -1,7 +1,7 @@
 /**
  * Google OAuth 2.0 web flow (v1.5 ticket 02, cn-aq2a, cn-lzqh, cn-j1la, cn-9s7r): the consent URL for
- * the services a person picks, the code exchange, the account's address, and token refresh. The Home's
- * OAuth client (one per Home, set up once by the admin) signs every call.
+ * the services a person picks, the code exchange, the account's address, and token refresh. The Space's
+ * OAuth client (one per Space, set up once by the admin) signs every call.
  */
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'

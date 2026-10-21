@@ -6,7 +6,7 @@ import { useState, type ReactNode } from 'react'
 import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/reactivity'
 import type { RecurringSchedule, Remind, TaskAssignee, TaskInput, TaskTimingInput, TaskView } from '@mr-robot/protocol'
-import { homeMembersAtom, keys, robotsAtom, taskAtom, tasksAtom, useCommand } from '../client/api-atoms.ts'
+import { spaceMembersAtom, keys, robotsAtom, taskAtom, tasksAtom, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { renderResult } from './AtomView.tsx'
 import { SaveButton } from './SaveButton.tsx'
@@ -16,7 +16,7 @@ import { assigneeKey, assigneeText, momentText, outcomeMark, whenText, type Name
 
 /** The names of the people and Robots this Member knows, for a Task's doer. */
 export function useNames(): Names {
-  const members = AsyncResult.getOrElse(useAtomValue(homeMembersAtom), () => [])
+  const members = AsyncResult.getOrElse(useAtomValue(spaceMembersAtom), () => [])
   const robots = AsyncResult.getOrElse(useAtomValue(robotsAtom), () => [])
   return { members: new Map(members.map((member) => [member.id, member.name])), robots: new Map(robots.map((robot) => [robot.id, robot.identity.name])) }
 }
@@ -55,9 +55,9 @@ export function parseAssigneeKey(key: string): TaskAssignee {
   return { kind: 'nobody' }
 }
 
-/** The doers a Member may choose: the Members of the Home, the Robots he reaches, and nobody (mc-n2bb). */
+/** The doers a Member may choose: the Members of the Space, the Robots he reaches, and nobody (mc-n2bb). */
 export function AssigneeOptions() {
-  const members = AsyncResult.getOrElse(useAtomValue(homeMembersAtom), () => [])
+  const members = AsyncResult.getOrElse(useAtomValue(spaceMembersAtom), () => [])
   const robots = AsyncResult.getOrElse(useAtomValue(robotsAtom), () => [])
   return (
     <>

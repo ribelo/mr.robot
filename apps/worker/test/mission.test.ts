@@ -29,7 +29,7 @@ async function activeRobot(as: string, name: string): Promise<string> {
 const mission = async (as: string, query = '') => (await api<MissionView>(as, `/api/mission${query}`)).body
 
 describe('Mission Control (v1.13 ticket 06)', () => {
-  it('orders the Fleet working first, then waiting for you, then by last activity; Whole Home is the admin\'s (mc-m4dd, mc-m7gg)', async () => {
+  it('orders the Fleet working first, then waiting for you, then by last activity; Whole Space is the admin\'s (mc-m4dd, mc-m7gg)', async () => {
     const quiet = await activeRobot(ANNA, 'Quiet')
     const waiting = await activeRobot(ANNA, 'Waiting')
     const busy = await activeRobot(ANNA, 'Busy')

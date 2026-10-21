@@ -1,5 +1,5 @@
 /**
- * Threads between the Mr. Robots of two Members of one Home (v1.9): invitations, talking, the pause at 20,
+ * Threads between the Mr. Robots of two Members of one Space (v1.9): invitations, talking, the pause at 20,
  * closing and the lists. Fake turns; no network.
  */
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
@@ -67,7 +67,7 @@ async function openThread(annaScope = 'my calendar for Friday', benScope = 'my f
 }
 
 describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', () => {
-  it('lists the other chiefs of the Home, not the asker (ch-c2xa)', async () => {
+  it('lists the other chiefs of the Space, not the asker (ch-c2xa)', async () => {
     await say(ANNA, anna, [{ calls: [{ name: 'thread_chiefs', args: {} }] }, { text: 'ok' }])
     const { chiefs } = JSON.parse(toolResults(anna).at(-1)!) as { chiefs: Array<{ id: string; ownerName: string }> }
     expect(chiefs).toEqual([expect.objectContaining({ id: ben, ownerName: 'Ben' })])
@@ -84,7 +84,7 @@ describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', (
     scripts.set(anna, [{ text: 'ok' }])
     await answer(ANNA, anna, out, true, '  my calendar,\nbut not the doctor  ')
     expect((await testRobot(anna).panel(true, (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((r) => r.id === anna)!, [])).threads![0]).toMatchObject({ state: 'invited', scope: 'my calendar for Friday' })
-    expect((await env.HOME.getByName('home').adminView((await api<{ id: string }>(ANNA, '/api/me')).body.id)).threads![0]).toMatchObject({ state: 'invited' })
+    expect((await env.SPACE.getByName('home').adminView((await api<{ id: string }>(ANNA, '/api/me')).body.id)).threads![0]).toMatchObject({ state: 'invited' })
 
     scripts.set(anna, [{ text: 'opened' }])
     scripts.set(ben, [{ text: 'opened' }])
@@ -135,7 +135,7 @@ describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', (
     expect((await api<RobotPanel>(ANNA, `/api/robots/${anna}/panel`)).body.threads).toEqual([])
   })
 
-  it('a Thread message reaches no chief before both owners accepted, checked at the Home (ch-fri7)', async () => {
+  it('a Thread message reaches no chief before both owners accepted, checked at the Space (ch-fri7)', async () => {
     const id = await invite()
     await settle(ben)
     const message = (key: string) => ({ id: key, kind: 'thread' as const, threadId: id, text: 'psst', requestId: key, chain: { id, hops: 0 }, from: { robotId: anna, ownerId: '', name: "Anna's Mr. Robot", avatarColor: '#5ec4b6' } })
@@ -254,25 +254,25 @@ describe('closing and the lists (ch-6g7j, ch-rlnd, ch-gckb, ch-6fcp, ch-5ngu)', 
     expect(review).toMatchObject({ proposal: { status: 'open', review: { title: 'Outcome of "Dinner on Friday"' } } })
   })
 
-  it('closes an open Thread after 7 days without a message, by the Home alarm, with a note in both Conversations (ch-gckb)', async () => {
+  it('closes an open Thread after 7 days without a message, by the Space alarm, with a note in both Conversations (ch-gckb)', async () => {
     const id = await openThread()
-    const home = env.HOME.getByName('home') as unknown as DurableObjectStub<import('./worker.ts').Home>
-    expect(await home.alarmForTest()).toBeGreaterThan(Date.now() + 6.9 * 24 * 3600 * 1000)
-    await home.backdateThreadsForTest(8 * 24 * 3600 * 1000)
-    await runDurableObjectAlarm(home)
+    const space = env.SPACE.getByName('home') as unknown as DurableObjectStub<import('./worker.ts').Space>
+    expect(await space.alarmForTest()).toBeGreaterThan(Date.now() + 6.9 * 24 * 3600 * 1000)
+    await space.backdateThreadsForTest(8 * 24 * 3600 * 1000)
+    await runDurableObjectAlarm(space)
     for (const [as, robot] of [[ANNA, anna], [BEN, ben]] as const) {
       expect((await api<RobotPanel>(as, `/api/robots/${robot}/panel`)).body.threads![0]).toMatchObject({ id, state: 'closed', closedBy: 'idle' })
       expect((await chat(as, robot)).some((item) => item.kind === 'thread' && item.event === 'idle')).toBe(true)
     }
   })
 
-  it('ends an invitation that has not both answers after 7 days, by the Home alarm (ch-gckb)', async () => {
+  it('ends an invitation that has not both answers after 7 days, by the Space alarm (ch-gckb)', async () => {
     const id = await invite()
     await settle(ben)
-    const home = env.HOME.getByName('home') as unknown as DurableObjectStub<import('./worker.ts').Home>
-    expect(await home.alarmForTest()).toBeGreaterThan(Date.now() + 6.9 * 24 * 3600 * 1000)
-    await home.backdateThreadsForTest(8 * 24 * 3600 * 1000)
-    await runDurableObjectAlarm(home)
+    const space = env.SPACE.getByName('home') as unknown as DurableObjectStub<import('./worker.ts').Space>
+    expect(await space.alarmForTest()).toBeGreaterThan(Date.now() + 6.9 * 24 * 3600 * 1000)
+    await space.backdateThreadsForTest(8 * 24 * 3600 * 1000)
+    await runDurableObjectAlarm(space)
     for (const [as, robot] of [[ANNA, anna], [BEN, ben]] as const) {
       expect((await api<RobotPanel>(as, `/api/robots/${robot}/panel`)).body.threads![0]).toMatchObject({ id, state: 'closed', closedBy: 'expired' })
       const items = await chat(as, robot)

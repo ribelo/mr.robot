@@ -52,6 +52,10 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     // The Robots' computer: built by the deploy from the Dockerfile in the repository (ao-h1wn).
     ComputerContainer: 'Cloudflare.Container',
   })
+  // Home became Space (v1.18 ticket 09, rm-lseo): the binding SPACE keeps the namespace's logical id 'Home' and names the class Space, so the
+  // deploy renames the class (renamed_classes) instead of creating an empty one.
+  const space = plan.resources.Edge.props.env.SPACE
+  expect(space).toEqual({ kind: 'Cloudflare.DurableObject', name: 'Home', className: 'Space' })
   expect(plan.resources.ComputerContainer.props).toMatchObject({ className: 'ComputerContainer', context: './infra/computer', instanceType: 'standard-1' })
   // An upload a restart cut off is aborted by R2 after a day (deep review P12).
   expect(plan.resources.Files.props.lifecycleRules).toEqual([{ id: 'abort-unfinished-uploads', abortMultipartUploadsTransition: { condition: { type: 'Age', maxAge: 86_400 } } }])
@@ -67,7 +71,7 @@ it('declares every resource of the deployment (robot-h3vr, robot-scwl)', async (
     'ai:AI',
     'browser:BROWSER',
     'durable_object_namespace:COMPUTER',
-    'durable_object_namespace:HOME',
+    'durable_object_namespace:SPACE',
     'durable_object_namespace:MEMBER',
     'durable_object_namespace:ROBOT',
     'r2_bucket:FILES',

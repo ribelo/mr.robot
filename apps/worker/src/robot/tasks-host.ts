@@ -1,14 +1,14 @@
 /**
  * The Task tools of every Robot (v1.13 ticket 04): the boundary where a tool call's text (an assignee as
- * "owner" or "member:Ben", a moment as ISO 8601) becomes the Home's typed input, and a TaskView becomes what
+ * "owner" or "member:Ben", a moment as ISO 8601) becomes the Space's typed input, and a TaskView becomes what
  * the model reads. Without robot_id the call works as this Robot; with it, and only for Mr. Robot, as one of
  * his staff by that Robot's rules (the deputy's reach checks), recorded as Mr. Robot.
  */
 import * as Effect from 'effect/Effect'
 import type { Actor, MemberView, RobotSummary, TaskAssignee, TaskInput, TaskTimingInput, TaskView } from '@mr-robot/protocol'
 import type { TaskCreateArgs, TaskTimingArgs, TaskUpdateArgs, TasksHost } from '../agent/tools/tasks.ts'
-import type { TaskCaller } from '../home/tasks.ts'
-import { HOME_ID } from '../env.ts'
+import type { TaskCaller } from '../space/tasks.ts'
+import { SPACE_ID } from '../env.ts'
 import { invalid, type DurableError } from '../platform/durable.ts'
 import * as Deputy from './deputy.ts'
 import { RobotPlatform, RobotState } from './programs.ts'
@@ -25,10 +25,10 @@ export interface TaskTurn {
 
 const promise = <A>(run: () => Promise<A>) => Effect.promise(run)
 
-/** A call to the Home whose refusal (Invalid, NotFound, Conflict) is the tool's error, in the Home's words. */
-const home = <A>(run: (stub: DurableObjectStub<import('../home/home.ts').Home>) => Promise<A>) => Effect.gen(function* () {
+/** A call to the Space whose refusal (Invalid, NotFound, Conflict) is the tool's error, in the Space's words. */
+const space = <A>(run: (stub: DurableObjectStub<import('../space/space.ts').Space>) => Promise<A>) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
-  return yield* Effect.tryPromise({ try: () => run(platform.env.HOME.getByName(HOME_ID)), catch: (error) => invalid(error instanceof Error ? error.message : String(error)) })
+  return yield* Effect.tryPromise({ try: () => run(platform.env.SPACE.getByName(SPACE_ID)), catch: (error) => invalid(error instanceof Error ? error.message : String(error)) })
 })
 
 interface Acting {
@@ -49,7 +49,7 @@ const acting = (robotId: string | undefined, change: boolean): Effect.Effect<Act
   return { caller: { kind: 'robot', robotId: entry.id, ownerId: entry.ownerId, actor }, zone: current.timeZone, deputy: true }
 })
 
-/** "self", "owner", "nobody", "robot:<id>", "member:<id, name or e-mail>" as the Home's assignee. */
+/** "self", "owner", "nobody", "robot:<id>", "member:<id, name or e-mail>" as the Space's assignee. */
 const parseAssignee = (text: string, caller: Acting['caller']) => Effect.gen(function* () {
   const value = text.trim()
   if (value === 'self' || value === 'me') return { kind: 'robot', robotId: caller.robotId } satisfies TaskAssignee
@@ -59,11 +59,11 @@ const parseAssignee = (text: string, caller: Acting['caller']) => Effect.gen(fun
   const id = rest.join(':').trim()
   if (kind === 'robot' && id !== '') return { kind: 'robot', robotId: id } satisfies TaskAssignee
   if (kind === 'member' && id !== '') {
-    const members = (yield* home((stub) => stub.members())).filter((member) => member.status === 'active')
+    const members = (yield* space((stub) => stub.members())).filter((member) => member.status === 'active')
     const wanted = id.toLowerCase()
     const found = members.filter((member) => member.id === id || member.email.toLowerCase() === wanted || member.name.toLowerCase() === wanted)
     if (found.length === 1) return { kind: 'member', memberId: found[0]!.id } satisfies TaskAssignee
-    return yield* invalid(found.length === 0 ? `No active Member "${id}" in this Home.` : `More than one Member is called "${id}"; give their e-mail.`)
+    return yield* invalid(found.length === 0 ? `No active Member "${id}" in this Space.` : `More than one Member is called "${id}"; give their e-mail.`)
   }
   return yield* invalid('assignee is "self", "owner", "nobody", "robot:<id>" or "member:<name or e-mail>"')
 })
@@ -73,7 +73,7 @@ const moment = (text: string, zone: string, field: string) => Effect.try({
   catch: () => invalid(`${field} is an ISO 8601 moment, like 2026-10-23T18:00 (local in ${zone}) or 2026-10-23T16:00Z`),
 })
 
-/** A tool's timing as the Home's input; exactly one rule for a recurring Task. */
+/** A tool's timing as the Space's input; exactly one rule for a recurring Task. */
 const parseTiming = (args: TaskTimingArgs, zone: string) => Effect.gen(function* () {
   const at = (text: string | undefined, field: string) => (text === undefined ? Effect.succeed(undefined) : moment(text, args.time_zone ?? zone, field))
   const deadline = yield* at(args.deadline, 'deadline')
@@ -107,7 +107,7 @@ function local(at: number | null, zone: string): string | null {
 interface Names { readonly members: ReadonlyMap<string, string>; readonly robots: ReadonlyMap<string, string> }
 
 const names = (ownerId: string) => Effect.gen(function* () {
-  const [members, robots] = yield* Effect.all([home((stub) => stub.members() as Promise<MemberView[]>), home((stub) => stub.reachable(ownerId) as Promise<RobotSummary[]>)])
+  const [members, robots] = yield* Effect.all([space((stub) => stub.members() as Promise<MemberView[]>), space((stub) => stub.reachable(ownerId) as Promise<RobotSummary[]>)])
   return { members: new Map(members.map((member) => [member.id, member.name])), robots: new Map(robots.map((robot) => [robot.id, robot.identity.name])) } as Names
 })
 
@@ -142,7 +142,7 @@ const list = (robotId: string | undefined, filter: { readonly assignee?: string;
   const state = filter.state === undefined ? 'open' : filter.state
   if (!['open', 'done', 'cancelled', 'all'].includes(state)) return yield* invalid('state is open, done, cancelled or all')
   const assignee = filter.assignee === undefined || filter.assignee === 'all' ? undefined : yield* parseAssignee(filter.assignee, who.caller)
-  const page = yield* home((stub) => stub.listTasks(who.caller, { state: state as 'open', ...(assignee === undefined ? {} : { assignee }) }))
+  const page = yield* space((stub) => stub.listTasks(who.caller, { state: state as 'open', ...(assignee === undefined ? {} : { assignee }) }))
   const known = yield* names(who.caller.ownerId)
   return { time_zone: who.zone, tasks: page.tasks.map((task) => shown(task, who.caller, who.zone, known)), more: page.next !== null }
 })
@@ -157,7 +157,7 @@ const create = (robotId: string | undefined, args: TaskCreateArgs) => Effect.gen
     ...remindOf(args.remind_minutes),
   }
   if (input.title === '') return yield* invalid('title must not be empty')
-  return yield* one(who, yield* home((stub) => stub.createTask(who.caller, input)))
+  return yield* one(who, yield* space((stub) => stub.createTask(who.caller, input)))
 })
 
 const update = (robotId: string | undefined, taskId: string, args: TaskUpdateArgs) => Effect.gen(function* () {
@@ -169,7 +169,7 @@ const update = (robotId: string | undefined, taskId: string, args: TaskUpdateArg
     ...(args.timing === undefined ? {} : { timing: yield* parseTiming(args.timing, who.zone) }),
     ...remindOf(args.remind_minutes),
   }
-  return yield* one(who, yield* home((stub) => stub.updateTask(who.caller, taskId, patch)))
+  return yield* one(who, yield* space((stub) => stub.updateTask(who.caller, taskId, patch)))
 })
 
 export function tasksHost(run: Deputy.Run, turn: TaskTurn): TasksHost {
@@ -183,7 +183,7 @@ export function tasksHost(run: Deputy.Run, turn: TaskTurn): TasksHost {
     list: (robotId, filter) => act(list(robotId, filter)),
     create: (robotId, input) => act(create(robotId, input)),
     update: (robotId, taskId, patch) => act(update(robotId, taskId, patch)),
-    assign: (robotId, taskId, text) => change(robotId, (who) => Effect.flatMap(parseAssignee(text, who.caller), (assignee) => home((stub) => stub.assignTask(who.caller, taskId, assignee)))),
+    assign: (robotId, taskId, text) => change(robotId, (who) => Effect.flatMap(parseAssignee(text, who.caller), (assignee) => space((stub) => stub.assignTask(who.caller, taskId, assignee)))),
     focus: async (taskId, reason) => {
       const focused = await turn.focus(taskId, reason)
       if (!focused.ok) throw new Error(focused.reason)
@@ -191,9 +191,9 @@ export function tasksHost(run: Deputy.Run, turn: TaskTurn): TasksHost {
     },
     done: (robotId, taskId, firstLine) => change(robotId, (who) => Effect.gen(function* () {
       if (!who.deputy && firstLine !== undefined && firstLine.trim() !== '') turn.doneLine(taskId, firstLine.trim())
-      return yield* home((stub) => stub.finishTask(who.caller, taskId))
+      return yield* space((stub) => stub.finishTask(who.caller, taskId))
     })),
-    cancel: (robotId, taskId) => change(robotId, (who) => home((stub) => stub.cancelTask(who.caller, taskId))),
-    pause: (robotId, taskId, paused) => change(robotId, (who) => home((stub) => stub.pauseTask(who.caller, taskId, paused))),
+    cancel: (robotId, taskId) => change(robotId, (who) => space((stub) => stub.cancelTask(who.caller, taskId))),
+    pause: (robotId, taskId, paused) => change(robotId, (who) => space((stub) => stub.pauseTask(who.caller, taskId, paused))),
   }
 }

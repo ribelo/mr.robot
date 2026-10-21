@@ -1,6 +1,6 @@
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
-import { HomeSpendLimit, RobotSpendLimit } from '@mr-robot/protocol'
+import { SpaceSpendLimit, RobotSpendLimit } from '@mr-robot/protocol'
 
 type SpendLimitKind = RobotSpendLimit['kind']
 
@@ -14,13 +14,13 @@ export const spendLimitDraft = (limit: RobotSpendLimit): SpendLimitDraft => ({ k
 
 const candidate = (draft: SpendLimitDraft) => (draft.kind === 'usd' ? { kind: 'usd', amount: draft.amount.trim() === '' ? Number.NaN : Number(draft.amount) } : { kind: draft.kind })
 
-/** The Home's limit the draft says; none when the amount is not whole dollars of at least 1. */
-export const parseHomeSpendLimit = (draft: SpendLimitDraft): Option.Option<HomeSpendLimit> => Schema.decodeUnknownOption(HomeSpendLimit)(candidate(draft))
+/** The Space's limit the draft says; none when the amount is not whole dollars of at least 1. */
+export const parseSpaceSpendLimit = (draft: SpendLimitDraft): Option.Option<SpaceSpendLimit> => Schema.decodeUnknownOption(SpaceSpendLimit)(candidate(draft))
 
 /** A Robot's limit the draft says; none when the amount is not whole dollars of at least 1. */
 export const parseRobotSpendLimit = (draft: SpendLimitDraft): Option.Option<RobotSpendLimit> => Schema.decodeUnknownOption(RobotSpendLimit)(candidate(draft))
 
-const KIND_LABELS: Record<SpendLimitKind, string> = { home: "Home's", none: 'No limit', usd: 'Amount' }
+const KIND_LABELS: Record<SpendLimitKind, string> = { home: "Space's", none: 'No limit', usd: 'Amount' }
 
 /**
  * A monthly spend limit (ux-dbx4, ux-q8ve): a segmented choice between the kinds offered, and an amount

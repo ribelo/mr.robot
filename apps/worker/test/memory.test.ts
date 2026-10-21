@@ -36,7 +36,7 @@ const userText = (request: { messages: Array<{ role: string }> }) => JSON.string
 
 describe('memory as a plugin (v1.3 ticket 02)', () => {
   it('enters the context as one baseline message with every scope; an edit becomes a note, not a new system prompt (pl-w3n0, pl-9n7w, pl-o3ck, pl-fkg7, pl-yqno)', async () => {
-    await api(ANNA, '/api/admin/home-memory', { method: 'PUT', body: { content: '# HOME.md\nElectricity: Tauron, account 123.' } })
+    await api(ANNA, '/api/admin/space-memory', { method: 'PUT', body: { content: '# SPACE.md\nElectricity: Tauron, account 123.' } })
     await api(ANNA, '/api/me/files/USER.md', { method: 'PUT', body: { content: '# USER.md\nCall me Anna.' } })
     const id = await robotWith()
     await turn(id, 'hi', [{ text: 'Hello Anna.' }])
@@ -91,20 +91,20 @@ describe('memory as a plugin (v1.3 ticket 02)', () => {
   it('drops the broadest files first and truncates the most specific last (pl-jsdm)', () => {
     const files: MemoryFile[] = [
       { scope: 'robot', path: 'memory/2026-10-07.md', content: 'today '.repeat(100) },
-      { scope: 'home', path: 'HOME.md', content: 'home '.repeat(400) },
+      { scope: 'home', path: 'SPACE.md', content: 'home '.repeat(400) },
       { scope: 'member', path: 'USER.md', content: 'user '.repeat(100) },
       { scope: 'robot', path: 'MEMORY.md', content: 'memory '.repeat(100) },
     ]
     const full = renderBaseline(files, 100_000, 'propose')
     const at = (path: string) => full.indexOf(`path="${path}"`)
-    expect(at('HOME.md')).toBeLessThan(at('USER.md'))
+    expect(at('SPACE.md')).toBeLessThan(at('USER.md'))
     expect(at('USER.md')).toBeLessThan(at('MEMORY.md'))
     expect(at('MEMORY.md')).toBeLessThan(at('memory/2026-10-07.md'))
     const tight = renderBaseline(files, 2000, 'propose')
     expect(new TextEncoder().encode(tight).length).toBeLessThanOrEqual(2000)
     expect(tight).not.toContain('home home')
     expect(tight).toContain('today today')
-    expect(tight).toContain('Memory budget: HOME.md')
+    expect(tight).toContain('Memory budget: SPACE.md')
     const tighter = renderBaseline(files, 900, 'propose')
     expect(new TextEncoder().encode(tighter).length).toBeLessThanOrEqual(900)
     expect(tighter).toContain('[truncated]')

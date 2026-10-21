@@ -1,6 +1,6 @@
 /**
  * The browser picker with two choices (v1.16 ticket 08, ob-myzd): Browser Run and the Host browser, in the Robot's
- * Advanced settings and for the Home default in Admin. No Container Chrome, no VPN card, no proxy card (ob-ltsr).
+ * Advanced settings and for the Space default in Admin. No Container Chrome, no VPN card, no proxy card (ob-ltsr).
  */
 import { RegistryProvider } from '@effect/atom-react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -23,26 +23,26 @@ const panel: RobotPanel = {
   settings: {
     identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null, subagentModels: [],
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, spaceSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
   },
   tasks: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, breakdown: { model: { robot: 0, review: 0, subagent: 0 }, browser: 0, box: 0, services: 0, total: 0 }, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } }, canEdit: true, takeover: null,
 }
 const catalog: SettingsCatalog = { toolGroups: [], skills: [], robots: [], secrets: [], models: [], workersAiEnabled: true, connections: [], hosts: [], browserBackends: [browserRun, deskBrowser], defaultBrowserBackend: 'browser-run' }
 
 describe("the Robot's browser backend", () => {
-  it('offers the Home default, Browser Run and the Host browser, and saves the choice', async () => {
+  it('offers the Space default, Browser Run and the Host browser, and saves the choice', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
     const patches: SettingsPatch[] = []
     render(<RegistryProvider><AdvancedSettings panel={panel} catalog={catalog} onSave={async (patch) => { patches.push(patch); return true }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
     const picker = screen.getByRole('combobox', { name: 'Browser backend' })
-    expect(within(picker).getAllByRole('option').map((option) => option.textContent)).toEqual(['Home default (Browser Run)', 'Browser Run', 'Host browser: Desk'])
+    expect(within(picker).getAllByRole('option').map((option) => option.textContent)).toEqual(['Space default (Browser Run)', 'Browser Run', 'Host browser: Desk'])
     fireEvent.change(picker, { target: { value: 'host:h-desk' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(patches.at(-1)?.browserBackend).toBe('host:h-desk'))
   })
 })
 
-describe('the Home default browser and the Admin cards', () => {
+describe('the Space default browser and the Admin cards', () => {
   const settings = {
     defaultModel: { provider: 'anthropic', model: 'claude-sonnet-5-5', effort: 'off' }, workersAiEnabled: true, defaultBrowserBackend: 'browser-run',
     robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'none' }, defaultReviewer: null,
@@ -54,7 +54,7 @@ describe('the Home default browser and the Admin cards', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | Request) => {
       const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname
       if (path === '/api/admin') return Response.json(view)
-      if (path === '/api/home-memory') return Response.json({ content: '' })
+      if (path === '/api/space-memory') return Response.json({ content: '' })
       return Response.json([])
     }))
     render(<RegistryProvider><Admin /></RegistryProvider>)

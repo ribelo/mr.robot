@@ -27,7 +27,7 @@ import { DurableRuntime, invalid, kvDelete, kvGet, kvSet, notFound, Sql, sqlLaye
 import { localDate, zonedTime } from '../robot/schedule.ts'
 import { DEFAULT_TIME_ZONE, parseTimeZone } from '../robot/time-zone.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
-import { HOME_ID, type Env } from '../env.ts'
+import { SPACE_ID, type Env } from '../env.ts'
 import { makeVault, type VaultError, type VaultShape } from '../platform/vault.ts'
 import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
@@ -74,7 +74,7 @@ export interface MemberProfile {
   readonly mission?: MissionPrefs
 }
 
-/** What a Member's programs need besides its SQLite: vaults, sign-in clients, push, the Home and its alarm. */
+/** What a Member's programs need besides its SQLite: vaults, sign-in clients, push, the Space and its alarm. */
 export interface MemberPlatformShape {
   readonly credentials: VaultShape
   readonly secrets: VaultShape
@@ -103,6 +103,12 @@ const promise = <A>(run: () => Promise<A>) => Effect.promise(run)
 const profile = Effect.gen(function* () {
   const value = yield* kvGet<MemberProfile>('profile')
   if (value === undefined) return yield* notFound('member is not initialised')
+  // Mission Control's Whole Home switch was stored as wholeHome until v1.18 (ticket 09): read as wholeSpace. Remove after one release.
+  const legacy = value.mission as (MissionPrefs & { readonly wholeHome?: boolean }) | undefined
+  if (legacy !== undefined && legacy.wholeSpace === undefined && legacy.wholeHome !== undefined) {
+    const { wholeHome, ...rest } = legacy
+    return { ...value, mission: { ...rest, wholeSpace: wholeHome } }
+  }
   return value
 })
 
@@ -194,7 +200,7 @@ type AccountRow = {
   status: AccountStatus; note: string | null; until: number | null; checked_at: number | null; notified: number; created_at: number; updated_at: number
 }
 
-/** Whether any account of this Provider is shared, as the Home indexes it. */
+/** Whether any account of this Provider is shared, as the Space indexes it. */
 const publish = (provider: ProviderId) => Effect.gen(function* () {
   const platform = yield* MemberPlatform
   const sql = yield* Sql
@@ -357,21 +363,21 @@ const openAccount = (row: AccountRow) => Effect.gen(function* () {
   return { kind: 'oauth', access: tokens.access, account: row.id, ...(tokens.accountId === undefined ? {} : { accountId: tokens.accountId }) } as ProviderCredential
 })
 
-/** One account's credential; a request for another Member's Robot (`forHome`) gets only a shared account. */
-const accountCredential = (id: string, forHome: boolean) => Effect.gen(function* () {
+/** One account's credential; a request for another Member's Robot (`forSpace`) gets only a shared account. */
+const accountCredential = (id: string, forSpace: boolean) => Effect.gen(function* () {
   yield* migrateAccounts
   const sql = yield* Sql
   const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
-  if (row === undefined || (forHome && row.shared !== 1)) return null
+  if (row === undefined || (forSpace && row.shared !== 1)) return null
   return yield* openAccount(row)
 })
 
 /** An account and its credential for a usage read or a check; a shared view sees only shared accounts. */
-const openForProbe = (id: string, forHome: boolean) => Effect.gen(function* () {
+const openForProbe = (id: string, forSpace: boolean) => Effect.gen(function* () {
   yield* migrateAccounts
   const sql = yield* Sql
   const row = yield* sql.first<AccountRow>('SELECT * FROM account WHERE id = ?', id)
-  if (row === undefined || (forHome && row.shared !== 1)) return yield* notFound('no such account')
+  if (row === undefined || (forSpace && row.shared !== 1)) return yield* notFound('no such account')
   return { provider: row.provider, credential: yield* openAccount(row) }
 })
 
@@ -414,10 +420,10 @@ const markAccount = (id: string, change: { status: AccountStatus; until: number 
 })
 
 /** The first account of a Provider (oldest first) a Robot may use. */
-const credential = (provider: ProviderId, forHome: boolean) => Effect.gen(function* () {
+const credential = (provider: ProviderId, forSpace: boolean) => Effect.gen(function* () {
   yield* migrateAccounts
   const sql = yield* Sql
-  const row = yield* sql.first<AccountRow>(`SELECT * FROM account WHERE provider = ? ${forHome ? 'AND shared = 1 ' : ''}ORDER BY created_at, rowid LIMIT 1`, provider)
+  const row = yield* sql.first<AccountRow>(`SELECT * FROM account WHERE provider = ? ${forSpace ? 'AND shared = 1 ' : ''}ORDER BY created_at, rowid LIMIT 1`, provider)
   return row === undefined ? null : yield* openAccount(row)
 })
 
@@ -655,7 +661,7 @@ const notify = (event: { robotId: string; robotName: string; kind: NotificationK
   urgency: event.kind === 'finished' ? 'normal' : 'high',
 }, event.hosts ?? [])
 
-/** The Home reminds this Member of a Task's moment (mc-s3cc): a push of its own, no Robot woken; quiet hours apply. */
+/** The Space reminds this Member of a Task's moment (mc-s3cc): a push of its own, no Robot woken; quiet hours apply. */
 const remind = (task: { taskId: string; title: string; at: number }) => Effect.gen(function* () {
   const me = yield* profile
   const clock = new Intl.DateTimeFormat('en-GB', { timeZone: me.timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(task.at)
@@ -752,7 +758,7 @@ export class Member extends DurableObject<Env> {
       secrets: makeVault(env.DATA_KEY, 'secrets'),
       oauthClients: { openai: env.OPENAI_OAUTH_CLIENT_ID, anthropic: env.ANTHROPIC_OAUTH_CLIENT_ID },
       vapid: { privateKeyHex: env.VAPID_PRIVATE_KEY, publicKey: env.VAPID_PUBLIC_KEY },
-      publishSharing: (memberId, provider, shared) => Effect.promise(() => env.HOME.getByName(HOME_ID).credentialShared(memberId, provider, shared)),
+      publishSharing: (memberId, provider, shared) => Effect.promise(() => env.SPACE.getByName(SPACE_ID).credentialShared(memberId, provider, shared)),
       getAlarm: () => Effect.promise(() => ctx.storage.getAlarm()),
       setAlarm: (at) => Effect.promise(() => ctx.storage.setAlarm(at)),
       send: (vapid, device, notification) => sendPush(vapid, device, notification),
@@ -790,12 +796,12 @@ export class Member extends DurableObject<Env> {
   /** The name or the nickname changed: every Robot of this Member names its owner the new way (ux-nwi1). */
   private async ownerRenamed(before: MemberProfile, after: MemberProfile): Promise<void> {
     if (before.name === after.name && before.nickname === after.nickname) return
-    await this.env.HOME.getByName(HOME_ID).ownerChanged(after.id, robotOwner(after)).catch((error: unknown) => console.warn('owner change not delivered', error))
+    await this.env.SPACE.getByName(SPACE_ID).ownerChanged(after.id, robotOwner(after)).catch((error: unknown) => console.warn('owner change not delivered', error))
   }
   /** The profile zone changed: every Robot of this Member follows it and is told (v1.11 ticket 08). */
   private async zoneMoved(before: MemberProfile, after: MemberProfile): Promise<void> {
     if (before.timeZone === after.timeZone) return
-    await this.env.HOME.getByName(HOME_ID).timeZoneChanged(after.id, after.timeZone, before.timeZone).catch((error: unknown) => console.warn('time zone change not delivered', error))
+    await this.env.SPACE.getByName(SPACE_ID).timeZoneChanged(after.id, after.timeZone, before.timeZone).catch((error: unknown) => console.warn('time zone change not delivered', error))
   }
   file(name: MemberFileName): Promise<string> { return this.run(file(name)) }
   files(): Promise<Record<MemberFileName, string>> { return this.run(files) }
@@ -814,7 +820,7 @@ export class Member extends DurableObject<Env> {
     await this.run(writeFile(name, content))
     sql.exec('UPDATE member_file SET author = ? WHERE name = ?', JSON.stringify(author ?? { kind: 'person', name: profileNow.name }), name)
     const memberId = (await this.run(profile)).id
-    await this.env.HOME.getByName(HOME_ID).memoryChanged(memberId, name, by, exceptRobot ?? null).catch((error: unknown) => console.warn('memory change not delivered', error))
+    await this.env.SPACE.getByName(SPACE_ID).memoryChanged(memberId, name, by, exceptRobot ?? null).catch((error: unknown) => console.warn('memory change not delivered', error))
   }
   private fileHistory(): FileHistory {
     const id = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = 'profile'").toArray()[0]
@@ -849,14 +855,14 @@ export class Member extends DurableObject<Env> {
   finishOAuth(provider: 'openai' | 'anthropic', pasted: string | undefined, shared: boolean): Promise<boolean> { return this.run(finishOAuth(provider, pasted, shared)) }
   updateAccount(id: string, change: { label?: string; shared?: boolean }): Promise<void> { return this.run(updateAccount(id, change)) }
   removeAccount(id: string): Promise<void> { return this.run(removeAccount(id)) }
-  credential(provider: ProviderId, forHome: boolean): Promise<ProviderCredential | null> { return this.run(credential(provider, forHome)) }
-  accountCredential(id: string, forHome: boolean): Promise<ProviderCredential | null> { return this.run(accountCredential(id, forHome)) }
+  credential(provider: ProviderId, forSpace: boolean): Promise<ProviderCredential | null> { return this.run(credential(provider, forSpace)) }
+  accountCredential(id: string, forSpace: boolean): Promise<ProviderCredential | null> { return this.run(accountCredential(id, forSpace)) }
   /** Usage windows of a Claude or OpenCode Go account, cached a minute (pa-lmbl, pa-sps4, pa-7d50); none for others (pa-afb9). */
   private readonly usageCache = new Map<string, AccountUsage>()
-  async accountUsage(id: string, forHome: boolean): Promise<AccountUsage> {
+  async accountUsage(id: string, forSpace: boolean): Promise<AccountUsage> {
     const cached = this.usageCache.get(id)
     if (cached !== undefined && Date.now() - cached.checkedAt < 60_000) return cached
-    const { provider, credential } = await this.run(openForProbe(id, forHome))
+    const { provider, credential } = await this.run(openForProbe(id, forSpace))
     if (provider !== 'anthropic' && provider !== 'opencode-go') return { windows: null, checkedAt: Date.now(), error: null }
     const probe = await probeAccount(provider, credential, this.connectorFetch())
     const usage: AccountUsage = {
@@ -992,15 +998,15 @@ export class Member extends DurableObject<Env> {
   private get connectionsOf(): ConnectionStore {
     this.connectionStore ??= new ConnectionStore(this.ctx.storage.sql, makeVault(this.env.DATA_KEY, 'connections'), async (connection, shared) => {
       const memberId = (await this.profile()).id
-      await this.env.HOME.getByName(HOME_ID).connectionShared(memberId, connection, shared)
-    }, async () => { await this.env.HOME.getByName(HOME_ID).seedConnectorSkills().catch((error: unknown) => console.warn('connector skills not seeded', error)) })
+      await this.env.SPACE.getByName(SPACE_ID).connectionShared(memberId, connection, shared)
+    }, async () => { await this.env.SPACE.getByName(SPACE_ID).seedConnectorSkills().catch((error: unknown) => console.warn('connector skills not seeded', error)) })
     return this.connectionStore
   }
 
   private googleConsents: GoogleConsents | undefined
   private get google(): GoogleConsents {
     this.googleConsents ??= new GoogleConsents(this.ctx.storage.sql, this.connectionsOf, async () => {
-      const settings = await this.env.HOME.getByName(HOME_ID).pluginSettings('google')
+      const settings = await this.env.SPACE.getByName(SPACE_ID).pluginSettings('google')
       const clientId = settings.values['clientId']
       const clientSecret = settings.secrets['clientSecret']
       return typeof clientId === 'string' && clientId !== '' && clientSecret !== undefined ? { clientId, clientSecret } : null
@@ -1041,8 +1047,8 @@ export class Member extends DurableObject<Env> {
       meta: outcome.success.meta,
       secrets: input.secrets,
     })
-    // A Discord bot starts listening at once (the Home holds its gateway).
-    if (input.kind === 'discord') await this.env.HOME.getByName(HOME_ID).ensureDiscordGateway().catch(() => undefined)
+    // A Discord bot starts listening at once (the Space holds its gateway).
+    if (input.kind === 'discord') await this.env.SPACE.getByName(SPACE_ID).ensureDiscordGateway().catch(() => undefined)
     return added
   }
 
@@ -1060,7 +1066,7 @@ export class Member extends DurableObject<Env> {
   addConnection(input: NewConnection): Promise<OwnConnection> { return this.connectionsOf.add(input) }
   updateConnection(id: string, change: ConnectionChange): Promise<OwnConnection | undefined> { return this.connectionsOf.update(id, change) }
   removeConnection(id: string): Promise<boolean> { return this.connectionsOf.remove(id) }
-  /** Secrets and state of a connection for one call; the caller (the Home, for a granted Robot) never keeps them. */
+  /** Secrets and state of a connection for one call; the caller (the Space, for a granted Robot) never keeps them. */
   async useConnection(id: string): Promise<{ connection: OwnConnection; secrets: Record<string, string>; meta: ConnectionMeta } | undefined> {
     const use = await this.connectionsOf.use(id)
     return use !== undefined && use.connection.kind === 'google' ? this.google.fresh(use) : use

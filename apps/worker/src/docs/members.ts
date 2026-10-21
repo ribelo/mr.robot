@@ -1,10 +1,10 @@
 export const MEMBERS = `# Members
 
-A Member is a person who signed in through Cloudflare Access and belongs to the Home. The first Member is the Home admin. The admin invites and removes Members. Read mr-robot.md for the Home.
+A Member is a person who signed in through Cloudflare Access and belongs to the Space. The first Member is the Space admin. The admin invites and removes Members. Read mr-robot.md for the Space.
 
 ## What a Member owns
 
-Each Member owns Robots, logins, Provider accounts, Connections and Hosts. These are private to the owner. The owner can share a Robot, a login, a Provider account, a Host or a Discord bot Connection with the Home. Connections that act as the owner (Google, Slack, Discord as you) are never shared. Read connections.md.
+Each Member owns Robots, logins, Provider accounts, Connections and Hosts. These are private to the owner. The owner can share a Robot, a login, a Provider account, a Host or a Discord bot Connection with the Space. Connections that act as the owner (Google, Slack, Discord as you) are never shared. Read connections.md.
 
 ## The profile
 

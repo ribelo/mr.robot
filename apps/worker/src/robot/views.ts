@@ -4,13 +4,13 @@
  * platform; nothing here writes except the registry report.
  */
 import * as Effect from 'effect/Effect'
-import { effectiveSpendLimit, type HomeSpendLimit } from '@mr-robot/protocol'
+import { effectiveSpendLimit, type SpaceSpendLimit } from '@mr-robot/protocol'
 import type { ChatItem, Conversation, ConversationPage, ProposalView, ConversationSearchResult, FleetState, GrantSet, ModelChoice, RobotPanel, RobotSummary, ScreenView, TaskView, Trajectory, TrajectoryEvent, TrajectoryExcerpt, UsageView } from '@mr-robot/protocol'
 import { readStoredEvents } from '../agent/session-log.ts'
-import { HOME_ID } from '../env.ts'
-import { currentMonth, type RegistryEntry } from '../home/home.ts'
+import { SPACE_ID } from '../env.ts'
+import { currentMonth, type RegistryEntry } from '../space/space.ts'
 import { invalid, notFound } from '../platform/durable.ts'
-import { homeDefaults, isCold, logOf, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
+import { spaceDefaults, isCold, logOf, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
 import { projectChat, resolveItem, type ResolveInput, type StoredRow } from './projection.ts'
 import { formatCursor, parseCursor, type ChatCursor } from './chat-items.ts'
 import { chainAccounts, chainOf } from './chain.ts'
@@ -446,8 +446,8 @@ const screen = Effect.gen(function* () {
   return { path: saved.path, at: saved.at, url: `/api/robots/${encodeURIComponent(id)}/screen?at=${saved.at}` } as ScreenView | null
 })
 
-/** This month's usage and the spend limit in effect; `home` is the Home's per-Robot limit. */
-const usage = (home: HomeSpendLimit) => Effect.gen(function* () {
+/** This month's usage and the spend limit in effect; `home` is the Space's per-Robot limit. */
+const usage = (home: SpaceSpendLimit) => Effect.gen(function* () {
   const store = yield* RobotState
   const month = currentMonth()
   const browser = store.browserUsage(month).map((row) => ({ backend: row.backend, minutes: Math.round(row.ms / 6_000) / 10, costUsd: row.costUsd }))
@@ -470,13 +470,13 @@ function boxView(stored: StoredBox | undefined, jobs: ReadonlyArray<{ id: string
 export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly TaskView[]) => Effect.gen(function* () {
   const store = yield* RobotState
   const takeover = store.get<TakeoverRow>('takeover')
-  const home = yield* homeDefaults
+  const space = yield* spaceDefaults
   return {
     summary,
-    settings: yield* settingsWith(home),
+    settings: yield* settingsWith(space),
     tasks,
     screen: yield* screen,
-    usage: yield* usage(home.robotSpendLimit),
+    usage: yield* usage(space.robotSpendLimit),
     canEdit,
     takeover: takeover === undefined ? null : { reason: takeover.reason, claimedBy: takeover.claimedBy },
     ...(store.config()?.kind === 'mr-robot' ? { threads: store.threads().map((copy) => copy.view) } : {}),
@@ -486,8 +486,8 @@ export const panel = (canEdit: boolean, summary: RobotSummary, tasks: readonly T
   } as RobotPanel
 })
 
-/** One row of the admin fleet list, from the DO itself (robot-x26m); `home` is the Home's per-Robot limit. */
-export const adminRow = (home: HomeSpendLimit) => Effect.gen(function* () {
+/** One row of the admin fleet list, from the DO itself (robot-x26m); `home` is the Space's per-Robot limit. */
+export const adminRow = (home: SpaceSpendLimit) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = store.config()
   if (current === undefined) return null
@@ -511,7 +511,7 @@ function lastLine(items: readonly ChatItem[]): { text: string; at: number } | un
   return undefined
 }
 
-/** Report the registry row (last line, state) to the Home. */
+/** Report the registry row (last line, state) to the Space. */
 export const report = Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
@@ -539,7 +539,7 @@ export const report = Effect.gen(function* () {
     lastWakeup: store.get<LastWakeup>(LAST_WAKEUP) ?? null,
     subagents: yield* subagentLines,
   }
-  yield* Effect.promise(() => platform.env.HOME.getByName(HOME_ID).robotChanged(entry))
+  yield* Effect.promise(() => platform.env.SPACE.getByName(SPACE_ID).robotChanged(entry))
 })
 
 /** Run the wake-up whose Turn failed again (the chat's "Try again"). */

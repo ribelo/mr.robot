@@ -67,7 +67,7 @@ describe('login entries (v1.1 ticket 05)', () => {
     expect(JSON.stringify(requests.get(id))).not.toContain(PASSWORD)
   })
 
-  it("lets another Member's Robot fill a Home entry once granted (rb-ob2g)", async () => {
+  it("lets another Member's Robot fill a Space entry once granted (rb-ob2g)", async () => {
     await api(ANNA, '/api/secrets/shop', { method: 'PUT', body: { username: 'home', password: PASSWORD, websites: ['shop.test'], shared: true } })
     const bens = await robotOf(BEN, ['shop'])
     await say(BEN, bens, 'log in', [

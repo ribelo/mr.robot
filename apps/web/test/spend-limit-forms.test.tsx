@@ -1,6 +1,6 @@
 /**
- * Spend limit forms (v1.12 ticket 05): segmented choices in Home settings (No limit / Amount) and in a
- * Robot's Advanced settings (Home's / No limit / Amount), the amount field only for Amount, and the
+ * Spend limit forms (v1.12 ticket 05): segmented choices in Space settings (No limit / Amount) and in a
+ * Robot's Advanced settings (Space's / No limit / Amount), the amount field only for Amount, and the
  * Robot's limit in effect.
  */
 import { RegistryProvider } from '@effect/atom-react'
@@ -22,7 +22,7 @@ const usage = (limit: FleetRow['usage']['limit']) => ({ month: '2026-10', inputT
 const segmentOf = (name: string) => screen.getByRole('radiogroup', { name }).querySelector('[aria-checked="true"]')?.textContent
 const choose = (group: string, segment: string) => fireEvent.click(within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name: segment }))
 
-describe('Home spend limits in Admin (ux-dbx4, ux-en86)', () => {
+describe('Space spend limits in Admin (ux-dbx4, ux-en86)', () => {
   const view: AdminView = {
     fleet: [
       { ...summary, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }) },
@@ -40,7 +40,7 @@ describe('Home spend limits in Admin (ux-dbx4, ux-en86)', () => {
       const method = request?.method ?? init?.method ?? 'GET'
       const path = new URL(request?.url ?? String(input), 'http://localhost').pathname
       if (path === '/api/admin') return Response.json(view)
-      if (path === '/api/home-memory') return Response.json({ content: '' })
+      if (path === '/api/space-memory') return Response.json({ content: '' })
       if (method === 'PATCH' && path === '/api/admin/settings') {
         const body = JSON.parse(request === undefined ? (ArrayBuffer.isView(init?.body) ? new TextDecoder().decode(init.body) : String(init?.body)) : await request.clone().text()) as Record<string, unknown>
         patches.push(body)
@@ -87,7 +87,7 @@ describe('Home spend limits in Admin (ux-dbx4, ux-en86)', () => {
   it('shows the limit in effect in the fleet table', async () => {
     await openAdmin()
     const rows = screen.getAllByRole('row').slice(1).map((row) => row.querySelectorAll('td')[6]?.textContent)
-    expect(rows.slice(0, 3)).toEqual(['$20 (Home)', '$50', 'no limit'])
+    expect(rows.slice(0, 3)).toEqual(['$20 (Space)', '$50', 'no limit'])
   })
 })
 
@@ -97,21 +97,21 @@ describe("a Robot's spend limit in Advanced settings (ux-q8ve, ux-en86)", () => 
     settings: {
       identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
       codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
-      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null, subagentModels: [],
+      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, spaceSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
     },
     tasks: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }), canEdit: true, takeover: null,
   }
   const catalog: SettingsCatalog = { toolGroups: [], skills: [], robots: [], secrets: [], models: [], workersAiEnabled: true }
 
-  it("offers Home's, No limit and Amount, shows the limit in effect, and saves the choice", async () => {
+  it("offers Space's, No limit and Amount, shows the limit in effect, and saves the choice", async () => {
     const saved: SettingsPatch[] = []
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
     render(<RegistryProvider><AdvancedSettings panel={panel} catalog={catalog} onSave={async (patch) => { saved.push(patch); return true }} onPause={vi.fn()} onResume={vi.fn()} onDelete={vi.fn()} onClear={vi.fn()} onStartOver={vi.fn()} /></RegistryProvider>)
     const group = screen.getByRole('radiogroup', { name: 'Monthly spend limit' })
-    expect(within(group).getAllByRole('radio').map((radio) => radio.textContent)).toEqual(["Home's", 'No limit', 'Amount'])
-    expect(segmentOf('Monthly spend limit')).toBe("Home's")
+    expect(within(group).getAllByRole('radio').map((radio) => radio.textContent)).toEqual(["Space's", 'No limit', 'Amount'])
+    expect(segmentOf('Monthly spend limit')).toBe("Space's")
     expect(screen.queryByLabelText('Monthly spend limit, USD per month')).toBeNull()
-    expect(screen.getByText('In effect: $20 (Home)')).toBeTruthy()
+    expect(screen.getByText('In effect: $20 (Space)')).toBeTruthy()
 
     choose('Monthly spend limit', 'No limit')
     expect(screen.getByText('In effect: no limit')).toBeTruthy()

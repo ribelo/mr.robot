@@ -35,7 +35,7 @@ async function say(id: string, text: string, script: Parameters<typeof scripts.s
 const toolResults = (id: string) => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 
 describe('browser backends (rb-wgtd, rb-ybt4, rb-bcui, rb-y50l, rb-kank)', () => {
-  it('a Robot follows the Home default until it chooses its own; the login carries over to the new backend', async () => {
+  it('a Robot follows the Space default until it chooses its own; the login carries over to the new backend', async () => {
     const id = await browsingRobot()
     const catalog = (await api<SettingsCatalog>(ANNA, `/api/robots/${id}/catalog`)).body
     expect(catalog.defaultBrowserBackend).toBe('browser-run')

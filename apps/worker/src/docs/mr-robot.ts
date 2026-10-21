@@ -2,17 +2,17 @@ export const MR_ROBOT = `# Mr. Robot: the product
 
 Mr. Robot is a platform where each person has Robots. A Robot is a persistent worker. It does recurring tasks for its owner, for example shopping, invoices and appointment checks. It runs on Cloudflare, so it works while the owner's computer sleeps.
 
-## Home and Members
+## Space and Members
 
-A Home is the group of people in one deployment. A Member is a person who signed in through Cloudflare Access and belongs to the Home. The first Member is the Home admin. The admin invites and removes Members.
+A Space is the group of people in one deployment. A Member is a person who signed in through Cloudflare Access and belongs to the Space. The first Member is the Space admin. The admin invites and removes Members.
 
-Each Member owns Robots, logins, Provider accounts, Connections and Hosts. These are private to the owner. The owner can share some of them with the Home. Connections that act as the owner (Google, Slack, Discord as you) are never shared. Read connections.md. A Robot can also be shared with the Home. A shared Robot talks to every Member, but only its owner changes it.
+Each Member owns Robots, logins, Provider accounts, Connections and Hosts. These are private to the owner. The owner can share some of them with the Space. Connections that act as the owner (Google, Slack, Discord as you) are never shared. Read connections.md. A Robot can also be shared with the Space. A shared Robot talks to every Member, but only its owner changes it.
 
 Read members.md for the profile, the nickname, avatars and the Robot list with its groups.
 
 ## Robots
 
-A Robot has one endless Conversation, its own Workspace files, its own Grants and its own browser. Its work is kept as Tasks at the Home, beside the Tasks of people. Read tasks.md. The owner decides what a Robot may do. Everything is off until the owner grants it. Read grants.md.
+A Robot has one endless Conversation, its own Workspace files, its own Grants and its own browser. Its work is kept as Tasks at the Space, beside the Tasks of people. Read tasks.md. The owner decides what a Robot may do. Everything is off until the owner grants it. Read grants.md.
 
 A Robot sleeps between Turns. A Turn is one run of the Robot. A Wake-up starts a Turn. A Wake-up is one of these:
 - a message from a Member

@@ -3,7 +3,7 @@
  * as a durable user message, never the system prompt (pl-w3n0): the full baseline when the session
  * has none (first step, after compaction, after a rewind), otherwise a note naming the files that
  * changed since (pl-9n7w). Also the tools that change shared memory: Mr. Robot writes owner and
- * Home files, other Robots propose edits (pl-o3ck, pl-yqno).
+ * Space files, other Robots propose edits (pl-o3ck, pl-yqno).
  */
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
@@ -11,7 +11,7 @@ import { renderBaseline, renderChanges, type MemoryChange, type MemoryFile, type
 import { tool } from '../agent/tools/define.ts'
 import { capability } from './define.ts'
 
-export const SHARED_FILES = ['USER.md', 'PROACTIVE_PREFERENCES.md', 'memory/world.md', 'HOME.md'] as const
+export const SHARED_FILES = ['USER.md', 'PROACTIVE_PREFERENCES.md', 'memory/world.md', 'SPACE.md'] as const
 export type SharedFile = (typeof SHARED_FILES)[number]
 
 export interface MemoryHost {
@@ -23,11 +23,11 @@ export interface MemoryHost {
   needsBaseline(sessionId: string): boolean
   /** The message entered the context: clear pending changes; a baseline marks the session current. */
   memoryDelivered(sessionId: string, baseline: boolean): void
-  /** How this Robot changes owner and Home files, by its kind (v1.11, sk-a2yy). */
+  /** How this Robot changes owner and Space files, by its kind (v1.11, sk-a2yy). */
   readonly shared: SharedFiles
 }
 
-/** Mr. Robot writes owner and Home files directly; other Robots ask the owner to approve an edit. */
+/** Mr. Robot writes owner and Space files directly; other Robots ask the owner to approve an edit. */
 export type SharedFiles =
   | { readonly kind: 'mr-robot'; write(file: SharedFile, content: string): Promise<void> }
   | { readonly kind: 'robot'; propose(kind: 'member-file', purpose: string, payload: Record<string, unknown>): { id: string } }
@@ -60,7 +60,7 @@ function memoryTools(config: MemoryConfig) {
     const write = shared.write.bind(shared)
     return [tool<{ file: SharedFile; content: string }>({
       name: 'memory_write_shared',
-      description: "Write the complete new version of one of your owner's shared memory files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) or the Home's HOME.md. Every Robot that reads it is told it changed.",
+      description: "Write the complete new version of one of your owner's shared memory files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) or the Space's SPACE.md. Every Robot that reads it is told it changed.",
       parameters: { properties: { file: { type: 'string', enum: [...SHARED_FILES], description: 'Which shared memory file to write' }, content: { type: 'string', description: 'The complete new file' } }, required: ['file', 'content'] },
       emptyAllowed: ['content'],
       execute: async ({ file, content }) => {
@@ -72,7 +72,7 @@ function memoryTools(config: MemoryConfig) {
   }
   return [tool<{ file: SharedFile; content: string; purpose: string }>({
     name: 'propose_member_file_edit',
-    description: "Propose a new full version of a shared memory file: your owner's USER.md, PROACTIVE_PREFERENCES.md or memory/world.md, or the Home's HOME.md, with what you learned. Your owner approves or rejects it.",
+    description: "Propose a new full version of a shared memory file: your owner's USER.md, PROACTIVE_PREFERENCES.md or memory/world.md, or the Space's SPACE.md, with what you learned. Your owner approves or rejects it.",
     parameters: {
       properties: {
         file: { type: 'string', enum: [...SHARED_FILES], description: 'Which shared memory file to write' },

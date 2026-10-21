@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { emptyGrants, type Conversation, type ConversationPage, type ConversationSearchResult, type RobotPanel, type RobotSummary, type TaskPage, type TaskView, type TrajectoryExcerpt, type WorkspaceFileContent, type WorkspaceFileView } from '@mr-robot/protocol'
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
-import type { Home as TestHome } from './worker.ts'
+import type { Space as TestSpace } from './worker.ts'
 
 const ANNA = 'anna@example.com'
 const BEN = 'ben@example.com'
@@ -140,7 +140,7 @@ describe('the deputy sees the Robots the owner reaches (v1.6 ticket 02)', () => 
     ])
     expect(stranger!).toContain(`no Robot ${strangers} your owner can reach`)
     expect(himself!).toContain('not for you')
-    // A Robot someone shared with the Home can be read, not changed.
+    // A Robot someone shared with the Space can be read, not changed.
     expect(JSON.parse(readShared!)).toMatchObject({ robotId: shared })
     expect(writeShared!).toContain('belongs to someone else')
     expect((await api<WorkspaceFileContent>(BEN, `/api/robots/${shared}/file?path=MEMORY.md`)).body.text).not.toContain('mine now')
@@ -232,7 +232,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
 })
 
 const taskCards = async (id: string) => (await chat(id)).flatMap((item) => (item.kind === 'task' ? [item] : []))
-const home = () => env.HOME.getByName('home') as unknown as DurableObjectStub<TestHome>
+const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
 
 describe('the deputy works with the Tasks of other Robots; limits and attempts (v1.6 ticket 04, v1.13 ticket 04)', () => {
   it('creates, edits, pauses, resumes and cancels a Task as another Robot, each shown there as a card naming Mr. Robot (cd-n9pi, mc-r4dd)', async () => {
@@ -265,7 +265,7 @@ describe('the deputy works with the Tasks of other Robots; limits and attempts (
     const task = (await api<TaskView>(ANNA, '/api/tasks', { body: { title: 'Pulse', instructions: 'Check prices.', assignee: { kind: 'robot', robotId: accountant }, timing: { kind: 'recurring', schedule: { kind: 'interval', everyMinutes: 5 } } } })).body
     for (let index = 0; index < 22; index += 1) {
       scripts.set(accountant, [{ say: `Run ${index} done.\nWith details.` }])
-      await home().backdateTasksForTest(5 * 60_000)
+      await space().backdateTasksForTest(5 * 60_000)
       await runDurableObjectAlarm(env.ROBOT.getByName(accountant))
       await settle(accountant)
     }
@@ -283,7 +283,7 @@ describe('the deputy works with the Tasks of other Robots; limits and attempts (
     const task = (await api<TaskView>(ANNA, '/api/tasks', { body: { title: 'Pulse', instructions: 'Check prices.', assignee: { kind: 'robot', robotId: accountant }, timing: { kind: 'recurring', schedule: { kind: 'interval', everyMinutes: 5 } } } })).body
     await api(ANNA, `/api/robots/${accountant}/pause`, { body: {} })
     for (let fired = 0; fired < 2; fired += 1) {
-      await home().backdateTasksForTest(5 * 60_000)
+      await space().backdateTasksForTest(5 * 60_000)
       await runDurableObjectAlarm(env.ROBOT.getByName(accountant))
       // A backdated moment can fire the alarm by itself before the test runs it: its work is what counts.
       await settle(accountant)

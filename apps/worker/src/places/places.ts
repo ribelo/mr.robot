@@ -42,7 +42,7 @@ export interface PlacesDeps {
   readonly workspace: WorkspaceHost
   /** Whether the Robot is in setup: its first Conversation writes its persona files, so it reaches its Workspace and no other place. */
   inSetup(): boolean
-  /** The levels the Robot holds the places at now, read at each call: the files group, the box group (deny when the Home has the plugin off), a Host's facet. */
+  /** The levels the Robot holds the places at now, read at each call: the files group, the box group (deny when the Space has the plugin off), a Host's facet. */
   workspaceLevel(): GrantLevel
   boxLevel(): GrantLevel
   hostLevel(hostId: string, facet: PlaceFacet): GrantLevel
@@ -180,7 +180,7 @@ export class Places {
   /**
    * A Host the Robot names, by id or by the name it calls the Host (host-names.ts: two Hosts of one name go by their owners' names), among
    * those its owner reaches; it comes back under that name.
-   * @throws UnknownPlace when there is none, AmbiguousPlace when the name is the own name of more than one; a failed lookup is the Home's own error.
+   * @throws UnknownPlace when there is none, AmbiguousPlace when the name is the own name of more than one; a failed lookup is the Space's own error.
    */
   async hostNamed(name: string): Promise<HostView> {
     const found = lookUpHost(await this.deps.hosts(), name)

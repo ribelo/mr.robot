@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, Me, TaskView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts, wakeOf } from './stub-llm.ts'
-import type { Home as TestHome, Member as TestMember } from './worker.ts'
+import type { Space as TestSpace, Member as TestMember } from './worker.ts'
 
 const ANNA = 'anna@example.com'
 let annaId = ''
-const home = () => env.HOME.getByName('home') as unknown as DurableObjectStub<TestHome>
+const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
 
 beforeEach(async () => {
   await reset()
@@ -37,7 +37,7 @@ async function taskTurns(id: string): Promise<number> {
   return (await env.ROBOT.getByName(id).trajectory()).filter((event) => event.type === 'user/message' && JSON.parse(event.data).source?.kind === 'task').length
 }
 
-describe('The Home fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', () => {
+describe('The Space fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', () => {
   it('a scheduled Task wakes its Robot once with a Task Wake-up (mc-s1aa)', async () => {
     const id = await activeRobot()
     scripts.set(id, [{ say: 'Report sent.' }, { text: 'unexpected second run' }])
@@ -65,7 +65,7 @@ describe('The Home fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', (
     const first = (task.timing as { next: number }).next
     expect(await testRobot(id).alarmForTest()).toBe(first)
     scripts.set(id, [{ text: 'Checked once.' }, { text: 'unexpected second run' }])
-    await home().backdateTasksForTest(16 * 60_000)
+    await space().backdateTasksForTest(16 * 60_000)
     await runDurableObjectAlarm(env.ROBOT.getByName(id))
     await settle(id)
     expect(await taskTurns(id)).toBe(1)
@@ -103,8 +103,8 @@ describe('The Home fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', (
   it('reminds a person once per occurrence through push, without a Robot (mc-s3cc, mc-s4dd)', async () => {
     const at = Date.now() + 10 * 60_000
     await create({ title: 'Call mum', assignee: { kind: 'member', memberId: annaId }, timing: { kind: 'scheduled', at }, remind: { kind: 'before', minutes: 15 } })
-    await runDurableObjectAlarm(home())
-    await runDurableObjectAlarm(home())
+    await runDurableObjectAlarm(space())
+    await runDurableObjectAlarm(space())
     const member = env.MEMBER.getByName(annaId) as unknown as DurableObjectStub<TestMember>
     const reminders = (await member.deliveredForTest()).filter((notification) => notification.kind === 'reminder')
     expect(reminders).toEqual([expect.objectContaining({ kind: 'reminder', title: 'Call mum', url: '/#/mission' })])

@@ -17,10 +17,10 @@ const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', s
 const usage = { month: '2026-10', inputTokens: 1000, outputTokens: 100, costUsd: 1.99, breakdown, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } } as const
 const panel = {
   summary,
-  settings: { identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [], contextBudget: 128000, codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants, notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null, subagentModels: [] },
+  settings: { identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [], contextBudget: 128000, codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants, notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, spaceSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [] },
   tasks: [], screen: null, usage, canEdit: true, takeover: null,
 } as unknown as RobotPanel
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeHome: false, drawer: false }, acceptTasksFrom: [] } as unknown as Me
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as unknown as Me
 const costs: MemberCosts = { month: '2026-10', breakdown, limit: { kind: 'usd', amount: 50 }, byRobot: [{ robotId: 'r-1', name: 'Sales', breakdown }] }
 
 /** The rows of a breakdown table as [label, amount]. */
@@ -56,7 +56,7 @@ describe('cost by source in the PWA (ao-zbld, ao-ef5t, ao-ypas)', () => {
     } as unknown as AdminView
     vi.stubGlobal('fetch', vi.fn(async (input: string | Request) => {
       const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname
-      return path === '/api/admin' ? Response.json(view) : path === '/api/home-memory' ? Response.json({ content: '' }) : Response.json([])
+      return path === '/api/admin' ? Response.json(view) : path === '/api/space-memory' ? Response.json({ content: '' }) : Response.json([])
     }))
     render(<RegistryProvider><Admin /></RegistryProvider>)
     const lines = await screen.findAllByText('model $1.60 · browser $0.09 · box $0.05 · services $0.25')

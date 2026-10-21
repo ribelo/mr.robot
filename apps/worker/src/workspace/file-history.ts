@@ -68,7 +68,7 @@ export function authorOf(metadata: Record<string, string> | undefined, uploaded:
   return { by: decoded?._tag === 'Some' ? decoded.value : { kind: 'unknown' }, at: Number(metadata?.['at'] ?? uploaded) || uploaded }
 }
 
-/** The history of the files under one base: a Robot's Workspace, a Member's files, the Home's. */
+/** The history of the files under one base: a Robot's Workspace, a Member's files, the Space's. */
 export class FileHistory {
   constructor(private readonly bucket: R2Bucket, private readonly base: string) {}
 
@@ -133,4 +133,4 @@ export function versionView(version: FileVersion): { id: string; at: number; by:
 
 export const robotHistoryBase = (robotId: string) => `history/robots/${robotId}/`
 export const memberHistoryBase = (memberId: string) => `history/members/${memberId}/`
-export const HOME_HISTORY_BASE = 'history/home/'
+export const SPACE_HISTORY_BASE = 'history/space/'

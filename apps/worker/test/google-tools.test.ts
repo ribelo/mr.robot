@@ -22,7 +22,7 @@ const invoice = {
   id: 'm-1', threadId: 't-1', labelIds: ['INBOX', 'UNREAD'], snippet: 'Your invoice for October', internalDate: '1791400000000',
   payload: {
     mimeType: 'multipart/mixed',
-    headers: headers({ From: 'Shop <billing@shop.test>', To: 'anna@gmail.test', Cc: 'ben@home.test', Subject: 'Invoice 10/2026', Date: 'Wed, 07 Oct 2026 09:00:00 +0200', 'Message-ID': '<m1@shop.test>', 'List-Unsubscribe': '<https://shop.test/unsub?u=1>, <mailto:unsub@shop.test>', 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }),
+    headers: headers({ From: 'Shop <billing@shop.test>', To: 'anna@gmail.test', Cc: 'ben@space.test', Subject: 'Invoice 10/2026', Date: 'Wed, 07 Oct 2026 09:00:00 +0200', 'Message-ID': '<m1@shop.test>', 'List-Unsubscribe': '<https://shop.test/unsub?u=1>, <mailto:unsub@shop.test>', 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }),
     parts: [
       { mimeType: 'multipart/alternative', parts: [
         { mimeType: 'text/plain', body: { data: b64url('Hello Anna,\r\nyour invoice is attached.\r\nTotal: 123,45 zł') } },
@@ -94,7 +94,7 @@ describe('Gmail tools against recorded responses (cn-426k, cn-z1di)', () => {
     expect(sent.threadId).toBe('t-1')
     const mime = decodeRaw(sent.raw)
     expect(mime).toContain('To: Shop <billing@shop.test>')
-    expect(mime).toContain('Cc: ben@home.test')
+    expect(mime).toContain('Cc: ben@space.test')
     expect(mime).not.toMatch(/Cc:.*anna@gmail\.test/)
     expect(mime).toContain('Subject: Re: Invoice 10/2026')
     expect(mime).toContain('References: <m1@shop.test>')
@@ -105,7 +105,7 @@ describe('Gmail tools against recorded responses (cn-426k, cn-z1di)', () => {
     connectorFixtures.on('GET', `${GMAIL}/messages/m-1?format=full`, invoice)
     connectorFixtures.on('GET', `${GMAIL}/messages/m-1/attachments/att-1`, { data: b64url('%PDF-1.4 invoice') })
     const { tools: list } = tools()
-    await runTool(list, 'gmail_send', { to: ['ben@home.test'], subject: 'Rachunek za prąd', body: 'Zapłacone.' })
+    await runTool(list, 'gmail_send', { to: ['ben@space.test'], subject: 'Rachunek za prąd', body: 'Zapłacone.' })
     expect(decodeRaw((json(connectorFixtures.calls.at(-1)!) as { raw: string }).raw)).toContain(`Subject: =?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode('Rachunek za prąd')))}?=`)
     await runTool(list, 'gmail_forward', { messageId: 'm-1', to: ['accounting@firm.test'], note: 'For the books.' })
     const forwarded = decodeRaw((json(connectorFixtures.calls.at(-1)!) as { raw: string }).raw)
@@ -174,11 +174,11 @@ describe('Calendar tools against recorded responses (cn-s04t)', () => {
     await runTool(list, 'calendar_create', { summary: 'Holiday', start: '2026-12-24', end: '2026-12-27' })
     expect(json(connectorFixtures.calls.at(-1)!)).toEqual({ summary: 'Holiday', start: { date: '2026-12-24' }, end: { date: '2026-12-27' } })
     expect(new URL(connectorFixtures.calls.at(-1)!.url).searchParams.get('sendUpdates')).toBe('none')
-    await runTool(list, 'calendar_create', { summary: 'Plan', start: '2026-10-12T10:00:00', end: '2026-10-12T11:00:00', timeZone: 'Europe/Warsaw', attendees: ['ben@home.test'], meet: true })
+    await runTool(list, 'calendar_create', { summary: 'Plan', start: '2026-10-12T10:00:00', end: '2026-10-12T11:00:00', timeZone: 'Europe/Warsaw', attendees: ['ben@space.test'], meet: true })
     const created = connectorFixtures.calls.at(-1)!
     expect(new URL(created.url).searchParams.get('sendUpdates')).toBe('all')
     expect(new URL(created.url).searchParams.get('conferenceDataVersion')).toBe('1')
-    expect(json(created)).toMatchObject({ start: { dateTime: '2026-10-12T10:00:00', timeZone: 'Europe/Warsaw' }, attendees: [{ email: 'ben@home.test' }], conferenceData: { createRequest: { conferenceSolutionKey: { type: 'hangoutsMeet' } } } })
+    expect(json(created)).toMatchObject({ start: { dateTime: '2026-10-12T10:00:00', timeZone: 'Europe/Warsaw' }, attendees: [{ email: 'ben@space.test' }], conferenceData: { createRequest: { conferenceSolutionKey: { type: 'hangoutsMeet' } } } })
   })
 
   it('updates only the given fields, deletes, answers an invitation as the account, and reads free/busy', async () => {

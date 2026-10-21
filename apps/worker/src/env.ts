@@ -1,4 +1,4 @@
-import type { Home } from './home/home.ts'
+import type { Space } from './space/space.ts'
 import type { Member } from './member/member.ts'
 import type { Robot } from './robot/robot.ts'
 
@@ -6,7 +6,7 @@ import type { Robot } from './robot/robot.ts'
 export interface Env {
   readonly ROBOT: DurableObjectNamespace<Robot>
   readonly MEMBER: DurableObjectNamespace<Member>
-  readonly HOME: DurableObjectNamespace<Home>
+  readonly SPACE: DurableObjectNamespace<Space>
   readonly FILES: R2Bucket
   /** The Files bucket's S3 credentials as JSON (an R2 API token the Alchemy stack creates, held as a secret); presigned URLs are signed with them (v1.16 ticket 06). Absent in a local run. */
   readonly FILES_S3?: string
@@ -15,7 +15,7 @@ export interface Env {
   readonly COMPUTER?: DurableObjectNamespace<import('./box/container.ts').ComputerContainer>
   readonly AI: Ai
   readonly LOADER: WorkerLoader
-  readonly HOME_NAME: string
+  readonly SPACE_NAME: string
   readonly DATA_KEY: string
   /** Signs the Box tokens (box/token.ts), so the edge refuses a made-up token before it reaches a Robot. */
   readonly BOX_TOKEN_KEY: string
@@ -30,5 +30,5 @@ export interface Env {
   readonly DEV_IDENTITY?: string
 }
 
-/** The single Home of a deployment (v1 deploys one). */
-export const HOME_ID = 'home'
+/** The single Space of a deployment (v1 deploys one). */
+export const SPACE_ID = 'home'

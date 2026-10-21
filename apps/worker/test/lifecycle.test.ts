@@ -89,7 +89,7 @@ describe('creating a Robot', () => {
 })
 
 describe('sharing and lifecycle', () => {
-  it('keeps a Robot private until shared with the Home (robot-hpj1, robot-bld3)', async () => {
+  it('keeps a Robot private until shared with the Space (robot-hpj1, robot-bld3)', async () => {
     const id = await newRobot(ANNA)
     expect((await robots(BEN)).some((robot) => robot.id === id)).toBe(false)
     expect((await api(BEN, `/api/robots/${id}/conversation`)).status).toBe(404)

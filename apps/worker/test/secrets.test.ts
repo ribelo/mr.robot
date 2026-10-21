@@ -85,7 +85,7 @@ describe('secrets', () => {
     expect(JSON.stringify(requests.get(id)!.at(-1)!.messages)).not.toContain(PASSWORD)
   })
 
-  it("lets another Member's Robot use a Home-shared secret once granted", async () => {
+  it("lets another Member's Robot use a Space-shared secret once granted", async () => {
     await api(ANNA, '/api/secrets/electricity', { method: 'PUT', body: { password: PASSWORD, allowRead: true, shared: true } })
     const bens = await robotOf(BEN, [])
     await say(BEN, bens, 'pay the bill', [{ calls: [{ name: 'secret_get', args: { name: 'electricity' } }] }, { text: 'no' }])

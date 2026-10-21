@@ -49,7 +49,7 @@ let annaId = ''
 const toolResults = (id: string) => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 
 describe('Hosts (v1.2 tickets 01 and 02)', () => {
-  it('pairs, shows online with its heartbeat, shares with the Home, and unpairs (hs-hend, hs-ro43, hs-0eka, hs-rwxw, hs-7dlt)', async () => {
+  it('pairs, shows online with its heartbeat, shares with the Space, and unpairs (hs-hend, hs-ro43, hs-0eka, hs-rwxw, hs-7dlt)', async () => {
     const host = await fakeHost()
     const mine = (await api<HostView[]>(ANNA, '/api/hosts')).body
     expect(mine).toEqual([expect.objectContaining({ id: host.hostId, name: 'Desk', online: true, version: '0.1.0', mine: true, sharing: 'private', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: 'full', shell: 'bash' } })])

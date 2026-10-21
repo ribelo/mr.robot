@@ -1,6 +1,6 @@
 /**
- * Platform skills (v1.15 ticket 12, gb-n6by): harness knowledge that every Robot may need and no Home library can hold, because the
- * library is per Home and granted per Robot. They ship with the Worker like the product docs, at docs/skills/<name>/SKILL.md, read-only,
+ * Platform skills (v1.15 ticket 12, gb-n6by): harness knowledge that every Robot may need and no Space library can hold, because the
+ * library is per Space and granted per Robot. They ship with the Worker like the product docs, at docs/skills/<name>/SKILL.md, read-only,
  * with no Grant, and a deploy is the only thing that changes them. The skill tool loads one by name; the catalog lists them one line each.
  * A skill about a tool group shows only to a Robot that holds the group (gb-ekkf). The skill box shows with the box grant, and the skill
  * hosts with any facet of a Host (v1.16 ticket 10, ob-vw9d, ob-ivby); the skill pages with the files group, which writes them (v1.17, dp-3wnd).
@@ -353,7 +353,7 @@ Read this before you write to MEMORY.md or a daily note, and when what you remem
   - Commitments: what you or your owner promised, with the date and who waits for it. Remove a commitment when it is done.
 - AGENTS.md: how you work here; its Tool notes section holds the quirks of the tools here (device names, host aliases).
 - SOUL.md: who you are and how you talk. Change it rarely, and tell your owner when you do.
-- Your owner's files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) and the Home's (HOME.md) are not yours: propose an edit, or, as Mr. Robot, write it with memory_write_shared.
+- Your owner's files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) and the Space's (SPACE.md) are not yours: propose an edit, or, as Mr. Robot, write it with memory_write_shared.
 
 ## How to correct
 - When a newer claim replaces an older one, change the old line where it stands. Do not add a second line that disagrees with it.

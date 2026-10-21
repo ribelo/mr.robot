@@ -1,6 +1,6 @@
 /**
- * Tasks at the Home (v1.13, mc-t1aa…mc-t8hh): the one store of work for people and Robots. Tasks live in
- * the Home's SQLite beside the Robot registry, so who may see a Task (its creator, its assignee, the people who
+ * Tasks at the Space (v1.13, mc-t1aa…mc-t8hh): the one store of work for people and Robots. Tasks live in
+ * the Space's SQLite beside the Robot registry, so who may see a Task (its creator, its assignee, the people who
  * reach its Robot) is one query. The programs here are Effects over that SQLite; what a change means
  * elsewhere (a Robot's next moment, a reminder, a card in a Conversation) goes out through TaskPorts.
  */
@@ -36,11 +36,11 @@ export const ATTEMPTS_KEPT = 20
 export const MAX_TIMED_TASKS = 50
 
 /**
- * Who asks: a Member (the Home admin with Whole Home sees every Task), or a Robot, which works by its
+ * Who asks: a Member (the Space admin with Whole Space sees every Task), or a Robot, which works by its
  * owner's rules. `actor` is who the change is recorded as: for Mr. Robot acting for one of his staff, himself.
  */
 export type TaskCaller =
-  | { readonly kind: 'member'; readonly memberId: string; readonly wholeHome: boolean; readonly actor: Actor }
+  | { readonly kind: 'member'; readonly memberId: string; readonly wholeSpace: boolean; readonly actor: Actor }
   | { readonly kind: 'robot'; readonly robotId: string; readonly ownerId: string; readonly actor: Actor }
 
 export interface TaskRow {
@@ -136,10 +136,10 @@ const viewerOf = (caller: TaskCaller): string => (caller.kind === 'member' ? cal
 
 /**
  * A Member sees a Task he created, one assigned to him, one assigned to a Robot he reaches, and an
- * unassigned one he or one of his Robots created. Whole Home (the admin's switch) sees all.
+ * unassigned one he or one of his Robots created. Whole Space (the admin's switch) sees all.
  */
 function visibility(caller: TaskCaller): { readonly where: string; readonly bindings: readonly unknown[] } {
-  if (caller.kind === 'member' && caller.wholeHome) return { where: '1 = 1', bindings: [] }
+  if (caller.kind === 'member' && caller.wholeSpace) return { where: '1 = 1', bindings: [] }
   const member = viewerOf(caller)
   return {
     where: `((t.creator_member = ? AND json_extract(t.created_by, '$.kind') = 'member')
@@ -266,7 +266,7 @@ const mayAssign = (ports: TaskPorts, caller: TaskCaller, assignee: TaskAssignee)
   if (assignee.kind === 'nobody') return
   if (assignee.kind === 'member') {
     const person = yield* memberRow(assignee.memberId)
-    if (person === undefined || person.status !== 'active') return yield* Effect.fail(invalid('That person is not an active Member of this Home.'))
+    if (person === undefined || person.status !== 'active') return yield* Effect.fail(invalid('That person is not an active Member of this Space.'))
     if (caller.kind === 'member' || assignee.memberId === caller.ownerId) return
     const owner = (yield* memberRow(caller.ownerId))?.name ?? 'your owner'
     if (!(yield* ports.acceptsFrom(assignee.memberId)).includes(caller.ownerId)) {
@@ -464,7 +464,7 @@ export interface DueTask {
 export interface DueOccurrence extends DueTask {
   readonly recurring: boolean
   readonly deadline: number | null
-  /** When the Home handed it out (epoch ms): a Turn on the Task since then has served this occurrence (parkedOccurrence). */
+  /** When the Space handed it out (epoch ms): a Turn on the Task since then has served this occurrence (parkedOccurrence). */
   readonly takenAt: number
 }
 
@@ -488,7 +488,7 @@ export const takeDue = (robotId: string, now = Date.now()) => Effect.gen(functio
 
 /**
  * A scheduled occurrence its Robot held back while a Host was offline (v1.16 ticket 05), as it is now: null when the Task is no longer
- * open and the Robot's, when its timing was replaced since it was handed out (the edit armed it again, so the Home hands it out anew),
+ * open and the Robot's, when its timing was replaced since it was handed out (the edit armed it again, so the Space hands it out anew),
  * or when a Turn started on the Task since (run now, or a focus). An edit of the title or instructions keeps it, with the new text:
  * the occurrence was handed out, so it is the only one left.
  */
@@ -523,7 +523,7 @@ const unreminded = Effect.gen(function* () {
     })
 })
 
-/** When the Home's alarm next has a reminder to send; null when none waits. */
+/** When the Space's alarm next has a reminder to send; null when none waits. */
 export const nextReminder = Effect.map(unreminded, (pending) => (pending.length === 0 ? null : Math.min(...pending.map((entry) => entry.at))))
 
 /**

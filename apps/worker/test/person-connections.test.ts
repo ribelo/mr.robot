@@ -4,7 +4,7 @@ import type { ConnectionNote, ConnectionView, ConnectorKind, Me, PluginView, Rob
 import { api, robots, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
-// v1.12 ticket 08: a connection that acts as a person (Slack, Google) is never shared with the Home.
+// v1.12 ticket 08: a connection that acts as a person (Slack, Google) is never shared with the Space.
 const ANNA = 'anna@example.com'
 const BEN = 'ben@example.com'
 let annaId = ''
@@ -60,7 +60,7 @@ describe('the server refuses sharing a person connection (ux-bk91, ux-ro7d)', ()
   it('refuses shared on create and update for Slack and Google; a Discord bot still shares', async () => {
     const created = await api<{ error: string }>(ANNA, '/api/connections/slack', { body: { shared: true, values: { token: 'xoxc-token', cookie: 'xoxd-cookie' } } })
     expect(created.status).toBe(400)
-    expect(created.body.error).toBe('a Slack connection acts as you, so it cannot be shared with the Home')
+    expect(created.body.error).toBe('a Slack connection acts as you, so it cannot be shared with the Space')
     expect((await api<ConnectionView[]>(ANNA, '/api/connections')).body).toEqual([])
 
     const slack = await stored(annaId, 'slack', 'Acme', 'acme.slack.com', false)
@@ -68,7 +68,7 @@ describe('the server refuses sharing a person connection (ux-bk91, ux-ro7d)', ()
     for (const connection of [slack, google]) {
       const refused = await api<{ error: string }>(ANNA, `/api/connections/${connection.id}`, { method: 'PATCH', body: { shared: true } })
       expect(refused.status).toBe(400)
-      expect(refused.body.error).toContain('acts as you, so it cannot be shared with the Home')
+      expect(refused.body.error).toContain('acts as you, so it cannot be shared with the Space')
       // Other changes, and shared: false, still go through.
       const renamed = await api<ConnectionView>(ANNA, `/api/connections/${connection.id}`, { method: 'PATCH', body: { label: 'Renamed', shared: false } })
       expect(renamed.status).toBe(200)
@@ -101,7 +101,7 @@ describe('the update unshares person connections (ux-cop2, ux-dz8p, ux-ro7d)', (
     await turn(ANNA, annaMr.id, 'hello')
     expect(await toolsOf(ANNA, annas)).toContain('slack_read_channel')
 
-    await env.HOME.getByName('home').unsharePersonConnections()
+    await env.SPACE.getByName('home').unsharePersonConnections()
 
     // The connection is Ben's alone now; the Discord bot stays shared.
     expect((await api<ConnectionView[]>(ANNA, '/api/connections')).body.map((connection) => connection.id)).toEqual([bot.id])
@@ -119,7 +119,7 @@ describe('the update unshares person connections (ux-cop2, ux-dz8p, ux-ro7d)', (
     expect(await notes(ANNA)).toEqual([])
 
     // Each affected Robot hears it at its next Turn, once; Ben's Robot hears nothing.
-    const told = 'acts as Ben, so it is no longer shared with the Home and your grant on it was removed.'
+    const told = 'acts as Ben, so it is no longer shared with the Space and your grant on it was removed.'
     await turn(ANNA, annas, 'what now?')
     expect(newUser(annas)).toContain('Slack connection')
     expect(newUser(annas)).toContain(told)
@@ -131,7 +131,7 @@ describe('the update unshares person connections (ux-cop2, ux-dz8p, ux-ro7d)', (
     expect(newUser(bens)).not.toContain(told)
 
     // Running it again changes nothing.
-    await env.HOME.getByName('home').unsharePersonConnections()
+    await env.SPACE.getByName('home').unsharePersonConnections()
     expect(await notes(BEN)).toHaveLength(1)
 
     // Only the owner dismisses the note.
@@ -141,15 +141,15 @@ describe('the update unshares person connections (ux-cop2, ux-dz8p, ux-ro7d)', (
   })
 
   it('notes a shared person connection that no Robot of another Member held', async () => {
-    const google = await stored(benId, 'google', 'Home', 'ben@gmail.test', true)
+    const google = await stored(benId, 'google', 'Space', 'ben@gmail.test', true)
     // Anna's Mr. Robot reaches it unless she lowers it to deny.
     const annaMr = (await robots(ANNA)).find((robot) => robot.kind === 'mr-robot')!
     await api(ANNA, `/api/robots/${annaMr.id}/settings`, { method: 'PATCH', body: { grants: { connections: { [google.id]: 'deny' } } } })
     expect((await connectionGrants(ANNA, annaMr.id))[google.id]).toBe('deny')
 
-    await env.HOME.getByName('home').unsharePersonConnections()
+    await env.SPACE.getByName('home').unsharePersonConnections()
 
-    expect(await notes(BEN)).toEqual([expect.objectContaining({ kind: 'google', label: 'Home', account: 'ben@gmail.test', robots: [] })])
+    expect(await notes(BEN)).toEqual([expect.objectContaining({ kind: 'google', label: 'Space', account: 'ben@gmail.test', robots: [] })])
     expect((await api<ConnectionView[]>(ANNA, '/api/connections')).body).toEqual([])
   })
 })

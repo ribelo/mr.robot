@@ -4,7 +4,7 @@ Each Robot has its own browser. The Robot uses it to open pages, read them, clic
 
 ## Backends
 
-A browser backend is what runs the Chrome. There are two. The owner chooses one per Robot in its Advanced settings. The default comes from the Home and is Browser Run. The Box has no browser.
+A browser backend is what runs the Chrome. There are two. The owner chooses one per Robot in its Advanced settings. The default comes from the Space and is Browser Run. The Box has no browser.
 - Browser Run: Cloudflare Browser Rendering, in the cloud. Its requests come from Cloudflare addresses and carry a Cloudflare signature. Some sites block them.
 - Host browser: Chrome on a Host, a real computer of the owner with a home connection. It needs a graphical session on that computer. When the Host is offline, a browser tool fails; the platform does not switch to Browser Run. Read hosts.md.
 

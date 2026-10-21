@@ -9,7 +9,7 @@ import * as Exit from 'effect/Exit'
 import type { AccountUsage, Me, ProviderView, ProvidersView, RobotSummary, ThemeChoice } from '@mr-robot/protocol'
 import { SharedPages } from './PageShare.tsx'
 import { applyTheme } from '../theme/theme.ts'
-import { homeMembersAtom, keys, memberCostsAtom, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
+import { spaceMembersAtom, keys, memberCostsAtom, memberFileAtom, providersAtom, secretsAtom, useCommand } from '../client/api-atoms.ts'
 import { CostBreakdownView, costSummary } from './CostBreakdown.tsx'
 import { AsyncResult } from 'effect/reactivity'
 import { exitFailure } from '../client/api-failure.ts'
@@ -77,7 +77,7 @@ function You({ me }: { me: Me }) {
   const [timeZone, setTimeZone] = useState(me.timeZone)
   const [quiet, setQuiet] = useState(me.quietHours ?? { start: '', end: '' })
   const [accept, setAccept] = useState<readonly string[]>(me.acceptTasksFrom)
-  const others = AsyncResult.getOrElse(useAtomValue(homeMembersAtom), () => []).filter((member) => member.id !== me.id)
+  const others = AsyncResult.getOrElse(useAtomValue(spaceMembersAtom), () => []).filter((member) => member.id !== me.id)
   const [error, setError] = useState<string>()
   const nativeNotifications = hostBridge()?.nativeNotifications === true
   const save = async () => {
@@ -139,7 +139,7 @@ function ProviderList({ view }: { view: ProvidersView }) {
   return (
     <>
       <h2>Providers</h2>
-      <div className="muted">Your keys and subscriptions run your Robots. Add as many accounts as you have; share each one with the Home on its own. Each Robot's model chain says which accounts it uses.</div>
+      <div className="muted">Your keys and subscriptions run your Robots. Add as many accounts as you have; share each one with the Space on its own. Each Robot's model chain says which accounts it uses.</div>
       {message === undefined ? null : <div className="muted">{message}</div>}
       <div className="providers">
         {PROVIDERS.map((provider) => (
@@ -236,7 +236,7 @@ function AccountRow({ account, mine }: { account: ProviderView; mine: boolean })
       </div>
       {mine ? (
         <div className="connection-actions">
-          <label className="check"><input type="checkbox" checked={account.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateAccount(account.id, { shared })) }} /><span>Shared with the Home</span></label>
+          <label className="check"><input type="checkbox" checked={account.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateAccount(account.id, { shared })) }} /><span>Shared with the Space</span></label>
           <button type="button" className="link" disabled={check.kind === 'checking'} onClick={() => void checkNow()}>{check.kind === 'checking' ? 'Checking…' : 'Check now'}</button>
           <button type="button" className="link" disabled={renaming} onClick={() => setRenaming(true)}>Rename</button>
           <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${account.label}? Robots that use it move on to the next entry of their model chain.`)) void change((api) => api.removeAccount(account.id)) }}>Remove</button>
@@ -276,7 +276,7 @@ function Connect({ provider, onDone }: { provider: (typeof PROVIDERS)[number]; o
   }, [flow, provider.id, shared, onDone, command])
 
   if (!open) return <button type="button" className="button" onClick={() => setOpen(true)}>Add account</button>
-  const sharedBox = <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /> share with the Home</label>
+  const sharedBox = <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /> share with the Space</label>
   if (provider.kind === 'api-key') {
     return (
       <span className="form">
@@ -435,7 +435,7 @@ function Secrets() {
             <div className="login-main">
               <strong>{login.name}</strong>
               <span className="muted">{[login.username, login.websites.join(', ')].filter((part) => part !== '').join(' · ') || 'no username or website yet'}</span>
-              <span className="muted">{login.scope === 'home' ? 'Shared with the Home' : 'Private'}{login.allowRead ? ' · allow reading' : ''}{login.robots.length === 0 ? '' : ` · granted to ${login.robots.join(', ')}`}</span>
+              <span className="muted">{login.scope === 'home' ? 'Shared with the Space' : 'Private'}{login.allowRead ? ' · allow reading' : ''}{login.robots.length === 0 ? '' : ` · granted to ${login.robots.join(', ')}`}</span>
               {revealed[login.name] === undefined ? null : <code className="login-revealed">{revealed[login.name]}</code>}
             </div>
             {login.mine ? (
@@ -478,7 +478,7 @@ function LoginForm({ draft, onChange, onSave, onCancel }: { draft: LoginDraft; o
       <label>Websites<textarea rows={2} value={draft.websites} placeholder="https://allegro.pl (one per line)" onChange={(event) => onChange({ ...draft, websites: event.target.value })} /></label>
       <label>Notes<textarea rows={2} value={draft.notes} onChange={(event) => onChange({ ...draft, notes: event.target.value })} /></label>
       <label className="check"><input type="checkbox" checked={draft.allowRead} onChange={(event) => onChange({ ...draft, allowRead: event.target.checked })} /><span>Allow reading<small>The Robot may read the value itself (API keys). Leave off for website passwords.</small></span></label>
-      <label className="check"><input type="checkbox" checked={draft.shared} onChange={(event) => onChange({ ...draft, shared: event.target.checked })} /><span>Share with the Home<small>Other Members can grant it to their Robots.</small></span></label>
+      <label className="check"><input type="checkbox" checked={draft.shared} onChange={(event) => onChange({ ...draft, shared: event.target.checked })} /><span>Share with the Space<small>Other Members can grant it to their Robots.</small></span></label>
       <div className="question-actions">
         <button type="button" className="button" onClick={onCancel}>Cancel</button>
         <button type="button" className="button button-primary" disabled={draft.name === '' || (!draft.existing && draft.password === '')} onClick={() => void onSave(draft)}>Save</button>
@@ -544,14 +544,14 @@ function ResetEverything({ me }: { me: Me }) {
   return (
     <>
       <h2>Reset everything</h2>
-      <div className="muted">Deletes all your robots, their conversations, files and memory, your memory files and usage, and starts a fresh Mr. Robot. Kept: your logins, your Provider accounts, your Hosts, the skill library and the Home settings.</div>
+      <div className="muted">Deletes all your robots, their conversations, files and memory, your memory files and usage, and starts a fresh Mr. Robot. Kept: your logins, your Provider accounts, your Hosts, the skill library and the Space settings.</div>
       <div><button type="button" className="button button-danger" onClick={() => setOpen(true)}>Reset everything…</button></div>
       {open ? (
         <ConfirmByName
           title="Reset everything"
           name={me.name}
           goes="All your robots, conversations, robot files, memory files and usage are deleted. A fresh Mr. Robot starts."
-          stays="Kept: logins, Provider accounts, Hosts, the skill library and Home settings."
+          stays="Kept: logins, Provider accounts, Hosts, the skill library and Space settings."
           action="Reset everything"
           onCancel={() => setOpen(false)}
           onConfirm={async () => {

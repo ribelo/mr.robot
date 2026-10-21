@@ -155,9 +155,9 @@ describe('orphans (sk-44d5)', () => {
     await env.FILES.put(`robots/${orphan}/MEMORY.md`, 'left behind')
     await env.FILES.put(`robots/${orphan}/out/report.md`, 'left behind')
     await env.FILES.put(`screens/${orphan}/${screenName(Date.now())}`, png)
-    const home = env.HOME.getByName('home')
+    const space = env.SPACE.getByName('home')
     const mr = (await api<Array<{ id: string }>>(ANNA, '/api/robots')).body[0]!.id
-    await runInDurableObject(home, async (_instance, state) => {
+    await runInDurableObject(space, async (_instance, state) => {
       state.storage.sql.exec(
         "INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at) VALUES (?, 'm-gone', 'robot', '{}', 'private', 'deleted', 'sleeping', '', 0)", orphan,
       )
@@ -166,19 +166,19 @@ describe('orphans (sk-44d5)', () => {
     // The Robot's own storage is empty: it knows nothing of the id it is asked to destroy.
     expect(await testRobot(orphan).toolNames().catch(() => 'empty')).toBe('empty')
 
-    await home.destroyOrphans()
+    await space.destroyOrphans()
 
     expect(await keysUnder(`robots/${orphan}/`)).toEqual([])
     expect(await keysUnder(`screens/${orphan}/`)).toEqual([])
-    const rows = await runInDurableObject(home, async (_instance, state) => state.storage.sql.exec("SELECT id FROM robot WHERE status = 'deleted'").toArray())
+    const rows = await runInDurableObject(space, async (_instance, state) => state.storage.sql.exec("SELECT id FROM robot WHERE status = 'deleted'").toArray())
     expect(rows).toEqual([])
     // Live Robots are not touched, and the pass does not run twice.
     expect((await api<Array<{ id: string }>>(ANNA, '/api/robots')).body.some((entry) => entry.id === mr)).toBe(true)
     await env.FILES.put(`robots/${orphan}/MEMORY.md`, 'new')
-    await runInDurableObject(home, async (_instance, state) => {
+    await runInDurableObject(space, async (_instance, state) => {
       state.storage.sql.exec("INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at) VALUES (?, 'm-gone', 'robot', '{}', 'private', 'deleted', 'sleeping', '', 0)", orphan)
     })
-    await home.destroyOrphans()
+    await space.destroyOrphans()
     expect(await keysUnder(`robots/${orphan}/`)).toHaveLength(1)
   })
 })

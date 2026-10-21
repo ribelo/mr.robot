@@ -122,7 +122,7 @@ export function capabilityItems(catalog: CapabilityCatalog, grants: GrantSet): C
     }),
     ...(catalog.hosts ?? []).flatMap((host) => HOST_FACETS.map((name) => facet(host, name))),
     ...catalog.secrets.map((secret) => item('secrets', secret.name, secret.name,
-      [secret.username, (secret.websites ?? []).join(', '), secret.scope === 'home' ? 'shared with the Home' : 'yours'].filter((part) => part !== undefined && part !== '').join(' · '))),
+      [secret.username, (secret.websites ?? []).join(', '), secret.scope === 'home' ? 'shared with the Space' : 'yours'].filter((part) => part !== undefined && part !== '').join(' · '))),
   ]
 }
 

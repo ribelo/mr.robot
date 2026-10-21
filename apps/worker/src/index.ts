@@ -12,12 +12,12 @@ import { GOOGLE_CALLBACK_PATH, googleCallback } from './edge/google-callback.ts'
 import { identityEmail } from './edge/identity.ts'
 import { signedBoxToken } from './box/token.ts'
 import { PERMIT_HEADER, permitSecret } from './places/copy-permit.ts'
-import { HOME_ID, type Env } from './env.ts'
-import type { SignIn } from './home/home.ts'
+import { SPACE_ID, type Env } from './env.ts'
+import type { SignIn } from './space/space.ts'
 
 export { Robot } from './robot/robot.ts'
 export { Member } from './member/member.ts'
-export { Home } from './home/home.ts'
+export { Space } from './space/space.ts'
 export { ComputerContainer } from './box/container.ts'
 
 const WS_PATH = new URLPattern({ pathname: '/api/robots/:id/ws' })
@@ -43,18 +43,18 @@ async function boxChannel(request: Request, env: Env): Promise<Response> {
  * Cloudflare Access (a bypass application in infra/stack.ts) and carry the host's own token instead.
  */
 async function hostChannel(request: Request, env: Env, path: string): Promise<Response> {
-  const home = env.HOME.getByName(HOME_ID)
+  const space = env.SPACE.getByName(SPACE_ID)
   if (path === '/api/host/pair/start' && request.method === 'POST') {
     const body = (await request.json().catch(() => ({}))) as { name?: unknown; platform?: unknown }
     if (typeof body.name !== 'string' || body.name.trim() === '') return json({ error: 'give the host a name' }, 400)
-    const { code } = await home.startPairing(body.name, typeof body.platform === 'string' ? body.platform : 'unknown')
+    const { code } = await space.startPairing(body.name, typeof body.platform === 'string' ? body.platform : 'unknown')
     return json({ code, approveUrl: `${new URL(request.url).origin}/#/pair/${code}` })
   }
-  if (path === '/api/host/pair/poll') return json(await home.pollPairing(new URL(request.url).searchParams.get('code') ?? ''))
+  if (path === '/api/host/pair/poll') return json(await space.pollPairing(new URL(request.url).searchParams.get('code') ?? ''))
   if (path === '/api/host/connect' || path === '/api/host/relay') {
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket', { status: 426 })
     const hostId = request.headers.get('x-host-id') ?? ''
-    const owner = await home.hostOwner(hostId)
+    const owner = await space.hostOwner(hostId)
     if (owner === null) return new Response('unknown host', { status: 401 })
     const url = new URL(request.url)
     const headers = new Headers(request.headers)
@@ -92,15 +92,15 @@ export default {
     if (path === GOOGLE_CALLBACK_PATH && request.method === 'GET') return googleCallback(request, env)
     const program = Effect.gen(function* () {
       const email = yield* identityEmail(request, env, ctx)
-      const signIn = yield* call((): Promise<SignIn> => env.HOME.getByName(HOME_ID).signIn(email))
+      const signIn = yield* call((): Promise<SignIn> => env.SPACE.getByName(SPACE_ID).signIn(email))
       if (!signIn.ok) {
-        return yield* Effect.fail<ApiError>(forbidden(signIn.reason === 'removed' ? 'your access to this Home was removed' : 'ask the Home admin for an invite'))
+        return yield* Effect.fail<ApiError>(forbidden(signIn.reason === 'removed' ? 'your access to this Space was removed' : 'ask the Space admin for an invite'))
       }
       const member = signIn.member
       const socket = WS_PATH.exec(request.url)
       if (socket !== null) {
         const id = socket.pathname.groups['id']!
-        const access = yield* call(() => env.HOME.getByName(HOME_ID).access(member.id, id))
+        const access = yield* call(() => env.SPACE.getByName(SPACE_ID).access(member.id, id))
         if (access === null) return yield* Effect.fail<ApiError>(notFound('no such robot'))
         const headers = new Headers(request.headers)
         headers.set('x-member-id', member.id)

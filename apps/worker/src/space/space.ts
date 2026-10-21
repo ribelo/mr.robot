@@ -1,11 +1,11 @@
 /**
- * The Home (robot-q7rj): its Members, the registry of every Robot (owner, sharing,
- * last line, state), Home settings, and everything shared with the Home.
- * One per deployment, addressed by HOME_ID.
+ * The Space (robot-q7rj): its Members, the registry of every Robot (owner, sharing,
+ * last line, state), Space settings, and everything shared with the Space.
+ * One per deployment, addressed by SPACE_ID.
  */
 import type { AccountStatus, ChainEntry, ConnectionNote, ConnectionView, ConnectorKind, FileHistoryView, FileVersionContent, HostView, LoginView, PluginView, RobotOwner, SkillLibraryRow } from '@mr-robot/protocol'
-import { authorLabel, authorMetadata, authorOf, FileHistory, HOME_HISTORY_BASE, versionView, type FileAuthor } from '../workspace/file-history.ts'
-import { CHIEF_TITLE, costBreakdown, HomeSpendLimit, MemberAvatar, robotIdentity, usableNames, type MemberCosts, type StoredIdentity } from '@mr-robot/protocol'
+import { authorLabel, authorMetadata, authorOf, FileHistory, SPACE_HISTORY_BASE, versionView, type FileAuthor } from '../workspace/file-history.ts'
+import { CHIEF_TITLE, costBreakdown, SpaceSpendLimit, MemberAvatar, robotIdentity, usableNames, type MemberCosts, type StoredIdentity } from '@mr-robot/protocol'
 import * as Schema from 'effect/Schema'
 import type { HostEntry } from '../member/hosts.ts'
 import { metaOf, parseEntry, serializeEntry, type LoginEntry } from '../platform/logins.ts'
@@ -39,10 +39,10 @@ import { DurableRuntime, invalid, notFound, Sql, sqlLayer } from '../platform/du
 import { backendOptions } from '../browser/backends.ts'
 import { isRemovedBrowserBackend } from '../browser/removed-backends.ts'
 import { MR_ROBOT_ONLY_GROUPS, TOOL_GROUPS } from '../agent/catalog.ts'
-import { connectionView, HomePlugins } from './plugins.ts'
+import { connectionView, SpacePlugins } from './plugins.ts'
 import { connectorOn, connectorPlugin, CONNECTOR_TITLES, disabledToolGroups } from '../plugins/catalog.ts'
 import { CONNECTOR_SKILLS, heldSkillNames } from '../connectors/skills.ts'
-import { DiscordAtHome, type BotConnection } from './discord.ts'
+import { DiscordAtSpace, type BotConnection } from './discord.ts'
 import type { DiscordFile } from '../connectors/discord.ts'
 import { abandoned, answered, closed, invited, lapsed, messaged, ThreadRegistry, type AnswerOutcome, type Side, type Step, type ThreadRow } from './threads.ts'
 import type { GatewayMessage } from '../connectors/discord-gateway.ts'
@@ -64,28 +64,28 @@ import type { Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
 import * as Tasks from './tasks.ts'
 import type { LastWakeup, MissionView, RobotTurn, SubagentLine, TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
-import { legacyHomeSpendLimit } from '../platform/spend-limit-migration.ts'
+import { legacySpaceSpendLimit } from '../platform/spend-limit-migration.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
 export const MR_ROBOT_COLOR = '#5ec4b6'
 
-/** The Home's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
+/** The Space's model list until the admin edits it (robot-82r5); contextWindow caps each Robot's budget. */
 /** Prices are the admin's to correct in the admin view; subscriptions are flat and count as 0. */
-/** Which connected Provider a new Robot starts on when the Home default is not usable. */
+/** Which connected Provider a new Robot starts on when the Space default is not usable. */
 const FALLBACK_ORDER = ['anthropic', 'openai', 'opencode-go', 'deepseek', 'openrouter', 'workers-ai']
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000
 const AVATAR_COLORS = ['#f4a03a', '#6c63ff', '#8b5cf6', '#3b82f6', '#f97316', '#ef4444', '#10b981', '#ec4899']
 
-export interface HomeSettings {
+export interface SpaceSettings {
   readonly defaultModel: ModelChoice
-  /** Off: no Workers AI model is offered in the Home and chains skip Workers AI entries (ux-101w). */
+  /** Off: no Workers AI model is offered in the Space and chains skip Workers AI entries (ux-101w). */
   readonly workersAiEnabled: boolean
   /** The browser backend new and unset Robots use (rb-ybt4). */
   readonly defaultBrowserBackend: BrowserBackend
-  /** The limit of each Robot that follows the Home's (ux-dbx4). */
-  readonly robotSpendLimit: HomeSpendLimit
+  /** The limit of each Robot that follows the Space's (ux-dbx4). */
+  readonly robotSpendLimit: SpaceSpendLimit
   /** The limit of all Robots of one Member together. */
-  readonly memberSpendLimit: HomeSpendLimit
+  readonly memberSpendLimit: SpaceSpendLimit
   /** The Auto review route of Robots without their own; null: each Robot's own model (ao-6m9i). */
   readonly defaultReviewer: ModelChoice | null
 }
@@ -119,8 +119,8 @@ type RobotSql = {
   fleet_state: FleetState; last_line: string; last_at: number; turn: string | null; last_wakeup: string | null; subagents?: string | null
 }
 
-/** The Home's reach beyond its SQLite: the other Durable Objects, R2, Workers AI and the secret vault. */
-export interface HomePlatformShape {
+/** The Space's reach beyond its SQLite: the other Durable Objects, R2, Workers AI and the secret vault. */
+export interface SpacePlatformShape {
   readonly env: Env
   readonly secrets: VaultShape
   /** The Threads between chiefs (v1.9). */
@@ -131,13 +131,13 @@ export interface HomePlatformShape {
   readonly catalogTries: Map<string, number>
 }
 
-export class HomePlatform extends Context.Service<HomePlatform, HomePlatformShape>()('mr-robot/HomePlatform') {}
+export class SpacePlatform extends Context.Service<SpacePlatform, SpacePlatformShape>()('mr-robot/SpacePlatform') {}
 
-type R = Sql | HomePlatform
+type R = Sql | SpacePlatform
 
 /** An RPC to another Durable Object (or R2), awaited as an Effect; its failure is a defect here. */
-const remote = <A>(call: (env: Env) => Promise<A>): Effect.Effect<A, never, HomePlatform> => Effect.gen(function* () {
-  const platform = yield* HomePlatform
+const remote = <A>(call: (env: Env) => Promise<A>): Effect.Effect<A, never, SpacePlatform> => Effect.gen(function* () {
+  const platform = yield* SpacePlatform
   return yield* Effect.promise(() => call(platform.env))
 })
 
@@ -288,11 +288,11 @@ const removeAvatarPicture = (memberId: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ settings
 
-/** A stored Home spend limit; absent: no limit. Only decoded patches are stored, so a value that does not decode is a defect. */
+/** A stored Space spend limit; absent: no limit. Only decoded patches are stored, so a value that does not decode is a defect. */
 const spendLimitSetting = (key: 'robotSpendLimit' | 'memberSpendLimit') => Effect.gen(function* () {
   const stored = yield* setting<unknown>(key)
-  if (stored === undefined) return { kind: 'none' } as HomeSpendLimit
-  return yield* Schema.decodeUnknownEffect(HomeSpendLimit)(stored).pipe(Effect.orDie)
+  if (stored === undefined) return { kind: 'none' } as SpaceSpendLimit
+  return yield* Schema.decodeUnknownEffect(SpaceSpendLimit)(stored).pipe(Effect.orDie)
 })
 
 const settings = Effect.gen(function* () {
@@ -303,7 +303,7 @@ const settings = Effect.gen(function* () {
     robotSpendLimit: yield* spendLimitSetting('robotSpendLimit'),
     memberSpendLimit: yield* spendLimitSetting('memberSpendLimit'),
     defaultReviewer: (yield* setting<ModelChoice | null>('defaultReviewer')) ?? null,
-  } as HomeSettings
+  } as SpaceSettings
 })
 
 /**
@@ -311,7 +311,7 @@ const settings = Effect.gen(function* () {
  * off, a default model on Workers AI moves to the first model the admin can use (ux-jseo); `by` is the
  * admin who saves, else the first active admin.
  */
-const updateSettings = (patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }, by?: string) => Effect.gen(function* () {
+const updateSettings = (patch: Partial<SpaceSettings> & { models?: readonly ModelOption[] }, by?: string) => Effect.gen(function* () {
   const sql = yield* Sql
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined) yield* putSetting(key, value)
@@ -324,7 +324,7 @@ const updateSettings = (patch: Partial<HomeSettings> & { models?: readonly Model
   return { ...(yield* settings), ...(moved === undefined ? {} : { defaultModelMoved: moved }) }
 })
 
-/** The Home default is on Workers AI while it is off: it moves to the admin's first usable model, or stays when there is none. */
+/** The Space default is on Workers AI while it is off: it moves to the admin's first usable model, or stays when there is none. */
 const moveDefaultOffWorkersAi = (by: string | undefined) => Effect.gen(function* () {
   const current = yield* settings
   if (current.workersAiEnabled || current.defaultModel.provider !== 'workers-ai') return undefined
@@ -336,14 +336,14 @@ const moveDefaultOffWorkersAi = (by: string | undefined) => Effect.gen(function*
   return { from: current.defaultModel, to } as DefaultModelMoved
 })
 
-/** Spend limits a Robot's Turns are held to: the Home's per-Robot limit, the owner's limit and what the owner's Robots spent this month. */
+/** Spend limits a Robot's Turns are held to: the Space's per-Robot limit, the owner's limit and what the owner's Robots spent this month. */
 export interface SpendLimits {
-  readonly robot: HomeSpendLimit
-  readonly member: HomeSpendLimit
+  readonly robot: SpaceSpendLimit
+  readonly member: SpaceSpendLimit
   readonly memberSpentUsd: number
 }
 
-/** A Member's own month by source across their Robots, against the Home's per-Member limit (ao-ef5t). */
+/** A Member's own month by source across their Robots, against the Space's per-Member limit (ao-ef5t). */
 const memberCosts = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const current = yield* settings
@@ -371,7 +371,7 @@ const summary = (row: RobotSql) => Effect.gen(function* () {
   return { ...entry, ownerName: (yield* member(entry.ownerId))?.name ?? '', unread: false } as RobotSummary
 })
 
-/** Robots a Member can reach: their own, and everything shared with the Home (robot-hpj1, robot-bld3). */
+/** Robots a Member can reach: their own, and everything shared with the Space (robot-hpj1, robot-bld3). */
 const reachable = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const rows = yield* sql.all<RobotSql>("SELECT * FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home') ORDER BY last_at DESC", memberId)
@@ -383,14 +383,14 @@ export const FLEET_PAGE_SIZE = 200
 
 /**
  * One page of Mission Control's Fleet (mc-m4dd, mc-m6ff): the Robots a Member reaches, or every Robot for Whole
- * Home; working first, then waiting for you, then by last activity; `q` finds a name.
+ * Space; working first, then waiting for you, then by last activity; `q` finds a name.
  */
-const fleetPage = (memberId: string, wholeHome: boolean, q: string, page: number) => Effect.gen(function* () {
+const fleetPage = (memberId: string, wholeSpace: boolean, q: string, page: number) => Effect.gen(function* () {
   const sql = yield* Sql
-  const reach = wholeHome ? '' : "AND (r.owner_id = ? OR r.sharing = 'home')"
+  const reach = wholeSpace ? '' : "AND (r.owner_id = ? OR r.sharing = 'home')"
   const words = q.trim()
   const named = words === '' ? '' : "AND json_extract(r.identity, '$.name') LIKE ? ESCAPE '\\'"
-  const bindings = [...(wholeHome ? [] : [memberId]), ...(words === '' ? [] : [`%${words.replace(/[\\%_]/g, (character) => `\\${character}`)}%`])]
+  const bindings = [...(wholeSpace ? [] : [memberId]), ...(words === '' ? [] : [`%${words.replace(/[\\%_]/g, (character) => `\\${character}`)}%`])]
   const rows = yield* sql.all<RobotSql & { owner_name: string | null }>(
     `SELECT r.*, m.name AS owner_name FROM robot r LEFT JOIN member m ON m.id = r.owner_id WHERE r.status != 'deleted' ${reach} ${named}
      ORDER BY CASE r.fleet_state WHEN 'working' THEN 0 WHEN 'waiting for you' THEN 1 ELSE 2 END, r.last_at DESC, r.id LIMIT ? OFFSET ?`,
@@ -398,7 +398,7 @@ const fleetPage = (memberId: string, wholeHome: boolean, q: string, page: number
   )
   const counts = yield* sql.first<{ robots: number; working: number | null; waiting: number | null }>(
     `SELECT COUNT(*) AS robots, SUM(r.fleet_state = 'working') AS working, SUM(r.fleet_state = 'waiting for you') AS waiting FROM robot r WHERE r.status != 'deleted' ${reach}`,
-    ...(wholeHome ? [] : [memberId]),
+    ...(wholeSpace ? [] : [memberId]),
   )
   return {
     fleet: rows.slice(0, FLEET_PAGE_SIZE).map((row): RobotSummary => ({ ...entryFromSql(row), ownerName: row.owner_name ?? '', unread: false })),
@@ -410,9 +410,9 @@ const fleetPage = (memberId: string, wholeHome: boolean, q: string, page: number
 /** What Mission Control asks for: the Fleet's name search and page, and the Tasks table's filter (mc-m6ff). */
 export interface MissionQuery { readonly fleetQ: string; readonly fleetPage: number; readonly tasks: Tasks.TaskFilter }
 
-/** Mission Control (mc-m1aa): a page of the Fleet and a page of the Tasks, for a Member or, with Whole Home, the admin. */
+/** Mission Control (mc-m1aa): a page of the Fleet and a page of the Tasks, for a Member or, with Whole Space, the admin. */
 const mission = (caller: Extract<Tasks.TaskCaller, { kind: 'member' }>, query: MissionQuery) => Effect.gen(function* () {
-  const fleet = yield* fleetPage(caller.memberId, caller.wholeHome, query.fleetQ, query.fleetPage)
+  const fleet = yield* fleetPage(caller.memberId, caller.wholeSpace, query.fleetQ, query.fleetPage)
   const tasks = yield* Tasks.listTasks(caller, query.tasks)
   return {
     fleet: fleet.fleet, fleetNext: fleet.next, tasks: tasks.tasks, tasksNext: tasks.next,
@@ -473,7 +473,7 @@ const robotChanged = (changed: RegistryEntry) => Effect.gen(function* () {
   if (changed.kind === 'robot' && reach(before) !== reach(changed)) yield* syncMrRobots
 })
 
-/** The model a new Robot of this Member starts on: the Home default if they can use it, else one they can. */
+/** The model a new Robot of this Member starts on: the Space default if they can use it, else one they can. */
 const startingModel = (memberId: string, wanted?: ModelChoice) => Effect.gen(function* () {
   const usable = yield* models(memberId)
   const pick = wanted ?? (yield* settings).defaultModel
@@ -652,16 +652,16 @@ const adminView = (adminId: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ settings catalog (robot-vqtw)
 
-/** The Home's Exa API key (rb-x8i3), sealed; never shown back. */
+/** The Space's Exa API key (rb-x8i3), sealed; never shown back. */
 const exaKey = Effect.gen(function* () {
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   const sealed = yield* setting<string>('exa-key')
   return sealed === undefined ? null : yield* platform.secrets.open(sealed)
 })
 
 const setExaKey = (key: string | null) => Effect.gen(function* () {
   const sql = yield* Sql
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   if (key === null || key.trim() === '') return yield* sql.run("DELETE FROM setting WHERE k = 'exa-key'")
   yield* putSetting('exa-key', yield* platform.secrets.seal(key.trim()))
 })
@@ -670,7 +670,7 @@ const setExaKey = (key: string | null) => Effect.gen(function* () {
 
 type HostSql = { id: string; owner_id: string; name: string; platform: string; sharing: 'private' | 'home'; online: number; last_seen: number | null; version: string | null; capabilities: string | null; users: string }
 
-/** The Member DO reports each host; the Home keeps the index for sharing and the admin view. */
+/** The Member DO reports each host; the Space keeps the index for sharing and the admin view. */
 const hostChanged = (entry: HostEntry | { id: string; removed: true }) => Effect.gen(function* () {
   const sql = yield* Sql
   if ('removed' in entry) {
@@ -703,7 +703,7 @@ const hostViews = (rows: readonly HostSql[], memberId: string | null) => Effect.
   }))
 })
 
-/** Hosts a Member's robots can reach: their own, and those shared with the Home (hs-0eka). */
+/** Hosts a Member's robots can reach: their own, and those shared with the Space (hs-0eka). */
 const hostsFor = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   return yield* hostViews(yield* sql.all<HostSql>("SELECT * FROM host WHERE owner_id = ? OR sharing = 'home' ORDER BY name", memberId), memberId)
@@ -771,7 +771,7 @@ const browserBackends = browserBackendsFor(null)
 
 const sharedSecrets = Effect.gen(function* () {
   const sql = yield* Sql
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   const rows = yield* sql.all<{ name: string; owner_id: string; sealed: string; updated_at: number }>('SELECT name, owner_id, sealed, updated_at FROM shared_secret ORDER BY name')
   return yield* Effect.forEach(rows, (row) => Effect.map(platform.secrets.open(row.sealed), (text) => ({ name: row.name, ownerId: row.owner_id, updatedAt: row.updated_at, ...metaOf(parseEntry(text)) })))
 })
@@ -787,7 +787,7 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const mrRobot = (yield* sql.first<{ kind: string }>('SELECT kind FROM robot WHERE id = ?', robotId))?.kind === 'mr-robot'
   return {
-    toolGroups: yield* Effect.map(setting<string>('exa-key'), (key) => Object.entries(TOOL_GROUPS).filter(([name]) => mrRobot || !MR_ROBOT_ONLY_GROUPS.includes(name)).map(([name, description]) => ({ name, description: name.startsWith('exa') && key === undefined ? `${description} Needs the Home's Exa API key: the Home admin adds it under Admin → Exa.` : description }))),
+    toolGroups: yield* Effect.map(setting<string>('exa-key'), (key) => Object.entries(TOOL_GROUPS).filter(([name]) => mrRobot || !MR_ROBOT_ONLY_GROUPS.includes(name)).map(([name, description]) => ({ name, description: name.startsWith('exa') && key === undefined ? `${description} Needs the Space's Exa API key: the Space admin adds it under Admin → Exa.` : description }))),
     skills: (yield* skills(memberId)).map(({ name, description }) => ({ name, description })),
     robots: (yield* reachable(memberId)).filter((robot) => robot.id !== robotId && robot.kind === 'robot').map((robot) => ({ id: robot.id, name: robot.identity.name })),
     secrets: yield* grantableSecrets(memberId),
@@ -803,7 +803,7 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ the skill library (robot-7qpi, robot-qjvu, robot-lszy, robot-jqfw)
 
-/** Skills a Member can see: every Home skill, and private skills of their own Robots. */
+/** Skills a Member can see: every Space skill, and private skills of their own Robots. */
 const skills = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   return (yield* sql.all<SkillSql>("SELECT * FROM skill WHERE visibility = 'home' OR owner_id = ? ORDER BY name", memberId)).map(skillFromSql)
@@ -815,7 +815,7 @@ const loadableSkills = (memberId: string, names: readonly string[]) => Effect.ma
 const skillRepository = Effect.map(setting<SkillRepository>('skillRepository'), (value) => value ?? null)
 
 const setSkillRepository = (repository: SkillRepository, token: string | undefined) => Effect.gen(function* () {
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   yield* putSetting('skillRepository', repository)
   if (token !== undefined) yield* putSetting('skillRepositoryToken', yield* platform.secrets.seal(token))
 })
@@ -839,7 +839,7 @@ const upsertSkill = (name: string, description: string, source: 'git' | 'robot' 
 /** Pull the configured repository; its skills replace the previous Git skills (robot-qjvu). */
 const syncSkills = Effect.gen(function* () {
   const sql = yield* Sql
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   const repository = yield* skillRepository
   if (repository === null) return yield* invalid('set the skills repository first')
   const sealed = yield* setting<string>('skillRepositoryToken')
@@ -905,12 +905,12 @@ const skillContent = (memberId: string, name: string, path = 'SKILL.md') => Effe
 
 const sharedSecret = (name: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   const row = yield* sql.first<{ sealed: string }>('SELECT sealed FROM shared_secret WHERE name = ?', name)
   return row === undefined ? null : yield* platform.secrets.open(row.sealed)
 })
 
-/** An entry the Member may change: their private one, or a Home one they shared. */
+/** An entry the Member may change: their private one, or a Space one they shared. */
 const ownLogin = (memberId: string, name: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const shared = yield* sql.first<{ owner_id: string }>('SELECT owner_id FROM shared_secret WHERE name = ?', name)
@@ -920,12 +920,12 @@ const ownLogin = (memberId: string, name: string) => Effect.gen(function* () {
 })
 
 /**
- * Store a login entry (rb-4dxe): private ones stay in the Member DO, Home ones live here (rb-ob2g).
+ * Store a login entry (rb-4dxe): private ones stay in the Member DO, Space ones live here (rb-ob2g).
  * Changing the scope moves the entry; fields left out keep their value (the password is not resent).
  */
 const putLogin = (memberId: string, name: string, patch: Partial<LoginEntry>, shared: boolean) => Effect.gen(function* () {
   const sql = yield* Sql
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   const current = yield* ownLogin(memberId, name)
   const base = current.entry ?? { username: '', password: '', websites: [], notes: '', allowRead: false }
   const entry: LoginEntry = { ...base, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) }
@@ -948,7 +948,7 @@ const deleteSecret = (memberId: string, name: string) => Effect.gen(function* ()
   yield* remote((env) => env.MEMBER.getByName(memberId).takeSecret(name))
 })
 
-/** The entry a Robot of this owner uses: the owner's private one, else the Home's. */
+/** The entry a Robot of this owner uses: the owner's private one, else the Space's. */
 const resolveLogin = (memberId: string, name: string) => Effect.gen(function* () {
   const text = (yield* remote((env) => env.MEMBER.getByName(memberId).secret(name))) ?? (yield* sharedSecret(name))
   return text === null ? null : parseEntry(text)
@@ -964,7 +964,7 @@ const revealLogin = (memberId: string, name: string) => Effect.gen(function* () 
   return current.entry.password
 })
 
-/** The Logins section: own and Home entries, and which of the Member's Robots hold each (rb-4dxe, rb-2myk). */
+/** The Logins section: own and Space entries, and which of the Member's Robots hold each (rb-4dxe, rb-2myk). */
 const secretsView = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const own = (yield* remote((env) => env.MEMBER.getByName(memberId).logins())).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
@@ -976,7 +976,7 @@ const secretsView = (memberId: string) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ live model lists (robot-82r5, robot-d994)
 
-/** Providers this Member's Robots can run on: Workers AI unless the admin switched it off, their own credentials, Home-shared ones. */
+/** Providers this Member's Robots can run on: Workers AI unless the admin switched it off, their own credentials, Space-shared ones. */
 const usableProviders = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const usable = new Set<string>((yield* settings).workersAiEnabled ? ['workers-ai'] : [])
@@ -1004,7 +1004,7 @@ const metadata = Effect.gen(function* () {
   return fresh.value
 })
 
-/** The credential a Member's Robot uses: the Member's own, else one shared with the Home. */
+/** The credential a Member's Robot uses: the Member's own, else one shared with the Space. */
 const providerCredential = (memberId: string, provider: ProviderId) => Effect.gen(function* () {
   const sql = yield* Sql
   const own = (yield* remote((env) => env.MEMBER.getByName(memberId).credential(provider, false) as Promise<ProviderCredential | null>))
@@ -1037,7 +1037,7 @@ const chainRefusal = (memberId: string, chain: readonly ChainEntry[]) => Effect.
   for (const entry of chain) {
     if (entry.provider === 'workers-ai' || entry.account === '') continue
     const account = usable.find((candidate) => candidate.id === entry.account)
-    if (account === undefined) return `the account ${entry.account} is not yours or shared with the Home`
+    if (account === undefined) return `the account ${entry.account} is not yours or shared with the Space`
     if (account.provider !== entry.provider) return `${account.label} is a ${account.provider} account, not ${entry.provider}`
   }
   return null as string | null
@@ -1051,7 +1051,7 @@ const accountCredential = (memberId: string, entryOwner: string, account: string
 })
 
 const listingAccess = (provider: string, memberId: string) => Effect.gen(function* () {
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   if (provider === 'workers-ai') return (platform.env.AI === undefined ? {} : { ai: platform.env.AI }) as ListingAccess
   if (provider === 'openrouter') return {} as ListingAccess
   const credential = yield* providerCredential(memberId, provider as ProviderId)
@@ -1062,7 +1062,7 @@ const listingAccess = (provider: string, memberId: string) => Effect.gen(functio
 /** Fetch one Provider's live list with a credential this Member can use; a failure keeps the last list. */
 const refreshCatalog = (provider: string, memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   const services = yield* Effect.context<R>()
   platform.catalogTries.set(provider, Date.now())
   const fetched = yield* listingAccess(provider, memberId).pipe(
@@ -1080,7 +1080,7 @@ const refreshCatalog = (provider: string, memberId: string) => Effect.gen(functi
 })
 
 const ensureCatalog = (provider: string, memberId: string) => Effect.gen(function* () {
-  const platform = yield* HomePlatform
+  const platform = yield* SpacePlatform
   const row = yield* catalogRow(provider)
   if (row?.models != null && row.fetchedAt !== null && Date.now() - row.fetchedAt < CATALOG_TTL_MS) return
   if (row?.error != null && Date.now() - (platform.catalogTries.get(provider) ?? 0) < 60_000) return
@@ -1115,7 +1115,7 @@ const unavailableModels = (memberId: string) => Effect.gen(function* () {
   return (yield* offeredModelList).filter((option) => !usable.some((entry) => entry.provider === option.provider && entry.model === option.model))
 })
 
-/** The Home's model list as the admin edits it: without Workers AI while it is off (ux-xsnr). */
+/** The Space's model list as the admin edits it: without Workers AI while it is off (ux-xsnr). */
 const offeredModelList = Effect.gen(function* () {
   const enabled = (yield* settings).workersAiEnabled
   return (yield* modelList).filter((option) => enabled || option.provider !== 'workers-ai')
@@ -1201,7 +1201,7 @@ const threadView = (row: ThreadRow, forRobotId: string) => Effect.gen(function* 
 
 /** Apply one transition to a Thread; a refusal is the chief's mistake, said in words it can act on. */
 const stepThread = <T extends object>(threadId: string, transition: (row: ThreadRow) => Step<T>) => Effect.gen(function* () {
-  const { threads } = yield* HomePlatform
+  const { threads } = yield* SpacePlatform
   const step = threads.step(threadId, transition)
   if (!step.ok) return yield* (step.reason === 'no such Thread' ? notFound(step.reason) : invalid(step.reason))
   return step
@@ -1217,12 +1217,12 @@ const bothChiefs = (row: ThreadRow) => [row.initiator.robotId, row.invitee.robot
 
 /** The alarm stands for the first Thread to lapse. */
 const rearmThreads = Effect.gen(function* () {
-  const { threads, alarmBy } = yield* HomePlatform
+  const { threads, alarmBy } = yield* SpacePlatform
   const at = threads.nextLapseAt()
   if (at !== null) yield* alarmBy(at)
 })
 
-/** The other chiefs of the Home a chief may invite: active Mr. Robots of other active Members (ch-c2xa). */
+/** The other chiefs of the Space a chief may invite: active Mr. Robots of other active Members (ch-c2xa). */
 const threadChiefs = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const rows = yield* sql.all<{ id: string; owner_name: string; fleet_state: string; identity: string }>(
@@ -1234,11 +1234,11 @@ const threadChiefs = (memberId: string) => Effect.gen(function* () {
 
 /** A chief invites another chief to a Thread; both owners get an Ask with the topic and the scope to edit (ch-l4jg, ch-vrl7, ch-hikl). */
 const threadOpen = (robotId: string, topic: string, chiefId: string, scope: string) => Effect.gen(function* () {
-  const { threads } = yield* HomePlatform
+  const { threads } = yield* SpacePlatform
   const me = yield* entry(robotId)
   if (me === undefined || me.kind !== 'mr-robot') return yield* invalid('only Mr. Robot opens a Thread')
   const other = yield* entry(chiefId)
-  const notAChief = invalid(`${chiefId} is not another chief of this Home you can invite; use thread_chiefs`)
+  const notAChief = invalid(`${chiefId} is not another chief of this Space you can invite; use thread_chiefs`)
   if (other === undefined || other.kind !== 'mr-robot') return yield* notAChief
   if (other.ownerId === me.ownerId) return yield* invalid('a Thread is between the chiefs of two different Members')
   if (!(yield* threadChiefs(me.ownerId)).some((chief) => chief.id === chiefId)) return yield* notAChief
@@ -1273,7 +1273,7 @@ const threadClose = (threadId: string, robotId: string, summary: string) => Effe
 })
 
 const threadFor = (threadId: string, robotId: string) => Effect.gen(function* () {
-  const { threads } = yield* HomePlatform
+  const { threads } = yield* SpacePlatform
   const row = threads.get(threadId)
   if (row === undefined || !bothChiefs(row).includes(robotId)) return undefined
   return yield* threadView(row, robotId)
@@ -1285,7 +1285,7 @@ const tellQuietly = (row: ThreadRow, robotId: string, event: ThreadEvent) =>
 
 /** Open Threads without a message for 7 days close, and invitations unanswered for 7 days expire, with a note in both Conversations (ch-gckb). */
 const lapseThreads = Effect.gen(function* () {
-  const { threads } = yield* HomePlatform
+  const { threads } = yield* SpacePlatform
   for (const id of threads.lapsing(Date.now())) {
     const step = threads.step(id, (row) => lapsed(row, Date.now()))
     if (!step.ok) continue
@@ -1296,7 +1296,7 @@ const lapseThreads = Effect.gen(function* () {
 
 /** A chief that is deleted or whose owner left ends its Threads; the other chief gets a note. */
 const endThreadsOf = (robotId: string) => Effect.gen(function* () {
-  const { threads } = yield* HomePlatform
+  const { threads } = yield* SpacePlatform
   for (const id of threads.activeOf(robotId)) {
     const step = threads.step(id, (row) => abandoned(row, robotId, Date.now()))
     if (!step.ok) continue
@@ -1306,7 +1306,7 @@ const endThreadsOf = (robotId: string) => Effect.gen(function* () {
 
 /** Every Thread for the admin view (ch-5ngu): topic, chiefs, state and counts; never a scope or a message. */
 const adminThreads = Effect.gen(function* () {
-  const { threads } = yield* HomePlatform
+  const { threads } = yield* SpacePlatform
   return yield* Effect.forEach(threads.all(), (row) => Effect.gen(function* () {
     const participants = yield* Effect.forEach([row.initiator, row.invitee], (side) => Effect.map(chiefOf(side), (chief) => ({ ownerName: chief.ownerName, chiefName: chief.label, robotId: side.robotId })))
     return {
@@ -1331,7 +1331,13 @@ const orphaned = (assignee: Exclude<TaskAssignee, { kind: 'nobody' }>) => Effect
 const orDie = <A, E, X>(effect: Effect.Effect<A, E, X>) => effect.pipe(Effect.catch((error: unknown) => (error !== null && typeof error === 'object' && '_tag' in error && ['NotFound', 'Invalid', 'Conflict'].includes((error as { _tag: string })._tag) ? Effect.fail(error as never) : Effect.die(error)))) as Effect.Effect<A, never, X>
 
 /** The Durable Object: tables, the platform layer, and one RPC method per program. */
-export class Home extends DurableObject<Env> {
+/** HOME.md became SPACE.md (v1.18 ticket 09, rm-lseo): its stored text and author move to the new keys, once. */
+export function renameHomeMemory(sql: SqlStorage): void {
+  sql.exec("UPDATE OR IGNORE setting SET k = 'space-md' WHERE k = 'home-md'")
+  sql.exec("UPDATE OR IGNORE setting SET k = 'space-md-author' WHERE k = 'home-md-author'")
+}
+
+export class Space extends DurableObject<Env> {
   private readonly runtime: DurableRuntime<R>
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -1357,6 +1363,7 @@ export class Home extends DurableObject<Env> {
     // v1.12 (ux-2ft4): the Member's avatar as JSON; NULL until they choose one.
     try { sql.exec('ALTER TABLE member ADD COLUMN avatar TEXT') } catch { /* added before */ }
     sql.exec('CREATE TABLE IF NOT EXISTS setting (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+    renameHomeMemory(sql)
     this.migrateSpendLimits()
     this.migrateBrowserBackends()
     // Robot definitions in the library (v1.18 ticket 04).
@@ -1390,7 +1397,7 @@ export class Home extends DurableObject<Env> {
       const current = await ctx.storage.getAlarm()
       if (current === null || current > at) await ctx.storage.setAlarm(Math.max(at, Date.now() + 1))
     })
-    this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(HomePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
+    this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(SpacePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
     ctx.waitUntil(this.destroyOrphans().catch((error: unknown) => console.warn('orphans not destroyed', error)))
     ctx.waitUntil(this.migrateRoutines().catch((error: unknown) => console.warn('Routines not migrated', error)))
     ctx.waitUntil(this.unsharePersonConnections().catch((error: unknown) => console.warn('person connections not unshared', error)))
@@ -1411,8 +1418,8 @@ export class Home extends DurableObject<Env> {
   setAvatarColor(memberId: string, color: string): Promise<MemberAvatar> { return this.run(setAvatarColor(memberId, color)) }
   setAvatarPicture(memberId: string, key: string): Promise<MemberAvatar> { return this.run(setAvatarPicture(memberId, key)) }
   removeAvatarPicture(memberId: string): Promise<MemberAvatar> { return this.run(removeAvatarPicture(memberId)) }
-  settings(): Promise<HomeSettings> { return this.run(settings) }
-  updateSettings(patch: Partial<HomeSettings> & { models?: readonly ModelOption[] }, by?: string): Promise<HomeSettings & { defaultModelMoved?: DefaultModelMoved }> { return this.run(updateSettings(patch, by)) }
+  settings(): Promise<SpaceSettings> { return this.run(settings) }
+  updateSettings(patch: Partial<SpaceSettings> & { models?: readonly ModelOption[] }, by?: string): Promise<SpaceSettings & { defaultModelMoved?: DefaultModelMoved }> { return this.run(updateSettings(patch, by)) }
   limitsFor(memberId: string): Promise<SpendLimits> { return this.run(limitsFor(memberId)) }
   memberCosts(memberId: string): Promise<MemberCosts> { return this.run(memberCosts(memberId)) }
   reachable(memberId: string): Promise<RobotSummary[]> { return this.run(reachable(memberId)) }
@@ -1459,7 +1466,7 @@ export class Home extends DurableObject<Env> {
     ))).pipe(Effect.asVoid)
   }
 
-  /** Plan again after Tasks changed: each Robot's earliest due moment (mc-s1aa), and the Home's next reminder (mc-s3cc). */
+  /** Plan again after Tasks changed: each Robot's earliest due moment (mc-s1aa), and the Space's next reminder (mc-s3cc). */
   private planned(assignees: ReadonlyArray<TaskAssignee | undefined>): Effect.Effect<void, never, Sql> {
     const env = this.env
     const storage = this.ctx.storage
@@ -1482,7 +1489,7 @@ export class Home extends DurableObject<Env> {
     return this.run(Tasks.parkedOccurrence(taskId, robotId, takenAt))
   }
 
-  /** A Robot's alarm asks for its due Tasks; the Home hands them out and moves them on (mc-s1aa, mc-s2bb). */
+  /** A Robot's alarm asks for its due Tasks; the Space hands them out and moves them on (mc-s1aa, mc-s2bb). */
   dueTasks(robotId: string): Promise<{ tasks: Tasks.DueOccurrence[]; nextDue: number | null }> { return this.run(Tasks.takeDue(robotId)) }
 
   /**
@@ -1505,8 +1512,8 @@ export class Home extends DurableObject<Env> {
 
   /**
    * Routines become Tasks (v1.13 ticket 05, mc-t7gg): each Robot not yet migrated hands over its Routines, a few
-   * Robots at a time; the Home stores them as Tasks, then the Robot drops its tables. A Robot that cannot be reached
-   * stays to migrate and is tried again at the Home's next start.
+   * Robots at a time; the Space stores them as Tasks, then the Robot drops its tables. A Robot that cannot be reached
+   * stays to migrate and is tried again at the Space's next start.
    */
   async migrateRoutines(): Promise<void> {
     const sql = this.ctx.storage.sql
@@ -1588,10 +1595,10 @@ export class Home extends DurableObject<Env> {
         connections.set(memberId, known)
         return known
       }
-      const homeLimit = (await this.settings()).robotSpendLimit
+      const spaceLimit = (await this.settings()).robotSpendLimit
       const robotSkills = await Promise.all(robots.map(async (robot) => {
         if (robot.id === self.id) return self.held
-        const admin = await this.env.ROBOT.getByName(robot.id).adminRow(homeLimit)
+        const admin = await this.env.ROBOT.getByName(robot.id).adminRow(spaceLimit)
         return admin === null ? [] : heldSkillNames(admin.grants, await connectionsOf(robot.ownerId), kindsOn)
       }))
       robots.forEach((robot, index) => {
@@ -1727,42 +1734,42 @@ export class Home extends DurableObject<Env> {
   /** The Exa plugin's key (its detail page), or the key saved before plugins had settings. */
   async exaKey(): Promise<string | null> { return (await this.pluginsOf.settings('exa')).secrets['apiKey'] ?? await this.run(exaKey) }
 
-  /** HOME.md: shared household facts for every Robot of the Home (pl-yqno). */
-  async homeMemory(): Promise<string> {
-    return this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md'").toArray().map((row) => JSON.parse(row.v) as string)[0] ?? ''
+  /** SPACE.md: shared household facts for every Robot of the Space (pl-yqno). */
+  async spaceMemory(): Promise<string> {
+    return this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'space-md'").toArray().map((row) => JSON.parse(row.v) as string)[0] ?? ''
   }
 
-  /** HOME.md changed: the version it replaces is kept with its author (v1.18, rm-d68k); `author` wrote this one. */
-  async setHomeMemory(content: string, by: string, exceptRobot: string | null, author: FileAuthor = { kind: 'person', name: by }): Promise<void> {
+  /** SPACE.md changed: the version it replaces is kept with its author (v1.18, rm-d68k); `author` wrote this one. */
+  async setSpaceMemory(content: string, by: string, exceptRobot: string | null, author: FileAuthor = { kind: 'person', name: by }): Promise<void> {
     const sql = this.ctx.storage.sql
-    const previous = sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md'").toArray()[0]
+    const previous = sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'space-md'").toArray()[0]
     if (previous !== undefined) {
-      const meta = sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md-author'").toArray()[0]
+      const meta = sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'space-md-author'").toArray()[0]
       const was = authorOf(meta === undefined ? undefined : JSON.parse(meta.v) as Record<string, string>, 0)
-      await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).keep('HOME.md', { body: JSON.parse(previous.v) as string, by: was.by, at: was.at }, Date.now())
+      await new FileHistory(this.env.FILES, SPACE_HISTORY_BASE).keep('SPACE.md', { body: JSON.parse(previous.v) as string, by: was.by, at: was.at }, Date.now())
     }
-    sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(content))
-    sql.exec("INSERT INTO setting (k, v) VALUES ('home-md-author', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(authorMetadata(author, Date.now())))
-    await this.memoryChanged(null, 'HOME.md', by, exceptRobot)
+    sql.exec("INSERT INTO setting (k, v) VALUES ('space-md', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(content))
+    sql.exec("INSERT INTO setting (k, v) VALUES ('space-md-author', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", JSON.stringify(authorMetadata(author, Date.now())))
+    await this.memoryChanged(null, 'SPACE.md', by, exceptRobot)
   }
 
-  /** HOME.md's history (v1.18, rm-7jo4). */
-  async homeMemoryHistory(): Promise<FileHistoryView> {
-    const meta = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'home-md-author'").toArray()[0]
+  /** SPACE.md's history (v1.18, rm-7jo4). */
+  async spaceMemoryHistory(): Promise<FileHistoryView> {
+    const meta = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'space-md-author'").toArray()[0]
     const current = meta === undefined ? null : authorOf(JSON.parse(meta.v) as Record<string, string>, 0)
-    return { path: 'HOME.md', current: current === null ? null : { at: current.at, by: authorLabel(current.by) }, versions: (await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).list('HOME.md')).map(versionView) }
+    return { path: 'SPACE.md', current: current === null ? null : { at: current.at, by: authorLabel(current.by) }, versions: (await new FileHistory(this.env.FILES, SPACE_HISTORY_BASE).list('SPACE.md')).map(versionView) }
   }
 
-  async homeMemoryVersion(version: string): Promise<FileVersionContent | null> {
-    const found = await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).read('HOME.md', version)
+  async spaceMemoryVersion(version: string): Promise<FileVersionContent | null> {
+    const found = await new FileHistory(this.env.FILES, SPACE_HISTORY_BASE).read('SPACE.md', version)
     return found === undefined ? null : { version: versionView(found.version), text: found.text }
   }
 
-  /** Bring a version of HOME.md back: a new version, every Robot hears it. */
-  async restoreHomeMemory(version: string, name: string): Promise<boolean> {
-    const found = await new FileHistory(this.env.FILES, HOME_HISTORY_BASE).read('HOME.md', version)
+  /** Bring a version of SPACE.md back: a new version, every Robot hears it. */
+  async restoreSpaceMemory(version: string, name: string): Promise<boolean> {
+    const found = await new FileHistory(this.env.FILES, SPACE_HISTORY_BASE).read('SPACE.md', version)
     if (found === undefined) return false
-    await this.setHomeMemory(found.text, `${name} (restored an earlier version)`, null, { kind: 'restore', name, version })
+    await this.setSpaceMemory(found.text, `${name} (restored an earlier version)`, null, { kind: 'restore', name, version })
     return true
   }
 
@@ -1782,7 +1789,7 @@ export class Home extends DurableObject<Env> {
     await Promise.all(robots.map((robot) => this.env.ROBOT.getByName(robot.id).timeZoneChanged(timeZone).catch((error: unknown) => console.warn('time zone change not delivered', robot.id, error))))
   }
 
-  /** Tell the Robots that read a shared memory file that it changed: one Member's, or every Robot for HOME.md. */
+  /** Tell the Robots that read a shared memory file that it changed: one Member's, or every Robot for SPACE.md. */
   async memoryChanged(memberId: string | null, path: string, by: string, exceptRobot: string | null): Promise<void> {
     const robots = this.ctx.storage.sql.exec<{ id: string; owner_id: string }>('SELECT id, owner_id FROM robot').toArray()
     await Promise.all(robots.filter((robot) => (memberId === null || robot.owner_id === memberId) && robot.id !== exceptRobot)
@@ -1814,9 +1821,9 @@ export class Home extends DurableObject<Env> {
 
   // ---------------------------------------------------------------- Plugins and connections (v1.5)
 
-  private pluginsStore: HomePlugins | undefined
-  private get pluginsOf(): HomePlugins {
-    this.pluginsStore ??= new HomePlugins(this.ctx.storage.sql, makeVault(this.env.DATA_KEY, 'plugins'))
+  private pluginsStore: SpacePlugins | undefined
+  private get pluginsOf(): SpacePlugins {
+    this.pluginsStore ??= new SpacePlugins(this.ctx.storage.sql, makeVault(this.env.DATA_KEY, 'plugins'))
     return this.pluginsStore
   }
 
@@ -1866,14 +1873,14 @@ export class Home extends DurableObject<Env> {
       for (const [legacy, key] of [['robotSpendLimitUsd', 'robotSpendLimit'], ['memberSpendLimitUsd', 'memberSpendLimit']] as const) {
         const row = sql.exec<{ v: string }>('SELECT v FROM setting WHERE k = ?', legacy).toArray()[0]
         if (row === undefined) continue
-        sql.exec('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(legacyHomeSpendLimit(JSON.parse(row.v))))
+        sql.exec('INSERT INTO setting (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', key, JSON.stringify(legacySpaceSpendLimit(JSON.parse(row.v))))
         sql.exec('DELETE FROM setting WHERE k = ?', legacy)
       }
     })
   }
 
   /**
-   * The v1.16 migration for two browsers (ob-l24v, ob-ltsr): a default browser backend that was removed is dropped, so the Home
+   * The v1.16 migration for two browsers (ob-l24v, ob-ltsr): a default browser backend that was removed is dropped, so the Space
    * default is Browser Rendering again; the sealed VPN and proxy settings and the VPN summary go. With none left it does nothing.
    */
   protected migrateBrowserBackends(): void {
@@ -1887,7 +1894,7 @@ export class Home extends DurableObject<Env> {
 
   /**
    * The v1.12 migration (ux-cop2, ux-dz8p): a connection that acts as a person is never shared with the
-   * Home. Each one still shared is unshared; Robots of other Members that held a grant on it lose the
+   * Space. Each one still shared is unshared; Robots of other Members that held a grant on it lose the
    * grant and are told at their next Turn; its owner gets a note on the Connections section naming them.
    * It runs at start and is safe to call again: nothing can share such a connection any more.
    */
@@ -1895,7 +1902,7 @@ export class Home extends DurableObject<Env> {
     for (const { ownerId, connection } of this.pluginsOf.sharedPersonConnections()) {
       const ownerName = this.memberName(ownerId)
       const title = connectorPlugin(connection.kind)?.title ?? connection.kind
-      const notice = `${ownerName}'s ${title} connection "${connection.label}" (${connection.account}) acts as ${ownerName}, so it is no longer shared with the Home and your grant on it was removed. Its tools are gone; if your work needs it, tell your owner.`
+      const notice = `${ownerName}'s ${title} connection "${connection.label}" (${connection.account}) acts as ${ownerName}, so it is no longer shared with the Space and your grant on it was removed. Its tools are gone; if your work needs it, tell your owner.`
       const robots = this.ctx.storage.sql.exec<{ id: string; owner_id: string; identity: string }>("SELECT id, owner_id, identity FROM robot WHERE owner_id <> ? AND status <> 'deleted' ORDER BY id", ownerId).toArray()
       const held = await Promise.all(robots.map((robot) => this.env.ROBOT.getByName(robot.id).connectionWithdrawn(connection.id, notice)))
       const lost = robots.filter((_, index) => held[index] === true).map((robot) => ({ name: (JSON.parse(robot.identity) as Identity).name, ownerName: this.memberName(robot.owner_id) }))
@@ -1911,16 +1918,16 @@ export class Home extends DurableObject<Env> {
 
   // ---------------------------------------------------------------- Discord (v1.5 ticket 05)
 
-  private discordAt: DiscordAtHome | undefined
-  private get discord(): DiscordAtHome {
-    this.discordAt ??= new DiscordAtHome(this.ctx.storage.sql, (memberId) => this.discordBot(memberId), this.connectorFetch(), async (message, ownerId) => { await this.discordReceived(message, ownerId) }, async (at) => {
+  private discordAt: DiscordAtSpace | undefined
+  private get discord(): DiscordAtSpace {
+    this.discordAt ??= new DiscordAtSpace(this.ctx.storage.sql, (memberId) => this.discordBot(memberId), this.connectorFetch(), async (message, ownerId) => { await this.discordReceived(message, ownerId) }, async (at) => {
       const current = await this.ctx.storage.getAlarm()
       if (current === null || current > at) await this.ctx.storage.setAlarm(at)
     }, () => this.discordBots())
     return this.discordAt
   }
 
-  /** The bot token of a Member's Discord connection (their own, or one shared with the Home). */
+  /** The bot token of a Member's Discord connection (their own, or one shared with the Space). */
   private async discordBot(memberId: string | null): Promise<BotConnection | null> {
     // For the gateway (no Member): any Member's Discord bot; for a Robot's reply: its owner's own or a shared one.
     const owners = memberId === null
@@ -1988,7 +1995,7 @@ export class Home extends DurableObject<Env> {
     void this.discord.ensure().catch(() => undefined)
   }
 
-  /** Post to a Discord channel with the Home's bot (the Channel side of a Robot's reply). */
+  /** Post to a Discord channel with the Space's bot (the Channel side of a Robot's reply). */
   discordPost(memberId: string, channelId: string, text: string, replyTo?: string, files?: readonly DiscordFile[]): Promise<boolean> { return this.discord.post(memberId, channelId, text, replyTo, files) }
 
   /**
@@ -2015,7 +2022,7 @@ export class Home extends DurableObject<Env> {
     await this.discord.ensure().catch((error: unknown) => console.warn('discord gateway failed', error))
   }
 
-  /** The Home's alarm keeps the Discord gateway alive: heartbeats, and reconnects after a drop or a restart. */
+  /** The Space's alarm keeps the Discord gateway alive: heartbeats, and reconnects after a drop or a restart. */
   override async alarm(): Promise<void> {
     await this.remindPeople().catch((error: unknown) => console.warn('reminders not sent', error))
     await this.run(lapseThreads).catch((error: unknown) => console.warn('idle Threads not closed', error))
@@ -2038,7 +2045,7 @@ export class Home extends DurableObject<Env> {
     return (input, init) => fetch(input, init)
   }
 
-  /** A Member's own connections and the ones others share with the Home (cn-qs78). */
+  /** A Member's own connections and the ones others share with the Space (cn-qs78). */
   async connectionsFor(memberId: string): Promise<ConnectionView[]> {
     const own = (await this.env.MEMBER.getByName(memberId).connections()).map((connection) => connectionView(connection, memberId, this.memberName(memberId), memberId))
     const shared = this.pluginsOf.sharedBy(memberId).map(({ ownerId, connection }) => connectionView(connection, ownerId, this.memberName(ownerId), memberId))

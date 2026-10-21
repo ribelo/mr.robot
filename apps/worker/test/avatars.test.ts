@@ -43,7 +43,7 @@ describe('a Member avatar (ux-2ft4, ux-s88l, ux-g4l9)', () => {
     expect((await api(ANNA, '/api/me', { method: 'PATCH', body: { avatarColor: 'red' } })).status).toBe(400)
   })
 
-  it('uploads a picture, serves it to the Home, replaces it and removes it', async () => {
+  it('uploads a picture, serves it to the Space, replaces it and removes it', async () => {
     await api(ANNA, '/api/me', { method: 'PATCH', body: { avatarColor: '#112233' } })
     const anna = await me()
     const first = await upload(PNG, 'image/png')
@@ -58,7 +58,7 @@ describe('a Member avatar (ux-2ft4, ux-s88l, ux-g4l9)', () => {
     expect(served.headers.get('cache-control')).toBe('private, max-age=300')
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG)
 
-    // Another Member of the Home sees it too, in the Admin members table and as the picture.
+    // Another Member of the Space sees it too, in the Admin members table and as the picture.
     await api(ANNA, '/api/admin/members', { body: { email: BEN } })
     await api(BEN, '/api/me')
     expect((await picture(BEN, anna.id, firstKey)).status).toBe(200)
@@ -109,11 +109,11 @@ describe('a Robot avatar seed (ux-0zm6, ux-h0s4, ux-4fgy)', () => {
 
   it('uses the id of a Robot stored before seeds existed, and keeps a seed drawn with Another look', async () => {
     const id = await newRobot()
-    // As stored before v1.12: no seed in the Robot's config or in the Home's registry.
+    // As stored before v1.12: no seed in the Robot's config or in the Space's registry.
     await runInDurableObject(env.ROBOT.getByName(id), async (_robot, state) => {
       state.storage.sql.exec("UPDATE robot SET v = json_remove(v, '$.identity.avatarSeed') WHERE k = 'config'")
     })
-    await runInDurableObject(env.HOME.getByName('home'), async (_home, state) => {
+    await runInDurableObject(env.SPACE.getByName('home'), async (_home, state) => {
       state.storage.sql.exec("UPDATE robot SET identity = json_remove(identity, '$.avatarSeed') WHERE id = ?", id)
     })
     expect((await summary(id)).identity.avatarSeed).toBe(id)

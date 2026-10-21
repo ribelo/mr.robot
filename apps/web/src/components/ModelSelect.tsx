@@ -16,7 +16,7 @@ const key = (option: { provider: string; model: string }) => `${option.provider}
 /**
  * A searchable model combobox grouped by Provider (rb-…, v1.1 ticket 07): typing filters by model
  * name and Provider. A Provider the person has not connected stays visible but disabled, labelled
- * with where to connect it, so a missing model explains itself. A Provider the Home admin switched
+ * with where to connect it, so a missing model explains itself. A Provider the Space admin switched
  * off (`disabledProviders`, ux-xsnr) is not offered; a value on it says so.
  */
 export function ModelSelect({ value, models, unavailable, disabledProviders = [], onChange }: {

@@ -6,7 +6,7 @@
 import type { Sender, WakeupKind } from '@mr-robot/protocol'
 import type { Delivery, Wakeup } from './store.ts'
 
-/** Mr. Robot's id for a Member (home.ts bootstrapMrRobot). */
+/** Mr. Robot's id for a Member (space.ts bootstrapMrRobot). */
 export const mrRobotIdOf = (memberId: string): string => `mr-robot-${memberId}`
 
 export interface DeliveryInput {

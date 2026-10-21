@@ -64,7 +64,7 @@ export interface RobotConfig {
   readonly codeMode: boolean
   /** Absent in Robots created before the setting existed: off. */
   readonly wakeOnScreenNotifications?: boolean
-  /** Absent or null: the Home default backend. */
+  /** Absent or null: the Space default backend. */
   readonly browserBackend?: BrowserBackend | null
   /** The Discord channel this Robot talks in (cn-y1ac); absent or null: none. */
   readonly discordChannel?: string | null
@@ -77,13 +77,13 @@ export interface RobotConfig {
   readonly cacheWarming?: boolean
   readonly idleCompaction?: boolean
   readonly idleCompactionFloorTokens?: number
-  /** Auto review (v1.14 ticket 08): off when absent; the reviewer route, or null for the Home default. */
+  /** Auto review (v1.14 ticket 08): off when absent; the reviewer route, or null for the Space default. */
   readonly autoReview?: boolean
   readonly reviewer?: ModelChoice | null
   /** v1.16 (ob-5nvd): Tasks wait for, or fail on, an offline Host the Robot holds a facet on; off when absent. */
   readonly requiresHosts?: boolean
   readonly notifications: NotificationSettings
-  /** The Robot's own monthly spend limit, or the Home's (ux-q8ve). */
+  /** The Robot's own monthly spend limit, or the Space's (ux-q8ve). */
   readonly spendLimit: RobotSpendLimit
   /** The owner's profile zone, kept current by the Member's fan-out (Robot.timeZoneChanged); never set by hand. */
   readonly timeZone: string
@@ -179,7 +179,7 @@ export interface ThreadCard {
 
 export type NoticeCard = TaskCard | ThreadCard | StoredRoutineCard
 
-/** This chief's copy of a Thread: the state the Home last told it, and the messages since the owner last let it go on (ch-408z). */
+/** This chief's copy of a Thread: the state the Space last told it, and the messages since the owner last let it go on (ch-408z). */
 export interface ThreadCopy {
   readonly view: ThreadView
   readonly windowCount: number
@@ -199,7 +199,7 @@ const SCHEMA_VERSION = 27
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
 
-/** The config's spend limit as a typed value (v1.12, ux-ommv): null is the Home's, 0 is no limit. */
+/** The config's spend limit as a typed value (v1.12, ux-ommv): null is the Space's, 0 is no limit. */
 function typedSpendLimit(sql: SqlStorage): void {
   const row = sql.exec<{ v: string }>("SELECT v FROM robot WHERE k = 'config'").toArray()[0]
   if (row === undefined) return
@@ -254,8 +254,8 @@ function renameComputerToBox(sql: SqlStorage): void {
 }
 
 /**
- * A Robot on a removed browser backend follows the Home default (v1.16 ticket 08, ob-l24v), which is Browser Rendering after the
- * Home's own migration. A session left open on the removed backend is forgotten: nothing runs there any more. Usage rows keep their
+ * A Robot on a removed browser backend follows the Space default (v1.16 ticket 08, ob-l24v), which is Browser Rendering after the
+ * Space's own migration. A session left open on the removed backend is forgotten: nothing runs there any more. Usage rows keep their
  * backend names as history (ob-0c3o).
  */
 function moveOffRemovedBrowsers(sql: SqlStorage): void {
@@ -327,7 +327,7 @@ const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
   23: [closeAsksForRemovedTools],
   // Every Member's Mr. Robot had one directory on a shared Host (deep review P8): his own from now on.
   22: [unshareMrRobotDirectory],
-  // Two browsers (v1.16 ticket 08, ob-l24v): a Robot on Container Chrome follows the Home default.
+  // Two browsers (v1.16 ticket 08, ob-l24v): a Robot on Container Chrome follows the Space default.
   20: [moveOffRemovedBrowsers],
   // Jobs run in a place, the Box or a Host (v1.16 ticket 01, ob-rc3b): the Box's job table keeps its rows and learns where they ran.
   21: [
@@ -370,11 +370,11 @@ const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
   ],
   // How a Wake-up reaches the Robot (v1.14, ao-9570): a steer reaches a running Turn, a follow-up waits for its own.
   13: [(sql) => addColumns(sql, 'wakeup', ["delivery TEXT NOT NULL DEFAULT 'followup'"])],
-  // Routines are Tasks at the Home (v1.13 ticket 05): a Robot without any has no Routine tables; the Home takes the others' and drops them.
+  // Routines are Tasks at the Space (v1.13 ticket 05): a Robot without any has no Routine tables; the Space takes the others' and drops them.
   12: [dropEmptyRoutines],
   // The routines tool group became tasks (v1.13, mc-r1aa): the same Grant, by its new name.
   11: ["UPDATE OR REPLACE grant_item SET name = 'tasks' WHERE kind = 'tool' AND name = 'routines'"],
-  // The Task a Turn works on and its attempt at the Home (v1.13, mc-w3cc).
+  // The Task a Turn works on and its attempt at the Space (v1.13, mc-w3cc).
   10: [(sql) => addColumns(sql, 'turn', ['task_id TEXT', 'task_title TEXT', 'attempt_id INTEGER'])],
   // Typed spend limits (v1.12, ux-ommv).
   9: [typedSpendLimit],
@@ -870,7 +870,7 @@ export class RobotStore {
     return row === undefined ? undefined : { view: JSON.parse(row.view) as ThreadView, windowCount: row.window_count }
   }
 
-  /** Take the state the Home sent; the message count only grows, and the pause window is this chief's own. */
+  /** Take the state the Space sent; the message count only grows, and the pause window is this chief's own. */
   saveThread(view: ThreadView, now: number): ThreadCopy {
     const known = this.thread(view.id)
     const next: ThreadView = known === undefined ? view : { ...view, messageCount: Math.max(view.messageCount, known.view.messageCount) }

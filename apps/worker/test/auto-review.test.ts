@@ -112,15 +112,15 @@ describe('Auto review (ao-wkpt, ao-gf33, ao-c8k9, ao-6m9i, ao-hfni, ao-jn6z)', (
     expect(reviewerRequests(id)).toEqual([])
   })
 
-  it('off by default; the Home default reviewer applies to a Robot without its own', async () => {
+  it('off by default; the Space default reviewer applies to a Robot without its own', async () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    expect((await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body.settings).toMatchObject({ autoReview: false, reviewer: null, homeReviewer: null })
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body.settings).toMatchObject({ autoReview: false, reviewer: null, spaceReviewer: null })
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { defaultReviewer: REVIEWER } })
     await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, autoReview: true, grants: { tools: { files: 'allow' } } } })
     await testRobot(body.id).activateForTest()
-    expect((await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body.settings).toMatchObject({ autoReview: true, reviewer: null, homeReviewer: REVIEWER })
+    expect((await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body.settings).toMatchObject({ autoReview: true, reviewer: null, spaceReviewer: REVIEWER })
     requests.delete(body.id)
     await say(body.id, 'save', [{ calls: [write('notes/c.md', 'z')] }, { text: '{"risk":"low","decision":"allow"}' }, { text: 'Saved.' }])
     expect(reviewerRequests(body.id).map((request) => request.model)).toEqual(['stub-reviewer'])

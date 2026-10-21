@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { AdminView, Conversation, Me, TaskPage } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts, wakeOf } from './stub-llm.ts'
-import type { Home as TestHome } from './worker.ts'
+import type { Space as TestSpace } from './worker.ts'
 
 const ANNA = 'anna@example.com'
 const HOUR = 3_600_000
-const home = () => env.HOME.getByName('home') as unknown as DurableObjectStub<TestHome>
+const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
 
 beforeEach(async () => {
   await reset()
@@ -37,10 +37,10 @@ describe('Routines become Tasks (v1.13 ticket 05)', () => {
       { id: 'schedule-2', name: 'Once', prompt: 'Book the table.', record: { kind: 'at', title: 'Once', prompt: 'Book the table.', scheduledAt: new Date(ran).toISOString() }, nextRun: null, runs: [{ startedAt: ran, outcome: 'ok', firstLine: 'Booked.' }] },
       { id: 'schedule-3', name: 'Paused pulse', prompt: 'Check prices.', record: { kind: 'every', title: 'Paused pulse', prompt: 'Check prices.', scheduledAt: new Date(next).toISOString(), everySeconds: 600 }, nextRun: null, paused: true, runs: [] },
     ])
-    await home().unmigrateForTest(id)
+    await space().unmigrateForTest(id)
     expect((await api<AdminView>(ANNA, '/api/admin')).body.robotsToMigrate).toBe(1)
 
-    await home().migrateRoutines()
+    await space().migrateRoutines()
     expect((await api<AdminView>(ANNA, '/api/admin')).body.robotsToMigrate).toBe(0)
     expect(await testRobot(id).hasRoutineTablesForTest()).toBe(false)
     const tasks = (await api<TaskPage>(ANNA, `/api/tasks?assignee=robot:${id}&state=all`)).body.tasks
@@ -66,8 +66,8 @@ describe('Routines become Tasks (v1.13 ticket 05)', () => {
     expect((await api<TaskPage>(ANNA, `/api/tasks?assignee=robot:${id}&state=all`)).body.tasks.find((task) => task.id === 'schedule-1')!.attempts[0]).toMatchObject({ outcome: 'ok', firstLine: 'Digest sent again.' })
 
     // Migrating again changes nothing.
-    await home().unmigrateForTest(id)
-    await home().migrateRoutines()
+    await space().unmigrateForTest(id)
+    await space().migrateRoutines()
     expect((await api<TaskPage>(ANNA, `/api/tasks?assignee=robot:${id}&state=all`)).body.tasks).toHaveLength(3)
   })
 })

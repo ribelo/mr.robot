@@ -4,11 +4,11 @@ import type { Conversation, Me, ProposalView, RobotSummary, TaskView } from '@mr
 import { frame } from '@mr-robot/host-protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
-import type { Home as TestHome, Member as TestMember } from './worker.ts'
+import type { Space as TestSpace, Member as TestMember } from './worker.ts'
 
 const ANNA = 'anna@example.com'
 let annaId = ''
-const home = () => env.HOME.getByName('home') as unknown as DurableObjectStub<TestHome>
+const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 beforeEach(async () => {
@@ -83,7 +83,7 @@ async function needsYou(): Promise<string[]> {
 
 /** The recurring Task's next occurrence is due now, and the Robot's alarm rings. */
 async function occurrence(id: string): Promise<void> {
-  await home().backdateTasksForTest(16 * 60_000)
+  await space().backdateTasksForTest(16 * 60_000)
   await runDurableObjectAlarm(env.ROBOT.getByName(id))
   await settle(id)
 }

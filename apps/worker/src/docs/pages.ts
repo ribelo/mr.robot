@@ -40,7 +40,7 @@ Only the owner shares a Page. A Robot has no tool for it. See "Shared Pages" bel
 
 ## Shared Pages
 
-The Share switch in the reading view makes a public link: https://<host>/p/<token>. Anyone with the link sees the Page's title, its content and a PDF, without signing in, and nothing else of the app. The token is random. The Home keeps only its hash.
+The Share switch in the reading view makes a public link: https://<host>/p/<token>. Anyone with the link sees the Page's title, its content and a PDF, without signing in, and nothing else of the app. The token is random. The Space keeps only its hash.
 
 - Stop sharing revokes the link at once. The address then answers "not found".
 - The profile lists every shared Page of the owner, with its link and Stop sharing.

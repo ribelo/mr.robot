@@ -13,7 +13,7 @@ import * as Schema from 'effect/Schema'
 export const BOX_TOKEN_PATH = '/run/mr-robot/token'
 export const BOX_ORIGIN_PATH = '/run/mr-robot/origin'
 
-/** The ids Home gives Robots: "r-<uuid>", and "mr-robot-<member id>" for Mr. Robot (home.ts, createRobot and bootstrapMrRobot). */
+/** The ids Space gives Robots: "r-<uuid>", and "mr-robot-<member id>" for Mr. Robot (space.ts, createRobot and bootstrapMrRobot). */
 const ROBOT_ID = '(?:r|mr-robot-m)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
 /** "<robot id>.<token id: 32 random bytes in hex>.<HMAC-SHA256 of '<robot id>.<token id>' under BOX_TOKEN_KEY, in hex>". */
@@ -28,7 +28,7 @@ const bytesOfHex = (text: string): Uint8Array<ArrayBuffer> => Uint8Array.from(te
 const signingKey = (key: string): Promise<CryptoKey> =>
   crypto.subtle.importKey('raw', new TextEncoder().encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
 
-/** A new token for a Robot's Box, signed with `key` (the Worker's BOX_TOKEN_KEY). A Robot id Home does not make is a defect. */
+/** A new token for a Robot's Box, signed with `key` (the Worker's BOX_TOKEN_KEY). A Robot id Space does not make is a defect. */
 export async function mintBoxToken(key: string, robotId: string): Promise<BoxToken> {
   const signed = `${robotId}.${hex(crypto.getRandomValues(new Uint8Array(32)))}`
   const signature = new Uint8Array(await crypto.subtle.sign('HMAC', await signingKey(key), new TextEncoder().encode(signed)))

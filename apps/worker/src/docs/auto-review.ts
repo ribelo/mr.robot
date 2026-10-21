@@ -23,7 +23,7 @@ Auto review is a Robot setting. When it is on, a reviewer model checks each tool
 ## The reviewer's model
 
 - The owner chooses the reviewer's provider, model and thinking effort in the Robot's Advanced settings.
-- Without a choice, the Robot uses the Home default, which the Home admin sets in Admin. Without a Home default, the Robot's own model reviews.
+- Without a choice, the Robot uses the Space default, which the Space admin sets in Admin. Without a Space default, the Robot's own model reviews.
 - A cheap model is enough: the reviewer reads one call and answers with a short JSON object.
 - Mr. Robot can change the switch and the reviewer of the Robots he directs.
 

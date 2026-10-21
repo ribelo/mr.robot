@@ -70,7 +70,7 @@ async function syncLibrary() {
   return { synced: synced.body.synced, authorization: () => authorization }
 }
 
-describe('the Home skill library', () => {
+describe('the Space skill library', () => {
   it('syncs the configured Git repository and lists its skills (robot-7qpi, robot-qjvu)', async () => {
     const { synced, authorization } = await syncLibrary()
     expect(synced.sort()).toEqual(['sage', 'tdd'])

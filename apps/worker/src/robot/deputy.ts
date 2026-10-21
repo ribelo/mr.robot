@@ -9,7 +9,7 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import { DeputySettingsPatch, type ConnectionView, type RobotSettings, type SettingsPatch } from '@mr-robot/protocol'
 import type { DeputyHost, RobotListing } from '../agent/tools/deputy.ts'
-import { HOME_ID } from '../env.ts'
+import { SPACE_ID } from '../env.ts'
 import { conflict, invalid, notFound, type DurableError } from '../platform/durable.ts'
 import { normalizePath } from '../workspace/workspace.ts'
 import { modelRefusal } from './model-choice.ts'
@@ -74,7 +74,7 @@ const config = Effect.gen(function* () {
 /**
  * The Robot a deputy call is about. Mr. Robot only; never himself, never another Mr. Robot; the owner must
  * reach the target (the check robot_propose_grants makes). A change also needs the owner to own it,
- * as in the app: a Robot someone else shared with the Home can be read, not changed.
+ * as in the app: a Robot someone else shared with the Space can be read, not changed.
  */
 /** Also the Robot a Task tool with robot_id works as (v1.13 ticket 04). */
 export const reach = (robotId: string, change: boolean) => Effect.gen(function* () {
@@ -82,11 +82,11 @@ export const reach = (robotId: string, change: boolean) => Effect.gen(function* 
   const current = yield* config
   if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot is a deputy')
   if (robotId === current.id) return yield* invalid('the deputy tools are for the other Robots, not for you')
-  const home = platform.env.HOME.getByName(HOME_ID)
-  const access = yield* promise(() => home.access(current.ownerId, robotId))
-  const entry = access === null ? undefined : yield* promise(() => home.entry(robotId))
+  const space = platform.env.SPACE.getByName(SPACE_ID)
+  const access = yield* promise(() => space.access(current.ownerId, robotId))
+  const entry = access === null ? undefined : yield* promise(() => space.entry(robotId))
   if (access === null || entry === undefined || entry.kind !== 'robot') return yield* invalid(`no Robot ${robotId} your owner can reach`)
-  if (change && access !== 'owner') return yield* invalid(`${entry.identity.name} belongs to someone else in the Home: you may read it, only its owner changes it`)
+  if (change && access !== 'owner') return yield* invalid(`${entry.identity.name} belongs to someone else in the Space: you may read it, only its owner changes it`)
   return { current, entry, by: current.identity.name, robot: platform.env.ROBOT.getByName(robotId) }
 })
 
@@ -94,7 +94,7 @@ export const list = Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const current = yield* config
   if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot is a deputy')
-  const reachable = (yield* promise(() => platform.env.HOME.getByName(HOME_ID).reachable(current.ownerId))).filter((robot) => robot.kind === 'robot')
+  const reachable = (yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).reachable(current.ownerId))).filter((robot) => robot.kind === 'robot')
   return yield* Effect.forEach(reachable, (robot) => Effect.map(
     ask(platform.env.ROBOT.getByName(robot.id), 'settings').pipe(Effect.map((settings) => settings.model), Effect.catch(() => Effect.succeed(null))),
     (model): RobotListing => ({
@@ -140,23 +140,23 @@ export const grants = (robotId: string) => Effect.gen(function* () {
 export const settings = (robotId: string) => Effect.gen(function* () {
   const { current, robot } = yield* reach(robotId, false)
   const platform = yield* RobotPlatform
-  const [shown, models, accounts] = yield* Effect.all([ask(robot, 'settings'), promise(() => platform.env.HOME.getByName(HOME_ID).models(current.ownerId)), promise(() => platform.env.HOME.getByName(HOME_ID).accountsFor(current.ownerId))])
+  const [shown, models, accounts] = yield* Effect.all([ask(robot, 'settings'), promise(() => platform.env.SPACE.getByName(SPACE_ID).models(current.ownerId)), promise(() => platform.env.SPACE.getByName(SPACE_ID).accountsFor(current.ownerId))])
   return {
     settings: shown,
     models: models.map((option) => ({ provider: option.provider, model: option.model, label: option.label })),
-    // What a chain entry may name (pa-w81r): the owner's accounts and those shared with the Home.
+    // What a chain entry may name (pa-w81r): the owner's accounts and those shared with the Space.
     accounts: [...accounts.mine, ...accounts.shared].map((account) => ({ account: account.id, owner: account.ownerId, provider: account.provider, label: account.label, status: account.status })),
   }
 })
 
 // ------------------------------------------------------------------ Connections (v1.15 ticket 08, gb-q55x)
 
-/** The Connections the owner can use: their own and the ones shared with the Home. */
+/** The Connections the owner can use: their own and the ones shared with the Space. */
 export const connections = Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const current = yield* config
   if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot is a deputy')
-  return yield* promise((): Promise<ConnectionView[]> => platform.env.HOME.getByName(HOME_ID).connectionsFor(current.ownerId))
+  return yield* promise((): Promise<ConnectionView[]> => platform.env.SPACE.getByName(SPACE_ID).connectionsFor(current.ownerId))
 })
 
 /** Set the instructions of one of the owner's own Connections; one shared by someone else is theirs to change. */

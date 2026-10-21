@@ -21,9 +21,9 @@ export interface PastedValues {
   readonly values: Readonly<Record<string, string>>
 }
 
-/** Why a connection may not be shared with the Home, or undefined when it may (ux-bk91). */
+/** Why a connection may not be shared with the Space, or undefined when it may (ux-bk91). */
 export function sharingRefusal(kind: ConnectorKind, shared: boolean): string | undefined {
-  return shared && actsAsPerson(kind) ? `a ${connectorPlugin(kind)?.title ?? kind} connection acts as you, so it cannot be shared with the Home` : undefined
+  return shared && actsAsPerson(kind) ? `a ${connectorPlugin(kind)?.title ?? kind} connection acts as you, so it cannot be shared with the Space` : undefined
 }
 
 export const connectPastedValues = (env: Env, memberId: string, kind: string, paste: PastedValues): Effect.Effect<OwnConnection, PasteRefused> => Effect.gen(function* () {

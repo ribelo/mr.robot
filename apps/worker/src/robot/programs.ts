@@ -10,13 +10,13 @@ import type { DirectoryEntry } from '../agent/tools/messaging.ts'
 import type { HostAccessByFacet, NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch } from '@mr-robot/protocol'
 import { HOST_ACCESS, parseHostAccess } from './host-access.ts'
 import type { MemberFileName } from '../member/member.ts'
-import { currentMonth } from '../home/home.ts'
-import { HOME_ID, type Env } from '../env.ts'
+import { currentMonth } from '../space/space.ts'
+import { SPACE_ID, type Env } from '../env.ts'
 import { chainOf, modelOf, withModel } from './chain.ts'
 import { conflict, invalid, notFound } from '../platform/durable.ts'
 import { chiefGrants, type ProposalRow, type RobotConfig, type RobotStore, type WakeupKind } from './store.ts'
 import { setupGrants } from '../agent/catalog.ts'
-import { effectiveSpendLimit, emptyGrants, GRANT_FIELDS, grantSetFrom, overlayGrants, usableNames, type GrantItemRef, type GrantSet, type HomeSpendLimit } from '@mr-robot/protocol'
+import { effectiveSpendLimit, emptyGrants, GRANT_FIELDS, grantSetFrom, overlayGrants, usableNames, type GrantItemRef, type GrantSet, type SpaceSpendLimit } from '@mr-robot/protocol'
 import { THREAD_PAUSE_AT, timeLabel, type AskAnswerLabel } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
@@ -76,7 +76,7 @@ export interface RobotPlatformShape {
   readonly env: Env
   /** Re-plan the alarm (Tasks, outbox, heartbeat). */
   rearm(): Effect.Effect<void>
-  /** Tell open views and the Home that something visible changed. */
+  /** Tell open views and the Space that something visible changed. */
   changed(): Effect.Effect<void>
   /** Make sure the wake-up queue is being worked off. */
   drain(): Effect.Effect<void>
@@ -212,7 +212,7 @@ export const directory = Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const current = yield* config
   const granted = new Set(usableNames(store.grants().recipients))
-  const reachable = yield* promise(() => platform.env.HOME.getByName(HOME_ID).reachable(current.ownerId))
+  const reachable = yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).reachable(current.ownerId))
   return reachable
     .filter((robot) => granted.has(robot.id) && robot.id !== current.id && robot.status === 'active')
     .map((robot): DirectoryEntry => ({ id: robot.id, name: robot.identity.name, description: robot.identity.description, availability: robot.fleetState }))
@@ -309,9 +309,9 @@ export const receive = (message: RobotMessage) => Effect.gen(function* () {
     // A Thread message (v1.9): the chain limit does not apply, the pause at 20 does.
     const known = store.thread(message.threadId)
     if (known === undefined || known.view.other.robotId !== message.from.robotId) return { accepted: false, reason: 'thread-closed' } as ReceiveResult
-    // The "opened" note may come after the first message: a copy still invited asks the Home, which opens a Thread only when both owners accepted.
+    // The "opened" note may come after the first message: a copy still invited asks the Space, which opens a Thread only when both owners accepted.
     const copy = known.view.state === 'invited'
-      ? yield* Effect.promise(() => platform.env.HOME.getByName(HOME_ID).threadView(message.threadId, current.id)).pipe(Effect.map((view) => (view === undefined ? known : store.saveThread({ ...view, messageCount: known.view.messageCount }, Date.now()))))
+      ? yield* Effect.promise(() => platform.env.SPACE.getByName(SPACE_ID).threadView(message.threadId, current.id)).pipe(Effect.map((view) => (view === undefined ? known : store.saveThread({ ...view, messageCount: known.view.messageCount }, Date.now()))))
       : known
     if (copy.view.state !== 'open') return { accepted: false, reason: 'thread-closed' } as ReceiveResult
     if (store.pendingWakeups() >= MAX_QUEUED_WAKEUPS) return { accepted: false, reason: 'queue-full' } as ReceiveResult
@@ -354,27 +354,27 @@ export const createRobot = (brief: string) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const current = yield* config
   if (current.kind !== 'mr-robot') return yield* invalid('only Mr. Robot creates Robots')
-  const entry = yield* Effect.tryPromise({ try: () => platform.env.HOME.getByName(HOME_ID).createRobot(current.ownerId, brief), catch: (error) => invalid(error instanceof Error ? error.message : String(error)) })
+  const entry = yield* Effect.tryPromise({ try: () => platform.env.SPACE.getByName(SPACE_ID).createRobot(current.ownerId, brief), catch: (error) => invalid(error instanceof Error ? error.message : String(error)) })
   return { id: entry.id, status: 'created; it is interviewing your owner in its own Conversation and will propose its Grants there' }
 })
 
 // ------------------------------------------------------------------ settings and Grants (robot-vqtw)
 
-/** What "the Home's" is for this Robot now: the Home's per-Robot limit and its default reviewer. */
-export interface HomeDefaults {
-  readonly robotSpendLimit: HomeSpendLimit
+/** What "the Space's" is for this Robot now: the Space's per-Robot limit and its default reviewer. */
+export interface SpaceDefaults {
+  readonly robotSpendLimit: SpaceSpendLimit
   readonly defaultReviewer: ModelChoice | null
 }
 
-export const homeDefaults = Effect.gen(function* () {
+export const spaceDefaults = Effect.gen(function* () {
   const platform = yield* RobotPlatform
-  const settings = yield* promise(() => platform.env.HOME.getByName(HOME_ID).settings())
-  return { robotSpendLimit: settings.robotSpendLimit, defaultReviewer: settings.defaultReviewer } as HomeDefaults
+  const settings = yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).settings())
+  return { robotSpendLimit: settings.robotSpendLimit, defaultReviewer: settings.defaultReviewer } as SpaceDefaults
 })
 
-/** The settings, with the Home's defaults already read. */
-export const settingsWith = (defaults: HomeDefaults) => Effect.gen(function* () {
-  const home = defaults.robotSpendLimit
+/** The settings, with the Space's defaults already read. */
+export const settingsWith = (defaults: SpaceDefaults) => Effect.gen(function* () {
+  const space = defaults.robotSpendLimit
   const store = yield* RobotState
   const current = yield* config
   return {
@@ -394,18 +394,18 @@ export const settingsWith = (defaults: HomeDefaults) => Effect.gen(function* () 
     // Discord is on by having a channel; an old 'discord' entry in the list means nothing.
     notifications: { ...current.notifications, channels: current.notifications.channels.filter((channel) => channel !== 'discord') },
     spendLimit: current.spendLimit,
-    homeSpendLimit: home,
+    spaceSpendLimit: space,
     ...idleSettings(current),
     autoReview: current.autoReview === true,
     requiresHosts: current.requiresHosts === true,
     reviewer: current.reviewer ?? null,
-    homeReviewer: defaults.defaultReviewer,
+    spaceReviewer: defaults.defaultReviewer,
     subagentModels: store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? [],
     hostAccess: store.get<HostAccessByFacet>(HOST_ACCESS) ?? {},
   } as RobotSettings
 })
 
-export const settings = Effect.flatMap(homeDefaults, settingsWith)
+export const settings = Effect.flatMap(spaceDefaults, settingsWith)
 
 /** Mr. Robot's recipients follow what his Member can reach (robot-70kf). */
 export const setRecipients = (robotIds: readonly string[]) => Effect.gen(function* () {
@@ -428,7 +428,7 @@ export const checkLimits = Effect.gen(function* () {
   const platform = yield* RobotPlatform
   const current = yield* config
   if (current.status !== 'active' && !(current.status === 'blocked' && current.blockedReason === 'limit')) return false
-  const limits = yield* promise(() => platform.env.HOME.getByName(HOME_ID).limitsFor(current.ownerId))
+  const limits = yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).limitsFor(current.ownerId))
   const robotLimit = effectiveSpendLimit(current.spendLimit, limits.robot).limit
   const spent = store.usage(currentMonth()).costUsd
   const reason = robotLimit.kind === 'usd' && spent >= robotLimit.amount
@@ -469,7 +469,7 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(before.compactionInstruction !== after.compactionInstruction, 'changed the compaction instruction.')
   note((before.discordChannel ?? null) !== (after.discordChannel ?? null), after.discordChannel ? `set the Discord channel to ${after.discordChannel}.` : 'removed the Discord channel.')
   note((before.discordProactive !== false) !== (after.discordProactive !== false), `changed Discord proactive messages to ${after.discordProactive !== false ? 'on' : 'off'}.`)
-  note((before.browserBackend ?? null) !== (after.browserBackend ?? null), `changed the browser backend to ${after.browserBackend ?? 'the Home default'}.`)
+  note((before.browserBackend ?? null) !== (after.browserBackend ?? null), `changed the browser backend to ${after.browserBackend ?? 'the Space default'}.`)
   note(before.notifications.enabled !== after.notifications.enabled, `switched notifications ${after.notifications.enabled ? 'on' : 'off'}.`)
   note(before.notifications.channels.join(',') !== after.notifications.channels.join(','), `changed notification channels to ${after.notifications.channels.join(', ')}.`)
   note((before.wakeOnScreenNotifications === true) !== (after.wakeOnScreenNotifications === true), `switched waking on screen notifications ${after.wakeOnScreenNotifications === true ? 'on' : 'off'}.`)
@@ -479,7 +479,7 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(idleBefore.idleCompactionFloorTokens !== idleAfter.idleCompactionFloorTokens, `changed the idle compaction floor to ${idleAfter.idleCompactionFloorTokens} tokens.`)
   note((before.autoReview === true) !== (after.autoReview === true), `switched Auto review ${after.autoReview === true ? 'on' : 'off'}.`)
   note((before.requiresHosts === true) !== (after.requiresHosts === true), `switched "do not run while any of my Hosts is offline" ${after.requiresHosts === true ? 'on' : 'off'}.`)
-  note(JSON.stringify(before.reviewer ?? null) !== JSON.stringify(after.reviewer ?? null), after.reviewer == null ? 'set the reviewer to the Home default.' : `set the reviewer to ${after.reviewer.model} (${after.reviewer.provider}), thinking ${after.reviewer.effort}.`)
+  note(JSON.stringify(before.reviewer ?? null) !== JSON.stringify(after.reviewer ?? null), after.reviewer == null ? 'set the reviewer to the Space default.' : `set the reviewer to ${after.reviewer.model} (${after.reviewer.provider}), thinking ${after.reviewer.effort}.`)
   return notes
 }
 
@@ -492,7 +492,7 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
   const chain = patch.chain !== undefined ? [...patch.chain] : patch.model !== undefined ? withModel(chainOf(before), active, patch.model) : undefined
   if (chain !== undefined) {
     if (chain.length === 0) return yield* invalid('a Robot needs at least one model in its chain')
-    const refusal = yield* promise(() => platform.env.HOME.getByName(HOME_ID).chainRefusal(before.ownerId, chain))
+    const refusal = yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).chainRefusal(before.ownerId, chain))
     if (refusal !== null) return yield* invalid(refusal)
   }
   // Roots are checked against the Robot's directory on its Hosts, so its name is chosen now if no Host call chose it yet.
@@ -538,10 +538,10 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
     for (const text of notes) store.addNotice(after.liveSessionId, storedLength(store.sql, after.liveSessionId), text, Date.now())
   }
   yield* platform.changed()
-  // The Home routes Discord messages by channel, so it hears about the mapping (cn-y1ac).
+  // The Space routes Discord messages by channel, so it hears about the mapping (cn-y1ac).
   if (patch.discordChannel !== undefined) {
     const current = yield* config
-    yield* promise(() => platform.env.HOME.getByName(HOME_ID).discordChannelChanged(current.id, current.discordChannel ?? null))
+    yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).discordChannelChanged(current.id, current.discordChannel ?? null))
   }
   if (patch.spendLimit !== undefined) yield* checkLimits
   if (patch.wakeOnScreenNotifications === false) yield* platform.stopWatching()
@@ -634,15 +634,15 @@ const installDefinitionTasks = Effect.gen(function* () {
   const current = yield* config
   const definition = store.get<InstalledDefinition>(DEFINITION)
   if (definition === undefined || definition.tasks.tasks.length === 0) return
-  const home = platform.env.HOME.getByName(HOME_ID)
+  const space = platform.env.SPACE.getByName(SPACE_ID)
   const caller = { kind: 'robot' as const, robotId: current.id, ownerId: current.ownerId, actor: { kind: 'robot' as const, robotId: current.id, name: current.identity.name, avatarColor: current.identity.avatarColor, avatarSeed: current.identity.avatarSeed } }
   const made: string[] = []
   for (const task of definition.tasks.tasks) {
     const timing = task.timing.kind === 'recurring' ? { kind: 'recurring' as const, schedule: task.timing.schedule, timeZone: task.timing.timeZone } : { kind: 'unscheduled' as const }
     const instructions = task.timing.kind === 'scheduled' ? `${task.instructions}\n\n(The definition planned it for ${task.timing.at}.)` : task.instructions
-    const created = yield* Effect.promise(() => home.createTask(caller, { title: task.title, instructions, assignee: { kind: 'robot', robotId: current.id }, timing }).catch(() => undefined))
+    const created = yield* Effect.promise(() => space.createTask(caller, { title: task.title, instructions, assignee: { kind: 'robot', robotId: current.id }, timing }).catch(() => undefined))
     if (created === undefined) continue
-    if (task.timing.kind === 'recurring') yield* Effect.promise(() => home.pauseTask(caller, created.id, true).catch(() => undefined))
+    if (task.timing.kind === 'recurring') yield* Effect.promise(() => space.pauseTask(caller, created.id, true).catch(() => undefined))
     made.push(`- ${task.title} (${created.id})${task.timing.kind === 'recurring' ? ', paused' : task.timing.kind === 'scheduled' ? `, no moment yet (planned for ${task.timing.at})` : ''}`)
   }
   if (made.length > 0) store.set(DEFINITION_TASKS_NOTE, [`You were installed from the definition "${definition.title}". Its Tasks are yours now and are not running yet:`, ...made, 'Ask your owner once, in one message, which of them to enable. Then resume each chosen one with task_pause (paused false) or give it its moment with task_update. Do not ask again.'].join('\n'))
@@ -674,7 +674,7 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
       if (proposal.skill === null) return
       const visibility = proposal.payload['visibility'] === 'private' ? 'private' : 'home'
       yield* Effect.tryPromise({
-        try: () => platform.env.HOME.getByName(HOME_ID).publishSkill(ownerId, proposal.skill!.name, proposal.skill!.description, String(proposal.payload['content'] ?? ''), visibility),
+        try: () => platform.env.SPACE.getByName(SPACE_ID).publishSkill(ownerId, proposal.skill!.name, proposal.skill!.description, String(proposal.payload['content'] ?? ''), visibility),
         catch: (error) => conflict(error instanceof Error ? error.message : String(error)),
       })
       return
@@ -689,7 +689,8 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
     case 'member-file': {
       if (proposal.file === null) return
       const file = proposal.file
-      if (file.name === 'HOME.md') yield* promise(() => platform.env.HOME.getByName(HOME_ID).setHomeMemory(file.content, 'your owner (approved)', null))
+      // An edit proposed before v1.18 names the file HOME.md (ticket 09).
+      if (file.name === 'SPACE.md' || file.name === 'HOME.md') yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).setSpaceMemory(file.content, 'your owner (approved)', null))
       else yield* promise(() => platform.env.MEMBER.getByName(ownerId).writeFile(file.name as MemberFileName, file.content, 'your owner (approved)'))
       return
     }
@@ -705,7 +706,7 @@ export type AnswerResult =
  * superseded or already-answered proposal fails. Approval applies the stored payload exactly.
  */
 /**
- * A Thread Ask was answered (v1.9): an invitation goes to the Home, which opens the Thread when both owners accepted
+ * A Thread Ask was answered (v1.9): an invitation goes to the Space, which opens the Thread when both owners accepted
  * and ends it on a decline; approving a "continue" Ask starts another window of messages. A Thread that ended meanwhile is only noted.
  */
 const threadAnswered = (proposal: ProposalRow, approved: boolean) => Effect.gen(function* () {
@@ -718,7 +719,7 @@ const threadAnswered = (proposal: ProposalRow, approved: boolean) => Effect.gen(
     return
   }
   const current = yield* config
-  const told = yield* Effect.tryPromise({ try: () => platform.env.HOME.getByName(HOME_ID).threadAnswer(ask.id, current.id, approved, ask.scope), catch: (error) => error instanceof Error ? error.message : String(error) }).pipe(Effect.result)
+  const told = yield* Effect.tryPromise({ try: () => platform.env.SPACE.getByName(SPACE_ID).threadAnswer(ask.id, current.id, approved, ask.scope), catch: (error) => error instanceof Error ? error.message : String(error) }).pipe(Effect.result)
   if (told._tag === 'Failure') store.addNotice(current.liveSessionId, storedLength(store.sql, current.liveSessionId), `Thread "${ask.topic}": ${String(told.failure)}`, Date.now())
 })
 
@@ -974,13 +975,13 @@ export const answerHelp = (requestId: string, text: string, answerer: HelpAnswer
 
 // ------------------------------------------------------------------ secrets (robot-0bde)
 
-/** secret.get: a granted name only, resolved from the owner or the Home. */
+/** secret.get: a granted name only, resolved from the owner or the Space. */
 export const secret = (name: string) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   if (!store.mayUse('secret', name)) return yield* invalid(`The secret "${name}" is not granted to you. Granted: ${usableNames(store.effectiveGrants().secrets).join(', ') || 'none'}. Ask with propose_grants.`)
   const ownerId = (yield* config).ownerId
-  const entry = yield* promise(() => platform.env.HOME.getByName(HOME_ID).resolveLogin(ownerId, name))
+  const entry = yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).resolveLogin(ownerId, name))
   if (entry === null) return yield* notFound(`The secret "${name}" no longer exists`)
   // A website login is filled into the page, not read (rb-e1ic); only entries marked "allow reading" give their value.
   if (!entry.allowRead) return yield* invalid(`"${name}" is a website login: use login_fill on its login page instead of reading it.`)
@@ -1143,7 +1144,7 @@ export const QUIET_DUE = 'quiet-due'
 /** The kv key of the idle plan (idle.ts): the moments left for warming or idle compaction. */
 export const IDLE_PLAN = 'idle-plan'
 
-/** The Home planned this Robot's earliest due Task. */
+/** The Space planned this Robot's earliest due Task. */
 export const setNextDue = (at: number | null) => Effect.gen(function* () {
   const store = yield* RobotState
   if (store.config() === undefined) return
@@ -1153,7 +1154,7 @@ export const setNextDue = (at: number | null) => Effect.gen(function* () {
 })
 
 /**
- * The moment came: the Home hands out the due Tasks and moves them on; each becomes one Task Wake-up. A Task
+ * The moment came: the Space hands out the due Tasks and moves them on; each becomes one Task Wake-up. A Task
  * whose earlier Wake-up is still queued or running is skipped, so a Task cannot flood its Robot (cd-d14a).
  */
 export const fireTasks = (now: number) => Effect.gen(function* () {
@@ -1162,10 +1163,10 @@ export const fireTasks = (now: number) => Effect.gen(function* () {
   const due = store.get<number>(NEXT_DUE)
   if (due === undefined || due > now) return
   const current = yield* config
-  const home = platform.env.HOME.getByName(HOME_ID)
-  const answer = yield* promise(() => home.dueTasks(current.id))
+  const space = platform.env.SPACE.getByName(SPACE_ID)
+  const answer = yield* promise(() => space.dueTasks(current.id))
   for (const task of answer.tasks) {
-    if (store.taskQueued(task.id)) yield* promise(() => home.taskSkipped(task.id, current.id, 'The previous run had not finished.'))
+    if (store.taskQueued(task.id)) yield* promise(() => space.taskSkipped(task.id, current.id, 'The previous run had not finished.'))
     else yield* startOrHold(task, now)
   }
   if (answer.nextDue === null) store.delete(NEXT_DUE)
@@ -1186,7 +1187,7 @@ interface ParkedTask {
   readonly title: string
   readonly instructions: string
   readonly deadline: number | null
-  /** When the Home handed the occurrence out: the Home drops it once a Turn on the Task started after this (parkedOccurrence). */
+  /** When the Space handed the occurrence out: the Space drops it once a Turn on the Task started after this (parkedOccurrence). */
   readonly takenAt: number
 }
 
@@ -1210,17 +1211,17 @@ const unpark = (store: RobotStore, task: ParkedTask): boolean => {
   return true
 }
 
-/** The Hosts the Robot's owner reaches and whether each is online; null when the Home cannot say. */
+/** The Hosts the Robot's owner reaches and whether each is online; null when the Space cannot say. */
 const knownHosts = (ownerId: string) => Effect.gen(function* () {
   const platform = yield* RobotPlatform
-  const hosts = yield* promise(() => platform.env.HOME.getByName(HOME_ID).hostsFor(ownerId).catch(() => null))
+  const hosts = yield* promise(() => platform.env.SPACE.getByName(SPACE_ID).hostsFor(ownerId).catch(() => null))
   // Named as the Robot calls them, so a failed Task names the Host it waited for (deep review P14b).
   return hosts === null ? null : withDistinctNames(hosts).map((host): KnownHost => ({ id: host.id, name: host.name, online: host.online }))
 })
 
 /**
  * The Hosts that count for the Robot (taskHostFacets), as they are now; a Host that returned leaves the list of reported outages.
- * Null when the setting is off, or when the Home cannot say: then nothing is held back, so a missing answer never stops the Robot.
+ * Null when the setting is off, or when the Space cannot say: then nothing is held back, so a missing answer never stops the Robot.
  */
 const hostsNow = Effect.gen(function* () {
   const store = yield* RobotState
@@ -1242,9 +1243,9 @@ const failWithoutTurn = (task: ParkedTask, gate: Extract<TaskGate, { kind: 'fail
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const current = yield* config
-  const home = platform.env.HOME.getByName(HOME_ID)
-  const started = yield* promise(() => home.attemptStarted(task.id, current.id))
-  if (started !== null) yield* promise(() => home.attemptFinished(started.attemptId, 'failed', gate.line))
+  const space = platform.env.SPACE.getByName(SPACE_ID)
+  const started = yield* promise(() => space.attemptStarted(task.id, current.id))
+  if (started !== null) yield* promise(() => space.attemptFinished(started.attemptId, 'failed', gate.line))
   const { fresh, reported } = outageNotice(gate.offline, store.get<readonly string[]>(HOST_OUTAGES) ?? [])
   if (fresh.length === 0) return
   store.set(HOST_OUTAGES, reported)
@@ -1284,10 +1285,10 @@ export const releaseParked = (now: number) => Effect.gen(function* () {
     return
   }
   const current = yield* config
-  const home = (yield* RobotPlatform).env.HOME.getByName(HOME_ID)
+  const space = (yield* RobotPlatform).env.SPACE.getByName(SPACE_ID)
   for (const entry of parked) {
     // A cancelled, finished, reassigned, rescheduled or already run Task gets no Turn; an edited text is taken as it is now.
-    const task = yield* promise(() => home.parkedOccurrence(entry.id, current.id, entry.takenAt))
+    const task = yield* promise(() => space.parkedOccurrence(entry.id, current.id, entry.takenAt))
     if (task === null) {
       unpark(store, entry)
       continue

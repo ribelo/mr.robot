@@ -45,7 +45,7 @@ export function Pages({ route, me, robots }: { route: Route; me: Me; robots: rea
     case 'admin': return (
       <div className="page">
         <PageHead title="Admin" back={{ page: 'home' }} />
-        {me.role === 'admin' ? <Admin /> : <div className="muted">Only the Home admin sees this page.</div>}
+        {me.role === 'admin' ? <Admin /> : <div className="muted">Only the Space admin sees this page.</div>}
       </div>
     )
     case 'this-computer': return (

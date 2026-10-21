@@ -40,7 +40,7 @@ function routineAction(name: string, args: Record<string, unknown>): TaskAction 
 const ROUTINE_CARD_ACTIONS: Record<StoredRoutineCard['action'], TaskAction> = { created: 'created', updated: 'updated', deleted: 'cancelled', paused: 'paused', resumed: 'resumed' }
 /**
  * The card a Task tool call shows in the Conversation of the Robot that made it (mc-c1aa). A call with robot_id
- * works as another Robot; the Home tells that Robot's Conversation, not this one.
+ * works as another Robot; the Space tells that Robot's Conversation, not this one.
  */
 function taskAction(name: string, args: Record<string, unknown>): TaskAction | undefined {
   if (args['robot_id'] !== undefined) return undefined

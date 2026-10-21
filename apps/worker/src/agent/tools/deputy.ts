@@ -17,7 +17,7 @@ export interface RobotListing {
   readonly model: ModelChoice | null
   readonly lastActiveAt: number
   readonly lastLine: string
-  /** Whose Robot it is; a Robot shared with the Home by someone else can be read but not changed. */
+  /** Whose Robot it is; a Robot shared with the Space by someone else can be read but not changed. */
   readonly owner: string
   readonly mine: boolean
 }
@@ -146,7 +146,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
     }),
     tool<{ robot_id: string } & Record<string, unknown>>({
       name: 'robot_settings_set',
-      description: "Change another Robot's settings. Allowed: chain (its ordered model chain: entries {account, owner, provider, model, effort}; account ids and owners from robot_settings or your owner's Providers; the Robot moves to the next entry only when an account hits a limit or breaks), model {provider, model} (changes the active chain entry), thinking (off, low, medium, high, xhigh, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Home default), notifications {enabled, channels}, wakeOnScreenNotifications, cacheWarming, idleCompaction, idleCompactionFloorTokens, autoReview, requiresHosts (the Robot runs no Task while a Host it holds a facet on is offline), reviewer {provider, model, effort} (null: the Home default), subagentModels [{provider, model}] (the models its Subagents may run on; the subagents grant itself stays with your owner). Grants, spendLimit and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
+      description: "Change another Robot's settings. Allowed: chain (its ordered model chain: entries {account, owner, provider, model, effort}; account ids and owners from robot_settings or your owner's Providers; the Robot moves to the next entry only when an account hits a limit or breaks), model {provider, model} (changes the active chain entry), thinking (off, low, medium, high, xhigh, max), codeMode, contextBudget, compactionInstruction, discordChannel (null removes it), discordProactive, browserBackend (null: the Space default), notifications {enabled, channels}, wakeOnScreenNotifications, cacheWarming, idleCompaction, idleCompactionFloorTokens, autoReview, requiresHosts (the Robot runs no Task while a Host it holds a facet on is offline), reviewer {provider, model, effort} (null: the Space default), subagentModels [{provider, model}] (the models its Subagents may run on; the subagents grant itself stays with your owner). Grants, spendLimit and sharing cannot be changed this way and are refused: Grants are proposals your owner answers (robot_propose_grants). Each change shows as a line in that Robot's Conversation naming you; it takes effect on its next Turn.",
       parameters: {
         properties: {
           robot_id: robotId,
@@ -167,7 +167,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
           requiresHosts: { type: 'boolean', description: 'Do not run Tasks while any Host the Robot holds a facet on is offline: a recurring Task fails with the Host named, a scheduled Task waits for the Host. Messages still wake the Robot' },
           autoReview: { type: 'boolean', description: 'A reviewer model checks each allowed tool call before it runs; a denied call becomes an Ask to your owner' },
           subagentModels: { type: 'array', items: { type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' } }, required: ['provider', 'model'] }, description: 'The models its Subagents may run on' },
-          reviewer: { oneOf: [{ type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'xhigh', 'max'] } }, required: ['provider', 'model', 'effort'] }, { type: 'null' }], description: "The reviewer's model; null: the Home default" },
+          reviewer: { oneOf: [{ type: 'object', properties: { provider: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'xhigh', 'max'] } }, required: ['provider', 'model', 'effort'] }, { type: 'null' }], description: "The reviewer's model; null: the Space default" },
         },
         required: ['robot_id'],
       },

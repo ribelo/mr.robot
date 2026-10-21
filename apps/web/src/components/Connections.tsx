@@ -49,7 +49,7 @@ function UnsharedNote({ note, title }: { note: ConnectionNote; title: string }) 
   const robots = note.robots.map((robot) => `${robot.name} (${robot.ownerName})`).join(', ')
   return (
     <div className="note">
-      Your {title} connection <b>{note.label}</b> ({note.account}) acts as you, so it is no longer shared with the Home.{' '}
+      Your {title} connection <b>{note.label}</b> ({note.account}) acts as you, so it is no longer shared with the Space.{' '}
       {note.robots.length === 0 ? 'No Robot of another Member had it.' : `Robots of other Members lost it: ${robots}.`}{' '}
       <button type="button" className="link" onClick={() => void command((api) => api.dismissConnectionNote(note.id), [keys.connections]).then((exit) => setMessage(exitFailure(exit)))}>Dismiss</button>
       {message === undefined ? null : <div className="muted">{message}</div>}
@@ -132,7 +132,7 @@ export function ConnectorPanel({ plugin, way, connections }: { plugin: PluginVie
               {connection.mine ? (
                 <div className="connection-actions">
                   <label className="check"><input type="radio" name={`default-${connector.kind}`} checked={connection.isDefault} onChange={() => void change((api) => api.updateConnection(connection.id, { isDefault: true }))} /><span>Default</span></label>
-                  {connector.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={connection.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateConnection(connection.id, { shared })) }} /><span>Shared with the Home</span></label>}
+                  {connector.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={connection.shared} onChange={(event) => { const shared = event.target.checked; void change((api) => api.updateConnection(connection.id, { shared })) }} /><span>Shared with the Space</span></label>}
                   <button type="button" className="link danger" onClick={() => { if (confirm(`Remove ${connection.label}? Robots granted it lose it.`)) void change((api) => api.removeConnection(connection.id)) }}>Remove</button>
                 </div>
               ) : null}
@@ -191,7 +191,7 @@ function PasteConnect({ way, form }: { way: ConnectorWay; form: Extract<Connecto
       <SchemaFields fields={form.fields} values={values} secretsSet={[]} onChange={setValues} />
       <label><span>Name <span className="muted">(optional)</span></span><input value={label} placeholder="Shown to your Robots, e.g. Work" onChange={(event) => setLabel(event.target.value)} /></label>
       {form.warning === undefined ? null : <div className="note">{form.warning}</div>}
-      {way.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Home</span></label>}
+      {way.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Space</span></label>}
       <div className="question-actions">{message === undefined ? null : <span className="muted">{message}</span>}<button type="button" className="button button-primary" disabled={busy} onClick={() => void connect()}>Connect</button></div>
     </div>
   )
@@ -209,7 +209,7 @@ function OAuthConnect({ plugin, way, services }: { plugin: PluginView; way: Conn
       <div className="check-grid">{services.map((service) => (
         <label key={service.value} className="check"><input type="checkbox" checked={chosen.includes(service.value)} onChange={() => setChosen(chosen.includes(service.value) ? chosen.filter((value) => value !== service.value) : [...chosen, service.value])} /><span>{service.label}</span></label>
       ))}</div>
-      {way.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Home</span></label>}
+      {way.actsAsPerson ? null : <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Shared with the Space</span></label>}
       <div className="question-actions"><a className={chosen.length === 0 ? 'button button-primary disabled' : 'button button-primary'} href={chosen.length === 0 ? undefined : start}>Connect {plugin.title}</a></div>
     </div>
   )

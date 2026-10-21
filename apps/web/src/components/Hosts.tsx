@@ -40,7 +40,7 @@ export function Hosts() {
             <td>{host.mine ? (
               <select value={host.sharing} onChange={(event) => { const sharing = event.target.value === 'home' ? 'home' : 'private'; void command((api) => api.setHostSharing(host.id, sharing), [keys.hosts]) }}>
                 <option value="private">Only my robots</option>
-                <option value="home">Shared with the Home</option>
+                <option value="home">Shared with the Space</option>
               </select>
             ) : <span className="muted">{host.ownerName}'s, shared</span>}</td>
             <td>{host.mine ? <button type="button" className="link" onClick={() => { if (confirm(`Unpair ${host.name}? Its app disconnects and must be paired again.`)) void command((api) => api.unpairHost(host.id), [keys.hosts]) }}>Unpair</button> : null}</td>

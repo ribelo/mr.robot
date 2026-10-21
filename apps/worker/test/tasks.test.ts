@@ -34,7 +34,7 @@ async function newRobot(as: string): Promise<string> {
 
 const listed = async (as: string, query = '') => (await api<TaskPage>(as, `/api/tasks${query}`)).body.tasks.map((task) => task.title)
 
-describe('Tasks at the Home (v1.13 ticket 01)', () => {
+describe('Tasks at the Space (v1.13 ticket 01)', () => {
   it('round-trips a Task through create, edit, pause, done and cancel (mc-t1aa, mc-t2bb, mc-t3cc)', async () => {
     const at = Date.now() + HOUR
     const call = await create(ANNA, { title: ' Call mum ', instructions: 'Ask about Sunday.', assignee: { kind: 'member', memberId: annaId }, timing: { kind: 'scheduled', at, deadline: at + HOUR }, remind: { kind: 'before', minutes: 15 } })
@@ -91,7 +91,7 @@ describe('Tasks at the Home (v1.13 ticket 01)', () => {
     expect(pause.body.error).toBe('Only a recurring Task can be paused.')
   })
 
-  it('shows a Member only the Tasks he may see; Whole Home shows the admin all (mc-r2bb, mc-m7gg)', async () => {
+  it('shows a Member only the Tasks he may see; Whole Space shows the admin all (mc-r2bb, mc-m7gg)', async () => {
     const annasRobot = await newRobot(ANNA)
     const shared = await newRobot(ANNA)
     await api(ANNA, `/api/robots/${shared}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
@@ -104,11 +104,11 @@ describe('Tasks at the Home (v1.13 ticket 01)', () => {
     expect((await listed(BEN)).sort()).toEqual(['Ben alone', 'For Ben', 'For the shared Robot'])
     expect((await listed(ANNA)).sort()).toEqual(['Anna alone', 'For Ben', 'For the private Robot', 'For the shared Robot'])
     expect((await listed(ANNA, '?scope=home')).length).toBe(5)
-    // One Task's routes follow the admin's remembered Whole Home switch (mc-m7gg).
+    // One Task's routes follow the admin's remembered Whole Space switch (mc-m7gg).
     expect((await api(ANNA, `/api/tasks/${bens.id}`)).status).toBe(404)
-    await api(ANNA, '/api/me', { method: 'PATCH', body: { mission: { wholeHome: true } } })
+    await api(ANNA, '/api/me', { method: 'PATCH', body: { mission: { wholeSpace: true } } })
     expect((await api(ANNA, `/api/tasks/${bens.id}`)).status).toBe(200)
-    // Whole Home is the admin's alone; for Ben it is his own view.
+    // Whole Space is the admin's alone; for Ben it is his own view.
     expect((await listed(BEN, '?scope=home')).length).toBe(3)
     expect((await api(BEN, `/api/tasks/${forBen.id}`)).status).toBe(200)
     expect((await api(BEN, `/api/tasks/${(await create(ANNA, { title: 'Hidden', assignee: { kind: 'robot', robotId: annasRobot } })).id}`)).status).toBe(404)

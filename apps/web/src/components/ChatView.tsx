@@ -413,7 +413,7 @@ export function entryNameFor(service: string): string {
 
 /**
  * A credential Ask (v1.15, gb-1g9w): the Login entry form, or the secret form, pre-filled with what the Robot gave. Saving creates the entry
- * under the owner, grants it to the Robot and wakes it; the password is sent once, to the Home. Decline refuses.
+ * under the owner, grants it to the Robot and wakes it; the password is sent once, to the Space. Decline refuses.
  */
 function CredentialForm({ proposal, canAnswer, onReply }: { proposal: ProposalView; canAnswer: boolean; onReply?: (proposal: ProposalView, reply: AskReply) => void }) {
   const ask = proposal.credential!
@@ -437,7 +437,7 @@ function CredentialForm({ proposal, canAnswer, onReply }: { proposal: ProposalVi
           <label>{login ? 'Password' : 'Value'}<input type="password" value={password} autoComplete="off" aria-label={login ? 'Password' : 'Value'} onChange={(event) => setPassword(event.target.value)} /></label>
           {login ? <label>Websites<input value={websites} aria-label="Websites" onChange={(event) => setWebsites(event.target.value)} /></label> : null}
           <label>Notes<input value={notes} aria-label="Notes" onChange={(event) => setNotes(event.target.value)} /></label>
-          <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Share with the Home</span></label>
+          <label className="check"><input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} /><span>Share with the Space</span></label>
           <div className="question-actions">
             <button type="button" className="button" onClick={() => onReply?.(proposal, { kind: 'decline' })}>Decline</button>
             <button type="submit" className="button button-primary" disabled={!ready}>Save and give access</button>
@@ -567,7 +567,7 @@ function ThreadAnswer({ proposal, canAnswer, onAnswer }: { proposal: ProposalVie
 
 const THREAD_EVENT: Record<ThreadEvent, string> = {
   opened: 'Thread opened', declined: 'Thread declined', closed: 'Thread closed', idle: 'Thread closed after 7 days without a message',
-  expired: 'Invitation expired after 7 days without both answers', gone: 'Thread ended: the other chief is no longer in the Home',
+  expired: 'Invitation expired after 7 days without both answers', gone: 'Thread ended: the other chief is no longer in the Space',
 }
 const THREAD_STATE: Record<ThreadView['state'], string> = { invited: 'Invited', open: 'Open', closed: 'Closed', declined: 'Declined' }
 

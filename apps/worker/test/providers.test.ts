@@ -52,7 +52,7 @@ describe('Providers and credentials', () => {
     expect(JSON.stringify(view)).not.toContain('sk-anna')
   })
 
-  it('keeps many accounts per Provider, each shared with the Home on its own (pa-i3le, pa-f281, pa-cv06)', async () => {
+  it('keeps many accounts per Provider, each shared with the Space on its own (pa-i3le, pa-f281, pa-cv06)', async () => {
     const add = (key: string, label?: string) => api<{ id: string }>(ANNA, '/api/providers/opencode-go/accounts', { body: { key, shared: false, ...(label === undefined ? {} : { label }) } })
     expect((await add('Bearer sk-x y')).status).toBe(400)
     const first = (await add('sk-firstkey1111')).body.id
@@ -89,7 +89,7 @@ describe('Providers and credentials', () => {
     expect(await testRobot(id).credentialForTest('deepseek')).toMatchObject({ kind: 'api-key', key: 'sk-legacy-deepseek' })
   })
 
-  it("runs another Member's Robot on a credential shared with the Home (robot-dic7)", async () => {
+  it("runs another Member's Robot on a credential shared with the Space (robot-dic7)", async () => {
     const account = (await api<{ id: string }>(ANNA, '/api/providers/deepseek/accounts', { body: { key: 'sk-anna-secret-key', shared: false } })).body.id
     const bens = await robotOf(BEN)
     expect(await testRobot(bens).credentialForTest('deepseek')).toBeNull()
@@ -100,7 +100,7 @@ describe('Providers and credentials', () => {
     expect(await testRobot(bens).credentialForTest('deepseek')).toBeNull()
   })
 
-  it('applies the Home default model to new Robots (robot-6nkv)', async () => {
+  it('applies the Space default model to new Robots (robot-6nkv)', async () => {
     const patched = await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { defaultModel: { provider: 'stub', model: 'house-model', effort: 'low' } } })
     expect(patched.status).toBe(200)
     expect((await api(BEN, '/api/admin/settings', { method: 'PATCH', body: {} })).status).toBe(403)

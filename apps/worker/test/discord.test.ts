@@ -9,7 +9,7 @@ import { account, runTool, testHost, bodyOf } from './connector-host.ts'
 import { accountsTool } from '../src/connectors/connector.ts'
 import { DiscordPlugin, inviteUrl, BOT_PERMISSIONS } from '../src/connectors/discord.ts'
 import { closeVerdict, DAILY_CONNECTS, gatewayStep, initialGateway, INTENTS, nextConnectAt, readPayload, resumeAddress } from '../src/connectors/discord-gateway.ts'
-import { DiscordAtHome } from '../src/home/discord.ts'
+import { DiscordAtSpace } from '../src/space/discord.ts'
 
 const ANNA = 'anna@example.com'
 const TOKEN = 'bot-token-123'
@@ -81,7 +81,7 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
   })
 
   it('one socket at a time: a shared connect, a real close on reconnect, a resume, and a stop on a bad token', async () => {
-    await runInDurableObject(env.HOME.getByName('discord-gateway-test'), async (_home, state) => {
+    await runInDurableObject(env.SPACE.getByName('discord-gateway-test'), async (_home, state) => {
       const sql = state.storage.sql
       const servers: Array<{ url: string; socket: WebSocket; received: string[]; closed: number[] }> = []
       const fetcher = (async (input: RequestInfo | URL) => {
@@ -94,7 +94,7 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
         return new Response(null, { status: 101, webSocket: pair[0] })
       }) as typeof fetch
       const alarms: number[] = []
-      const gateway = new DiscordAtHome(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async (at) => { alarms.push(at) })
+      const gateway = new DiscordAtSpace(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async (at) => { alarms.push(at) })
       const until = async (done: () => boolean) => { for (let index = 0; index < 100 && !done(); index++) await new Promise((resolve) => setTimeout(resolve, 10)) }
       const ops = (server: { received: string[] }) => server.received.map((frame) => (JSON.parse(frame) as { op: number }).op)
       const lastHourAgo = () => sql.exec('UPDATE discord_connect SET at = at - ?', 2 * 60 * MIN)
@@ -133,13 +133,13 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
   })
 
   it('listens with the next bot when the first one holds a token Discord refused', async () => {
-    await runInDurableObject(env.HOME.getByName('discord-second-bot-test'), async (_home, state) => {
+    await runInDurableObject(env.SPACE.getByName('discord-second-bot-test'), async (_home, state) => {
       const sql = state.storage.sql
       const used: string[] = []
       const fetcher = (async () => { const pair = new WebSocketPair(); pair[1].accept(); return new Response(null, { status: 101, webSocket: pair[0] }) }) as typeof fetch
       const old = { ownerId: 'm-1', connectionId: 'c-old', token: 'old-token' }
       const fresh = { ownerId: 'm-1', connectionId: 'c-new', token: 'new-token' }
-      const gateway = new DiscordAtHome(sql, async () => null, async (input, init) => { used.push(String(input)); return fetcher(input, init) }, async () => {}, async () => {}, async () => [old, fresh])
+      const gateway = new DiscordAtSpace(sql, async () => null, async (input, init) => { used.push(String(input)); return fetcher(input, init) }, async () => {}, async () => {}, async () => [old, fresh])
       const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('old-token')))
       sql.exec('INSERT INTO discord_stopped (token_hash, code, at) VALUES (?, 4004, ?)', [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join(''), Date.now())
       await gateway.ensure()
@@ -149,11 +149,11 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
   })
 
   it('stops connecting when the daily budget is used up', async () => {
-    await runInDurableObject(env.HOME.getByName('discord-budget-test'), async (_home, state) => {
+    await runInDurableObject(env.SPACE.getByName('discord-budget-test'), async (_home, state) => {
       const sql = state.storage.sql
       let calls = 0
       const fetcher = (async () => { calls++; return new Response('no', { status: 503 }) }) as typeof fetch
-      const gateway = new DiscordAtHome(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async () => {})
+      const gateway = new DiscordAtSpace(sql, async () => ({ ownerId: 'm-1', connectionId: 'c-1', token: TOKEN }), fetcher, async () => {}, async () => {})
       const now = Date.now()
       for (let index = 0; index < DAILY_CONNECTS; index++) sql.exec('INSERT INTO discord_connect (at) VALUES (?)', now - 20 * 60 * MIN + index)
       await gateway.ensure()
@@ -165,14 +165,14 @@ describe('gateway reconnects (Discord reset the bot token after 1000 connections
 describe('Discord tools against recorded responses (cn-q259)', () => {
   it('names the bot with its invite link, lists servers and their text channels, reads messages', async () => {
     connectorFixtures.on('GET', `${API}/users/@me`, { id: 'B1', username: 'mr-robot', bot: true })
-    connectorFixtures.on('GET', `${API}/users/@me/guilds`, [{ id: 'G-1', name: 'Home server', owner: false }])
+    connectorFixtures.on('GET', `${API}/users/@me/guilds`, [{ id: 'G-1', name: 'Space server', owner: false }])
     connectorFixtures.on('GET', `${API}/guilds/G-1/channels`, [{ id: 'C-1', name: 'general', type: 0, position: 0 }, { id: 'V-1', name: 'Voice', type: 2 }, { id: 'K-1', name: 'Text', type: 4 }, { id: 'C-2', name: 'flat-watcher', type: 0, topic: 'Flats', position: 1 }])
     connectorFixtures.on('GET', `${API}/channels/C-1/messages`, [message('M-2', 'second', { referenced_message: { id: 'M-1', content: 'first' }, reactions: [{ emoji: { name: '👍' }, count: 2 }] }), message('M-1', 'first', { attachments: [{ id: 'A1', filename: 'plan.pdf', size: 10, content_type: 'application/pdf', url: 'https://cdn.discordapp.com/a/plan.pdf' }] })])
     const { tools } = setup()
     const me = bodyOf(await runTool(tools, 'discord_me', {}))
     expect(me).toEqual({ id: 'B1', name: 'mr-robot', username: 'mr-robot', invite: `https://discord.com/oauth2/authorize?client_id=B1&scope=bot&permissions=${BOT_PERMISSIONS}` })
     expect(connectorFixtures.calls[0]!.headers['authorization']).toBe('Bot ' + TOKEN)
-    expect(bodyOf(await runTool(tools, 'discord_guilds', {}))).toEqual([{ id: 'G-1', name: 'Home server' }])
+    expect(bodyOf(await runTool(tools, 'discord_guilds', {}))).toEqual([{ id: 'G-1', name: 'Space server' }])
     expect(bodyOf(await runTool(tools, 'discord_channels', { guildId: 'G-1' }))).toEqual([
       { id: 'C-1', channel: '#general', type: 'text', position: 0 },
       { id: 'C-2', channel: '#flat-watcher', type: 'text', topic: 'Flats', position: 1 },
@@ -287,13 +287,13 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   it("a message in a robot's channel wakes it and the final reply goes back there as a reply to the message", async () => {
     const id = await discordRobot()
     scripts.set(id, [{ say: 'The flat on Prosta is still free.' }])
-    expect(await env.HOME.getByName('home').discordReceived(incoming('M-in', 'any news?'), annaId)).toBe(id)
+    expect(await env.SPACE.getByName('home').discordReceived(incoming('M-in', 'any news?'), annaId)).toBe(id)
     await settle(id)
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.some((item) => item.kind === 'message' && item.text === 'any news?' && item.sender.kind === 'channel' && item.sender.channel === 'discord' && item.sender.from === 'Anna')).toBe(true)
     expect(postsTo('C-robot')).toEqual([{ content: 'The flat on Prosta is still free.', message_reference: { message_id: 'M-in', channel_id: 'C-robot', fail_if_not_exists: false } }])
     // The same Discord message twice wakes the robot once.
-    await env.HOME.getByName('home').discordReceived(incoming('M-in', 'any news?'), annaId)
+    await env.SPACE.getByName('home').discordReceived(incoming('M-in', 'any news?'), annaId)
     await settle(id)
     expect(postsTo('C-robot')).toHaveLength(1)
   })
@@ -301,7 +301,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   it('a Turn woken on Discord posts every say to the message it answers, and no "finished" notification', async () => {
     const id = await discordRobot()
     scripts.set(id, [{ calls: [{ name: 'say', args: { text: "I'll check the listings." } }] }, { calls: [{ name: 'say', args: { text: 'Two flats match.' } }] }, { text: '' }])
-    await env.HOME.getByName('home').discordReceived(incoming('M-ask', 'what is new?'), annaId)
+    await env.SPACE.getByName('home').discordReceived(incoming('M-ask', 'what is new?'), annaId)
     await settle(id)
     const replies = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'reply').slice(-2)
     expect(replies.map((item) => item.kind === 'reply' ? item.text : '')).toEqual(["I'll check the listings.", 'Two flats match.'])
@@ -350,7 +350,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     expect(postsTo('C-robot')).toEqual([])
     // Replies to Discord messages still go back.
     scripts.set(id, [{ say: 'Still nothing.' }])
-    await env.HOME.getByName('home').discordReceived(incoming('M-q', 'and now?'), annaId)
+    await env.SPACE.getByName('home').discordReceived(incoming('M-q', 'and now?'), annaId)
     await settle(id)
     expect(postsTo('C-robot')).toEqual([{ content: 'Still nothing.', message_reference: { message_id: 'M-q', channel_id: 'C-robot', fail_if_not_exists: false } }])
   })
@@ -361,7 +361,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     const long = paragraphs.join('\n\n')
     expect(long.length).toBeGreaterThan(4000)
     scripts.set(id, [{ say: long }])
-    await env.HOME.getByName('home').discordReceived(incoming('M-long', 'tell me everything'), annaId)
+    await env.SPACE.getByName('home').discordReceived(incoming('M-long', 'tell me everything'), annaId)
     await settle(id)
     const posts = postsTo('C-robot')
     expect(posts.length).toBeGreaterThan(1)
@@ -378,10 +378,10 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     expect((await api<RobotPanel>(ANNA, `/api/robots/${mrRobot}/panel`)).body.settings.discordChannel).toBeNull()
     await api(ANNA, `/api/robots/${mrRobot}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(mrRobot, [{ say: 'Hi Anna, on it.' }])
-    expect(await env.HOME.getByName('home').discordReceived({ id: 'M-dm', channelId: 'D-anna', guildId: null, authorId: 'U-anna', authorName: 'Anna', text: 'hello from my phone', direct: true }, annaId)).toBe(mrRobot)
+    expect(await env.SPACE.getByName('home').discordReceived({ id: 'M-dm', channelId: 'D-anna', guildId: null, authorId: 'U-anna', authorName: 'Anna', text: 'hello from my phone', direct: true }, annaId)).toBe(mrRobot)
     await settle(mrRobot)
     expect(postsTo('D-anna')).toEqual([{ content: 'Hi Anna, on it.', message_reference: { message_id: 'M-dm', channel_id: 'D-anna', fail_if_not_exists: false } }])
     // A message in a channel no robot owns wakes nobody.
-    expect(await env.HOME.getByName('home').discordReceived({ id: 'M-x', channelId: 'C-nobody', guildId: 'G-1', authorId: 'U-anna', authorName: 'Anna', text: 'hm', direct: false }, annaId)).toBeNull()
+    expect(await env.SPACE.getByName('home').discordReceived({ id: 'M-x', channelId: 'C-nobody', guildId: 'G-1', authorId: 'U-anna', authorName: 'Anna', text: 'hm', direct: false }, annaId)).toBeNull()
   })
 })

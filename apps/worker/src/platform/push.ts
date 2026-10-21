@@ -12,7 +12,7 @@ export interface DeviceSubscription {
 }
 
 export interface PushNotification {
-  /** A Robot's notification, or the Home's reminder of a Task (mc-s3cc). */
+  /** A Robot's notification, or the Space's reminder of a Task (mc-s3cc). */
   readonly kind: 'robot' | 'reminder'
   readonly title: string
   readonly body: string

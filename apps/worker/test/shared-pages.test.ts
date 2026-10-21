@@ -32,7 +32,7 @@ async function robotWithPages(): Promise<string> {
   return body.id
 }
 
-/** A request from a stranger: no Mr. Robot session, an e-mail that is no Member of the Home. */
+/** A request from a stranger: no Mr. Robot session, an e-mail that is no Member of the Space. */
 const open = (url: string) => SELF.fetch(url, { headers: { 'x-dev-identity': 'stranger@example.org' } })
 
 describe('shared Pages (dp-hf7v, dp-jl3d, dp-zq16, dp-62di, dp-p5yn)', () => {

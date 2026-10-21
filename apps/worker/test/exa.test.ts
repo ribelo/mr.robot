@@ -40,7 +40,7 @@ const lastTools = (id: string) => (requests.get(id)!.at(-1)!.tools ?? []).map((d
 const toolResults = (id: string) => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 
 describe('Exa (v1.1 ticket 11)', () => {
-  it('searches with the Home key and counts the call and its cost (rb-cfvy, rb-x8i3, rb-pb26)', async () => {
+  it('searches with the Space key and counts the call and its cost (rb-cfvy, rb-x8i3, rb-pb26)', async () => {
     await api(ANNA, '/api/admin/exa', { method: 'PUT', body: { key: 'exa-test-key' } })
     const id = await robotWith(['exa'])
     scripts.set(id, [{ calls: [{ name: 'web_search_exa', args: { query: 'cloudflare containers pricing', numResults: 3 } }] }, { text: 'Found it.' }])
@@ -59,11 +59,11 @@ describe('Exa (v1.1 ticket 11)', () => {
   it('explains that the admin must add a key when there is none', async () => {
     const id = await robotWith(['exa', 'exa-agent'])
     const catalog = (await api<SettingsCatalog>(ANNA, `/api/robots/${id}/catalog`)).body
-    expect(catalog.toolGroups.find((group) => group.name === 'exa')?.description).toContain('the Home admin adds it under Admin → Exa')
+    expect(catalog.toolGroups.find((group) => group.name === 'exa')?.description).toContain('the Space admin adds it under Admin → Exa')
     scripts.set(id, [{ calls: [{ name: 'exa_agent_list_runs', args: {} }] }, { text: 'No key.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'list runs' } })
     await settle(id)
-    expect(toolResults(id)[0]).toContain('the Home admin must add an Exa API key')
+    expect(toolResults(id)[0]).toContain('the Space admin must add an Exa API key')
     expect(exaCalls).toEqual([])
   })
 })

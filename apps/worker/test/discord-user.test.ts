@@ -191,7 +191,7 @@ const paste = (values: Record<string, string>, shared = false) => api<Connection
 describe('connecting Discord as you through the edge API (ux-urf8, ux-l2ul, ux-bk91, ux-cbo3)', () => {
   it('checks the token with Discord, stores a person connection that is never shared, and gives a granted Robot its tools', async () => {
     connectorFixtures.on('GET', API + '/users/@me', ME)
-    expect((await paste({ token: TOKEN }, true)).body.error).toBe('a Discord connection acts as you, so it cannot be shared with the Home')
+    expect((await paste({ token: TOKEN }, true)).body.error).toBe('a Discord connection acts as you, so it cannot be shared with the Space')
     const saved = await paste({ token: TOKEN })
     expect(saved.status).toBe(200)
     expect(saved.body).toMatchObject({ kind: 'discord-user', label: 'Anna', account: 'anna_n', status: 'connected', shared: false })

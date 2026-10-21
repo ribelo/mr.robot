@@ -10,7 +10,7 @@ import { usableNames, type GrantLevel, type GrantLevels } from '@mr-robot/protoc
 import { splitHostFacet } from '../places/host-facet.ts'
 import { mrRobotHostLevel } from './host-access.ts'
 
-/** A Host as the Home lists it for the Robot's owner. */
+/** A Host as the Space lists it for the Robot's owner. */
 export interface KnownHost {
   readonly id: string
   readonly name: string

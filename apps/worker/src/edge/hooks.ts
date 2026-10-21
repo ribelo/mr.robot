@@ -6,7 +6,7 @@
  */
 import * as Effect from 'effect/Effect'
 import { IDEMPOTENCY_KEY_MAX_LENGTH, WEBHOOK_MAX_BYTES } from '../channels/webhook.ts'
-import { HOME_ID, type Env } from '../env.ts'
+import { SPACE_ID, type Env } from '../env.ts'
 import { ApiError, badRequest, call, json, notFound, respond, unauthorized } from './http.ts'
 
 const HOOK_PATH = new URLPattern({ pathname: '/hooks/:robotId/:key' })
@@ -49,7 +49,7 @@ export const hookChannel = (request: Request, env: Env): Effect.Effect<Response>
   if (match === null) return yield* Effect.fail(notFound('no such endpoint'))
   if (request.method !== 'POST') return yield* Effect.fail(new ApiError({ status: 405, message: 'POST the event to this address' }))
   const { robotId, key } = match.pathname.groups as { robotId: string; key: string }
-  const known = yield* call(() => env.HOME.getByName(HOME_ID).entry(robotId))
+  const known = yield* call(() => env.SPACE.getByName(SPACE_ID).entry(robotId))
   if (known === undefined) return yield* Effect.fail(wrongKey())
   const robot = env.ROBOT.getByName(robotId)
   if (!(yield* call(() => robot.webhookAccepts(key)))) return yield* Effect.fail(wrongKey())

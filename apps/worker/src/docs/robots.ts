@@ -41,9 +41,9 @@ When a Robot changes SOUL.md, it tells the owner. Read memory-and-files.md for t
 - The models of its Subagents. Read subagents.md.
 - Code mode or direct tool calls.
 - Grants. Read grants.md.
-- Spend limit: the Home's, no limit, or an amount. Read providers.md.
+- Spend limit: the Space's, no limit, or an amount. Read providers.md.
 - Notifications.
-- Sharing: private or shared with the Home.
+- Sharing: private or shared with the Space.
 
 The owner can pause, resume and delete a Robot. A paused Robot does not run.
 
@@ -51,7 +51,7 @@ The owner can pause, resume and delete a Robot. A paused Robot does not run.
 
 - Clear history clears the Conversation.
 - Start over clears the Conversation and resets the Workspace to the templates. Grants, Tasks, Connections and settings stay.
-- Reset everything keeps logins, Provider accounts, Hosts, the skill library and Home settings.
+- Reset everything keeps logins, Provider accounts, Hosts, the skill library and Space settings.
 
 The docs/ folder is never removed. The platform owns it.
 
@@ -72,5 +72,5 @@ A Robot other than Mr. Robot sends a work request to another Robot only with a r
 
 ## Skills
 
-A skill is a set of instructions in a SKILL.md file. A global skill is in the Home library. A Robot reads the global skills granted to it. It cannot edit them. A local skill is in the Robot's Workspace under skills/. The Robot edits it freely and can propose it for the library. A platform skill ships with the Worker under docs/skills/; every Robot reads it with no Grant.
+A skill is a set of instructions in a SKILL.md file. A global skill is in the Space library. A Robot reads the global skills granted to it. It cannot edit them. A local skill is in the Robot's Workspace under skills/. The Robot edits it freely and can propose it for the library. A platform skill ships with the Worker under docs/skills/; every Robot reads it with no Grant.
 `

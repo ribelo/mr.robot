@@ -9,7 +9,7 @@ An Ask is a pending decision that a Robot puts to its owner. The Conversation sh
 | setup | Approve the Grants at the end of setup. |
 | grants | Approve a Grant proposal from propose_grants. |
 | member-file | Approve a new full version of USER.md or PROACTIVE_PREFERENCES.md. |
-| skill | Approve a local skill for the Home library. |
+| skill | Approve a local skill for the Space library. |
 | takeover | Take over the Robot's browser. |
 | review | Approve a list of items, one by one or all at once. |
 | thread | Accept or decline a Thread invitation, and set its Scope. |

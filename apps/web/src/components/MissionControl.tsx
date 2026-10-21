@@ -1,6 +1,6 @@
 /**
  * Mission Control (v1.13 ticket 06, mc-m1aa…mc-m9ii): the Fleet (who works, why, on what) and the Tasks a Member
- * sees, as two dense windowed tables. Grouping, the state filter and Whole Home are remembered in the Member's
+ * sees, as two dense windowed tables. Grouping, the state filter and Whole Space are remembered in the Member's
  * preferences; a Fleet row opens the Robot, a Task row opens its detail in place.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -98,7 +98,7 @@ export function MissionControl({ me }: { me: Me }) {
     setPages({ fleet: 1, tasks: 1 })
     void command((api) => api.updateMe({ mission: patch }), [keys.me])
   }
-  const wanted: MissionQuery = { scope: admin && prefs.wholeHome ? 'home' : 'mine', state: prefs.state, group: prefs.group, fleetQ: fleetQ.trim(), q: q.trim(), fleetPages: pages.fleet, taskPages: pages.tasks }
+  const wanted: MissionQuery = { scope: admin && prefs.wholeSpace ? 'home' : 'mine', state: prefs.state, group: prefs.group, fleetQ: fleetQ.trim(), q: q.trim(), fleetPages: pages.fleet, taskPages: pages.tasks }
   const key = JSON.stringify(wanted)
   const result = useAtomValue(missionAtom(key))
   const refresh = useAtomRefresh(missionAtom(key))
@@ -132,8 +132,8 @@ export function MissionControl({ me }: { me: Me }) {
         {chief === undefined ? null : <button type="button" className={prefs.drawer ? 'button active' : 'button'} aria-pressed={prefs.drawer} onClick={() => remember({ drawer: !prefs.drawer })}>{chief.identity.name}</button>}
         {admin ? (
           <label className="inline">
-            Whole Home
-            <button type="button" role="switch" aria-checked={prefs.wholeHome} aria-label="Whole Home" className={prefs.wholeHome ? 'switch on' : 'switch'} onClick={() => remember({ wholeHome: !prefs.wholeHome })}><span /></button>
+            Whole Space
+            <button type="button" role="switch" aria-checked={prefs.wholeSpace} aria-label="Whole Space" className={prefs.wholeSpace ? 'switch on' : 'switch'} onClick={() => remember({ wholeSpace: !prefs.wholeSpace })}><span /></button>
           </label>
         ) : null}
       </div>
@@ -141,7 +141,7 @@ export function MissionControl({ me }: { me: Me }) {
         <div className="mission-tables">
           {shown === undefined
             ? renderResult(result, { what: 'Mission Control', retry: refresh }, () => null)
-            : <MissionTables view={shown} prefs={prefs} wholeHome={wanted.scope === 'home'} onOpenTask={setOpenTask} onForm={setForm}
+            : <MissionTables view={shown} prefs={prefs} wholeSpace={wanted.scope === 'home'} onOpenTask={setOpenTask} onForm={setForm}
               onMoreFleet={() => setPages((current) => ({ ...current, fleet: current.fleet + 1 }))}
               onMoreTasks={() => setPages((current) => ({ ...current, tasks: current.tasks + 1 }))} />}
         </div>
@@ -153,10 +153,10 @@ export function MissionControl({ me }: { me: Me }) {
   )
 }
 
-function MissionTables({ view, prefs, wholeHome, onOpenTask, onForm, onMoreFleet, onMoreTasks }: {
+function MissionTables({ view, prefs, wholeSpace, onOpenTask, onForm, onMoreFleet, onMoreTasks }: {
   view: MissionView
   prefs: MissionPrefs
-  wholeHome: boolean
+  wholeSpace: boolean
   onOpenTask: (id: string) => void
   onForm: (form: { readonly parentId?: string; readonly task?: TaskView }) => void
   onMoreFleet: () => void
@@ -171,7 +171,7 @@ function MissionTables({ view, prefs, wholeHome, onOpenTask, onForm, onMoreFleet
   const titles = useMemo(() => new Map(view.tasks.map((task) => [task.id, task.title])), [view.tasks])
   const moreFleet = useCallback(() => { if (view.fleetNext !== null) onMoreFleet() }, [view.fleetNext, onMoreFleet])
   const moreTasks = useCallback(() => { if (view.tasksNext !== null) onMoreTasks() }, [view.tasksNext, onMoreTasks])
-  const fleetColumns = `22px minmax(110px, 1.3fr) 108px minmax(110px, 1.2fr) minmax(100px, 1.2fr) minmax(80px, 0.9fr) 56px minmax(140px, 2.2fr)${wholeHome ? ' minmax(80px, 0.8fr)' : ''} 76px`
+  const fleetColumns = `22px minmax(110px, 1.3fr) 108px minmax(110px, 1.2fr) minmax(100px, 1.2fr) minmax(80px, 0.9fr) 56px minmax(140px, 2.2fr)${wholeSpace ? ' minmax(80px, 0.8fr)' : ''} 76px`
   const taskColumns = '84px minmax(160px, 2.4fr) minmax(90px, 1fr) minmax(130px, 1.5fr) minmax(130px, 1.8fr) 46px 30px'
   return (
     <>
@@ -183,8 +183,8 @@ function MissionTables({ view, prefs, wholeHome, onOpenTask, onForm, onMoreFleet
           rowKey={(robot) => robot.id}
           rowHeight={ROW_HEIGHT}
           columns={fleetColumns}
-          header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Last line</span>{wholeHome ? <span>Owner</span> : null}<span /></>}
-          renderRow={(robot) => <FleetCells robot={robot} now={now} wholeHome={wholeHome}
+          header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Last line</span>{wholeSpace ? <span>Owner</span> : null}<span /></>}
+          renderRow={(robot) => <FleetCells robot={robot} now={now} wholeSpace={wholeSpace}
             onInterrupt={() => void command((api) => api.interrupt(robot.id), [keys.robots, keys.tasks, keys.robot(robot.id)])}
             onInterruptSubagent={(childId) => void command((api) => api.interruptSubagent(robot.id, childId), [keys.robots, keys.robot(robot.id)])} />}
           onRowClick={(robot) => go({ page: 'robot', id: robot.id, panel: false, from: 'mission' })}
@@ -248,7 +248,7 @@ function SubagentLines({ robot, now, onInterrupt }: { robot: RobotSummary; now: 
   )
 }
 
-function FleetCells({ robot, now, wholeHome, onInterrupt, onInterruptSubagent }: { robot: RobotSummary; now: number; wholeHome: boolean; onInterrupt: () => void; onInterruptSubagent: (childId: string) => void }) {
+function FleetCells({ robot, now, wholeSpace, onInterrupt, onInterruptSubagent }: { robot: RobotSummary; now: number; wholeSpace: boolean; onInterrupt: () => void; onInterruptSubagent: (childId: string) => void }) {
   const cause: LastWakeup | null = robot.turn ?? robot.lastWakeup
   return (
     <>
@@ -260,7 +260,7 @@ function FleetCells({ robot, now, wholeHome, onInterrupt, onInterruptSubagent }:
       <span>{robot.turn?.activity ?? ''}</span>
       <span>{robot.turn === null ? '' : sinceText(robot.turn.since, now)}</span>
       <span className="muted">{robot.lastLine}</span>
-      {wholeHome ? <span className="muted">{robot.ownerName}</span> : null}
+      {wholeSpace ? <span className="muted">{robot.ownerName}</span> : null}
       <span>{robot.turn === null ? null : <button type="button" className="link danger" onClick={(event) => { event.stopPropagation(); onInterrupt() }}>Interrupt</button>}</span>
     </>
   )

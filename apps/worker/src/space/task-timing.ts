@@ -75,7 +75,7 @@ export function wakeAt(timing: TaskTiming, state: TaskState): number | null {
 }
 
 /**
- * When the Home reminds a person of the occurrence at `wake` (mc-s3cc, mc-s4dd): `minutes` before a scheduled
+ * When the Space reminds a person of the occurrence at `wake` (mc-s3cc, mc-s4dd): `minutes` before a scheduled
  * Task that asks for it; before (or, without a reminder, at) a recurring occurrence. Null: no reminder.
  */
 export function reminderAt(assignee: TaskAssignee, timing: TaskTiming, remind: Remind, wake: number | null): number | null {

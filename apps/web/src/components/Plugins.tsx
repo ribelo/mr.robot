@@ -44,13 +44,13 @@ export function PluginIcon({ icon }: { icon: string }): ReactNode {
   return <span className="plugin-icon">{glyph}</span>
 }
 
-/** The Plugins page (cn-dbm9, reference 12): every plugin, its description, and the Home's switch. */
+/** The Plugins page (cn-dbm9, reference 12): every plugin, its description, and the Space's switch. */
 export function PluginsPage({ isAdmin }: { isAdmin: boolean }) {
   return (
     <AtomView atom={pluginsAtom} what="the plugins">
       {(plugins) => (
         <div className="plugins">
-          <div className="muted">What Robots in this Home can do. {isAdmin ? 'Switch a plugin off to take it from every Robot; open one for its settings.' : 'The Home admin switches plugins on and off.'}</div>
+          <div className="muted">What Robots in this Space can do. {isAdmin ? 'Switch a plugin off to take it from every Robot; open one for its settings.' : 'The Space admin switches plugins on and off.'}</div>
           <PluginGroup title="Built-in" plugins={plugins.filter((plugin) => plugin.group === 'capability')} isAdmin={isAdmin} />
           <PluginGroup title="Connectors" plugins={plugins.filter((plugin) => plugin.group === 'connector')} isAdmin={isAdmin} />
         </div>
@@ -97,7 +97,7 @@ export function PluginDetail({ name, isAdmin }: { name: string; isAdmin: boolean
       <button type="button" className="link back-link" onClick={() => go({ page: 'plugins' })}>‹ Plugins</button>
       {renderResult(result, { what: 'the plugin' }, (plugins) => {
         const plugin = plugins.find((entry) => entry.name === name)
-        if (plugin === undefined) return <Empty title="No such plugin" hint="It may have been removed from this Home." />
+        if (plugin === undefined) return <Empty title="No such plugin" hint="It may have been removed from this Space." />
         const settings = JSON.stringify([plugin.values, plugin.secretsSet])
         const formKey = ownSave !== undefined && ownSave.settings === settings ? ownSave.formKey : settings
         return <PluginSettings key={formKey} plugin={plugin} isAdmin={isAdmin} onSaved={(saved) => setOwnSave({ settings: JSON.stringify([saved.values, saved.secretsSet]), formKey })} />
@@ -131,9 +131,9 @@ function PluginSettings({ plugin, isAdmin, onSaved }: { plugin: PluginView; isAd
       {plugin.setupNeeded === null ? null : <div className="note">{plugin.setupNeeded}</div>}
       {plugin.connectors.length > 0 && plugin.enabled ? <YourAccounts plugin={plugin} /> : null}
       {plugin.guide === null ? null : plugin.setupNeeded === null && plugin.connectors.length > 0
-        ? <details className="plugin-guide"><summary><h3>Home setup <span className="muted">(done once by the admin)</span></h3></summary><Markdown text={plugin.guide} /></details>
+        ? <details className="plugin-guide"><summary><h3>Space setup <span className="muted">(done once by the admin)</span></h3></summary><Markdown text={plugin.guide} /></details>
         : <div className="plugin-guide"><h3>Setup</h3><Markdown text={plugin.guide} /></div>}
-      {!isAdmin ? <div className="muted">Only the Home admin changes this plugin's settings.</div> : plugin.fields.length === 0 ? <div className="muted">This plugin has no settings.</div> : (
+      {!isAdmin ? <div className="muted">Only the Space admin changes this plugin's settings.</div> : plugin.fields.length === 0 ? <div className="muted">This plugin has no settings.</div> : (
         <div className="form">
           <h3>Settings</h3>
           <SchemaFields fields={plugin.fields} values={values} secretsSet={plugin.secretsSet} onChange={setValues} />

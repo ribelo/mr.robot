@@ -15,7 +15,7 @@ export const TOOL_GROUPS = {
   notify: 'Send its owner a push notification.',
   robots: 'Create Robots and configure the Robots its owner can reach (Mr. Robot only).',
   deputy: "Read the Conversations, files, Grants and settings of the Robots its owner can reach, and change their files and settings (Mr. Robot only).",
-  exa: 'Exa research: web search, page crawling and code context, paid per call from the Home\'s Exa key.',
+  exa: 'Exa research: web search, page crawling and code context, paid per call from the Space\'s Exa key.',
   'exa-agent': 'Exa agent runs: long research jobs that can cost dollars each. Grant separately.',
   subagents: 'Hand work to Subagents: fresh or forked contexts on the models you allow, at most three at once.',
   box: 'A Box: run commands and move files on a Linux computer of its own (its tools are listed in docs/box.md); its running time costs money.',

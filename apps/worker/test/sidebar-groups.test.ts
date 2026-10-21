@@ -33,16 +33,16 @@ describe('sidebar groups (ux-wxbm, ux-o7po, ux-xbvi)', () => {
     const id = await newRobot(ANNA)
     expect(await groups(ANNA)).toEqual([])
     const work = await createGroup(ANNA, '  Work ')
-    const home = await createGroup(ANNA, 'Home')
+    const space = await createGroup(ANNA, 'Space')
     expect(work).toEqual({ id: expect.any(String), name: 'Work', collapsed: false })
-    expect((await groups(ANNA)).map((group) => group.name)).toEqual(['Work', 'Home'])
+    expect((await groups(ANNA)).map((group) => group.name)).toEqual(['Work', 'Space'])
     expect((await api(ANNA, '/api/robot-groups', { body: { name: '   ' } })).status).toBe(400)
 
     expect((await api<RobotGroup>(ANNA, `/api/robot-groups/${work.id}`, { method: 'PATCH', body: { name: 'Office', collapsed: true } })).body).toEqual({ id: work.id, name: 'Office', collapsed: true })
-    expect((await api<RobotGroup[]>(ANNA, '/api/robot-groups/order', { method: 'PUT', body: { ids: [home.id, work.id] } })).body.map((group) => group.name)).toEqual(['Home', 'Office'])
-    expect((await api(ANNA, '/api/robot-groups/order', { method: 'PUT', body: { ids: [home.id] } })).status).toBe(400)
+    expect((await api<RobotGroup[]>(ANNA, '/api/robot-groups/order', { method: 'PUT', body: { ids: [space.id, work.id] } })).body.map((group) => group.name)).toEqual(['Space', 'Office'])
+    expect((await api(ANNA, '/api/robot-groups/order', { method: 'PUT', body: { ids: [space.id] } })).status).toBe(400)
     // Collapsing is remembered: it comes back on the next read.
-    expect(await groups(ANNA)).toEqual([{ id: home.id, name: 'Home', collapsed: false }, { id: work.id, name: 'Office', collapsed: true }])
+    expect(await groups(ANNA)).toEqual([{ id: space.id, name: 'Space', collapsed: false }, { id: work.id, name: 'Office', collapsed: true }])
 
     expect((await entry(ANNA, id)).groupId).toBeUndefined()
     await moveTo(ANNA, id, { kind: 'group', groupId: work.id })
@@ -51,9 +51,9 @@ describe('sidebar groups (ux-wxbm, ux-o7po, ux-xbvi)', () => {
     await moveTo(ANNA, id, { kind: 'ungrouped' })
     expect('groupId' in await entry(ANNA, id)).toBe(false)
 
-    await moveTo(ANNA, id, { kind: 'group', groupId: home.id })
+    await moveTo(ANNA, id, { kind: 'group', groupId: space.id })
     await api(ANNA, `/api/robots/${id}/list`, { body: { pinned: true } })
-    expect((await api(ANNA, `/api/robot-groups/${home.id}`, { method: 'DELETE' })).status).toBe(200)
+    expect((await api(ANNA, `/api/robot-groups/${space.id}`, { method: 'DELETE' })).status).toBe(200)
     expect((await groups(ANNA)).map((group) => group.id)).toEqual([work.id])
     const after = await entry(ANNA, id)
     expect('groupId' in after).toBe(false)

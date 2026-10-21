@@ -13,7 +13,7 @@ interface CredentialInput {
 /**
  * Asking for a credential (v1.15 ticket 05, gb-3192): the Ask carries the Login entry form, pre-filled with what the Robot gave. Saving it
  * creates the entry under the owner, grants it to the Robot at allow and wakes the Robot with the entry's name. The password goes from the
- * owner's browser to the Home; this tool, its program and the Robot never see it (gb-196l).
+ * owner's browser to the Space; this tool, its program and the Robot never see it (gb-196l).
  */
 export function credentialTools(host: RobotHost): ToolDefinition[] {
   return [

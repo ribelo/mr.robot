@@ -1,6 +1,6 @@
 /**
  * Every plugin the Plugins page lists (cn-dbm9): the capability plugins a Robot is granted by tool
- * group, and the connectors. A plugin may carry a Home settings schema (its detail page form) and,
+ * group, and the connectors. A plugin may carry a Space settings schema (its detail page form) and,
  * for connectors, how a person connects an account. Adding an entry adds its row and page; the
  * web app has no per-plugin code.
  */
@@ -15,7 +15,7 @@ export interface ConnectorSpec {
   readonly connect: ConnectSpec
   /**
    * A connection of this connector acts as the person who connected it (a Slack session, a Google
-   * account): it is never shared with the Home, so no other Member's Robot acts as them (ux-bk91).
+   * account): it is never shared with the Space, so no other Member's Robot acts as them (ux-bk91).
    */
   readonly actsAsPerson?: true
 }
@@ -34,8 +34,8 @@ export interface PluginEntry {
   readonly group: 'capability' | 'connector'
   /** Tool groups this plugin provides; a disabled plugin's groups are neither mounted nor grantable. */
   readonly toolGroups: readonly ToolGroup[]
-  /** The Home's settings for the plugin (admin only); secret fields carry role "secret". */
-  readonly homeConfig?: z<unknown>
+  /** The Space's settings for the plugin (admin only); secret fields carry role "secret". */
+  readonly spaceConfig?: z<unknown>
   /** Setup steps in Markdown for the plugin page; origin is this Mr. Robot's address (callback URLs). */
   readonly guide?: (origin: string) => string
   /** What the admin still has to set up, given the saved values and which secrets are stored. */
@@ -61,20 +61,20 @@ export const PLUGINS: readonly PluginEntry[] = [
   capability('box', 'Box', 'folder'),
   capability('exa', 'Exa research', 'search', {
     toolGroups: ['exa', 'exa-agent'],
-    description: 'Web search, page crawling, code context and long agent runs through Exa, paid per call from the Home\'s key.',
-    homeConfig: z.object({ apiKey: z.string().role('secret').description('Exa API key').comment('From dashboard.exa.ai → API keys. Calls are billed to this key.') }) as never,
-    setupNeeded: (_values, secrets) => (secrets.has('apiKey') ? null : 'Add the Home\'s Exa API key.'),
+    description: 'Web search, page crawling, code context and long agent runs through Exa, paid per call from the Space\'s key.',
+    spaceConfig: z.object({ apiKey: z.string().role('secret').description('Exa API key').comment('From dashboard.exa.ai → API keys. Calls are billed to this key.') }) as never,
+    setupNeeded: (_values, secrets) => (secrets.has('apiKey') ? null : 'Add the Space\'s Exa API key.'),
   }),
   {
     name: 'google', title: 'Google', icon: 'google', group: 'connector', toolGroups: [],
     description: 'Gmail, Calendar, Drive with Docs and Sheets, and Contacts for the Google accounts people connect.',
-    homeConfig: z.object({
+    spaceConfig: z.object({
       clientId: z.string().required().description('OAuth client ID').comment('From Google Auth Platform → Clients: the web client created for Mr. Robot.'),
       clientSecret: z.string().role('secret').required().description('OAuth client secret'),
     }) as never,
-    setupNeeded: (values, secrets) => (typeof values['clientId'] === 'string' && values['clientId'] !== '' && secrets.has('clientSecret') ? null : 'The Home admin sets up the Google OAuth client once.'),
+    setupNeeded: (values, secrets) => (typeof values['clientId'] === 'string' && values['clientId'] !== '' && secrets.has('clientSecret') ? null : 'The Space admin sets up the Google OAuth client once.'),
     guide: (origin) => [
-      'Do this once for the whole Home. It takes a few screens in Google Cloud; nothing is installed.',
+      'Do this once for the whole Space. It takes a few screens in Google Cloud; nothing is installed.',
       '',
       '1. Open [console.cloud.google.com](https://console.cloud.google.com/projectcreate) and create a project named **Mr Robot**.',
       '2. Enable the APIs (use the project you just created): [Gmail](https://console.cloud.google.com/apis/library/gmail.googleapis.com), [Calendar](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com), [Drive](https://console.cloud.google.com/apis/library/drive.googleapis.com), [Docs](https://console.cloud.google.com/apis/library/docs.googleapis.com), [Sheets](https://console.cloud.google.com/apis/library/sheets.googleapis.com) and [People](https://console.cloud.google.com/apis/library/people.googleapis.com) — press **Enable** on each.',
@@ -124,7 +124,7 @@ export const PLUGINS: readonly PluginEntry[] = [
     name: 'discord', title: 'Discord', icon: 'discord', group: 'connector', toolGroups: [],
     description: 'As a bot on your server: Robots read and post in channels and DMs, and talk to you through their own channel. As you: Robots read the servers you are on and, with a write grant, send, reply, react and mark read.',
     guide: () => [
-      'Do this once for the Home. The bot belongs to you, not to Mr. Robot: nothing is published anywhere.',
+      'Do this once for the Space. The bot belongs to you, not to Mr. Robot: nothing is published anywhere.',
       '',
       '1. Open [discord.com/developers/applications](https://discord.com/developers/applications) → **New Application**, name it **Mr. Robot** (or anything you like).',
       '2. Open **Bot**. Press **Reset Token** → **Yes, do it**, then **Copy**. In Mr. Robot open your name → **Connections** → Discord → **Connect**, paste the token and press **Connect**.',
@@ -181,13 +181,13 @@ export function connectorOf(kind: string): { readonly plugin: PluginEntry; reado
 /** The connector plugin of a kind. */
 export const connectorPlugin = (kind: ConnectorKind): PluginEntry | undefined => connectorOf(kind)?.plugin
 
-/** Whether connections of a kind act as a person and so are never shared with the Home (ux-bk91). */
+/** Whether connections of a kind act as a person and so are never shared with the Space (ux-bk91). */
 export const actsAsPerson = (kind: ConnectorKind): boolean => connectorOf(kind)?.connector.actsAsPerson === true
 
-/** Whether the Home has the plugin of a connector kind on (both Discord kinds follow the Discord plugin). */
+/** Whether the Space has the plugin of a connector kind on (both Discord kinds follow the Discord plugin). */
 export const connectorOn = (enabled: Readonly<Record<string, boolean>>, kind: ConnectorKind): boolean => enabled[connectorPlugin(kind)?.name ?? kind] !== false
 
-/** Tool groups of the plugins the Home switched off. */
+/** Tool groups of the plugins the Space switched off. */
 export function disabledToolGroups(enabled: Readonly<Record<string, boolean>>): Set<string> {
   return new Set(PLUGINS.filter((plugin) => enabled[plugin.name] === false).flatMap((plugin) => plugin.toolGroups))
 }

@@ -1,5 +1,5 @@
 /**
- * The Discord connector (v1.5 ticket 05, cn-csae, cn-q259): one official bot per Home, its token in the
+ * The Discord connector (v1.5 ticket 05, cn-csae, cn-q259): one official bot per Space, its token in the
  * vault; REST tools for channels, messages, files, reactions and DMs with the owner. The gateway (a
  * Durable Object, see discord-gateway.ts) carries inbound messages; this file is only the REST surface.
  */

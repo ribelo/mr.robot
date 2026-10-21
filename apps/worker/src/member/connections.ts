@@ -1,7 +1,7 @@
 /**
  * A Member's connections (v1.5, cn-qs78, cn-bsge, cn-a1i0): accounts of Google, Slack and Discord.
  * Each row holds what the connection is; its secrets are sealed in the Member's vault, one per field,
- * and the row only references them. Shared connections are published to the Home's index.
+ * and the row only references them. Shared connections are published to the Space's index.
  */
 import * as Effect from 'effect/Effect'
 import type { ConnectionStatus, ConnectionView, ConnectorKind } from '@mr-robot/protocol'
@@ -10,7 +10,7 @@ import type { ConnectionStatus, ConnectionView, ConnectorKind } from '@mr-robot/
 export type ConnectionMeta = Readonly<Record<string, string | number | boolean | null>>
 import type { VaultShape } from '../platform/vault.ts'
 
-/** A connection as its owner stores it; owner fields are added by the Home. */
+/** A connection as its owner stores it; owner fields are added by the Space. */
 export type OwnConnection = Omit<ConnectionView, 'ownerId' | 'ownerName' | 'mine'>
 
 export interface NewConnection {
@@ -53,7 +53,7 @@ export class ConnectionStore {
   constructor(
     private readonly sql: SqlStorage,
     private readonly vault: VaultShape,
-    /** A shared connection changed or stopped being shared: the Home's index follows. */
+    /** A shared connection changed or stopped being shared: the Space's index follows. */
     private readonly publish: (connection: OwnConnection, shared: boolean) => Promise<void>,
     /** A connection was added: the connector's skills go into the library. */
     private readonly added: () => Promise<void> = async () => undefined,

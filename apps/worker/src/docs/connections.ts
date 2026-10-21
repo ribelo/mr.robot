@@ -5,7 +5,7 @@ A Connector is a plugin that gives Robots tools on an external service. A Connec
 ## Rules for all Connections
 
 - A Connection belongs to the Member who linked it.
-- Google, Slack and Discord as you act as the Member. They are never shared with the Home: another Member's Robot must never act as the owner. They have no "Shared with the Home" checkbox. A Discord bot Connection is private or shared.
+- Google, Slack and Discord as you act as the Member. They are never shared with the Space: another Member's Robot must never act as the owner. They have no "Shared with the Space" checkbox. A Discord bot Connection is private or shared.
 - A Member can have many Connections of one kind.
 - The owner grants a Connection to a Robot, one by one. Mr. Robot is the exception: he holds every Connection his owner can reach, unless the owner lowered one.
 - Write access is a separate grant item: Connection write. A Robot can read with a read grant and cannot write.
@@ -34,7 +34,7 @@ If nobody signs in within 10 minutes, the attempt stops and nothing is connected
 
 ## Google
 
-The Home admin pastes one Google Cloud OAuth client in the Google plugin settings (a guided page shows the steps). Each Member links accounts with Connect Google and chooses the services. The services are Gmail, Calendar, Drive (with Docs and Sheets), and Contacts. Gmail send is a separate grant. The tool google_accounts lists the accounts and the services each one offers. Files from Google land in the Robot's Workspace.
+The Space admin pastes one Google Cloud OAuth client in the Google plugin settings (a guided page shows the steps). Each Member links accounts with Connect Google and chooses the services. The services are Gmail, Calendar, Drive (with Docs and Sheets), and Contacts. Gmail send is a separate grant. The tool google_accounts lists the accounts and the services each one offers. Files from Google land in the Robot's Workspace.
 
 ## Slack
 
@@ -44,7 +44,7 @@ Slack connects as you. The Robot can read by default: channels, unread messages,
 
 Discord connects as a bot, as you, or both.
 
-As a bot: one bot belongs to the Home. The Member invites it to a Discord server. A Discord bot Connection shows its id next to its name. Discord is also a Channel. A message in a Robot's Discord channel or in a DM wakes the Robot. The Robot's reply goes to the same place.
+As a bot: one bot belongs to the Space. The Member invites it to a Discord server. A Discord bot Connection shows its id next to its name. Discord is also a Channel. A message in a Robot's Discord channel or in a DM wakes the Robot. The Robot's reply goes to the same place.
 
 As you: the Member connects their own Discord account. Robots read the servers the Member is on: servers, channels, messages, threads, search and people. They read through Discord's REST API, so a Discord message does not wake a Robot through this Connection. The write tools (send, reply, react, mark read) need the Connection write grant. The connect form says: "Discord forbids automating a user account and may close it. You take that risk." The Member takes that risk knowingly.
 
@@ -58,9 +58,9 @@ The owner of a Connection can write instructions for it in Connections, for exam
 
 ## Skills for Connections
 
-Each Connector has a SKILL.md in the Home library. The skill comes with the Connection grant.
+Each Connector has a SKILL.md in the Space library. The skill comes with the Connection grant.
 
 ## Plugins page
 
-The Plugins page lists the plugins. The Home admin switches a plugin on or off for the Home. Each plugin has a detail page with its settings.
+The Plugins page lists the plugins. The Space admin switches a plugin on or off for the Space. Each plugin has a detail page with its settings.
 `

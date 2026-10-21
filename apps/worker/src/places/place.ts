@@ -15,7 +15,7 @@ export type { Reach } from './host-facet.ts'
 export const WORKSPACE_PLACE = 'workspace'
 export const BOX_PLACE = 'box'
 
-/** A place a call resolved to, after its grant was checked. A Host is the one the Robot's owner reaches, as the Home lists it. */
+/** A place a call resolved to, after its grant was checked. A Host is the one the Robot's owner reaches, as the Space lists it. */
 export type Place =
   | { readonly kind: 'workspace' }
   | { readonly kind: 'box' }

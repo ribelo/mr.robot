@@ -1,6 +1,6 @@
 /**
  * Skills that come with the connectors (v1.5 ticket 07, cn-go3s, cn-6kh9): common flows for each
- * connector, and reading mBank's notification e-mails through Gmail. They are seeded into the Home's
+ * connector, and reading mBank's notification e-mails through Gmail. They are seeded into the Space's
  * skill library (the admin may edit them; a later seed never overwrites an edit) and a Robot loads
  * them only through a connector it is granted, never by an ordinary skill grant.
  */
@@ -93,7 +93,7 @@ const SLACK = skill('slack-workspace', 'Catch up on a Slack workspace: unread fi
 If Slack says the session is gone, tell the owner to paste the token and cookie again on the Slack row.
 `)
 
-const DISCORD = skill('discord-bot', 'Use the Home\'s Discord bot: read and post in channels, reply, react, DM the owner.', `
+const DISCORD = skill('discord-bot', 'Use the Space\'s Discord bot: read and post in channels, reply, react, DM the owner.', `
 # Discord
 
 The bot posts as itself, never as the owner.
@@ -119,7 +119,7 @@ export const CONNECTOR_SKILL_NAMES: ReadonlySet<string> = new Set(Object.values(
 /**
  * The skills a Robot holds: its ordinary skill grants (a connector skill is never held that way), then
  * the skills of each connector kind in `kindsOn` it holds a granted connection of. The Robot's own
- * Turn and the Home's skill_library holders (cd-56kk) both answer through this one rule.
+ * Turn and the Space's skill_library holders (cd-56kk) both answer through this one rule.
  */
 export function heldSkillNames(
   grants: Pick<GrantSet, 'skills' | 'connections'>,

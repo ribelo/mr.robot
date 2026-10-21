@@ -21,7 +21,7 @@ import {
   MemberPreferences,
   AccountPatch,
   ApiKeyInput,
-  HomeSettingsPatch,
+  SpaceSettingsPatch,
   OAuthFinish,
   GroupInput,
   GroupOrder,
@@ -55,11 +55,11 @@ import {
   type RobotPanel,
   type SessionCapture,
 } from '@mr-robot/protocol'
-import { HOME_ID, type Env } from '../env.ts'
+import { SPACE_ID, type Env } from '../env.ts'
 import type { DefinitionRow } from '../definitions/library.ts'
 import { definitionArchive } from '../definitions/tarball.ts'
 import type { DefinitionView } from '@mr-robot/protocol'
-import { memberAvatarObject } from '../home/home.ts'
+import { memberAvatarObject } from '../space/space.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
 import { API_KEY_PROVIDERS, OAUTH_PROVIDERS, PROVIDER_IDS, type ProviderId } from '../agent/providers.ts'
 import { modelRefusal } from '../robot/model-choice.ts'
@@ -70,7 +70,7 @@ import { ApiError, badRequest, call, conflict, decodeBody, forbidden, notFound, 
 import { actsAsPerson, pluginByName } from '../plugins/catalog.ts'
 import { connectPastedValues, sharingRefusal } from '../member/connect-pasted.ts'
 import { isSignInKind } from '@mr-robot/host-protocol'
-import type { TaskCaller, TaskFilter } from '../home/tasks.ts'
+import type { TaskCaller, TaskFilter } from '../space/tasks.ts'
 
 export interface ApiContext {
   readonly request: Request
@@ -79,12 +79,12 @@ export interface ApiContext {
   readonly member: MemberView
 }
 
-const home = (env: Env) => env.HOME.getByName(HOME_ID)
+const space = (env: Env) => env.SPACE.getByName(SPACE_ID)
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 
-/** The caller may use this Robot (owner, or shared with the Home); returns how. */
+/** The caller may use this Robot (owner, or shared with the Space); returns how. */
 function reach(c: ApiContext, robotId: string): Effect.Effect<'owner' | 'shared', ApiError> {
-  return call(() => home(c.env).access(c.member.id, robotId)).pipe(
+  return call(() => space(c.env).access(c.member.id, robotId)).pipe(
     Effect.flatMap((access) => access === null ? Effect.fail(notFound('no such robot')) : Effect.succeed(access)),
   )
 }
@@ -95,7 +95,7 @@ function owner(c: ApiContext, robotId: string): Effect.Effect<void, ApiError> {
 
 /** A connection as the person's connection list shows it (what the app decodes after a change). */
 function connectionView(c: ApiContext, id: string) {
-  return call(() => home(c.env).connectionsFor(c.member.id)).pipe(
+  return call(() => space(c.env).connectionsFor(c.member.id)).pipe(
     Effect.flatMap((views) => {
       const view = views.find((entry) => entry.id === id)
       return view === undefined ? Effect.fail(notFound('no such connection of yours')) : Effect.succeed(view)
@@ -103,7 +103,7 @@ function connectionView(c: ApiContext, id: string) {
   )
 }
 
-/** A connection that acts as a person (Slack, Google) is never shared with the Home (ux-bk91). */
+/** A connection that acts as a person (Slack, Google) is never shared with the Space (ux-bk91). */
 function shareable(kind: ConnectorKind, shared: boolean): Effect.Effect<void, ApiError> {
   const refusal = sharingRefusal(kind, shared)
   return refusal === undefined ? Effect.void : Effect.fail(badRequest(refusal))
@@ -111,7 +111,7 @@ function shareable(kind: ConnectorKind, shared: boolean): Effect.Effect<void, Ap
 
 /** The caller's Mr. Robot, whose browser signs in to services for them (v1.12 ticket 11). */
 function chief(c: ApiContext): Effect.Effect<string, ApiError> {
-  return call(() => home(c.env).mrRobotOf(c.member.id)).pipe(Effect.flatMap((id) => id === null ? Effect.fail(notFound('you have no Mr. Robot')) : Effect.succeed(id)))
+  return call(() => space(c.env).mrRobotOf(c.member.id)).pipe(Effect.flatMap((id) => id === null ? Effect.fail(notFound('you have no Mr. Robot')) : Effect.succeed(id)))
 }
 
 /** A connector kind connected by signing in to the service (Slack, Discord as you). */
@@ -141,17 +141,17 @@ function chapterParam(request: Request): number | undefined | null {
 }
 
 /**
- * The caller of a Task route: the Member, recorded as themselves. The Home admin sees every Task with Whole Home
+ * The caller of a Task route: the Member, recorded as themselves. The Space admin sees every Task with Whole Space
  * (mc-m7gg): a list asks for it with scope=home; one Task's routes follow the admin's remembered switch.
  */
-/** One Task's routes reach every Task of the Home only while the admin has Whole Home on (mc-m7gg). */
+/** One Task's routes reach every Task of the Space only while the admin has Whole Space on (mc-m7gg). */
 function taskCallerByPrefs(c: ApiContext): Effect.Effect<Extract<TaskCaller, { kind: 'member' }>, ApiError> {
   if (c.member.role !== 'admin') return Effect.succeed(taskCaller(c, false))
-  return Effect.map(call(() => c.env.MEMBER.getByName(c.member.id).profile()), (profile) => taskCaller(c, profile.mission?.wholeHome === true))
+  return Effect.map(call(() => c.env.MEMBER.getByName(c.member.id).profile()), (profile) => taskCaller(c, profile.mission?.wholeSpace === true))
 }
 
-function taskCaller(c: ApiContext, wholeHome: boolean): Extract<TaskCaller, { kind: 'member' }> {
-  return { kind: 'member', memberId: c.member.id, wholeHome: wholeHome && c.member.role === 'admin', actor: { kind: 'member', memberId: c.member.id, name: c.member.name } }
+function taskCaller(c: ApiContext, wholeSpace: boolean): Extract<TaskCaller, { kind: 'member' }> {
+  return { kind: 'member', memberId: c.member.id, wholeSpace: wholeSpace && c.member.role === 'admin', actor: { kind: 'member', memberId: c.member.id, name: c.member.name } }
 }
 
 const isTaskState = Schema.is(TaskState)
@@ -189,24 +189,24 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/me', (c) => call(async (): Promise<Me> => {
     const member = c.env.MEMBER.getByName(c.member.id)
     // Channels link into the app by the address it is opened at (v1.15).
-    await home(c.env).rememberOrigin(new URL(c.request.url).origin)
+    await space(c.env).rememberOrigin(new URL(c.request.url).origin)
     // The app tells its zone each time it opens; anything that is not a zone is ignored.
     const reported = parseTimeZone(c.request.headers.get(TIME_ZONE_HEADER) ?? '')
     const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))
-    return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.HOME_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system', mission: { ...DEFAULT_MISSION_PREFS, ...profile.mission }, acceptTasksFrom: [...(profile.acceptTasksFrom ?? [])] }
+    return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.SPACE_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system', mission: { ...DEFAULT_MISSION_PREFS, ...profile.mission }, acceptTasksFrom: [...(profile.acceptTasksFrom ?? [])] }
   }))
   // Every Page the Member shares (v1.17, dp-zq16).
   .on('GET', '/api/me/shared-pages', (c) => call(() => c.env.MEMBER.getByName(c.member.id).sharedPages(new URL(c.request.url).origin)))
   // The Member's own month by source across their Robots (ao-ef5t).
-  .on('GET', '/api/me/costs', (c) => call(() => home(c.env).memberCosts(c.member.id)))
+  .on('GET', '/api/me/costs', (c) => call(() => space(c.env).memberCosts(c.member.id)))
   .on('PATCH', '/api/me', (c) => Effect.gen(function* () {
     const { avatarColor, acceptTasksFrom, ...rest } = yield* decodeBody(c.request, MemberPreferences)
-    // Only other active Members of the Home can be named (mc-a1aa).
-    const others = acceptTasksFrom === undefined ? undefined : new Set((yield* call(() => home(c.env).members())).filter((member) => member.status === 'active' && member.id !== c.member.id).map((member) => member.id))
+    // Only other active Members of the Space can be named (mc-a1aa).
+    const others = acceptTasksFrom === undefined ? undefined : new Set((yield* call(() => space(c.env).members())).filter((member) => member.status === 'active' && member.id !== c.member.id).map((member) => member.id))
     const patch = { ...rest, ...(acceptTasksFrom === undefined || others === undefined ? {} : { acceptTasksFrom: [...new Set(acceptTasksFrom)].filter((id) => others.has(id)) }) }
     yield* call(() => c.env.MEMBER.getByName(c.member.id).updateProfile(patch))
-    if (patch.name !== undefined) yield* call(() => home(c.env).rename(c.member.id, patch.name!))
-    if (avatarColor !== undefined) yield* call((): Promise<MemberAvatar> => home(c.env).setAvatarColor(c.member.id, avatarColor))
+    if (patch.name !== undefined) yield* call(() => space(c.env).rename(c.member.id, patch.name!))
+    if (avatarColor !== undefined) yield* call((): Promise<MemberAvatar> => space(c.env).setAvatarColor(c.member.id, avatarColor))
     return { ok: true }
   }))
   // The avatar picture (ux-s88l): the app resizes it to 256 px; the server keeps at most 1 MB of PNG, JPEG or WebP.
@@ -214,10 +214,10 @@ export const api = new Router<ApiContext>()
     const picture = yield* avatarPicture(c.request)
     const key = `avatar-${yield* Effect.promise(() => pictureHash(picture.bytes))}`
     yield* call(() => c.env.FILES.put(memberAvatarObject(c.member.id, key), picture.bytes, { httpMetadata: { contentType: picture.contentType } }))
-    return yield* call((): Promise<MemberAvatar> => home(c.env).setAvatarPicture(c.member.id, key))
+    return yield* call((): Promise<MemberAvatar> => space(c.env).setAvatarPicture(c.member.id, key))
   }))
-  .on('DELETE', '/api/me/avatar', (c) => call((): Promise<MemberAvatar> => home(c.env).removeAvatarPicture(c.member.id)))
-  // Any Member of the Home sees another Member's picture (ux-2ft4); the key changes with the picture.
+  .on('DELETE', '/api/me/avatar', (c) => call((): Promise<MemberAvatar> => space(c.env).removeAvatarPicture(c.member.id)))
+  // Any Member of the Space sees another Member's picture (ux-2ft4); the key changes with the picture.
   .on('GET', '/api/members/:member/avatar/:key', (c, { member, key }) => Effect.gen(function* () {
     if (!AVATAR_KEY.test(key)) return yield* Effect.fail(notFound('no such picture'))
     const object = yield* call(() => c.env.FILES.get(memberAvatarObject(member, key)))
@@ -263,23 +263,23 @@ export const api = new Router<ApiContext>()
   }))
 
   // ------------------------------------------------------------ secrets (robot-vplt)
-  .on('GET', '/api/secrets', (c) => call(() => home(c.env).secretsView(c.member.id)))
+  .on('GET', '/api/secrets', (c) => call(() => space(c.env).secretsView(c.member.id)))
   .on('PUT', '/api/secrets/:name', (c, { name }) => Effect.gen(function* () {
     if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) return yield* Effect.fail(badRequest('login names use letters, digits, ".", "_" and "-"'))
     const { shared, ...patch } = yield* decodeBody(c.request, LoginInput)
-    yield* call(() => home(c.env).putLogin(c.member.id, name, { ...patch, ...(patch.websites === undefined ? {} : { websites: patch.websites.map((site) => site.trim()).filter((site) => site !== '') }) }, shared)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    yield* call(() => space(c.env).putLogin(c.member.id, name, { ...patch, ...(patch.websites === undefined ? {} : { websites: patch.websites.map((site) => site.trim()).filter((site) => site !== '') }) }, shared)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
-  .on('GET', '/api/secrets/:name/reveal', (c, { name }) => Effect.map(call(() => home(c.env).revealLogin(c.member.id, name)), (password) => ({ password })))
-  .on('DELETE', '/api/secrets/:name', (c, { name }) => call(() => home(c.env).deleteSecret(c.member.id, name)))
+  .on('GET', '/api/secrets/:name/reveal', (c, { name }) => Effect.map(call(() => space(c.env).revealLogin(c.member.id, name)), (password) => ({ password })))
+  .on('DELETE', '/api/secrets/:name', (c, { name }) => call(() => space(c.env).deleteSecret(c.member.id, name)))
 
   // ------------------------------------------------------------ skill library (robot-7qpi, robot-qjvu)
-  .on('GET', '/api/skills', (c) => call(async () => ({ skills: await home(c.env).skills(c.member.id), repository: await home(c.env).skillRepository() })))
+  .on('GET', '/api/skills', (c) => call(async () => ({ skills: await space(c.env).skills(c.member.id), repository: await space(c.env).skillRepository() })))
   .on('PUT', '/api/admin/skills/repository', (c) => Effect.gen(function* () {
     yield* admin(c)
     const input = yield* decodeBody(c.request, SkillRepositoryInput)
     if (!/^[\w.-]+\/[\w.-]+$/.test(input.repo)) return yield* Effect.fail(badRequest('the repository is owner/name on GitHub'))
-    yield* call(() => home(c.env).setSkillRepository({ repo: input.repo, ref: input.ref || 'main', path: input.path }, input.token))
+    yield* call(() => space(c.env).setSkillRepository({ repo: input.repo, ref: input.ref || 'main', path: input.path }, input.token))
     return { ok: true }
   }))
   .on('POST', '/api/admin/browser-probe', (c) => Effect.gen(function* () {
@@ -288,34 +288,34 @@ export const api = new Router<ApiContext>()
     return yield* call(() => probe(c.env, input.backend, input.url, input.waitMs))
   }))
   // ------------------------------------------------------------ Hosts (v1.2)
-  .on('GET', '/api/hosts', (c) => call(() => home(c.env).hostsFor(c.member.id)))
+  .on('GET', '/api/hosts', (c) => call(() => space(c.env).hostsFor(c.member.id)))
   // ---------------------------------------------------------------- plugins and connections (v1.5)
-  .on('GET', '/api/plugins', (c) => call(() => home(c.env).plugins(c.member.id, new URL(c.request.url).origin)))
+  .on('GET', '/api/plugins', (c) => call(() => space(c.env).plugins(c.member.id, new URL(c.request.url).origin)))
   .on('PUT', '/api/admin/plugins/:name', (c, { name }) => Effect.gen(function* () {
     yield* admin(c)
     const body = yield* decodeBody(c.request, PluginSwitch)
     if (pluginByName(name) === undefined) return yield* Effect.fail(notFound('no such plugin'))
-    yield* call(() => home(c.env).setPluginEnabled(name, body.enabled))
+    yield* call(() => space(c.env).setPluginEnabled(name, body.enabled))
     return { ok: true }
   }))
   .on('PUT', '/api/admin/plugins/:name/settings', (c, { name }) => Effect.gen(function* () {
     yield* admin(c)
     const body = yield* decodeBody(c.request, PluginSettingsInput)
     if (pluginByName(name) === undefined) return yield* Effect.fail(notFound('no such plugin'))
-    return yield* Effect.tryPromise({ try: () => home(c.env).setPluginConfig(name, body.values, new URL(c.request.url).origin), catch: (error) => badRequest(error instanceof Error ? error.message.replace(/^PluginConfigInvalid: /, '') : 'the settings are not valid') })
+    return yield* Effect.tryPromise({ try: () => space(c.env).setPluginConfig(name, body.values, new URL(c.request.url).origin), catch: (error) => badRequest(error instanceof Error ? error.message.replace(/^PluginConfigInvalid: /, '') : 'the settings are not valid') })
   }))
-  .on('GET', '/api/connections', (c) => call(() => home(c.env).connectionsFor(c.member.id)))
-  .on('GET', '/api/connections/notes', (c) => call(() => home(c.env).connectionNotes(c.member.id)))
+  .on('GET', '/api/connections', (c) => call(() => space(c.env).connectionsFor(c.member.id)))
+  .on('GET', '/api/connections/notes', (c) => call(() => space(c.env).connectionNotes(c.member.id)))
   .on('DELETE', '/api/connections/notes/:id', (c, { id }) => Effect.gen(function* () {
-    const dismissed = yield* call(() => home(c.env).dismissConnectionNote(c.member.id, id))
+    const dismissed = yield* call(() => space(c.env).dismissConnectionNote(c.member.id, id))
     return dismissed ? { ok: true } : yield* Effect.fail(notFound('no such note'))
   }))
   // Google consent (v1.5 ticket 02): the browser navigates here, so both answer with a redirect.
   .on('GET', '/api/connections/google/oauth/start', (c) => Effect.promise(async () => {
     const url = new URL(c.request.url)
     const services = (url.searchParams.get('services') ?? '').split(',').filter(Boolean)
-    // A Google account acts as the person, so it is never shared with the Home (ux-bk91).
-    if (url.searchParams.get('shared') === '1' && actsAsPerson('google')) return Response.redirect(`${url.origin}/#/me?connection-error=${encodeURIComponent('a Google connection acts as you, so it cannot be shared with the Home')}`, 302)
+    // A Google account acts as the person, so it is never shared with the Space (ux-bk91).
+    if (url.searchParams.get('shared') === '1' && actsAsPerson('google')) return Response.redirect(`${url.origin}/#/me?connection-error=${encodeURIComponent('a Google connection acts as you, so it cannot be shared with the Space')}`, 302)
     try {
       const consent = await c.env.MEMBER.getByName(c.member.id).startGoogleConsent(url.origin, services, url.searchParams.get('shared') === '1', url.searchParams.get('reconnect'), url.searchParams.get('external') === '1')
       return Response.redirect(consent, 302)
@@ -364,36 +364,36 @@ export const api = new Router<ApiContext>()
     const removed = yield* call(() => c.env.MEMBER.getByName(c.member.id).removeConnection(id))
     return removed ? { ok: true } : yield* Effect.fail(notFound('no such connection of yours'))
   }))
-  .on('GET', '/api/hosts/pair/:code', (c, { code }) => call(() => home(c.env).pairingView(code)))
-  .on('POST', '/api/hosts/pair/:code', (c, { code }) => call(() => home(c.env).approvePairing(code, c.member.id)))
+  .on('GET', '/api/hosts/pair/:code', (c, { code }) => call(() => space(c.env).pairingView(code)))
+  .on('POST', '/api/hosts/pair/:code', (c, { code }) => call(() => space(c.env).approvePairing(code, c.member.id)))
   .on('PATCH', '/api/hosts/:id', (c, { id }) => Effect.gen(function* () {
     const { sharing } = yield* decodeBody(c.request, Schema.Struct({ sharing: Schema.Literals(['private', 'home']) }))
     yield* call(() => c.env.MEMBER.getByName(c.member.id).setHostSharing(id, sharing))
     return { ok: true }
   }))
   .on('DELETE', '/api/hosts/:id', (c, { id }) => Effect.gen(function* () {
-    const owner = yield* call(() => home(c.env).hostOwner(id))
+    const owner = yield* call(() => space(c.env).hostOwner(id))
     if (owner !== c.member.id && c.member.role !== 'admin') return yield* Effect.fail(forbidden('only the person who paired this host can unpair it'))
     yield* call(() => c.env.MEMBER.getByName(owner ?? c.member.id).unpairHost(id))
     return { ok: true }
   }))
-  .on('GET', '/api/home-memory', (c) => call(async () => ({ content: await home(c.env).homeMemory() })))
-  .on('GET', '/api/admin/home-memory/history', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).homeMemoryHistory()))))
-  .on('GET', '/api/admin/home-memory/versions/:version', (c, { version }) => Effect.gen(function* () {
+  .on('GET', '/api/space-memory', (c) => call(async () => ({ content: await space(c.env).spaceMemory() })))
+  .on('GET', '/api/admin/space-memory/history', (c) => admin(c).pipe(Effect.andThen(call(() => space(c.env).spaceMemoryHistory()))))
+  .on('GET', '/api/admin/space-memory/versions/:version', (c, { version }) => Effect.gen(function* () {
     yield* admin(c)
-    const found = yield* call(() => home(c.env).homeMemoryVersion(version))
+    const found = yield* call(() => space(c.env).spaceMemoryVersion(version))
     return found ?? (yield* Effect.fail(notFound('no such version')))
   }))
-  .on('POST', '/api/admin/home-memory/restore', (c) => Effect.gen(function* () {
+  .on('POST', '/api/admin/space-memory/restore', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { version } = yield* decodeBody(c.request, FileRestore)
-    if (!(yield* call(() => home(c.env).restoreHomeMemory(version, c.member.name)))) return yield* Effect.fail(notFound('no such version'))
+    if (!(yield* call(() => space(c.env).restoreSpaceMemory(version, c.member.name)))) return yield* Effect.fail(notFound('no such version'))
     return { ok: true }
   }))
-  .on('PUT', '/api/admin/home-memory', (c) => Effect.gen(function* () {
+  .on('PUT', '/api/admin/space-memory', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { content } = yield* decodeBody(c.request, Schema.Struct({ content: Schema.String }))
-    yield* call(() => home(c.env).setHomeMemory(content, 'the Home admin', null))
+    yield* call(() => space(c.env).setSpaceMemory(content, 'the Space admin', null))
     return { ok: true }
   }))
   // The host action log (pl-vcy7): only the host's owner sees it.
@@ -405,22 +405,22 @@ export const api = new Router<ApiContext>()
   .on('PUT', '/api/admin/exa', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { key } = yield* decodeBody(c.request, Schema.Struct({ key: Schema.NullOr(Schema.String) }))
-    yield* call(() => home(c.env).setExaKey(key))
+    yield* call(() => space(c.env).setExaKey(key))
     return { ok: true, configured: key !== null && key.trim() !== '' }
   }))
-  .on('POST', '/api/admin/models/refresh', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).refreshCatalogs(c.member.id)))))
+  .on('POST', '/api/admin/models/refresh', (c) => admin(c).pipe(Effect.andThen(call(() => space(c.env).refreshCatalogs(c.member.id)))))
   .on('GET', '/api/skills/:name', (c, { name }) => Effect.gen(function* () {
-    const content = yield* call(() => home(c.env).skillContent(c.member.id, name))
+    const content = yield* call(() => space(c.env).skillContent(c.member.id, name))
     if (content === null) return yield* Effect.fail(notFound(`no skill "${name}"`))
     return { name, content }
   }))
   .on('PUT', '/api/admin/skills/:name', (c, { name }) => Effect.gen(function* () {
     yield* admin(c)
     const input = yield* decodeBody(c.request, Schema.Struct({ description: Schema.String, content: Schema.String }))
-    yield* call(() => home(c.env).saveSkill(name, input.description, input.content, c.member.id)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    yield* call(() => space(c.env).saveSkill(name, input.description, input.content, c.member.id)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
-  .on('DELETE', '/api/admin/skills/:name', (c, { name }) => admin(c).pipe(Effect.andThen(call(() => home(c.env).deleteSkill(name))), Effect.as({ ok: true })))
+  .on('DELETE', '/api/admin/skills/:name', (c, { name }) => admin(c).pipe(Effect.andThen(call(() => space(c.env).deleteSkill(name))), Effect.as({ ok: true })))
   // Robot definitions (v1.18 ticket 04): Save as definition, the library's list, and the directory to commit by hand.
   .on('POST', '/api/robots/:id/definition', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
@@ -430,31 +430,31 @@ export const api = new Router<ApiContext>()
   }))
   // Add a definition: a new Robot of the Member in setup, from the definition's files (v1.18 ticket 05).
   // The Marketplace (v1.18 ticket 06): every definition a Member sees with its needs matched; the admin publishes and removes.
-  .on('GET', '/api/marketplace', (c) => call(() => home(c.env).marketplace(c.member.id)).pipe(Effect.map((entries) => entries.map((entry) => ({ definition: definitionView(entry.row, c.member.id), tools: entry.tools, needs: entry.needs })))))
+  .on('GET', '/api/marketplace', (c) => call(() => space(c.env).marketplace(c.member.id)).pipe(Effect.map((entries) => entries.map((entry) => ({ definition: definitionView(entry.row, c.member.id), tools: entry.tools, needs: entry.needs })))))
   .on('POST', '/api/admin/definitions/:slug/publish', (c, { slug }) => Effect.gen(function* () {
     yield* admin(c)
     const { published } = yield* decodeBody(c.request, Schema.Struct({ published: Schema.Boolean }))
-    yield* call(() => home(c.env).setDefinitionPublished(slug, published))
+    yield* call(() => space(c.env).setDefinitionPublished(slug, published))
     return { ok: true }
   }))
-  .on('DELETE', '/api/admin/definitions/:slug', (c, { slug }) => admin(c).pipe(Effect.andThen(call(() => home(c.env).removeDefinition(slug))), Effect.as({ ok: true })))
+  .on('DELETE', '/api/admin/definitions/:slug', (c, { slug }) => admin(c).pipe(Effect.andThen(call(() => space(c.env).removeDefinition(slug))), Effect.as({ ok: true })))
   // Add from a Grok Bot marketplace address (v1.18 ticket 07): a brief, the Member's own until the admin publishes it.
   .on('POST', '/api/definitions/import', (c) => Effect.gen(function* () {
     const { url } = yield* decodeBody(c.request, Schema.Struct({ url: Schema.String }))
-    return definitionView(yield* call(() => home(c.env).importGrokTemplate(c.member.id, url)), c.member.id)
+    return definitionView(yield* call(() => space(c.env).importGrokTemplate(c.member.id, url)), c.member.id)
   }))
-  .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(() => home(c.env).addDefinition(c.member.id, slug)))
-  .on('GET', '/api/definitions', (c) => call(() => home(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
+  .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(() => space(c.env).addDefinition(c.member.id, slug)))
+  .on('GET', '/api/definitions', (c) => call(() => space(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
   .on('GET', '/api/definitions/:slug/archive', (c, { slug }) => Effect.gen(function* () {
-    const files = yield* call(() => home(c.env).definitionFiles(slug, c.member.id))
+    const files = yield* call(() => space(c.env).definitionFiles(slug, c.member.id))
     if (files === null) return yield* Effect.fail(notFound('no such definition'))
     const archive = yield* Effect.promise(() => definitionArchive(`robots/${slug}`, new Map(files.map((file) => [file.path, file.body])), Date.now()))
     return new Response(archive, { headers: { 'content-type': 'application/gzip', 'content-disposition': `attachment; filename="${slug}.tar.gz"` } })
   }))
-  .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message))))))
+  .on('POST', '/api/admin/skills/sync', (c) => admin(c).pipe(Effect.andThen(call(() => space(c.env).syncSkills()).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message))))))
 
   // ------------------------------------------------------------ Providers (robot-dic7, robot-lzu3, robot-7v9s)
-  .on('GET', '/api/providers', (c) => call(() => home(c.env).providersView(c.member.id)))
+  .on('GET', '/api/providers', (c) => call(() => space(c.env).providersView(c.member.id)))
   // Provider accounts (v1.10 ticket 02): many per Provider, each shared on its own (pa-i3le, pa-f281).
   .on('POST', '/api/providers/:provider/accounts', (c, { provider }) => Effect.gen(function* () {
     const name = yield* providerName(provider, [...API_KEY_PROVIDERS, 'opencode-go'])
@@ -480,27 +480,27 @@ export const api = new Router<ApiContext>()
     return { ok: true }
   }))
   .on('DELETE', '/api/accounts/:id', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).removeAccount(id)).pipe(Effect.as({ ok: true })))
-  // Usage windows (pa-lmbl, pa-sps4); another Member's account only when it is shared with the Home (pa-sstr).
+  // Usage windows (pa-lmbl, pa-sps4); another Member's account only when it is shared with the Space (pa-sstr).
   .on('GET', '/api/accounts/:id/usage', (c, { id }) => Effect.gen(function* () {
     const owner = new URL(c.request.url).searchParams.get('owner') ?? c.member.id
     if (owner === c.member.id) return yield* call(() => c.env.MEMBER.getByName(owner).accountUsage(id, false))
-    const { shared } = yield* call(() => home(c.env).accountsFor(c.member.id))
+    const { shared } = yield* call(() => space(c.env).accountsFor(c.member.id))
     if (!shared.some((account) => account.id === id && account.ownerId === owner)) return yield* Effect.fail(notFound('no such shared account'))
     return yield* call(() => c.env.MEMBER.getByName(owner).accountUsage(id, true))
   }))
   .on('POST', '/api/accounts/:id/check', (c, { id }) => call(() => c.env.MEMBER.getByName(c.member.id).checkAccount(id)))
-  .on('GET', '/api/admin/settings', (c) => admin(c).pipe(Effect.andThen(call(async () => ({ ...(await home(c.env).settings()), models: await home(c.env).offeredModelList() })))))
+  .on('GET', '/api/admin/settings', (c) => admin(c).pipe(Effect.andThen(call(async () => ({ ...(await space(c.env).settings()), models: await space(c.env).offeredModelList() })))))
   // Switching Workers AI off may move the default model; the answer says so for the admin's note (ux-jseo).
   .on('PATCH', '/api/admin/settings', (c) => Effect.gen(function* () {
     yield* admin(c)
-    const patch = yield* decodeBody(c.request, HomeSettingsPatch)
-    const saved = yield* call(() => home(c.env).updateSettings(patch, c.member.id))
-    return { ...saved, models: yield* call(() => home(c.env).offeredModelList()) }
+    const patch = yield* decodeBody(c.request, SpaceSettingsPatch)
+    const saved = yield* call(() => space(c.env).updateSettings(patch, c.member.id))
+    return { ...saved, models: yield* call(() => space(c.env).offeredModelList()) }
   }))
 
   // ------------------------------------------------------------ robots
   .on('GET', '/api/robots', (c) => call(async () => {
-    const robots = await home(c.env).reachable(c.member.id)
+    const robots = await space(c.env).reachable(c.member.id)
     // Read with what this person reaches now: a Robot that left their reach leaves its group (ux-lywk).
     const prefs = await c.env.MEMBER.getByName(c.member.id).listPrefs(robots.map((summary) => summary.id))
     return robots.map((summary) => {
@@ -536,7 +536,7 @@ export const api = new Router<ApiContext>()
       brief: Schema.optional(Schema.String),
       model: Schema.optional(Schema.Struct({ provider: Schema.String, model: Schema.String, effort: Schema.String })),
     }))
-    return yield* call(() => home(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    return yield* call(() => space(c.env).createRobot(c.member.id, brief, model as import('@mr-robot/protocol').ModelChoice | undefined)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
   }))
   .on('GET', '/api/robots/:id/conversation', (c, { id }) => reach(c, id).pipe(
     Effect.andThen(() => {
@@ -731,13 +731,13 @@ export const api = new Router<ApiContext>()
   }))
   .on('GET', '/api/robots/:id/panel', (c, { id }) => Effect.gen(function* () {
     const access = yield* reach(c, id)
-    const entry = (yield* call(() => home(c.env).reachable(c.member.id))).find((summary) => summary.id === id)
+    const entry = (yield* call(() => space(c.env).reachable(c.member.id))).find((summary) => summary.id === id)
     if (entry === undefined) return yield* Effect.fail(notFound())
-    const tasks = (yield* call((): Promise<TaskPage> => home(c.env).listTasks(taskCaller(c, false), { assignee: { kind: 'robot', robotId: id }, state: 'all' }))).tasks
+    const tasks = (yield* call((): Promise<TaskPage> => space(c.env).listTasks(taskCaller(c, false), { assignee: { kind: 'robot', robotId: id }, state: 'all' }))).tasks
     const panel: RobotPanel = yield* call(() => robot(c, id).panel(access === 'owner', entry, tasks))
     return panel
   }))
-  .on('GET', '/api/robots/:id/catalog', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => home(c.env).catalog(c.member.id, id)))))
+  .on('GET', '/api/robots/:id/catalog', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => space(c.env).catalog(c.member.id, id)))))
   .on('PATCH', '/api/robots/:id/settings', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
     const patch = yield* decodeBody(c.request, SettingsPatch)
@@ -773,7 +773,7 @@ export const api = new Router<ApiContext>()
     if (!result.ok) return yield* Effect.fail(result.reason === 'stale' ? conflictStale() : notFound('no such Ask'))
     return result.proposal
   }))
-  // Saving a credential Ask (v1.15 ticket 05): the form's password goes to the Home through this call and nowhere else.
+  // Saving a credential Ask (v1.15 ticket 05): the form's password goes to the Space through this call and nowhere else.
   .on('POST', '/api/robots/:id/proposals/:proposal/credential', (c, { id, proposal }) => Effect.gen(function* () {
     yield* owner(c, id)
     const save = yield* decodeBody(c.request, CredentialSave)
@@ -824,23 +824,23 @@ export const api = new Router<ApiContext>()
   .on('POST', '/api/robots/:id/resume', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => robot(c, id).resume()))))
   .on('DELETE', '/api/robots/:id', (c, { id }) => Effect.gen(function* () {
     const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
-    yield* call(() => home(c.env).deleteRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    yield* call(() => space(c.env).deleteRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
   .on('POST', '/api/robots/:id/clear', (c, { id }) => Effect.gen(function* () {
     // The old body had a `memory` flag; it is ignored now: Clear history keeps every file (sk-8won).
     const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
-    yield* call(() => home(c.env).clearRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    yield* call(() => space(c.env).clearRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
   .on('POST', '/api/robots/:id/start-over', (c, { id }) => Effect.gen(function* () {
     const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
-    yield* call(() => home(c.env).startOverRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    yield* call(() => space(c.env).startOverRobot(c.member.id, id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
   .on('POST', '/api/me/reset', (c) => Effect.gen(function* () {
     const { confirm } = yield* decodeBody(c.request, Schema.Struct({ confirm: Schema.String }))
-    yield* call(() => home(c.env).resetMember(c.member.id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
+    yield* call(() => space(c.env).resetMember(c.member.id, confirm)).pipe(Effect.mapError((error) => badRequest(error.detail ?? error.message)))
     return { ok: true }
   }))
 
@@ -849,53 +849,53 @@ export const api = new Router<ApiContext>()
     const query = new URL(c.request.url).searchParams
     const page = Number(query.get('fleetPage') ?? '1')
     const caller = taskCaller(c, query.get('scope') === 'home')
-    return call((): Promise<MissionView> => home(c.env).mission(caller, { fleetQ: query.get('fleetQ') ?? '', fleetPage: Number.isInteger(page) && page >= 1 ? page : 1, tasks: taskFilter(query) }))
+    return call((): Promise<MissionView> => space(c.env).mission(caller, { fleetQ: query.get('fleetQ') ?? '', fleetPage: Number.isInteger(page) && page >= 1 ? page : 1, tasks: taskFilter(query) }))
   })
 
   // ------------------------------------------------------------ Tasks (v1.13)
-  // The active Members of the Home: who a Task can be given to (mc-n2bb).
-  .on('GET', '/api/members', (c) => Effect.map(call(() => home(c.env).members()), (members) => members.filter((member) => member.status === 'active')))
+  // The active Members of the Space: who a Task can be given to (mc-n2bb).
+  .on('GET', '/api/members', (c) => Effect.map(call(() => space(c.env).members()), (members) => members.filter((member) => member.status === 'active')))
   .on('GET', '/api/tasks', (c) => {
     const query = new URL(c.request.url).searchParams
-    return call((): Promise<TaskPage> => home(c.env).listTasks(taskCaller(c, query.get('scope') === 'home'), taskFilter(query)))
+    return call((): Promise<TaskPage> => space(c.env).listTasks(taskCaller(c, query.get('scope') === 'home'), taskFilter(query)))
   })
   .on('POST', '/api/tasks', (c) => Effect.gen(function* () {
     const input = yield* decodeBody(c.request, TaskInput)
-    return yield* call((): Promise<TaskView> => home(c.env).createTask(taskCaller(c, false), input))
+    return yield* call((): Promise<TaskView> => space(c.env).createTask(taskCaller(c, false), input))
   }))
-  .on('GET', '/api/tasks/:id', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).task(caller, id))))
+  .on('GET', '/api/tasks/:id', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => space(c.env).task(caller, id))))
   .on('PATCH', '/api/tasks/:id', (c, { id }) => Effect.gen(function* () {
     const patch = yield* decodeBody(c.request, TaskPatch)
     const caller = yield* taskCallerByPrefs(c)
-    return yield* call((): Promise<TaskView> => home(c.env).updateTask(caller, id, patch))
+    return yield* call((): Promise<TaskView> => space(c.env).updateTask(caller, id, patch))
   }))
-  .on('POST', '/api/tasks/:id/done', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).finishTask(caller, id))))
-  .on('POST', '/api/tasks/:id/cancel', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).cancelTask(caller, id))))
+  .on('POST', '/api/tasks/:id/done', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => space(c.env).finishTask(caller, id))))
+  .on('POST', '/api/tasks/:id/cancel', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => space(c.env).cancelTask(caller, id))))
   .on('POST', '/api/tasks/:id/pause', (c, { id }) => Effect.gen(function* () {
     const { paused } = yield* decodeBody(c.request, TaskPause)
     const caller = yield* taskCallerByPrefs(c)
-    return yield* call((): Promise<TaskView> => home(c.env).pauseTask(caller, id, paused))
+    return yield* call((): Promise<TaskView> => space(c.env).pauseTask(caller, id, paused))
   }))
-  .on('POST', '/api/tasks/:id/run', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => home(c.env).runTask(caller, id))))
+  .on('POST', '/api/tasks/:id/run', (c, { id }) => Effect.flatMap(taskCallerByPrefs(c), (caller) => call((): Promise<TaskView> => space(c.env).runTask(caller, id))))
   .on('POST', '/api/tasks/:id/assign', (c, { id }) => Effect.gen(function* () {
     const { assignee } = yield* decodeBody(c.request, TaskAssign)
     const caller = yield* taskCallerByPrefs(c)
-    return yield* call((): Promise<TaskView> => home(c.env).assignTask(caller, id, assignee))
+    return yield* call((): Promise<TaskView> => space(c.env).assignTask(caller, id, assignee))
   }))
 
   // ------------------------------------------------------------ admin (robot-x26m, robot-1rap, robot-d2uv)
-  .on('GET', '/api/admin', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).adminView(c.member.id)))))
-  .on('GET', '/api/admin/members', (c) => admin(c).pipe(Effect.andThen(call(() => home(c.env).members()))))
+  .on('GET', '/api/admin', (c) => admin(c).pipe(Effect.andThen(call(() => space(c.env).adminView(c.member.id)))))
+  .on('GET', '/api/admin/members', (c) => admin(c).pipe(Effect.andThen(call(() => space(c.env).members()))))
   .on('POST', '/api/admin/members', (c) => Effect.gen(function* () {
     yield* admin(c)
     const { email } = yield* decodeBody(c.request, Schema.Struct({ email: Schema.String }))
     if (!email.includes('@')) return yield* Effect.fail(badRequest('not an e-mail address'))
-    return yield* call(() => home(c.env).invite(email))
+    return yield* call(() => space(c.env).invite(email))
   }))
   .on('DELETE', '/api/admin/members/:member', (c, { member }) => Effect.gen(function* () {
     yield* admin(c)
     if (member === c.member.id) return yield* Effect.fail(badRequest('you cannot remove yourself'))
-    yield* call(() => home(c.env).remove(member))
+    yield* call(() => space(c.env).remove(member))
     return { ok: true }
   }))
 

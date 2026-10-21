@@ -15,13 +15,13 @@ export interface MemoryFile {
 
 export interface MemoryChange {
   readonly path: string
-  /** "your owner", "Mr. Robot", a Robot's name, "the Home admin". */
+  /** "your owner", "Mr. Robot", a Robot's name, "the Space admin". */
   readonly by: string
   /** A change that is not a file (the owner's time zone): the note itself, shown as it is. */
   readonly notice?: string
 }
 
-/** Broadest first: the Home, the owner, then the Robot's own files, daily notes last. */
+/** Broadest first: the Space, the owner, then the Robot's own files, daily notes last. */
 // SOUL.md last: the most specific, so it is cut last (v1.18, rm-2asl).
 const ROBOT_ORDER = ['AGENTS.md', 'MEMORY.md', 'SOUL.md']
 const MEMBER_ORDER = ['memory/world.md', 'PROACTIVE_PREFERENCES.md', 'USER.md']
@@ -38,7 +38,7 @@ export function broadToSpecific(files: readonly MemoryFile[]): MemoryFile[] {
 }
 
 const SCOPE_NOTE: Record<MemoryScope, string> = {
-  home: 'shared by the whole Home',
+  home: 'shared by the whole Space',
   member: "your owner's, shared by all their Robots",
   robot: 'yours',
 }
@@ -48,7 +48,7 @@ const block = (file: MemoryFile, content: string) => `<file path="${file.path}" 
 const bytes = (text: string) => new TextEncoder().encode(text).length
 
 /**
- * How a Robot changes owner and Home files (v1.11, sk-a2yy): Mr. Robot writes them, other Robots propose
+ * How a Robot changes owner and Space files (v1.11, sk-a2yy): Mr. Robot writes them, other Robots propose
  * edits, a Robot in setup has no tool for them. The memory header names only the tool the Robot has.
  */
 export type SharedFileEdit = 'write' | 'propose' | 'none'
@@ -61,7 +61,7 @@ const SHARED_EDIT: Record<SharedFileEdit, string> = {
 
 const head = (edit: SharedFileEdit) => [
   '<system-reminder>',
-  `Your memory and persona files as of now. Robot files are yours to edit with the file tools. Owner files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) and Home files (HOME.md) are shared. ${SHARED_EDIT[edit]} When a file changes later you get a note naming it.`,
+  `Your memory and persona files as of now. Robot files are yours to edit with the file tools. Owner files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) and Space files (SPACE.md) are shared. ${SHARED_EDIT[edit]} When a file changes later you get a note naming it.`,
 ].join('\n')
 const TAIL = '</system-reminder>'
 

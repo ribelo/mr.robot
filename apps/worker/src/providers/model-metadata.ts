@@ -1,6 +1,6 @@
 /**
  * Names, context sizes, prices and (for OpenCode Go) the wire format of models, read live from
- * models.dev (the open catalog OpenCode uses). The Home fetches it daily and keeps only our
+ * models.dev (the open catalog OpenCode uses). The Space fetches it daily and keeps only our
  * Providers' entries. It never decides which models are offered: that is each Provider's own list.
  */
 import type { ModelOption } from '@mr-robot/protocol'

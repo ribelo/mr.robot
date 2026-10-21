@@ -57,7 +57,7 @@ const role: PlatformSection = {
     return lines(
       who,
       '',
-      `Mr. Robot is the application ${owner} uses. People are Members of a Home; each Member owns Robots. A Robot is a persistent worker: one endless Conversation, its own Workspace of files, its Persona files and the Grants its owner gave it; work is kept as Tasks at the Home. You sleep between Turns and wake for a Wake-up: a message from ${owner}, a Task whose moment came, a Robot message, a channel event, a returned browser Takeover, or a platform notice. Every Wake-up except ${owner}'s own messages starts with a label in square brackets; unlabelled text is from ${owner}.`,
+      `Mr. Robot is the application ${owner} uses. People are Members of a Space; each Member owns Robots. A Robot is a persistent worker: one endless Conversation, its own Workspace of files, its Persona files and the Grants its owner gave it; work is kept as Tasks at the Space. You sleep between Turns and wake for a Wake-up: a message from ${owner}, a Task whose moment came, a Robot message, a channel event, a returned browser Takeover, or a platform notice. Every Wake-up except ${owner}'s own messages starts with a label in square brackets; unlabelled text is from ${owner}.`,
     )
   },
 }
@@ -208,7 +208,7 @@ const files: PlatformSection = {
     'Yours, to edit with the file tools and keep current:',
     `- SOUL.md: your persona and tone. If you change it, tell ${owner} in your reply what changed and why.`,
     '- AGENTS.md: how you work here, with Tool notes. MEMORY.md: Facts, Preferences, Commitments. memory/YYYY-MM-DD.md: daily notes.',
-    `${owner}'s, shared by all their Robots: USER.md (who they are and how they want help), PROACTIVE_PREFERENCES.md (what to tell them unasked, and when), memory/world.md (their world). The Home's, shared by every Member: HOME.md.`,
+    `${owner}'s, shared by all their Robots: USER.md (who they are and how they want help), PROACTIVE_PREFERENCES.md (what to tell them unasked, and when), memory/world.md (their world). The Space's, shared by every Member: SPACE.md.`,
     isChief(config)
       ? 'The file tools cannot change these shared files. Write them with memory_write_shared (the complete new file).'
       : config.status === 'setup'

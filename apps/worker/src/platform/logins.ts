@@ -36,7 +36,7 @@ export function metaOf(entry: LoginEntry): LoginMeta {
   return { username: entry.username, websites: entry.websites, notes: entry.notes, allowRead: entry.allowRead }
 }
 
-/** Second-level labels under which registrations happen (enough for the sites a Home uses). */
+/** Second-level labels under which registrations happen (enough for the sites a Space uses). */
 const SECOND_LEVEL = new Set(['co', 'com', 'org', 'net', 'gov', 'edu', 'ac', 'biz', 'info', 'waw', 'krakow', 'gda', 'wroc', 'poznan'])
 
 /** The registrable domain of an address or host ("online.mbank.pl" → "mbank.pl", "a.b.co.uk" → "b.co.uk"). */

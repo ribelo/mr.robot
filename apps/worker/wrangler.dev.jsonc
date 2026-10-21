@@ -10,14 +10,14 @@
     "bindings": [
       { "name": "ROBOT", "class_name": "Robot" },
       { "name": "MEMBER", "class_name": "Member" },
-      { "name": "HOME", "class_name": "Home" }
+      { "name": "SPACE", "class_name": "Space" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Robot", "Member", "Home"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Robot", "Member", "Home"] }, { "tag": "v2", "renamed_classes": [{ "from": "Home", "to": "Space" }] }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "files" }],
   "worker_loaders": [{ "binding": "LOADER" }],
   "vars": {
-    "HOME_NAME": "Home",
+    "SPACE_NAME": "Space",
     "DATA_KEY": "0000000000000000000000000000000000000000000000000000000000000001",
     "VAPID_PRIVATE_KEY": "0000000000000000000000000000000000000000000000000000000000000002",
     "BOX_TOKEN_KEY": "0000000000000000000000000000000000000000000000000000000000000003",

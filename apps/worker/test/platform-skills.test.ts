@@ -151,7 +151,7 @@ describe('the skill tool loads a platform skill (gb-n6by)', () => {
   })
 })
 
-describe('read-only, and not in the Home library (gb-n6by, gb-8wx5)', () => {
+describe('read-only, and not in the Space library (gb-n6by, gb-8wx5)', () => {
   it('are files under docs/skills/ that every Robot reads and none changes', async () => {
     const id = await robotWith({ tools: { files: 'allow' } })
     scripts.set(id, [{ calls: [
@@ -176,7 +176,7 @@ describe('read-only, and not in the Home library (gb-n6by, gb-8wx5)', () => {
     expect((await api(ANNA, `/api/robots/${id}/file?path=docs/skills/asking/SKILL.md`, { method: 'PUT', body: { content: 'x' } })).status).toBe(400)
   })
 
-  it('are not in the Home library, whoever asks', async () => {
+  it('are not in the Space library, whoever asks', async () => {
     const id = await robotWith({ tools: { skills: 'allow' } })
     expect((await api<{ skills: SkillView[] }>(ANNA, '/api/skills')).body.skills).toEqual([])
     scripts.set(id, [{ calls: [{ name: 'skill_library', args: {} }] }, { text: '' }])

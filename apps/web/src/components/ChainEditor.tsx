@@ -7,7 +7,7 @@ const EFFORTS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'xhi
 /**
  * A Robot's model chain (v1.10, pa-mho0): ordered account + model rows, reordered by dragging. The
  * Robot runs on the first usable row and moves down only when an account hits a limit or breaks.
- * While the Home admin has Workers AI off, its rows stay and say that the Robot skips them (ux-zh1l).
+ * While the Space admin has Workers AI off, its rows stay and say that the Robot skips them (ux-zh1l).
  */
 export function ChainEditor({ chain, models, unavailable, accounts, workersAiEnabled = true, onChange }: {
   chain: readonly ChainEntry[]

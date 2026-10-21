@@ -26,7 +26,7 @@ export const keys = {
   secrets: 'secrets',
   hosts: 'hosts',
   memberFiles: 'member-files',
-  homeMemory: 'home-memory',
+  spaceMemory: 'space-memory',
   plugins: 'plugins',
   connections: 'connections',
   tasks: 'tasks',
@@ -90,9 +90,9 @@ export const pageShareAtom = Atom.family((key: string) => {
 })
 export const sharedPagesAtom = query((api) => api.sharedPages, [keys.sharedPages])
 export const memberFileAtom = Atom.family((name: string) => query((api) => api.memberFile(name), [keys.memberFiles]))
-export const homeMemoryAtom = query((api) => api.homeMemory, [keys.homeMemory])
+export const spaceMemoryAtom = query((api) => api.spaceMemory, [keys.spaceMemory])
 export const adminAtom = query((api) => api.admin, [keys.admin])
-export const homeSettingsAtom = query((api) => api.homeSettings, [keys.admin])
+export const spaceSettingsAtom = query((api) => api.spaceSettings, [keys.admin])
 export const providersAtom = query((api) => api.providers, [keys.providers])
 export const secretsAtom = query((api) => api.secrets, [keys.secrets])
 export const hostsAtom = query((api) => api.hosts, [keys.hosts])
@@ -101,7 +101,7 @@ export const pairingAtom = Atom.family((code: string) => query((api) => api.pair
 export const pluginsAtom = query((api) => api.plugins, [keys.plugins])
 export const connectionsAtom = query((api) => api.connections, [keys.connections])
 export const connectionNotesAtom = query((api) => api.connectionNotes, [keys.connections])
-export const homeMembersAtom = query((api) => api.homeMembers, [keys.me])
+export const spaceMembersAtom = query((api) => api.spaceMembers, [keys.me])
 export const memberCostsAtom = query((api) => api.memberCosts, [keys.me, keys.robots])
 /** What Mission Control shows: its filters, and how many pages of each table are loaded. */
 export interface MissionQuery {

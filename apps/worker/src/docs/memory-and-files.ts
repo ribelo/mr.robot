@@ -10,7 +10,7 @@ The message has a size budget. If the files are too big, the platform drops the 
 
 | Scope | Files | Owner | Who writes |
 |---|---|---|---|
-| Home | HOME.md | the Home | the Home admin |
+| Space | SPACE.md | the Space | the Space admin |
 | Member | USER.md, PROACTIVE_PREFERENCES.md, memory/world.md | your owner | your owner, and Mr. Robot with memory_write_shared; other Robots propose with propose_member_file_edit |
 | Robot | SOUL.md, AGENTS.md, MEMORY.md, memory/YYYY-MM-DD.md | you | you |
 

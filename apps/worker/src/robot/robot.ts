@@ -71,7 +71,7 @@ import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platfor
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { CredentialSave } from '@mr-robot/protocol'
-import type { ChainEntry, GrantLevel, HomeSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
+import type { ChainEntry, GrantLevel, SpaceSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
 import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedHeader, storedLength, storeSession } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
@@ -172,8 +172,8 @@ import type { DefinitionRow } from '../definitions/library.ts'
 import { registrableDomain } from '../platform/logins.ts'
 import type { FileHistoryView, FileVersionContent } from '@mr-robot/protocol'
 import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
-import { HOME_ID, type Env } from '../env.ts'
-import { currentMonth, type RegistryEntry } from '../home/home.ts'
+import { SPACE_ID, type Env } from '../env.ts'
+import { currentMonth, type RegistryEntry } from '../space/space.ts'
 import { projectChat } from './projection.ts'
 import { dropRoutines, exportRoutines, type ExportedRoutine } from './routine-export.ts'
 import * as Layer from 'effect/Layer'
@@ -206,7 +206,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private handingBack = false
   /** The hosts this Robot's owner reaches, refreshed each Turn (names for tools and labels). */
   private knownHosts: HostView[] = []
-  /** The owner's usable connections and the Home's plugin switches, refreshed with the reach (v1.5). */
+  /** The owner's usable connections and the Space's plugin switches, refreshed with the reach (v1.5). */
   private knownConnections: ConnectionView[] = []
   /** What this Robot's owner can grant it, read at the start of each Turn: the items its levels are listed over. */
   private knownCatalog: SettingsCatalog | undefined
@@ -308,7 +308,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * Delete this Robot for good (pl-3uoy): its storage, alarm, browser, Workspace files and screenshots. No undo.
-   * The files go by the id the Home passes, not by this Robot's own config: a Robot whose storage is already
+   * The files go by the id the Space passes, not by this Robot's own config: a Robot whose storage is already
    * gone (deleted before v1.3) still loses its files (sk-44d5).
    */
   async destroy(robotId: string): Promise<void> {
@@ -343,7 +343,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * Start the Conversation over (pl-05eu, pl-y228): a new session, without the old log, notices,
-   * rewinds or queued wake-ups. Configuration, grants and every Workspace file stay (v1.11, sk-8won); its Tasks live at the Home.
+   * rewinds or queued wake-ups. Configuration, grants and every Workspace file stay (v1.11, sk-8won); its Tasks live at the Space.
    */
   async clearHistory(): Promise<void> {
     if (this.store.activeTurn() !== undefined) throw new Error('the Robot is working; wait for it to finish, then clear')
@@ -435,7 +435,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return {
       sections: sections.map((section) => ({ ...section, text: this.mask(section.text) })),
       tools: config.codeMode && config.status !== 'setup' ? ['run_code (code mode), calling:', ...this.toolNames()] : this.toolNames(),
-      // The platform skills first (v1.15 ticket 12, gb-dzf6), then the Home skills granted.
+      // The platform skills first (v1.15 ticket 12, gb-dzf6), then the Space skills granted.
       skills: config.status === 'setup' ? [] : [...(this.capabilityInput().platformSkills ?? []).map((skill) => `${skill.name} (platform): ${skill.description}`), ...usableNames(this.store.effectiveGrants().skills)],
     }
   }
@@ -481,7 +481,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /**
-   * The running Turn works on this Task, or on none (mc-w3cc, ao-lj6z): only a Task assigned to this Robot. The Home
+   * The running Turn works on this Task, or on none (mc-w3cc, ao-lj6z): only a Task assigned to this Robot. The Space
    * records an attempt running; the Turn's end finishes it. Focus may change any number of times in a Turn: the
    * Task it leaves ends its attempt as skipped with the reason, and Mission Control shows the new focus at once (ao-cvpx).
    */
@@ -489,9 +489,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const active = this.store.activeTurn()
     if (active === undefined) return { ok: false, reason: 'No Turn is running.' }
     if (active.task?.id === taskId || (active.task === null && taskId === null)) return { ok: true, title: active.task?.title ?? null }
-    const started = taskId === null ? null : await this.home().attemptStarted(taskId, this.store.requireConfig().id)
+    const started = taskId === null ? null : await this.space().attemptStarted(taskId, this.store.requireConfig().id)
     if (taskId !== null && started === null) return { ok: false, reason: 'That Task is not an open Task assigned to you.' }
-    if (active.task !== null) await this.home().attemptFinished(active.task.attemptId, 'skipped', reason.trim() === '' ? 'Dropped for other work.' : reason.trim())
+    if (active.task !== null) await this.space().attemptFinished(active.task.attemptId, 'skipped', reason.trim() === '' ? 'Dropped for other work.' : reason.trim())
     this.store.setTurnTask(started === null || taskId === null ? null : { id: taskId, title: started.title, attemptId: started.attemptId })
     await this.report()
     return { ok: true, title: started?.title ?? null }
@@ -546,7 +546,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.rearm()
   }
 
-  /** The Home planned this Robot's earliest due Task (mc-s1aa): the alarm comes then. */
+  /** The Space planned this Robot's earliest due Task (mc-s1aa): the alarm comes then. */
   setNextDue(at: number | null): Promise<void> {
     return this.program(Programs.setNextDue(at))
   }
@@ -605,7 +605,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.set(`turn-start:${wakeup.id}`, startSeq)
       // The owner caused this Turn: if it runs ten minutes without a say, it gets one steer (gb-0skq).
       if (causedByOwner(wakeup, this.store.requireConfig().ownerId)) this.store.set(QUIET_DUE, { wakeupId: wakeup.id, at: Date.now() + QUIET_STEER_MS })
-      // A Task Wake-up makes the Task the Turn's subject, with an attempt at the Home (mc-t4dd).
+      // A Task Wake-up makes the Task the Turn's subject, with an attempt at the Space (mc-t4dd).
       const taskId = wakeup.kind === 'task' && typeof wakeup.payload['taskId'] === 'string' ? wakeup.payload['taskId'] : undefined
       if (taskId !== undefined) await this.focusTask(taskId, '').catch((error: unknown) => console.warn('attempt not started', taskId, error))
       // Follow-ups from the same sender queued with it join its Turn; a Task never shares one (ao-rdhs).
@@ -703,7 +703,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await backend.start()
       const encode = new TextEncoder()
       await backend.write(BOX_TOKEN_PATH, encode.encode(token))
-      const origin = await this.home().appOrigin()
+      const origin = await this.space().appOrigin()
       if (origin !== null) await backend.write(BOX_ORIGIN_PATH, encode.encode(origin))
       const ws = this.workspace
       const files = (await this.run(ws.list(BOX_FOLDER))).filter((entry) => entry.path.startsWith(`${BOX_FOLDER}/`) && !inBoxCache(entry.path))
@@ -859,7 +859,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       workspaceLevel: () => this.groupLevel('files'),
       boxLevel: () => this.groupLevel('box'),
       hostLevel: (hostId, facet) => this.store.levelOf('host', hostFacetKey(hostId, facet)),
-      hosts: () => this.home().hostsFor(this.store.requireConfig().ownerId),
+      hosts: () => this.space().hostsFor(this.store.requireConfig().ownerId),
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
       link: (host, reach) => hostLink(this.hostCaller(), host, reach),
       jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach),
@@ -882,12 +882,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.store.config()?.status === 'setup' || this.groupUsable('files')
   }
 
-  /** Whether a tool group is usable now: allow or ask, and the Home has its plugin on. */
+  /** Whether a tool group is usable now: allow or ask, and the Space has its plugin on. */
   private groupUsable(group: 'files' | 'box'): boolean {
     return usableLevel(this.groupLevel(group))
   }
 
-  /** The level of a tool group now: deny when the Home has its plugin off (in `plugins`, the switches the last Turn read by default). */
+  /** The level of a tool group now: deny when the Space has its plugin off (in `plugins`, the switches the last Turn read by default). */
   private groupLevel(group: 'files' | 'box', plugins: Readonly<Record<string, boolean>> = this.pluginsOn): GrantLevel {
     return disabledToolGroups(plugins).has(group) ? 'deny' : this.store.levelOf('tool', group)
   }
@@ -922,9 +922,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         return box.state === 'off' ? undefined : box.token
       },
       containerUp: async () => this.boxState().state === 'booting' || (await this.boxBackend().running().catch(() => false)),
-      // The Home's switches as they are now: the Robot's own copy (pluginsOn) is the last Turn's, and empty in a cold isolate.
+      // The Space's switches as they are now: the Robot's own copy (pluginsOn) is the last Turn's, and empty in a cold isolate.
       levels: async () => {
-        const plugins = await this.home().pluginsEnabled()
+        const plugins = await this.space().pluginsEnabled()
         return { files: this.groupLevel('files', plugins), box: this.groupLevel('box', plugins) }
       },
       permit: (secret) => this.wsPermits.find(secret),
@@ -965,7 +965,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** An adapter for each other Provider the allowed list names, so a Subagent can run there. */
   private async subagentAdapters(config: RobotConfig): Promise<Array<{ provider: string; adapter: LlmAdapter }>> {
     if (!this.store.mayUse('tool', 'subagents')) return []
-    const list = await this.home().modelList()
+    const list = await this.space().modelList()
     const providers = [...new Map(this.subagentModels().filter((entry) => entry.provider !== config.model.provider).map((entry) => [entry.provider, entry])).values()]
     return providers.flatMap((entry) => {
       const chosen = list.find((option) => option.provider === entry.provider && option.model === entry.model)
@@ -1114,7 +1114,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (row === undefined) return
     const [input, output, cached] = [usage.inputTokens ?? 0, usage.outputTokens ?? 0, usage.cacheReadTokens ?? 0]
     if (input === 0 && output === 0) return
-    const price = (await this.home().modelList()).find((option) => option.provider === row.provider && option.model === row.model)?.price
+    const price = (await this.space().modelList()).find((option) => option.provider === row.provider && option.model === row.model)?.price
     await this.recordUsage('subagent', input, output, price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000)
     if (await this.checkLimits()) this.interruptChildren()
   }
@@ -1214,7 +1214,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.requireConfig()
     const saved = this.store.get<{ provider: string; model: string; effort: string; options: GenerateOptions }>(WARM_REQUEST)
     if (saved === undefined || saved.provider !== config.model.provider || saved.model !== config.model.model || !warmable(saved.model, saved.effort)) return
-    const chosen = (await this.home().modelList()).find((option) => option.provider === saved.provider && option.model === saved.model)
+    const chosen = (await this.space().modelList()).find((option) => option.provider === saved.provider && option.model === saved.model)
     const adapter = this.adapter(saved.provider, chosen?.contextWindow, saved.model, chosen?.wire)
     let usage: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } | undefined
     for await (const chunk of adapter.stream({ ...saved.options, maxTokens: 1, purpose: CACHE_WARM as never, signal: AbortSignal.timeout(120_000) })) {
@@ -1405,19 +1405,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /**
-   * Auto review of one call (v1.14 ticket 08, ao-wkpt): the reviewer route of the Robot, else the Home's, else
+   * Auto review of one call (v1.14 ticket 08, ao-wkpt): the reviewer route of the Robot, else the Space's, else
    * the Robot's own model. The session gets a record of the decision for the Trajectory (ao-jn6z); the
    * reviewer's tokens are the Robot's review cost (ao-hfni). A failed review rejects, so the call does not run.
    */
   private async reviewCall(call: { readonly definition: ToolDefinition; readonly arguments: Readonly<Record<string, unknown>>; readonly exec: ToolRunContext }): Promise<ReviewOutcome> {
     const config = this.store.requireConfig()
-    const route = config.reviewer ?? (await this.home().settings()).defaultReviewer ?? config.model
+    const route = config.reviewer ?? (await this.space().settings()).defaultReviewer ?? config.model
     const session = call.exec.agent?.session
     const record = (data: Record<string, unknown>) => {
       if (session !== undefined) appendPluginRecord(session, REVIEW_RECORD as never, { callId: String(call.exec.callId), name: call.definition.name, reviewer: `${route.provider}/${route.model}`, ...data } as never)
     }
     try {
-      const chosen = (await this.home().modelList()).find((option) => option.provider === route.provider && option.model === route.model)
+      const chosen = (await this.space().modelList()).find((option) => option.provider === route.provider && option.model === route.model)
       const adapter = this.adapter(route.provider, chosen?.contextWindow, route.model, chosen?.wire)
       const history = reviewHistory(session?.snapshotEvents() ?? [], { ownerId: config.ownerId, chiefId: mrRobotIdOf(config.ownerId), child: (session?.header as { origin?: string } | undefined)?.origin === 'subagent' })
       const text = reviewUserText({
@@ -1481,7 +1481,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const config = this.store.requireConfig()
       this.store.addNotice(config.liveSessionId, storedLength(this.ctx.storage.sql, config.liveSessionId), `Interrupted by ${interruptedBy}.`, Date.now())
       this.store.delete('failed-wakeup')
-      if (turn?.task != null) await this.home().attemptFinished(turn.task.attemptId, 'interrupted', `Interrupted by ${interruptedBy}.`).catch((error: unknown) => console.warn('attempt not finished', error))
+      if (turn?.task != null) await this.space().attemptFinished(turn.task.attemptId, 'interrupted', `Interrupted by ${interruptedBy}.`).catch((error: unknown) => console.warn('attempt not finished', error))
       return
     }
     const failedTurn = this.rememberFailure(wakeup, startSeq)
@@ -1490,7 +1490,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (turn?.task != null) {
       const reply = failedTurn ? undefined : (await this.program(Views.turnItems(startSeq))).filter((item) => item.kind === 'reply').at(-1)
       const firstLine = failedTurn ? 'The Turn failed.' : doneLine !== undefined ? doneLine : reply?.kind === 'reply' ? reply.text.split('\n')[0]!.slice(0, 160) : 'Finished without a reply.'
-      await this.home().attemptFinished(turn.task.attemptId, failedTurn ? 'failed' : 'ok', firstLine).catch((error: unknown) => console.warn('attempt not finished', error))
+      await this.space().attemptFinished(turn.task.attemptId, failedTurn ? 'failed' : 'ok', firstLine).catch((error: unknown) => console.warn('attempt not finished', error))
     }
     if (failedTurn) await this.chainFailure(startSeq, causedByOwner(wakeup, this.store.requireConfig().ownerId) || this.store.get(`owner-steered:${wakeup.id}`) === true).catch((error: unknown) => console.warn('model chain not advanced', error))
     else await this.chainSucceeded().catch(() => undefined)
@@ -1555,7 +1555,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.config()
     if (config !== undefined) {
       const channelId = config.discordChannel ?? ''
-      const discord = new DiscordChannel(config.ownerId, channelId === '' ? null : channelId, { post: (memberId, channel, text, replyTo, files) => this.home().discordPost(memberId, channel, text, replyTo, files) })
+      const discord = new DiscordChannel(config.ownerId, channelId === '' ? null : channelId, { post: (memberId, channel, text, replyTo, files) => this.space().discordPost(memberId, channel, text, replyTo, files) })
       channels.set(discord.id, discord)
     }
     return channels
@@ -1595,7 +1595,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async channelEvent(event: InboundEvent): Promise<{ accepted: boolean }> {
     const adapter = this.channels().get(event.channel)
     if (adapter === undefined) throw new Error(`no Channel ${event.channel}`)
-    // Discord messages arrive only for Robots the Home routes them to (their channel, or Mr. Robot for a DM).
+    // Discord messages arrive only for Robots the Space routes them to (their channel, or Mr. Robot for a DM).
     if (event.channel !== 'discord' && event.channel !== 'webhook' && !this.store.requireConfig().notifications.channels.includes(event.channel)) return { accepted: false }
     const wakeup = adapter.inbound(event)
     if (wakeup.dedupeKey !== null) {
@@ -1779,7 +1779,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** One attachment of a say: a Workspace file or a stored screenshot, checked now, handed over by reference. */
   private async sayFile(reference: string): Promise<{ attachment: Attachment; channelFile: ChannelFile }> {
     const id = this.store.requireConfig().id
-    const origin = await this.home().appOrigin()
+    const origin = await this.space().appOrigin()
     if (reference.startsWith(SCREEN_PREFIX)) {
       const name = reference.slice(SCREEN_PREFIX.length)
       const shot = await readScreenshot(this.env.FILES, id, name)
@@ -1821,13 +1821,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * Each entry's account state now; unbound entries are always usable, Workers AI entries while the
-   * Home admin leaves Workers AI on (ux-zh1l). `disabled`: unusable because the admin switched it off.
+   * Space admin leaves Workers AI on (ux-zh1l). `disabled`: unusable because the admin switched it off.
    */
   private async entryStates(chain: readonly ChainEntry[]): Promise<Array<{ usable: boolean; until: number | null; label: string; disabled: boolean }>> {
     const config = this.store.requireConfig()
     const bound = chain.some((entry) => entry.account !== '' && entry.account !== 'workers-ai')
-    const { mine, shared } = bound ? await this.home().accountsFor(config.ownerId) : { mine: [], shared: [] }
-    const workersAiOn = chain.some((entry) => entry.provider === 'workers-ai') ? (await this.home().settings()).workersAiEnabled : true
+    const { mine, shared } = bound ? await this.space().accountsFor(config.ownerId) : { mine: [], shared: [] }
+    const workersAiOn = chain.some((entry) => entry.provider === 'workers-ai') ? (await this.space().settings()).workersAiEnabled : true
     this.chainStates = new Map([...mine, ...shared].map((account) => [account.id, account]))
     const now = Date.now()
     return chain.map((entry) => {
@@ -1896,7 +1896,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const resets = /resets at (\S+?)\)/.exec(failure.message ?? '')?.[1]
     const until = resets === undefined ? null : Date.parse(resets)
     const note = (failure.message ?? failure.code ?? 'failed').slice(0, 200)
-    const label = await this.home().markAccount(entry.owner, entry.account, { status: kind, until: until !== null && Number.isFinite(until) ? until : null, note }, { id: config.id, name: config.identity.name })
+    const label = await this.space().markAccount(entry.owner, entry.account, { status: kind, until: until !== null && Number.isFinite(until) ? until : null, note }, { id: config.id, name: config.identity.name })
     const reason = `${label ?? 'its account'} ${kind === 'limited' ? 'hit its limit' : 'stopped working'}`
     const before = this.activeIndex(chain)
     if (!(await this.pickEntry(reason))) return
@@ -1913,7 +1913,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const entry = chain[this.activeIndex(chain)]!
     const state = this.chainStates.get(entry.account)
     if (state === undefined || state.status === 'ok') return
-    await this.home().markAccount(entry.owner, entry.account, { status: 'ok', until: null, note: null }, { id: config.id, name: config.identity.name })
+    await this.space().markAccount(entry.owner, entry.account, { status: 'ok', until: null, note: null }, { id: config.id, name: config.identity.name })
     this.chainStates.set(entry.account, { ...state, status: 'ok', until: null, note: null })
   }
 
@@ -1941,7 +1941,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Kept so "Try again" can run the same wake-up once the cause is fixed (a key added, a model changed).
     if (wakeup !== undefined) {
       const attempt = active?.task?.attemptId
-      if (attempt !== undefined) this.ctx.waitUntil(this.home().attemptFinished(attempt, 'failed', 'The Turn failed.').catch(() => undefined))
+      if (attempt !== undefined) this.ctx.waitUntil(this.space().attemptFinished(attempt, 'failed', 'The Turn failed.').catch(() => undefined))
       this.store.delete(INTERRUPTED_BY)
       this.store.set('failed-wakeup', { kind: wakeup.kind, sender: wakeup.sender, text: wakeup.text, payload: wakeup.payload })
       this.store.endTurn(wakeup.id)
@@ -1969,7 +1969,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       cached += usage.cacheReadTokens ?? 0
     }
     if (input === 0 && output === 0) return
-    const price = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.price
+    const price = (await this.space().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)?.price
     const cost = price === undefined ? 0 : ((input - cached) * price.input + cached * (price.cachedInput ?? price.input) + output * price.output) / 1_000_000
     await this.recordUsage('robot', input, output, cost)
   }
@@ -2010,7 +2010,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (this.composition !== undefined && this.children.size > 0) return this.composition.value
     await this.releaseComposition()
     const brief = this.store.get<string>('brief') ?? null
-    const chosen = (await this.home().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)
+    const chosen = (await this.space().modelList()).find((option) => option.provider === config.model.provider && option.model === config.model.model)
     const contextWindow = chosen?.contextWindow
     const adapter = this.adapter(config.model.provider, contextWindow, config.model.model, chosen?.wire)
     // The bridge follows the adapter that runs this composition (sk-74ym); every text is read at each request.
@@ -2067,7 +2067,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * What the mounted tools follow beside the settings revision: the levels that apply (Mr. Robot's follow what his owner reaches, which
-   * changes without a settings change), the Hosts and Connections the owner reaches, and the Home's plugin switches. A composition built
+   * changes without a settings change), the Hosts and Connections the owner reaches, and the Space's plugin switches. A composition built
    * for another reach is rebuilt, so that a tool at ask is wrapped by the ask gate.
    */
   private mountsKey(): string {
@@ -2115,8 +2115,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         const chain = chainOf(config)
         const index = Math.min(this.store.get<number>('chain-active') ?? 0, chain.length - 1)
         const entry = chain[index]!
-        if (entry.provider === provider && entry.account !== '') return (await this.home().accountCredential(config.ownerId, entry.owner, entry.account)) ?? undefined
-        const found = await this.home().providerCredential(config.ownerId, provider)
+        if (entry.provider === provider && entry.account !== '') return (await this.space().accountCredential(config.ownerId, entry.owner, entry.account)) ?? undefined
+        const found = await this.space().providerCredential(config.ownerId, provider)
         if (found === null) return undefined
         if (entry.provider === provider && found.account !== undefined) {
           const bound = chain.map((item, at) => (at === index ? { ...item, account: found.account!, owner: found.owner } : item))
@@ -2141,7 +2141,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     mounts.push(mount(ConversationPlugin, { host: this }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), mount(Ask, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
     const grants = this.store.effectiveGrants()
-    // Plugins the Home switched off are not mounted for anyone (cn-dbm9).
+    // Plugins the Space switched off are not mounted for anyone (cn-dbm9).
     const off = disabledToolGroups(this.pluginsOn)
     const granted = new Set(usableNames(grants.tools).filter(isToolGroup).filter((group) => !off.has(group)))
     const items = this.mountItems(grants)
@@ -2161,11 +2161,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const connectorSkills = this.connectorSkillNames()
     const skillNames = () => this.heldSkills()
     const holdsSkills = granted.has('skills') || connectorSkills.length > 0
-    // The skill tool is every Robot's: the platform skills need no Grant (v1.15 ticket 12). The Home's and the local skills come with the group.
+    // The skill tool is every Robot's: the platform skills need no Grant (v1.15 ticket 12). The Space's and the local skills come with the group.
     mounts.push(mount(SkillCatalog, {
       source: {
-        granted: () => holdsSkills ? this.home().loadableSkills(config.ownerId, skillNames()) : Promise.resolve([]),
-        content: async (name) => holdsSkills && skillNames().includes(name) ? this.home().skillContent(config.ownerId, name) : null,
+        granted: () => holdsSkills ? this.space().loadableSkills(config.ownerId, skillNames()) : Promise.resolve([]),
+        content: async (name) => holdsSkills && skillNames().includes(name) ? this.space().skillContent(config.ownerId, name) : null,
         local: () => holdsSkills ? this.localSkills() : Promise.resolve([]),
         localContent: (name) => holdsSkills ? this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null) : Promise.resolve(null),
         platform: () => platformSkillsFor(this.platformSkillAudience(granted)),
@@ -2192,7 +2192,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * The grant items the calls of each capability use beyond its tool group (sk-hx8j): a login by name,
-   * a recipient, the Host facet of a call or of the Host browser, a Home skill loaded by name.
+   * a recipient, the Host facet of a call or of the Host browser, a Space skill loaded by name.
    */
   private mountItems(grants: GrantSet): {
     readonly logins: ItemsOf
@@ -2244,7 +2244,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
           return isHostBackend(backend) ? [{ kind: 'host', name: hostFacetKey(hostIdOf(backend), 'browser') }] : []
         },
       }),
-      // The skills group covers every skill tool; loading a Home skill also uses that skill's item. Local skills are the Robot's own.
+      // The skills group covers every skill tool; loading a Space skill also uses that skill's item. Local skills are the Robot's own.
       skills: (group) => (name) => bothItems(group ? fixedItems(tool('skills')) : NO_ITEMS, name === 'skill' ? {
         possible: usableNames(grants.skills).map((skill): GrantItem => ({ kind: 'skill', name: skill })),
         used: async (args) => (typeof args['name'] === 'string' && Object.hasOwn(grants.skills, args['name']) ? [{ kind: 'skill', name: args['name'] }] : []),
@@ -2271,7 +2271,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return heldSkillNames(this.store.effectiveGrants(), this.knownConnections, this.connectorKindsOn())
   }
 
-  /** Connector kinds with an implementation whose plugin the Home has on. */
+  /** Connector kinds with an implementation whose plugin the Space has on. */
   private connectorKindsOn(): ConnectorKind[] {
     return (Object.keys(this.connectorPlugins()) as ConnectorKind[]).filter((kind) => connectorOn(this.pluginsOn, kind))
   }
@@ -2315,13 +2315,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       use: async (connectionId) => {
         // Checked again at each call: a grant withdrawn mid-Turn stops working at once.
         if (!this.store.mayUse('connection', connectionId)) throw new Error('this connection is no longer granted')
-        const use = await this.home().useConnection(ownerId, connectionId)
+        const use = await this.space().useConnection(ownerId, connectionId)
         if (use === null) throw new Error('this connection no longer exists or is no longer shared')
         // Secrets of the call are masked out of everything this Turn writes (cn-a1i0).
         for (const [field, value] of Object.entries(use.secrets)) this.remember(`${use.connection.label}:${field}`, value)
         return { secrets: use.secrets, meta: use.meta }
       },
-      markStatus: (connectionId, status, note) => this.home().updateUsedConnection(ownerId, connectionId, { status, statusNote: note }),
+      markStatus: (connectionId, status, note) => this.space().updateUsedConnection(ownerId, connectionId, { status, statusNote: note }),
       saveFile: async (path, bytes) => {
         await this.run(this.workspace.write(path, bytes))
         return path
@@ -2366,7 +2366,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   private async hostOwnerStub(hostId: string) {
-    const owner = await this.home().hostOwner(hostId)
+    const owner = await this.space().hostOwner(hostId)
     if (owner === null) throw new HostOffline({ message: `there is no host ${hostId} any more` })
     return this.env.MEMBER.getByName(owner)
   }
@@ -2388,9 +2388,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
   }
 
-  /** This Robot's backend: its own choice, else the Home default (rb-ybt4). */
+  /** This Robot's backend: its own choice, else the Space default (rb-ybt4). */
   private async chosenBackend(): Promise<BrowserBackend> {
-    return this.store.requireConfig().browserBackend ?? (await this.home().settings()).defaultBrowserBackend
+    return this.store.requireConfig().browserBackend ?? (await this.space().settings()).defaultBrowserBackend
   }
 
   /** The backend of the session that is open now (attached or left running). */
@@ -2758,15 +2758,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private async refreshReach(): Promise<void> {
     const config = this.store.config()
     if (config === undefined) return
-    const [hosts, connections, pluginsOn, origin] = await Promise.all([this.home().hostsFor(config.ownerId), this.home().connectionsFor(config.ownerId), this.home().pluginsEnabled(), this.home().appOrigin()])
+    const [hosts, connections, pluginsOn, origin] = await Promise.all([this.space().hostsFor(config.ownerId), this.space().connectionsFor(config.ownerId), this.space().pluginsEnabled(), this.space().appOrigin()])
     // The Robot calls its Hosts by names no two share (deep review P14b): the Hosts line, my_capabilities, the tool descriptions, the browser.
     ;[this.knownHosts, this.knownConnections, this.pluginsOn, this.knownOrigin] = [withDistinctNames(hosts), connections, pluginsOn, origin]
-    const [catalog, skills] = await Promise.all([this.home().catalog(config.ownerId, config.id), config.kind === 'mr-robot' ? this.home().skills(config.ownerId) : Promise.resolve([])])
+    const [catalog, skills] = await Promise.all([this.space().catalog(config.ownerId, config.id), config.kind === 'mr-robot' ? this.space().skills(config.ownerId) : Promise.resolve([])])
     this.knownCatalog = catalog.hosts === undefined ? catalog : { ...catalog, hosts: withDistinctNames(catalog.hosts) }
     // An unpaired Host's grant rows, mode and roots are not kept; a Host shared no more keeps them for its return (deep review P13).
     const unreached = this.store.keptHostIds().filter((id) => !this.knownHosts.some((host) => host.id === id))
     if (unreached.length > 0) {
-      const paired = await this.home().pairedHosts(unreached)
+      const paired = await this.space().pairedHosts(unreached)
       this.store.forgetUnpairedHosts(unreached.filter((id) => !paired.includes(id)))
     }
     if (config.kind !== 'mr-robot') return
@@ -2821,7 +2821,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return origin === null ? '' : ` (${origin}/#/r/${encodeURIComponent(this.store.requireConfig().id)})`
   }
 
-  /** The address the app is served from, as the Home last saw it (kept in memory, read at each refreshReach). */
+  /** The address the app is served from, as the Space last saw it (kept in memory, read at each refreshReach). */
   private knownOrigin: string | null = null
 
   setIdentity(patch: Partial<Identity>): Identity {
@@ -2865,8 +2865,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /**
-   * Save a credential Ask (v1.15 ticket 05, gb-923q): the entry is created under the owner at the Home, granted to this Robot at allow, and
-   * the Robot is woken with its name. The password goes from here to the Home and nowhere else: it is not stored in the Ask, the log or a
+   * Save a credential Ask (v1.15 ticket 05, gb-923q): the entry is created under the owner at the Space, granted to this Robot at allow, and
+   * the Robot is woken with its name. The password goes from here to the Space and nowhere else: it is not stored in the Ask, the log or a
    * Wake-up, and this Robot's tools never see it (gb-196l).
    */
   async saveCredential(proposalId: string, revision: number, entry: CredentialSave): Promise<AnswerResult> {
@@ -2877,8 +2877,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const name = entry.name.trim()
     if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) throw Object.assign(new Error('login names use letters, digits, ".", "_" and "-"'), { name: 'Invalid', status: 400 })
     if (entry.password === '') throw Object.assign(new Error('a login needs a password'), { name: 'Invalid', status: 400 })
-    if (await this.home().resolveLogin(config.ownerId, name) !== null) throw Object.assign(new Error(`you already have a login named "${name}": choose another name`), { name: 'Conflict', status: 409 })
-    await this.home().putLogin(config.ownerId, name, {
+    if (await this.space().resolveLogin(config.ownerId, name) !== null) throw Object.assign(new Error(`you already have a login named "${name}": choose another name`), { name: 'Conflict', status: 409 })
+    await this.space().putLogin(config.ownerId, name, {
       username: entry.username, password: entry.password, websites: entry.websites.map((site) => site.trim()).filter((site) => site !== ''), notes: entry.notes, allowRead: pending.credential?.credential === 'secret' ? true : entry.allowRead,
     }, entry.shared)
     this.store.setGrants(overlayGrants(this.store.grants(), { ...emptyGrants, secrets: { [name]: 'allow' } }))
@@ -2917,8 +2917,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.store.get<{ readonly id: string } & RobotOwner>('owner') ?? { id: this.store.requireConfig().ownerId, name: 'your owner' }
   }
 
-  protected home() {
-    return this.env.HOME.getByName(HOME_ID)
+  protected space() {
+    return this.env.SPACE.getByName(SPACE_ID)
   }
 
   fleetState(): Promise<FleetState> {
@@ -2926,7 +2926,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  /** Report the registry row to the Home and tell open views to refresh. */
+  /** Report the registry row to the Space and tell open views to refresh. */
   protected async changed(): Promise<void> {
     this.broadcast()
     await this.report()
@@ -3011,7 +3011,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   private async viewerMessage(socket: WebSocket, viewer: ViewerState, input: Record<string, unknown>): Promise<void> {
     // Access is checked on every message: sharing, removal and deletion apply to open sockets too.
-    const access = await this.home().access(viewer.memberId, this.store.requireConfig().id)
+    const access = await this.space().access(viewer.memberId, this.store.requireConfig().id)
     if (access === null) {
       socket.close(1008, 'access removed')
       return
@@ -3059,7 +3059,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         // Autofill in the takeover window (rb-o52a): the Robot's granted entries for the page shown.
         const page = await this.page()
         const config = this.store.requireConfig()
-        const entries = await Promise.all(usableNames(this.store.effectiveGrants().secrets).map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+        const entries = await Promise.all(usableNames(this.store.effectiveGrants().secrets).map(async (name) => [name, await this.space().resolveLogin(config.ownerId, name)] as const))
         socket.send(JSON.stringify({ type: 'logins', entries: entries.flatMap(([name, entry]) => entry !== null && entryMatches(entry, page.url()) ? [{ name, username: entry.username }] : []) }))
         return
       }
@@ -3068,7 +3068,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         if (takeover?.claimedBy !== viewer.memberId) throw new Error('claim the browser first')
         const name = String(input['name'] ?? '')
         if (!this.store.mayUse('secret', name)) throw new Error(`"${name}" is not granted to this Robot`)
-        const entry = await this.home().resolveLogin(this.store.requireConfig().ownerId, name)
+        const entry = await this.space().resolveLogin(this.store.requireConfig().ownerId, name)
         if (entry === null) throw new Error(`"${name}" no longer exists`)
         socket.send(JSON.stringify({ type: 'filled', message: await this.fillEntry(name, entry, await this.page()) }))
         return
@@ -3193,7 +3193,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       await this.changed()
       return
     }
-    const member = await this.home().member(memberId)
+    const member = await this.space().member(memberId)
     await this.wake({
       kind: 'takeover',
       sender: { kind: 'platform' },
@@ -3420,7 +3420,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async proposeGrantsFor(robotId: string, purpose: string, grants: GrantSet): Promise<{ proposalId: string; status: string }> {
     const config = this.store.requireConfig()
     if (config.kind !== 'mr-robot') throw new Error('only Mr. Robot proposes Grants for other Robots')
-    if (robotId === config.id || (await this.home().access(config.ownerId, robotId)) === null) throw new Error(`no Robot ${robotId} your owner can reach`)
+    if (robotId === config.id || (await this.space().access(config.ownerId, robotId)) === null) throw new Error(`no Robot ${robotId} your owner can reach`)
     const proposal = await this.env.ROBOT.getByName(robotId).proposeFromChief(`${config.identity.name} asks: ${purpose}`, grants)
     return { proposalId: proposal.id, status: 'asked your owner in that Robot\'s chat; nothing is granted until they approve' }
   }
@@ -3454,12 +3454,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.program(Threads.list)
   }
 
-  /** The Home tells this chief about an invitation to answer (ch-vrl7, ch-hikl). */
+  /** The Space tells this chief about an invitation to answer (ch-vrl7, ch-hikl). */
   threadInvitation(view: ThreadView, phase: 'invitation-out' | 'invitation-in'): Promise<void> {
     return this.program(Threads.invitation(view, phase))
   }
 
-  /** The Home tells this chief that a Thread opened, was declined, closed or went idle. */
+  /** The Space tells this chief that a Thread opened, was declined, closed or went idle. */
   threadChanged(view: ThreadView, event: ThreadEvent, wake: boolean): Promise<void> {
     return this.program(Threads.changed(view, event, wake))
   }
@@ -3471,12 +3471,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- Routines become Tasks (v1.13 ticket 05)
 
-  /** The Robot's Routines and their runs, for the Home to store as Tasks; none once its tables are gone. */
+  /** The Robot's Routines and their runs, for the Space to store as Tasks; none once its tables are gone. */
   exportRoutines(): ExportedRoutine[] {
     return exportRoutines(this.ctx.storage.sql)
   }
 
-  /** The Home stored them as Tasks: the Routine tables go. */
+  /** The Space stored them as Tasks: the Routine tables go. */
   dropRoutines(): void {
     dropRoutines(this.ctx.storage.sql)
   }
@@ -3779,7 +3779,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const file = await this.run(ws.read(entry.path))
       if (file !== undefined) files.set(entry.path.slice(draft.length + 1), new Uint8Array(file.body))
     }
-    const tasks = await this.home().listTasks({ kind: 'robot', robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot', robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }, { state: 'open', assignee: { kind: 'robot', robotId: config.id } })
+    const tasks = await this.space().listTasks({ kind: 'robot', robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot', robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }, { state: 'open', assignee: { kind: 'robot', robotId: config.id } })
     const logins = await this.logins().catch(() => [])
     const sites = (name: string) => [...new Set((logins.find((entry) => entry.name === name)?.websites ?? []).map((site) => registrableDomain(site) ?? site))]
     files.set('tasks.yaml', new TextEncoder().encode(writeTasks(tasksFormOf(tasks.tasks))))
@@ -3787,7 +3787,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (!files.has('README.md')) files.set('README.md', new TextEncoder().encode(`# ${config.identity.name}\n\n${config.identity.description}\n`))
     await this.run(ws.removeUnder(draft))
     await this.changed()
-    return this.home().saveDefinition(slug, [...files.entries()].map(([path, body]) => ({ path, body })), config.ownerId, this.owner().name)
+    return this.space().saveDefinition(slug, [...files.entries()].map(([path, body]) => ({ path, body })), config.ownerId, this.owner().name)
   }
 
   /** A persona or memory file's history (v1.18, rm-7jo4): who wrote it now, and its kept versions. */
@@ -3828,17 +3828,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return Promise.all(names.map(async (name) => ({ name, description: skillFrontmatter((await this.run(this.workspace.readText(`skills/${name}/SKILL.md`))) ?? '').description })))
   }
 
-  /** Whether this Robot may change the Home library directly (Mr. Robot, ticket 10). */
+  /** Whether this Robot may change the Space library directly (Mr. Robot, ticket 10). */
   protected editsGlobalSkills(): boolean {
     return this.store.requireConfig().kind === 'mr-robot'
   }
 
   async writeSkill(name: string, content: string): Promise<{ path: string; scope: 'local' | 'global' }> {
     const config = this.store.requireConfig()
-    const global = (await this.home().skills(config.ownerId)).find((skill) => skill.name === name)
+    const global = (await this.space().skills(config.ownerId)).find((skill) => skill.name === name)
     if (global !== undefined) {
-      if (!this.editsGlobalSkills()) throw new Error(`"${name}" is a skill from the Home library and is read-only for you (rb-krq2). Write a local skill with another name, or ask your owner to change it.`)
-      await this.home().saveSkill(name, skillFrontmatter(content).description || global.description, content, config.ownerId)
+      if (!this.editsGlobalSkills()) throw new Error(`"${name}" is a skill from the Space library and is read-only for you (rb-krq2). Write a local skill with another name, or ask your owner to change it.`)
+      await this.space().saveSkill(name, skillFrontmatter(content).description || global.description, content, config.ownerId)
       return { path: `library: ${name}`, scope: 'global' }
     }
     const path = `skills/${name}/SKILL.md`
@@ -3848,7 +3848,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   async skillLibrary(): Promise<SkillLibraryRow[]> {
     const config = this.store.requireConfig()
-    return this.home().skillLibrary(config.ownerId, { id: config.id, held: this.heldSkills() }, config.kind === 'mr-robot')
+    return this.space().skillLibrary(config.ownerId, { id: config.id, held: this.heldSkills() }, config.kind === 'mr-robot')
   }
 
   async promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }> {
@@ -3868,7 +3868,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /**
-   * Another Member's connection stopped being shared with the Home (v1.12, ux-dz8p): its grant rows go,
+   * Another Member's connection stopped being shared with the Space (v1.12, ux-dz8p): its grant rows go,
    * and a Robot that held it hears the notice at its next Turn. Mr. Robot held it unless his owner
    * lowered it to deny. Returns whether this Robot held it.
    */
@@ -3900,7 +3900,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /**
    * The owner's profile zone changed (v1.11 ticket 08). The Robot's zone is the owner's, so the next Turn and
-   * daily notes use the new one, and the model hears it once with its next step. Recurring Tasks move at the Home.
+   * daily notes use the new one, and the model hears it once with its next step. Recurring Tasks move at the Space.
    */
   async timeZoneChanged(timeZone: string): Promise<void> {
     const config = this.store.config()
@@ -3914,17 +3914,17 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.changed()
   }
 
-  /** Every memory file in scope: the Home, the owner, and this Robot's own (pl-o3ck, pl-fkg7, pl-yqno). */
+  /** Every memory file in scope: the Space, the owner, and this Robot's own (pl-o3ck, pl-fkg7, pl-yqno). */
   async memoryFiles(): Promise<MemoryFile[]> {
     const config = this.store.requireConfig()
     const own = [...PERSONA_FILES, ...dailyNotePaths(Date.now(), config.timeZone)]
     const [robotFiles, member, home] = await Promise.all([
       this.run(Effect.forEach(own, (path) => this.workspace.readText(path).pipe(Effect.map((content) => ({ scope: 'robot' as const, path, content: content ?? '' }))), { concurrency: 8 })),
       this.env.MEMBER.getByName(config.ownerId).files().catch(() => ({}) as Record<string, string>),
-      this.home().homeMemory().catch(() => ''),
+      this.space().spaceMemory().catch(() => ''),
     ])
     return [
-      { scope: 'home', path: 'HOME.md', content: home },
+      { scope: 'home', path: 'SPACE.md', content: home },
       ...Object.entries(member).map(([path, content]): MemoryFile => ({ scope: 'member', path, content })),
       ...robotFiles,
     ]
@@ -3949,12 +3949,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (baseline) this.store.set('memory-baseline', sessionId)
   }
 
-  /** Mr. Robot writes shared memory directly; every other Robot of the owner (or the Home) is told. */
+  /** Mr. Robot writes shared memory directly; every other Robot of the owner (or the Space) is told. */
   private async writeShared(file: SharedFile, content: string): Promise<void> {
     const config = this.store.requireConfig()
     // Mr. Robot writes shared files: their history names him (v1.18, rm-d68k).
     const author = { kind: 'chief' as const, name: config.identity.name }
-    if (file === 'HOME.md') await this.home().setHomeMemory(content, config.identity.name, config.id, author)
+    if (file === 'SPACE.md') await this.space().setSpaceMemory(content, config.identity.name, config.id, author)
     else await this.env.MEMBER.getByName(config.ownerId).writeFile(file, content, config.identity.name, config.id, author)
   }
 
@@ -3983,7 +3983,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   exaKey(): Promise<string | null> {
-    return this.home().exaKey()
+    return this.space().exaKey()
   }
 
   /** An Exa call in usage and limits (rb-pb26); an agent run's cost is counted the first time it is seen. */
@@ -4005,7 +4005,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async logins(): Promise<Array<{ name: string; username: string; websites: readonly string[]; matchesPage: boolean; readable: boolean }>> {
     const config = this.store.requireConfig()
     const url = this.browserPage === undefined ? null : (await this.browserPage.catch(() => undefined))?.url() ?? null
-    const entries = await Promise.all(usableNames(this.store.effectiveGrants().secrets).map(async (name) => [name, await this.home().resolveLogin(config.ownerId, name)] as const))
+    const entries = await Promise.all(usableNames(this.store.effectiveGrants().secrets).map(async (name) => [name, await this.space().resolveLogin(config.ownerId, name)] as const))
     return entries.flatMap(([name, entry]) => entry === null ? [] : [{ name, username: entry.username, websites: entry.websites, matchesPage: url !== null && entryMatches(entry, url), readable: entry.allowRead }])
   }
 
@@ -4016,7 +4016,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async fillLogin(name: string): Promise<string> {
     const config = this.store.requireConfig()
     if (!this.store.mayUse('secret', name)) throw new Error(`The login "${name}" is not granted to you. Ask with propose_grants.`)
-    const entry = await this.home().resolveLogin(config.ownerId, name)
+    const entry = await this.space().resolveLogin(config.ownerId, name)
     if (entry === null) throw new Error(`The login "${name}" no longer exists`)
     return this.fillEntry(name, entry, await this.page())
   }
@@ -4034,7 +4034,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return `Filled ${filled.username && entry.username !== '' ? 'the username and ' : ''}the password of "${name}". Submit the form yourself.`
   }
 
-  /** secret.get: a granted name only, resolved from the owner or the Home (robot-0bde). */
+  /** secret.get: a granted name only, resolved from the owner or the Space (robot-0bde). */
   secret(name: string): Promise<string> {
     return this.program(Programs.secret(name))
   }
@@ -4050,7 +4050,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const config = this.store.config()
     if (config === undefined) return
     const granted = usableNames(this.store.effectiveGrants().secrets)
-    const values = await Promise.all(granted.map(async (name) => [name, await this.home().resolveSecret(config.ownerId, name).catch(() => null)] as const))
+    const values = await Promise.all(granted.map(async (name) => [name, await this.space().resolveSecret(config.ownerId, name).catch(() => null)] as const))
     this.secretValues = values.filter((entry): entry is readonly [string, string] => entry[1] !== null)
   }
 
@@ -4137,7 +4137,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
 
-  /** `tasks`: the Robot's Tasks the viewer may see, from the Home. */
+  /** `tasks`: the Robot's Tasks the viewer may see, from the Space. */
   async panel(canEdit: boolean, summary: RobotSummary, tasks: readonly TaskView[]): Promise<RobotPanel> {
     await this.reachForView()
     return this.program(Views.panel(canEdit, summary, tasks))
@@ -4159,8 +4159,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   /** One row of the admin fleet list, from the DO itself (robot-x26m). */
-  /** `home` is the Home's per-Robot spend limit, which the row's limit in effect may follow. */
-  adminRow(home: HomeSpendLimit): Promise<{ fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView } | null> {
+  /** `home` is the Space's per-Robot spend limit, which the row's limit in effect may follow. */
+  adminRow(home: SpaceSpendLimit): Promise<{ fleetState: FleetState; status: RobotConfig['status']; grants: GrantSet; model: ModelChoice; usage: UsageView } | null> {
     return this.program(Views.adminRow(home))
   }
 
@@ -4250,7 +4250,7 @@ async function forwardInput(cdp: { send(method: string, params?: Record<string, 
   }
 }
 
-const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32 }
+const KEY_CODES: Record<string, number> = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46, Space: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32 }
 
 /** The tool running now: the latest call without a result (a code program's latest inner call wins). */
 

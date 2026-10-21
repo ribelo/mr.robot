@@ -3,7 +3,7 @@
  * token is good while the Robot's record says the Box is booting, running or stopping (it sends its caches then) and its container is up;
  * after a stop there is no token, and the Workspace is out of reach again.
  *
- * The door is open only while the Robot holds its Box (the box group usable, with the Home's plugin switches as they are now). A script in
+ * The door is open only while the Robot holds its Box (the box group usable, with the Space's plugin switches as they are now). A script in
  * the Box has no owner to ask, so the door applies the Workspace rules of the tools the Robot's own calls meet (D1): the files group must be
  * usable at allow (at ask, a call waits for its owner and a script cannot; the door says so), and the same keys are writable. The one
  * exception is a run of ws the Robot started itself (a copy, the caches' archive): it has a permit for its one key and its one direction
@@ -21,7 +21,7 @@ export interface BoxDoorDeps {
   liveToken(): BoxToken | undefined
   /** Whether the container answers, for a Box recorded as running. */
   containerUp(): Promise<boolean>
-  /** The levels of the files and box groups now: deny where the Home has the plugin off, read from the Home at each request. */
+  /** The levels of the files and box groups now: deny where the Space has the plugin off, read from the Space at each request. */
   levels(): Promise<{ readonly files: GrantLevel; readonly box: GrantLevel }>
   /** The permit of a copy in flight, by the secret its ws sent; undefined when there is none. */
   permit(secret: PermitSecret): CopyPermit | undefined

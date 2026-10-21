@@ -3,14 +3,14 @@ import { useAtomRefresh } from '@effect/atom-react'
 import * as Exit from 'effect/Exit'
 import { spendLimitText, type AdminView, type GrantLevels, type ModelChoice } from '@mr-robot/protocol'
 import * as Option from 'effect/Option'
-import { adminAtom, homeMemoryAtom, keys, useCommand } from '../client/api-atoms.ts'
+import { adminAtom, spaceMemoryAtom, keys, useCommand } from '../client/api-atoms.ts'
 import { exitFailure } from '../client/api-failure.ts'
 import { AtomView } from './AtomView.tsx'
 import { go } from '../route.ts'
 import { ConfirmButton } from './RobotSheets.tsx'
 import { SaveButton } from './SaveButton.tsx'
 import { ModelSelect } from './ModelSelect.tsx'
-import { parseHomeSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
+import { parseSpaceSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import { Avatar, MemberFace } from './Avatar.tsx'
 import { costSummary } from './CostBreakdown.tsx'
 import { ReviewerSetting } from './ReviewerSetting.tsx'
@@ -18,7 +18,7 @@ import { ReviewerSetting } from './ReviewerSetting.tsx'
 const usd = (value: number) => `$${value.toFixed(2)}`
 const tokens = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value)
 
-/** The Home admin's single place (robot-x26m, robot-1rap, robot-bvme, robot-d2uv). */
+/** The Space admin's single place (robot-x26m, robot-1rap, robot-bvme, robot-d2uv). */
 export function Admin() {
   const refresh = useAtomRefresh(adminAtom)
   // Robots change state by themselves; the view reads again every 15 seconds.
@@ -26,7 +26,7 @@ export function Admin() {
     const timer = setInterval(refresh, 15_000)
     return () => clearInterval(timer)
   }, [refresh])
-  return <AtomView atom={adminAtom} what="the Home" errorTitle="The admin view cannot be loaded">{(view) => <AdminPage view={view} />}</AtomView>
+  return <AtomView atom={adminAtom} what="the Space" errorTitle="The admin view cannot be loaded">{(view) => <AdminPage view={view} />}</AtomView>
 }
 
 /** Items a Robot may use, an ask item marked (sk-746n). */
@@ -64,7 +64,7 @@ function AdminPage({ view }: { view: AdminView }) {
         </tbody>
       </table>
 
-      {view.robotsToMigrate === 0 ? null : <div className="muted">{view.robotsToMigrate} {view.robotsToMigrate === 1 ? 'Robot' : 'Robots'} still to migrate: their Routines become Tasks when the Home next starts.</div>}
+      {view.robotsToMigrate === 0 ? null : <div className="muted">{view.robotsToMigrate} {view.robotsToMigrate === 1 ? 'Robot' : 'Robots'} still to migrate: their Routines become Tasks when the Space next starts.</div>}
 
       <h2>Threads</h2>
       {(view.threads ?? []).length === 0 ? <div className="muted">No Threads between chiefs.</div> : (
@@ -100,21 +100,21 @@ function AdminPage({ view }: { view: AdminView }) {
       </table>
       <Invite onInvite={(email) => run((api) => api.invite(email), `Invited ${email}. They join on first sign-in.`)} />
 
-      <h2>Home settings</h2>
-      <HomeSettings view={view} />
+      <h2>Space settings</h2>
+      <SpaceSettings view={view} />
       <h2>Hosts</h2>
-      {(view.hosts ?? []).length === 0 ? <div className="muted">No computers paired in this Home.</div> : (
+      {(view.hosts ?? []).length === 0 ? <div className="muted">No computers paired in this Space.</div> : (
         <table className="grid"><tbody>{(view.hosts ?? []).map((host) => (
           <tr key={host.id}>
-            <td><b>{host.name}</b><div className="muted">{host.ownerName} · {host.sharing === 'home' ? 'shared with the Home' : 'private'}</div></td>
+            <td><b>{host.name}</b><div className="muted">{host.ownerName} · {host.sharing === 'home' ? 'shared with the Space' : 'private'}</div></td>
             <td>{host.online ? '● online' : 'offline'}<div className="muted">last seen {host.lastSeen === null ? 'never' : new Date(host.lastSeen).toLocaleString()}</div></td>
             <td className="muted">{host.platform}{host.version === null ? '' : ` · app ${host.version}`}{host.capabilities === null ? '' : ` · ${host.capabilities.chrome === null ? 'no Chrome' : 'Chrome'}${host.capabilities.graphical ? '' : ' · no display'}`}</td>
             <td className="muted">{host.users.length === 0 ? 'not in use' : `used by ${host.users.join(', ')}`}</td>
           </tr>
         ))}</tbody></table>
       )}
-      <h2>Home memory</h2>
-      <AtomView atom={homeMemoryAtom}>{(file) => <HomeMemory initial={file.content} />}</AtomView>
+      <h2>Space memory</h2>
+      <AtomView atom={spaceMemoryAtom}>{(file) => <SpaceMemory initial={file.content} />}</AtomView>
       <h2>Exa</h2>
       <ExaKey configured={view.exaConfigured === true} onSave={(key) => run((api) => api.setExaKey(key), key === null ? 'Removed.' : undefined)} />
 
@@ -133,7 +133,7 @@ function AdminPage({ view }: { view: AdminView }) {
 
       <h2>Providers</h2>
       {view.providers.length === 0 ? <div className="muted">No Provider connected yet. Connect one on your profile page.</div> : (
-        <table className="grid"><tbody>{view.providers.map((entry) => <tr key={entry.id}><td>{entry.provider}</td><td>{entry.label}</td><td>{entry.ownerName}</td><td>{entry.shared ? 'shared with the Home' : 'private'}</td></tr>)}</tbody></table>
+        <table className="grid"><tbody>{view.providers.map((entry) => <tr key={entry.id}><td>{entry.provider}</td><td>{entry.label}</td><td>{entry.ownerName}</td><td>{entry.shared ? 'shared with the Space' : 'private'}</td></tr>)}</tbody></table>
       )}
 
       <h2>Skill library</h2>
@@ -158,18 +158,18 @@ function Invite({ onInvite }: { onInvite: (email: string) => Promise<boolean> })
 }
 
 /**
- * Home settings: the Workers AI switch (ux-101w), the default model chosen with the Provider-grouped
+ * Space settings: the Workers AI switch (ux-101w), the default model chosen with the Provider-grouped
  * combobox (ux-3l7i), the default browser and the spend limits. Switching Workers AI off can move the
  * default model; the save answer says where, and a note tells the admin (ux-jseo).
  */
-function HomeSettings({ view }: { view: AdminView }) {
+function SpaceSettings({ view }: { view: AdminView }) {
   const command = useCommand()
   const [model, setModel] = useState<ModelChoice>(view.settings.defaultModel)
   const [workersAi, setWorkersAi] = useState(view.settings.workersAiEnabled)
   const [robotLimit, setRobotLimit] = useState(spendLimitDraft(view.settings.robotSpendLimit))
   const [memberLimit, setMemberLimit] = useState(spendLimitDraft(view.settings.memberSpendLimit))
-  const robotSpendLimit = parseHomeSpendLimit(robotLimit)
-  const memberSpendLimit = parseHomeSpendLimit(memberLimit)
+  const robotSpendLimit = parseSpaceSpendLimit(robotLimit)
+  const memberSpendLimit = parseSpaceSpendLimit(memberLimit)
   const [backend, setBackend] = useState(view.settings.defaultBrowserBackend ?? 'browser-run')
   const [reviewer, setReviewer] = useState<ModelChoice | null>(view.settings.defaultReviewer)
   const [moved, setMoved] = useState<string>()
@@ -178,7 +178,7 @@ function HomeSettings({ view }: { view: AdminView }) {
   const save = async () => {
     // An amount that is not whole dollars of at least 1 is shown under its field and not sent.
     if (Option.isNone(robotSpendLimit) || Option.isNone(memberSpendLimit)) return false
-    const exit = await command((api) => api.updateHomeSettings({
+    const exit = await command((api) => api.updateSpaceSettings({
       defaultModel: model,
       workersAiEnabled: workersAi,
       defaultBrowserBackend: backend,
@@ -200,7 +200,7 @@ function HomeSettings({ view }: { view: AdminView }) {
       <div className="toggle-card">
         <div>
           <div>Workers AI</div>
-          <div className="muted">Models on this Cloudflare account, free of charge. Off: nobody in the Home can pick them and chains skip them.</div>
+          <div className="muted">Models on this Cloudflare account, free of charge. Off: nobody in the Space can pick them and chains skip them.</div>
         </div>
         <button type="button" role="switch" aria-checked={workersAi} aria-label="Workers AI" className={workersAi ? 'switch on' : 'switch'} onClick={() => setWorkersAi(!workersAi)}><span /></button>
       </div>
@@ -219,7 +219,7 @@ function HomeSettings({ view }: { view: AdminView }) {
       <ReviewerSetting value={reviewer} models={view.settings.models} fallback="Each Robot's own model" onChange={setReviewer} />
       <small className="muted">The Auto review model of every Robot that has none of its own.</small>
       <div className="form inline spend-limits">
-        <SpendLimitChoice label="Spend limit per Robot" kinds={['none', 'usd']} draft={robotLimit} valid={Option.isSome(robotSpendLimit)} note="Each Robot that follows the Home's limit, per month." onChange={setRobotLimit} />
+        <SpendLimitChoice label="Spend limit per Robot" kinds={['none', 'usd']} draft={robotLimit} valid={Option.isSome(robotSpendLimit)} note="Each Robot that follows the Space's limit, per month." onChange={setRobotLimit} />
         <SpendLimitChoice label="Spend limit per Member" kinds={['none', 'usd']} draft={memberLimit} valid={Option.isSome(memberSpendLimit)} note="All Robots of one Member together, per month." onChange={setMemberLimit} />
       </div>
       <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} /></div>
@@ -248,7 +248,7 @@ function SkillRepository({ view, onSave, onSync }: { view: AdminView; onSave: (i
   )
 }
 
-/** The Home library (rb-5ku3): every global skill opens in an editor; create and delete. */
+/** The Space library (rb-5ku3): every global skill opens in an editor; create and delete. */
 function SkillLibrary({ view, onMessage }: { view: AdminView; onMessage: (message: string | undefined) => void }) {
   const command = useCommand()
   const [editing, setEditing] = useState<{ name: string; description: string; content: string; isNew: boolean } | null>(null)
@@ -299,7 +299,7 @@ function SkillLibrary({ view, onMessage }: { view: AdminView; onMessage: (messag
   )
 }
 
-/** The Home's Exa API key (rb-x8i3): write-only; Robots granted "exa" use it. */
+/** The Space's Exa API key (rb-x8i3): write-only; Robots granted "exa" use it. */
 function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: string | null) => Promise<boolean> }) {
   const [key, setKey] = useState('')
   return (
@@ -314,24 +314,24 @@ function ExaKey({ configured, onSave }: { configured: boolean; onSave: (key: str
   )
 }
 
-/** HOME.md (pl-yqno): household facts every Robot of the Home reads; the admin and Mr. Robot write it. */
-function HomeMemory({ initial }: { initial: string }) {
+/** SPACE.md (pl-yqno): household facts every Robot of the Space reads; the admin and Mr. Robot write it. */
+function SpaceMemory({ initial }: { initial: string }) {
   const command = useCommand()
   const [content, setContent] = useState(initial)
   const [stored, setStored] = useState(initial)
   const [error, setError] = useState<string>()
   const save = async () => {
     const written = content
-    const exit = await command((api) => api.setHomeMemory(written), [keys.homeMemory])
+    const exit = await command((api) => api.setSpaceMemory(written), [keys.spaceMemory])
     setError(exitFailure(exit))
     if (Exit.isSuccess(exit)) setStored(written)
     return exit
   }
   return (
     <div className="form">
-      <div className="muted">Facts for every Robot in the Home: the electricity provider, the building, shared accounts. Each Robot is told when it changes.</div>
-      <label>HOME.md
-        <textarea rows={6} value={content} placeholder="# HOME.md" onChange={(event) => setContent(event.target.value)} />
+      <div className="muted">Facts for every Robot in the Space: the electricity provider, the building, shared accounts. Each Robot is told when it changes.</div>
+      <label>SPACE.md
+        <textarea rows={6} value={content} placeholder="# SPACE.md" onChange={(event) => setContent(event.target.value)} />
       </label>
       <div className="question-actions">{error === undefined ? null : <span className="muted">{error}</span>}<SaveButton onSave={save} disabled={content === stored} /></div>
     </div>

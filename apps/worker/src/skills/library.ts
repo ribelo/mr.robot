@@ -1,5 +1,5 @@
 /**
- * The Home skill library (robot-7qpi): skills in R2 under skills/<name>/, synchronised from the
+ * The Space skill library (robot-7qpi): skills in R2 under skills/<name>/, synchronised from the
  * admin's Git repository (robot-qjvu) and extended by approved Robot proposals (robot-jqfw).
  */
 import * as Data from 'effect/Data'

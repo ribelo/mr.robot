@@ -14,7 +14,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeHome: false, drawer: false }, acceptTasksFrom: [] }
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] }
 const account: ProviderView = { id: 'a-1', provider: 'deepseek', label: 'DeepSeek key', kind: 'api-key', shared: false, connectedAt: 0, ownerId: 'm-1', ownerName: 'Anna', status: 'ok', note: null, until: null }
 
 interface Call { readonly method: string; readonly path: string; readonly body: string }
@@ -117,10 +117,10 @@ describe('inline rename of a Provider account (ux-h9wl)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
     field = screen.getByRole('textbox', { name: 'Name of this account' })
-    fireEvent.change(field, { target: { value: 'Home key' } })
+    fireEvent.change(field, { target: { value: 'Space key' } })
     fireEvent.blur(field)
     await waitFor(() => expect(renames(calls)).toHaveLength(1))
-    expect(JSON.parse(renames(calls)[0]!.body)).toEqual({ label: 'Home key' })
+    expect(JSON.parse(renames(calls)[0]!.body)).toEqual({ label: 'Space key' })
   })
 })
 

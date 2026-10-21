@@ -165,7 +165,7 @@ describe('every say goes out on the Channel the Wake-up came from (gb-s6lx, gb-j
     connectorFixtures.calls = []
     scripts.set(id, [{ calls: [sayCall('Here are both.', { attachments: ['out/note.txt', 'out/big.bin'] })] }, { text: '' }])
     const message = { id: 'M-in', channelId: 'C-robot', guildId: 'G-1', authorId: 'U-x', authorName: 'Someone', text: 'send the report', direct: false }
-    expect(await env.HOME.getByName('home').discordReceived(message, annaId)).toBe(id)
+    expect(await env.SPACE.getByName('home').discordReceived(message, annaId)).toBe(id)
     await settle(id)
     const [post] = connectorFixtures.calls.filter((call) => call.method === 'POST' && call.url === `${API}/channels/C-robot/messages`)
     expect(post!.headers['content-type']).toMatch(/^multipart\/form-data; boundary=/)
@@ -235,7 +235,7 @@ describe('the safety net (gb-xgd7, gb-7jqy, gb-3gp2)', () => {
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { discordChannel: 'C-robot' } })
     connectorFixtures.calls = []
     scripts.set(id, [{ text: 'It is still free.' }])
-    await env.HOME.getByName('home').discordReceived({ id: 'M-ask', channelId: 'C-robot', guildId: 'G-1', authorId: 'u-anna', authorName: 'Anna', text: 'is the flat free?', direct: false }, annaId)
+    await env.SPACE.getByName('home').discordReceived({ id: 'M-ask', channelId: 'C-robot', guildId: 'G-1', authorId: 'u-anna', authorName: 'Anna', text: 'is the flat free?', direct: false }, annaId)
     await settle(id)
     const posts = connectorFixtures.calls.filter((call) => call.method === 'POST' && call.url === `${API}/channels/C-robot/messages`).map((call) => JSON.parse(call.body ?? '{}') as Record<string, unknown>)
     expect(posts).toEqual([{ content: 'It is still free.', message_reference: { message_id: 'M-ask', channel_id: 'C-robot', fail_if_not_exists: false } }])

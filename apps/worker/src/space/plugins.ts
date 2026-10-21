@@ -1,7 +1,7 @@
 /**
- * The Home's plugins and shared connections (v1.5 ticket 01): which plugins are on (cn-dbm9), each
+ * The Space's plugins and shared connections (v1.5 ticket 01): which plugins are on (cn-dbm9), each
  * plugin's settings from its schema with secret fields sealed apart (cn-s1pd, cn-a1i0), and the index
- * of connections Members share with the Home (cn-qs78).
+ * of connections Members share with the Space (cn-qs78).
  */
 import * as Effect from 'effect/Effect'
 import type { ConnectionNote, ConnectionView, PluginView } from '@mr-robot/protocol'
@@ -12,7 +12,7 @@ import type { VaultShape } from '../platform/vault.ts'
 
 export class PluginNotFound extends Error {}
 
-export class HomePlugins {
+export class SpacePlugins {
   constructor(private readonly sql: SqlStorage, private readonly vault: VaultShape) {
     sql.exec('CREATE TABLE IF NOT EXISTS plugin (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL, config TEXT NOT NULL)')
     sql.exec('CREATE TABLE IF NOT EXISTS plugin_secret (name TEXT NOT NULL, field TEXT NOT NULL, sealed TEXT NOT NULL, PRIMARY KEY (name, field)) WITHOUT ROWID')
@@ -26,7 +26,7 @@ export class HomePlugins {
 
   // ---------------------------------------------------------------- plugins
 
-  /** Plugins are on unless the Home switched them off. */
+  /** Plugins are on unless the Space switched them off. */
   enabled(): Record<string, boolean> {
     const rows = this.sql.exec<{ name: string; enabled: number }>('SELECT name, enabled FROM plugin').toArray()
     return Object.fromEntries(PLUGINS.map((plugin) => [plugin.name, rows.find((row) => row.name === plugin.name)?.enabled !== 0]))
@@ -47,8 +47,8 @@ export class HomePlugins {
     return {
       name: plugin.name, title: plugin.title, description: plugin.description, icon: plugin.icon, group: plugin.group,
       enabled: this.enabled()[plugin.name] ?? true,
-      // Only the admin sees the Home's settings; everyone sees whether setup is missing.
-      fields: isAdmin && plugin.homeConfig !== undefined ? describeSchema(plugin.homeConfig) : [],
+      // Only the admin sees the Space's settings; everyone sees whether setup is missing.
+      fields: isAdmin && plugin.spaceConfig !== undefined ? describeSchema(plugin.spaceConfig) : [],
       values: isAdmin ? values : {},
       secretsSet: isAdmin ? [...secretsSet] : [],
       setupNeeded: plugin.setupNeeded?.(values, secretsSet) ?? null,
@@ -77,8 +77,8 @@ export class HomePlugins {
   async setConfig(name: string, input: Readonly<Record<string, unknown>>, origin: string): Promise<PluginView> {
     const plugin = pluginByName(name)
     if (plugin === undefined) throw new PluginNotFound(name)
-    if (plugin.homeConfig === undefined) throw new PluginConfigInvalid({ plugin: name, message: 'this plugin has no settings' })
-    const parsed = parseForm(name, plugin.homeConfig, input, this.secretsSet(name))
+    if (plugin.spaceConfig === undefined) throw new PluginConfigInvalid({ plugin: name, message: 'this plugin has no settings' })
+    const parsed = parseForm(name, plugin.spaceConfig, input, this.secretsSet(name))
     if (!parsed.ok) throw parsed.error
     this.sql.exec("INSERT INTO plugin (name, enabled, config) VALUES (?, 1, ?) ON CONFLICT (name) DO UPDATE SET config = excluded.config", name, JSON.stringify(parsed.values))
     for (const [field, value] of Object.entries(parsed.secrets)) {
@@ -112,7 +112,7 @@ export class HomePlugins {
     else this.sql.exec('DELETE FROM shared_connection WHERE id = ?', connection.id)
   }
 
-  /** Connections other Members share with the Home. */
+  /** Connections other Members share with the Space. */
   sharedBy(exceptOwner: string): Array<{ ownerId: string; connection: OwnConnection }> {
     return this.sql.exec<{ owner_id: string; view: string }>('SELECT owner_id, view FROM shared_connection WHERE owner_id <> ?', exceptOwner).toArray()
       .map((row) => ({ ownerId: row.owner_id, connection: JSON.parse(row.view) as OwnConnection }))

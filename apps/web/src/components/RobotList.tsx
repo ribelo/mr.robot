@@ -239,7 +239,7 @@ export function RobotList({ robots, groups, selected, meName, meAvatar, isAdmin,
         </li>
       )}
       <li className="new-group">
-        <InlineEdit editing={naming} value="" label="Name of the new group" placeholder="Work, Home, a project" onSave={(name) => onGroupChange({ kind: 'create', name })} onClose={() => setNaming(false)}>
+        <InlineEdit editing={naming} value="" label="Name of the new group" placeholder="Work, Space, a project" onSave={(name) => onGroupChange({ kind: 'create', name })} onClose={() => setNaming(false)}>
           <button type="button" className="link" onClick={() => setNaming(true)}>New group…</button>
         </InlineEdit>
       </li>
@@ -352,7 +352,7 @@ function RowMenu({ robot, groups, place, onClose, onListPref, onMove, onNewGroup
         <div className="row-submenu" role="menu" aria-label="Move to">
           {groups.map((group) => <button key={group.id} type="button" role="menuitem" disabled={here(group.id)} onClick={() => onMove({ kind: 'group', groupId: group.id })}>{group.name}</button>)}
           <button type="button" role="menuitem" disabled={here(undefined)} onClick={() => onMove({ kind: 'ungrouped' })}>No group</button>
-          <InlineEdit editing={naming} value="" label="Name of the new group" placeholder="Work, Home, a project" onSave={onNewGroup} onClose={onClose}>
+          <InlineEdit editing={naming} value="" label="Name of the new group" placeholder="Work, Space, a project" onSave={onNewGroup} onClose={onClose}>
             <button type="button" role="menuitem" onClick={() => setNaming(true)}>New group…</button>
           </InlineEdit>
         </div>

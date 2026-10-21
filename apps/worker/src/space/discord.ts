@@ -1,6 +1,6 @@
 /**
- * Discord at the Home (v1.5 ticket 05): which Robot talks in which channel (cn-y1ac), posting through
- * the Home's bot connection (cn-65gg), and the gateway socket that brings messages in. The gateway
+ * Discord at the Space (v1.5 ticket 05): which Robot talks in which channel (cn-y1ac), posting through
+ * the Space's bot connection (cn-65gg), and the gateway socket that brings messages in. The gateway
  * protocol and the reconnect rules are pure, in ../connectors/discord-gateway.ts.
  *
  * One socket at a time: a socket this object dropped can no longer change its state, a connect
@@ -17,7 +17,7 @@ export interface BotConnection {
   readonly token: string
 }
 
-export class DiscordAtHome {
+export class DiscordAtSpace {
   /** The socket that is live now; events from any other socket are ignored. */
   private live: LiveSocket | undefined
   private connecting: Promise<void> | undefined
@@ -54,7 +54,7 @@ export class DiscordAtHome {
     return row === undefined ? null : { robotId: row.robot_id, ownerId: row.owner_id }
   }
 
-  /** Post text with the Home's bot (the Channel side). */
+  /** Post text with the Space's bot (the Channel side). */
   async post(memberId: string, channelId: string, text: string, replyTo?: string, files: readonly DiscordFile[] = []): Promise<boolean> {
     const bot = await this.bot(memberId)
     if (bot === null) return false
@@ -66,7 +66,7 @@ export class DiscordAtHome {
     return outcome.success
   }
 
-  /** Discord's gateway is a WebSocket; one socket per Home, kept alive with heartbeats. */
+  /** Discord's gateway is a WebSocket; one socket per Space, kept alive with heartbeats. */
   async ensure(): Promise<void> {
     const live = this.live
     if (live !== undefined) {

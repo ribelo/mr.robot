@@ -23,8 +23,8 @@ const settings = {
 } as const
 const view: AdminView = { fleet: [], robotsToMigrate: 0, members: [], skills: [], skillRepository: null, providers: [], settings }
 
-/** The Save button of Home settings: the one right after the spend limits. */
-const saveHomeSettings = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Spend limit per Member' }).closest('.form')!.nextElementSibling as HTMLElement).getByRole('button', { name: 'Save' }))
+/** The Save button of Space settings: the one right after the spend limits. */
+const saveSpaceSettings = () => fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Spend limit per Member' }).closest('.form')!.nextElementSibling as HTMLElement).getByRole('button', { name: 'Save' }))
 
 interface Call { readonly method: string; readonly path: string; readonly body: string }
 
@@ -37,14 +37,14 @@ function stubApi(saved: unknown): Call[] {
     const body = request === undefined ? (ArrayBuffer.isView(init?.body) ? new TextDecoder().decode(init.body) : typeof init?.body === 'string' ? init.body : '') : await request.clone().text()
     calls.push({ method, path, body })
     if (path === '/api/admin') return Response.json(view)
-    if (path === '/api/home-memory') return Response.json({ content: '' })
+    if (path === '/api/space-memory') return Response.json({ content: '' })
     if (method === 'PATCH' && path === '/api/admin/settings') return Response.json(saved)
     return Response.json([])
   }))
   return calls
 }
 
-describe('Home settings in Admin (ux-3l7i, ux-101w, ux-jseo)', () => {
+describe('Space settings in Admin (ux-3l7i, ux-101w, ux-jseo)', () => {
   it('chooses the default model with the Provider-grouped combobox and saves it', async () => {
     const calls = stubApi({ ...settings, defaultModel: { provider: 'opencode-go', model: 'glm-5', effort: 'off' } })
     render(<RegistryProvider><Admin /></RegistryProvider>)
@@ -53,7 +53,7 @@ describe('Home settings in Admin (ux-3l7i, ux-101w, ux-jseo)', () => {
     fireEvent.change(screen.getByLabelText('Search models'), { target: { value: 'glm' } })
     fireEvent.click(screen.getByRole('option', { name: 'GLM 5' }))
     expect(screen.getByText('GLM 5')).toBeTruthy()
-    saveHomeSettings()
+    saveSpaceSettings()
     await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true))
     const patch = JSON.parse(calls.find((call) => call.method === 'PATCH')!.body) as Record<string, unknown>
     expect(patch).toMatchObject({ defaultModel: { provider: 'opencode-go', model: 'glm-5', effort: 'off' }, workersAiEnabled: true })
@@ -64,11 +64,11 @@ describe('Home settings in Admin (ux-3l7i, ux-101w, ux-jseo)', () => {
     const calls = stubApi({ ...settings, workersAiEnabled: false, defaultModel: to, models: [sonnet, glm], defaultModelMoved: { from: settings.defaultModel, to } })
     render(<RegistryProvider><Admin /></RegistryProvider>)
     const workersAi = await screen.findByRole('switch', { name: 'Workers AI' })
-    expect(screen.getByText('Models on this Cloudflare account, free of charge. Off: nobody in the Home can pick them and chains skip them.')).toBeTruthy()
+    expect(screen.getByText('Models on this Cloudflare account, free of charge. Off: nobody in the Space can pick them and chains skip them.')).toBeTruthy()
     expect(workersAi.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(workersAi)
     expect(workersAi.getAttribute('aria-checked')).toBe('false')
-    saveHomeSettings()
+    saveSpaceSettings()
     expect(await screen.findByText('Default model moved to Claude Sonnet 5.5.')).toBeTruthy()
     expect(JSON.parse(calls.find((call) => call.method === 'PATCH')!.body)).toMatchObject({ workersAiEnabled: false })
     expect(screen.getByText('Claude Sonnet 5.5')).toBeTruthy()

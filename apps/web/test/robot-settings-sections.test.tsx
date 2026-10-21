@@ -15,7 +15,7 @@ const panel: RobotPanel = {
   settings: {
     identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
     codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: { ...emptyGrants, hosts: { 'h-desk:files': 'ask' } },
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, homeSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, homeReviewer: null, subagentModels: [],
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, spaceSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
   },
   tasks: [], screen: null, usage: { month: '2026-10', inputTokens: 0, outputTokens: 0, costUsd: 0, breakdown: { model: { robot: 0, review: 0, subagent: 0 }, browser: 0, box: 0, services: 0, total: 0 }, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } }, canEdit: true, takeover: null,
 }
@@ -123,7 +123,7 @@ describe('Robot settings: while idle (ao-jlr0, ao-f4sp, ao-z22f)', () => {
 })
 
 describe('Robot settings: Auto review (ao-c8k9, ao-6m9i)', () => {
-  it('is off with the Home default reviewer; switching it on with a model of its own saves both', async () => {
+  it('is off with the Space default reviewer; switching it on with a model of its own saves both', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ sections: [], tools: [], skills: [] })))
     const saved: SettingsPatch[] = []
     const models = [{ provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash', contextWindow: 128000 }, { provider: 'anthropic', model: 'claude-haiku-5-5', label: 'Claude Haiku', contextWindow: 200000 }]
@@ -131,7 +131,7 @@ describe('Robot settings: Auto review (ao-c8k9, ao-6m9i)', () => {
     const toggle = screen.getByRole('checkbox', { name: /^Auto review/ }) as HTMLInputElement
     expect(toggle.checked).toBe(false)
     const reviewer = screen.getByRole('combobox', { name: 'Reviewer' }) as HTMLSelectElement
-    expect(reviewer.selectedOptions[0]!.textContent).toBe("Home default (this Robot's own model)")
+    expect(reviewer.selectedOptions[0]!.textContent).toBe("Space default (this Robot's own model)")
     fireEvent.click(toggle)
     fireEvent.change(reviewer, { target: { value: 'own' } })
     fireEvent.change(screen.getByRole('combobox', { name: 'Reviewer thinking' }), { target: { value: 'low' } })

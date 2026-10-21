@@ -9,7 +9,7 @@ import * as Scope from 'effect/Scope'
 import type { HostView } from '@mr-robot/protocol'
 import { frame, HEARTBEAT_MS, makeHostClient, OFFLINE_AFTER_MS, parseFrame, parseHeartbeat, SANDBOX_DENIED, SANDBOX_UNAVAILABLE, type HostAccess, type HostNotification, type JobEnded, type JobInfo, type ReceivedHeartbeat, type RunOutcome, type Sandbox } from '@mr-robot/host-protocol'
 import type { Env } from '../env.ts'
-import { HOME_ID } from '../env.ts'
+import { SPACE_ID } from '../env.ts'
 import type { Reach } from '../places/host-facet.ts'
 import { HostAccessLost, HostCallFailed, HostNoSandbox, HostOffline, HostWriteDenied } from './host-call.ts'
 
@@ -28,7 +28,7 @@ type HostRow = {
   origin: string | null
 }
 
-/** The registry entry the Home keeps for sharing and the admin view. */
+/** The registry entry the Space keeps for sharing and the admin view. */
 export interface HostEntry {
   readonly id: string
   readonly ownerId: string
@@ -134,7 +134,7 @@ export class HostHub {
 
   private async report(id: string): Promise<void> {
     const row = this.row(id)
-    await this.env.HOME.getByName(HOME_ID).hostChanged(row === undefined ? { id, removed: true } : this.entry(row)).catch((error: unknown) => console.warn('host report failed', error))
+    await this.env.SPACE.getByName(SPACE_ID).hostChanged(row === undefined ? { id, removed: true } : this.entry(row)).catch((error: unknown) => console.warn('host report failed', error))
   }
 
   /** A new host for this Member; the token is returned once and stored only as a hash. */
@@ -406,7 +406,7 @@ export class HostHub {
 
   /**
    * A Robot's call on one of this Member's hosts (hs-5ktw): the Robot must hold the grant for that
-   * host and kind (Mr. Robot holds it unless his owner lowered it, sk-br7y); a shared host serves every Home member's robots.
+   * host and kind (Mr. Robot holds it unless his owner lowered it, sk-br7y); a shared host serves every Space member's robots.
    */
   async authorize(id: string, robotId: string, grant: HostGrant): Promise<{ row: HostRow; access: HostAccess }> {
     const row = this.row(id)

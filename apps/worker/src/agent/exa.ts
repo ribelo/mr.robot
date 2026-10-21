@@ -1,6 +1,6 @@
 /**
  * Exa (v1.1 ticket 11, rb-cfvy, rb-a0x0): the owner's desktop Exa tools, same names and parameters,
- * calling the Exa API with the Home's key. "exa" grants research (search, crawl, code context);
+ * calling the Exa API with the Space's key. "exa" grants research (search, crawl, code context);
  * "exa-agent" grants the billable agent runs separately. Every call reports its cost (rb-pb26).
  */
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -9,13 +9,13 @@ import { tool } from './tools/define.ts'
 const BASE = 'https://api.exa.ai'
 
 export interface ExaHost {
-  /** The Home's Exa key, or null when the admin has not added one. */
+  /** The Space's Exa key, or null when the admin has not added one. */
   exaKey(): Promise<string | null>
   /** Record an Exa call and its cost in usage and limits; an agent run's cost is counted once (runId). */
   recordExa(costUsd: number, runId?: string): Promise<void>
 }
 
-const NO_KEY = 'Exa is not set up in this Home: the Home admin must add an Exa API key under Admin → Exa. Tell your owner.'
+const NO_KEY = 'Exa is not set up in this Space: the Space admin must add an Exa API key under Admin → Exa. Tell your owner.'
 
 async function exa(host: ExaHost, method: 'GET' | 'POST', path: string, body?: unknown): Promise<Record<string, unknown>> {
   const key = await host.exaKey()

@@ -1,12 +1,12 @@
 /**
- * The Thread registry at the Home (v1.9): the one authoritative record of each Thread between two chiefs.
+ * The Thread registry at the Space (v1.9): the one authoritative record of each Thread between two chiefs.
  * The transitions are pure functions over a ThreadRow (a closed set: answer, message, close, lapse, abandon);
  * the registry reads a row, applies one transition and saves the result in one SQLite transaction.
- * The Home Durable Object tells the chiefs.
+ * The Space Durable Object tells the chiefs.
  */
 import type { ThreadState } from '@mr-robot/protocol'
 
-/** An open Thread with no message, or an invitation without both answers, for this long is closed by the Home alarm (ch-gckb). */
+/** An open Thread with no message, or an invitation without both answers, for this long is closed by the Space alarm (ch-gckb). */
 export const THREAD_IDLE_MS = 7 * 24 * 60 * 60 * 1000
 
 export type Answer = 'pending' | 'accepted' | 'declined'
@@ -24,7 +24,7 @@ export type Ending =
   | { readonly cause: 'chief'; readonly robotId: string; readonly summary: string }
   | { readonly cause: 'idle' }
   | { readonly cause: 'expired' }
-  /** The chief's Robot was deleted or its owner left the Home. */
+  /** The chief's Robot was deleted or its owner left the Space. */
   | { readonly cause: 'gone'; readonly robotId: string }
 
 interface Common {

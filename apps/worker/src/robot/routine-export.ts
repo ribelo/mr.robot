@@ -1,12 +1,12 @@
 /**
  * Routines become Tasks (v1.13 ticket 05, mc-t7gg): the one place that still reads a Robot's routine and
- * routine_run tables. The Home asks each Robot for its Routines once, stores them as Tasks, and the Robot drops
+ * routine_run tables. The Space asks each Robot for its Routines once, stores them as Tasks, and the Robot drops
  * the tables. Each Routine keeps its id, so a Wake-up or a Conversation item that names it names its Task.
  */
 import type { Attempt, RecurringSchedule, TaskTiming } from '@mr-robot/protocol'
 import { nextRun, onceAt } from './schedule.ts'
 
-/** A Routine as the Home stores it: a recurring Task, or a scheduled one for a one-shot Routine. */
+/** A Routine as the Space stores it: a recurring Task, or a scheduled one for a one-shot Routine. */
 export interface ExportedRoutine {
   readonly id: string
   readonly title: string
@@ -79,7 +79,7 @@ export function exportRoutines(sql: SqlStorage, now = Date.now()): ExportedRouti
   })
 }
 
-/** After the Home stored them: the Routine tables go. */
+/** After the Space stored them: the Routine tables go. */
 export function dropRoutines(sql: SqlStorage): void {
   sql.exec('DROP TABLE IF EXISTS routine_run')
   sql.exec('DROP TABLE IF EXISTS routine')

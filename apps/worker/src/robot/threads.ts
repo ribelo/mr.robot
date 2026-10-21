@@ -1,11 +1,11 @@
 /**
- * Threads at the chief's side (v1.9): the programs behind Mr. Robot's thread tools, and what the Home
- * tells this chief about a Thread. The Home holds the registry; each chief keeps a copy of the state in its
+ * Threads at the chief's side (v1.9): the programs behind Mr. Robot's thread tools, and what the Space
+ * tells this chief about a Thread. The Space holds the registry; each chief keeps a copy of the state in its
  * own store, and the messages live in its Conversation like any other (ch-jnet).
  */
 import * as Effect from 'effect/Effect'
 import type { ThreadEvent, ThreadView } from '@mr-robot/protocol'
-import { HOME_ID } from '../env.ts'
+import { SPACE_ID } from '../env.ts'
 import { storedLength } from '../agent/session-log.ts'
 import { oneLine } from '../agent/sources.ts'
 import { invalid, notFound } from '../platform/durable.ts'
@@ -41,11 +41,11 @@ const listed = (copy: ThreadCopy) => ({
 
 // ------------------------------------------------------------------ the tools
 
-/** The other chiefs of the Home (ch-c2xa). */
+/** The other chiefs of the Space (ch-c2xa). */
 export const chiefs = Effect.gen(function* () {
   const current = yield* onlyChief
   const platform = yield* RobotPlatform
-  const found = yield* Effect.tryPromise({ try: async () => platform.env.HOME.getByName(HOME_ID).threadChiefs(current.ownerId), catch: failure })
+  const found = yield* Effect.tryPromise({ try: async () => platform.env.SPACE.getByName(SPACE_ID).threadChiefs(current.ownerId), catch: failure })
   return found.map((chief) => ({ id: chief.id, ownerName: chief.ownerName, name: chief.name, availability: chief.availability }))
 })
 
@@ -54,7 +54,7 @@ export const open = (chiefId: string, topic: string, scope: string) => Effect.ge
   const current = yield* onlyChief
   const platform = yield* RobotPlatform
   if (topic.trim() === '') return yield* invalid('A Thread needs a topic')
-  const opened = yield* Effect.tryPromise({ try: () => platform.env.HOME.getByName(HOME_ID).threadOpen(current.id, topic.trim(), chiefId, scope), catch: failure })
+  const opened = yield* Effect.tryPromise({ try: () => platform.env.SPACE.getByName(SPACE_ID).threadOpen(current.id, topic.trim(), chiefId, scope), catch: failure })
   return { threadId: opened.threadId, status: 'invited; your owner and the other owner each answer an invitation, and the Thread opens only when both accept. You are told when it opens or is declined.' }
 })
 
@@ -80,7 +80,7 @@ export const send = (threadId: string, text: string, idempotencyKey: string) => 
     }
     return yield* invalid(`Report to your owner first: this Thread has had ${THREAD_PAUSE_AT} messages. Tell them where it stands in your reply; a question whether to go on is waiting for them. You may send again when they approve.`)
   }
-  yield* Effect.tryPromise({ try: () => platform.env.HOME.getByName(HOME_ID).threadMessage(threadId, current.id), catch: failure })
+  yield* Effect.tryPromise({ try: () => platform.env.SPACE.getByName(SPACE_ID).threadMessage(threadId, current.id), catch: failure })
   const masked = yield* platform.mask(text)
   yield* enqueueOutbox(copy.view.other.robotId, {
     id, kind: 'thread', threadId, text: masked, requestId: id, chain: { id: threadId, hops: 0 },
@@ -101,7 +101,7 @@ export const close = (threadId: string, summary: string) => Effect.gen(function*
   const platform = yield* RobotPlatform
   const current = yield* onlyChief
   if (store.thread(threadId) === undefined) return yield* notFound(`No Thread ${threadId}; see thread_list`)
-  yield* Effect.tryPromise({ try: () => platform.env.HOME.getByName(HOME_ID).threadClose(threadId, current.id, summary), catch: failure })
+  yield* Effect.tryPromise({ try: () => platform.env.SPACE.getByName(SPACE_ID).threadClose(threadId, current.id, summary), catch: failure })
   return { closed: true, threadId, status: 'closed; the other chief received your summary' }
 })
 
@@ -112,7 +112,7 @@ export const list = Effect.gen(function* () {
   return { threads: store.threads().map(listed) }
 })
 
-// ------------------------------------------------------------------ what the Home tells this chief
+// ------------------------------------------------------------------ what the Space tells this chief
 
 /** An invitation reaches this chief's owner as an Ask with the topic and a scope to edit (ch-vrl7, ch-hikl). */
 export const invitation = (view: ThreadView, phase: 'invitation-out' | 'invitation-in') => Effect.gen(function* () {
@@ -133,7 +133,7 @@ const noteOf = (view: ThreadView, event: ThreadEvent): string => {
     case 'closed': return `Thread closed: "${view.topic}" with ${view.other.label}`
     case 'idle': return `Thread closed after 7 days without a message: "${view.topic}" with ${view.other.label}`
     case 'expired': return `Thread invitation expired after 7 days without both answers: "${view.topic}" with ${view.other.label}`
-    case 'gone': return `Thread ended: ${view.other.label} is no longer in the Home ("${view.topic}")`
+    case 'gone': return `Thread ended: ${view.other.label} is no longer in the Space ("${view.topic}")`
   }
 }
 

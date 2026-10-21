@@ -1,2 +1,2 @@
 export type { Conversation, ProposalView } from '@mr-robot/protocol'
-export type { RegistryEntry } from '../src/home/home.ts'
+export type { RegistryEntry } from '../src/space/space.ts'

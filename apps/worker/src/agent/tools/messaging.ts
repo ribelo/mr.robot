@@ -100,12 +100,12 @@ export function robotsTools(host: RobotsHost): ToolDefinition[] {
     }),
     tool<Record<string, never>>({
       name: 'thread_chiefs',
-      description: "List the other chiefs (Mr. Robots) of your Home you may invite to a Thread: whose Mr. Robot it is, its name and whether it is available. Robots other than Mr. Robot never talk across Members.",
+      description: "List the other chiefs (Mr. Robots) of your Space you may invite to a Thread: whose Mr. Robot it is, its name and whether it is available. Robots other than Mr. Robot never talk across Members.",
       parameters: { properties: {} },
       concurrencySafe: true,
       execute: async () => {
         const chiefs = await host.threadChiefs()
-        return chiefs.length === 0 ? { chiefs: [], hint: 'Nobody else in your Home has an active Mr. Robot.' } : { chiefs }
+        return chiefs.length === 0 ? { chiefs: [], hint: 'Nobody else in your Space has an active Mr. Robot.' } : { chiefs }
       },
     }),
     tool<{ chief_id: string; topic: string; scope: string }>({

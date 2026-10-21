@@ -10,7 +10,7 @@ export * from './vendor.ts'
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
-// ---------------------------------------------------------------- Home, Members
+// ---------------------------------------------------------------- Space, Members
 
 export const MemberRole = Schema.Literals(['admin', 'member'])
 export type MemberRole = typeof MemberRole.Type
@@ -66,10 +66,10 @@ export type MissionGroup = typeof MissionGroup.Type
 export const MissionState = Schema.Literals(['open', 'done', 'cancelled', 'all'])
 export type MissionState = typeof MissionState.Type
 
-/** Mission Control as the Member left it (mc-m5ee, mc-m7gg, mc-n4dd): grouping, state filter, Whole Home, the Mr. Robot drawer. */
-export const MissionPrefs = Schema.Struct({ group: MissionGroup, state: MissionState, wholeHome: Schema.Boolean, drawer: Schema.Boolean })
+/** Mission Control as the Member left it (mc-m5ee, mc-m7gg, mc-n4dd): grouping, state filter, Whole Space, the Mr. Robot drawer. */
+export const MissionPrefs = Schema.Struct({ group: MissionGroup, state: MissionState, wholeSpace: Schema.Boolean, drawer: Schema.Boolean })
 export type MissionPrefs = typeof MissionPrefs.Type
-export const DEFAULT_MISSION_PREFS: MissionPrefs = { group: 'assignee', state: 'open', wholeHome: false, drawer: false }
+export const DEFAULT_MISSION_PREFS: MissionPrefs = { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }
 
 export const Me = Schema.Struct({
   ...MemberView.fields,
@@ -109,7 +109,7 @@ export const MemberPreferences = Schema.Struct({
   /** The avatar colour; a picture keeps it behind (ux-2ft4). The picture itself goes through PUT /api/me/avatar. */
   avatarColor: Schema.optional(AvatarColor),
   /** Mission Control's remembered choices; fields left out stay. */
-  mission: Schema.optional(Schema.Struct({ group: Schema.optional(MissionGroup), state: Schema.optional(MissionState), wholeHome: Schema.optional(Schema.Boolean), drawer: Schema.optional(Schema.Boolean) })),
+  mission: Schema.optional(Schema.Struct({ group: Schema.optional(MissionGroup), state: Schema.optional(MissionState), wholeSpace: Schema.optional(Schema.Boolean), drawer: Schema.optional(Schema.Boolean) })),
   /** Replaces the whole list (mc-a1aa). */
   acceptTasksFrom: Schema.optional(Schema.Array(Schema.String)),
 })
@@ -444,7 +444,7 @@ export const LoginView = Schema.Struct({
   notes: Schema.String,
   allowRead: Schema.Boolean,
   scope: Schema.Literals(['member', 'home']),
-  /** The Member may edit, reveal and delete it (their own, or a Home entry they shared). */
+  /** The Member may edit, reveal and delete it (their own, or a Space entry they shared). */
   mine: Schema.Boolean,
   updatedAt: Schema.Number,
   /** The Member's Robots that hold a grant for it. */
@@ -466,7 +466,7 @@ export const LoginInput = Schema.Struct({
 export const BrowserBackend = Schema.Union([Schema.Literal('browser-run'), Schema.TemplateLiteral(['host:', Schema.String])])
 export type BrowserBackend = typeof BrowserBackend.Type
 
-/** A backend as the settings show it: whether this Home can use it and why not. */
+/** A backend as the settings show it: whether this Space can use it and why not. */
 export const BrowserBackendOption = Schema.Struct({
   id: BrowserBackend,
   label: Schema.String,
@@ -481,25 +481,25 @@ export type BrowserBackendOption = typeof BrowserBackendOption.Type
 export const SpendAmount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 const NoSpendLimit = Schema.Struct({ kind: Schema.Literal('none') })
 const UsdSpendLimit = Schema.Struct({ kind: Schema.Literal('usd'), amount: SpendAmount })
-/** The Home's limit per Robot or per Member: no limit, or an amount. */
-export const HomeSpendLimit = Schema.Union([NoSpendLimit, UsdSpendLimit])
-export type HomeSpendLimit = typeof HomeSpendLimit.Type
-/** A Robot's own choice: the Home's per-Robot limit, no limit, or an amount. */
+/** The Space's limit per Robot or per Member: no limit, or an amount. */
+export const SpaceSpendLimit = Schema.Union([NoSpendLimit, UsdSpendLimit])
+export type SpaceSpendLimit = typeof SpaceSpendLimit.Type
+/** A Robot's own choice: the Space's per-Robot limit, no limit, or an amount. */
 export const RobotSpendLimit = Schema.Union([Schema.Struct({ kind: Schema.Literal('home') }), NoSpendLimit, UsdSpendLimit])
 export type RobotSpendLimit = typeof RobotSpendLimit.Type
-/** The limit that applies to a Robot or a Member, and whether it is the Home's or the Robot's own. */
-export const EffectiveSpendLimit = Schema.Struct({ limit: HomeSpendLimit, from: Schema.Literals(['home', 'robot']) })
+/** The limit that applies to a Robot or a Member, and whether it is the Space's or the Robot's own. */
+export const EffectiveSpendLimit = Schema.Struct({ limit: SpaceSpendLimit, from: Schema.Literals(['home', 'robot']) })
 export type EffectiveSpendLimit = typeof EffectiveSpendLimit.Type
 
 /** The one resolution of a Robot's limit (ux-en86): the spend check, the Admin table and the settings all use it. */
-export function effectiveSpendLimit(robot: RobotSpendLimit, home: HomeSpendLimit): EffectiveSpendLimit {
+export function effectiveSpendLimit(robot: RobotSpendLimit, home: SpaceSpendLimit): EffectiveSpendLimit {
   return robot.kind === 'home' ? { limit: home, from: 'home' } : { limit: robot, from: 'robot' }
 }
 
-/** "$20 (Home)", "no limit (Home)", "$50", "no limit". */
+/** "$20 (Space)", "no limit (Space)", "$50", "no limit". */
 export function spendLimitText(effective: EffectiveSpendLimit): string {
   const text = effective.limit.kind === 'usd' ? `$${effective.limit.amount}` : 'no limit'
-  return effective.from === 'home' ? `${text} (Home)` : text
+  return effective.from === 'home' ? `${text} (Space)` : text
 }
 
 /** Everything the advanced settings page edits. */
@@ -518,13 +518,13 @@ export const RobotSettings = Schema.Struct({
   compactionInstruction: Schema.String,
   grants: GrantSet,
   notifications: NotificationSettings,
-  /** The Robot's monthly spend limit: the Home's, no limit, or an amount. */
+  /** The Robot's monthly spend limit: the Space's, no limit, or an amount. */
   spendLimit: RobotSpendLimit,
-  /** What "the Home's" is now: the Home's per-Robot limit. */
-  homeSpendLimit: HomeSpendLimit,
+  /** What "the Space's" is now: the Space's per-Robot limit. */
+  spaceSpendLimit: SpaceSpendLimit,
   /** Keep the Robot's browser open between Turns and wake it when a page shows a notification (robot-lulc). */
   wakeOnScreenNotifications: Schema.Boolean,
-  /** This Robot's browser backend; null follows the Home default (rb-wgtd). */
+  /** This Robot's browser backend; null follows the Space default (rb-wgtd). */
   browserBackend: Schema.NullOr(BrowserBackend),
   /** The Discord channel this Robot talks in (cn-y1ac); null: no Discord. */
   discordChannel: Schema.NullOr(Schema.String),
@@ -538,12 +538,12 @@ export const RobotSettings = Schema.Struct({
   idleCompactionFloorTokens: Schema.Number,
   /** A reviewer model checks each call of an item at allow before it runs (ao-c8k9); off by default. */
   autoReview: Schema.Boolean,
-  /** The reviewer's route; null follows the Home default (ao-6m9i). */
+  /** The reviewer's route; null follows the Space default (ao-6m9i). */
   reviewer: Schema.NullOr(ModelChoice),
   /** v1.16 (ob-5nvd): no Task runs while a Host the Robot holds a facet on is offline. Absent: off. */
   requiresHosts: Schema.optional(Schema.Boolean),
-  /** What the Home default is now; null: the Robot's own model. */
-  homeReviewer: Schema.NullOr(ModelChoice),
+  /** What the Space default is now; null: the Robot's own model. */
+  spaceReviewer: Schema.NullOr(ModelChoice),
   /** The routes its Subagents may run on: the subagents grant's list, empty by default (ao-2z4n). */
   subagentModels: Schema.Array(SubagentModel),
   /** v1.16 (ob-wh59): the mode and write roots of its Host files and shell grants. Absent: every facet has the default. */
@@ -770,7 +770,7 @@ export type TaskTimingInput = typeof TaskTimingInput.Type
 export const TaskState = Schema.Literals(['open', 'done', 'cancelled'])
 export type TaskState = typeof TaskState.Type
 
-/** Whether the Home reminds a person before the Task's moment (mc-s3cc). */
+/** Whether the Space reminds a person before the Task's moment (mc-s3cc). */
 export const Remind = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('none') }),
   Schema.Struct({ kind: Schema.Literal('before'), minutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }),
@@ -980,7 +980,7 @@ export type QuestionAsk = typeof QuestionAsk.Type
 
 /**
  * A credential Ask (v1.15, gb-3192): a Robot asks for a login or a secret. The form is pre-filled with what the Robot gave; saving it creates
- * the entry under the owner, grants it to the Robot and wakes it with the entry's name. The password goes to the Home, never to the Robot.
+ * the entry under the owner, grants it to the Robot and wakes it with the entry's name. The password goes to the Space, never to the Robot.
  */
 export const CredentialAsk = Schema.Struct({
   credential: Schema.Literals(['login', 'secret']),
@@ -1042,7 +1042,7 @@ export const ProposalAnswer = Schema.Struct({
 /** "Always allow this" on a tool-call Ask (v1.17, dp-u9z9): the revision the owner saw. */
 export const AlwaysAllowAnswer = Schema.Struct({ revision: Schema.Number })
 
-/** Saving a credential Ask: the entry the owner filled in (v1.15, gb-923q). The password is sent once, to the Home. */
+/** Saving a credential Ask: the entry the owner filled in (v1.15, gb-923q). The password is sent once, to the Space. */
 export const CredentialSave = Schema.Struct({
   revision: Schema.Number,
   name: Schema.String,
@@ -1446,8 +1446,8 @@ export type UsageView = typeof UsageView.Type
 export const MemberCosts = Schema.Struct({
   month: Schema.String,
   breakdown: CostBreakdown,
-  /** The Member's spend limit: the Home's per-Member limit. */
-  limit: HomeSpendLimit,
+  /** The Member's spend limit: the Space's per-Member limit. */
+  limit: SpaceSpendLimit,
   byRobot: Schema.Array(Schema.Struct({ robotId: Schema.String, name: Schema.String, breakdown: CostBreakdown })),
 })
 export type MemberCosts = typeof MemberCosts.Type
@@ -1505,7 +1505,7 @@ export type AccountUsage = typeof AccountUsage.Type
 export const AccountStatus = Schema.Literals(['ok', 'limited', 'broken'])
 export type AccountStatus = typeof AccountStatus.Type
 
-/** One account of a Provider (v1.10): a key or a signed-in subscription, shared with the Home on its own. */
+/** One account of a Provider (v1.10): a key or a signed-in subscription, shared with the Space on its own. */
 export const ProviderView = Schema.Struct({
   id: Schema.String,
   provider: ProviderName,
@@ -1529,11 +1529,11 @@ export type ProviderView = typeof ProviderView.Type
 export const ProvidersView = Schema.Struct({
   /** The caller's own credentials. */
   mine: Schema.Array(ProviderView),
-  /** Credentials other Members share with the Home. */
+  /** Credentials other Members share with the Space. */
   shared: Schema.Array(ProviderView),
   models: Schema.Array(ModelOption),
   defaultModel: ModelChoice,
-  /** The Home admin's Workers AI switch (ux-101w); off: no Workers AI model is offered (ux-xsnr). */
+  /** The Space admin's Workers AI switch (ux-101w); off: no Workers AI model is offered (ux-xsnr). */
   workersAiEnabled: Schema.Boolean,
 })
 export type ProvidersView = typeof ProvidersView.Type
@@ -1547,12 +1547,12 @@ export const ApiKeyInput = Schema.Struct({ key: Schema.String, shared: Schema.Bo
 export const AccountPatch = Schema.Struct({ label: Schema.optional(Schema.String), shared: Schema.optional(Schema.Boolean) })
 export const OAuthFinish = Schema.Struct({ pasted: Schema.optional(Schema.String), shared: Schema.Boolean })
 export const ShareInput = Schema.Struct({ shared: Schema.Boolean })
-export const HomeSettingsPatch = Schema.Struct({
+export const SpaceSettingsPatch = Schema.Struct({
   defaultModel: Schema.optional(ModelChoice),
   workersAiEnabled: Schema.optional(Schema.Boolean),
   defaultBrowserBackend: Schema.optional(BrowserBackend),
-  robotSpendLimit: Schema.optional(HomeSpendLimit),
-  memberSpendLimit: Schema.optional(HomeSpendLimit),
+  robotSpendLimit: Schema.optional(SpaceSpendLimit),
+  memberSpendLimit: Schema.optional(SpaceSpendLimit),
   /** The Auto review route of every Robot that has none of its own; null: each Robot's own model (ao-6m9i). */
   defaultReviewer: Schema.optional(Schema.NullOr(ModelChoice)),
   models: Schema.optional(Schema.Array(Schema.Struct({
@@ -1563,7 +1563,7 @@ export const HomeSettingsPatch = Schema.Struct({
     price: Schema.optional(Schema.Struct({ input: Schema.Number, output: Schema.Number, cachedInput: Schema.optional(Schema.Number) })),
   }))),
 })
-export type HomeSettingsPatch = typeof HomeSettingsPatch.Type
+export type SpaceSettingsPatch = typeof SpaceSettingsPatch.Type
 
 // ---------------------------------------------------------------- Skills (robot-7qpi)
 
@@ -1610,35 +1610,35 @@ export const FleetRow = Schema.Struct({
 })
 export type FleetRow = typeof FleetRow.Type
 
-export const HomeSettingsView = Schema.Struct({
+export const SpaceSettingsView = Schema.Struct({
   defaultModel: ModelChoice,
-  /** Whether the Home's Robots may run on Workers AI (ux-101w); on by default. */
+  /** Whether the Space's Robots may run on Workers AI (ux-101w); on by default. */
   workersAiEnabled: Schema.Boolean,
   defaultBrowserBackend: BrowserBackend,
-  /** The limit of each Robot that follows the Home's (ux-dbx4). */
-  robotSpendLimit: HomeSpendLimit,
+  /** The limit of each Robot that follows the Space's (ux-dbx4). */
+  robotSpendLimit: SpaceSpendLimit,
   /** The limit of all Robots of one Member together. */
-  memberSpendLimit: HomeSpendLimit,
+  memberSpendLimit: SpaceSpendLimit,
   /** The Auto review route of Robots without their own; null: each Robot's own model (ao-6m9i). */
   defaultReviewer: Schema.NullOr(ModelChoice),
   models: Schema.Array(ModelOption),
 })
-export type HomeSettingsView = typeof HomeSettingsView.Type
+export type SpaceSettingsView = typeof SpaceSettingsView.Type
 
-/** Switching Workers AI off moved the Home default model off it (ux-jseo). */
+/** Switching Workers AI off moved the Space default model off it (ux-jseo). */
 export const DefaultModelMoved = Schema.Struct({ from: ModelChoice, to: ModelChoice })
 export type DefaultModelMoved = typeof DefaultModelMoved.Type
 
-/** The answer to a Home settings save: the settings now, and the default model's move when the save made one. */
-export const HomeSettingsSaved = Schema.Struct({
-  ...HomeSettingsView.fields,
+/** The answer to a Space settings save: the settings now, and the default model's move when the save made one. */
+export const SpaceSettingsSaved = Schema.Struct({
+  ...SpaceSettingsView.fields,
   defaultModelMoved: Schema.optional(DefaultModelMoved),
 })
-export type HomeSettingsSaved = typeof HomeSettingsSaved.Type
+export type SpaceSettingsSaved = typeof SpaceSettingsSaved.Type
 
 export const AdminView = Schema.Struct({
   fleet: Schema.Array(FleetRow),
-  /** Robots whose Routines have not yet become Tasks (v1.13 ticket 05): reached again at the Home's next start. */
+  /** Robots whose Routines have not yet become Tasks (v1.13 ticket 05): reached again at the Space's next start. */
   robotsToMigrate: Schema.Number,
   members: Schema.Array(Schema.Struct({ ...MemberView.fields, usage: UsageView })),
   skills: Schema.Array(SkillView),
@@ -1646,13 +1646,13 @@ export const AdminView = Schema.Struct({
   providers: Schema.Array(Schema.Struct({ id: Schema.String, provider: Schema.String, label: Schema.String, ownerName: Schema.String, shared: Schema.Boolean })),
   /** Each Provider's live model list: how many models, when fetched, and the last error. */
   modelLists: Schema.optional(Schema.Array(Schema.Struct({ provider: Schema.String, count: Schema.Number, fetchedAt: Schema.NullOr(Schema.Number), error: Schema.NullOr(Schema.String) }))),
-  settings: HomeSettingsView,
+  settings: SpaceSettingsView,
   browserBackends: Schema.optional(Schema.Array(BrowserBackendOption)),
-  /** Whether the Home has an Exa API key (rb-x8i3); the key is never sent. */
+  /** Whether the Space has an Exa API key (rb-x8i3); the key is never sent. */
   exaConfigured: Schema.optional(Schema.Boolean),
-  /** Every Host of the Home (hs-w8vi). */
+  /** Every Host of the Space (hs-w8vi). */
   hosts: Schema.optional(Schema.Array(HostView)),
-  /** Every Thread of the Home (ch-5ngu). */
+  /** Every Thread of the Space (ch-5ngu). */
   threads: Schema.optional(Schema.Array(AdminThread)),
 })
 export type AdminView = typeof AdminView.Type
@@ -1694,7 +1694,7 @@ export type ConnectMethod = typeof ConnectMethod.Type
 /**
  * One way to connect an account of a connector plugin (ux-s8rx): its kind, who the connection acts as
  * ("As you", "As a bot"), how to connect, and whether it acts as the person: those are never shared
- * with the Home (ux-bk91).
+ * with the Space (ux-bk91).
  */
 export const ConnectorWay = Schema.Struct({ kind: ConnectorKind, way: Schema.String, connect: ConnectMethod, actsAsPerson: Schema.Boolean })
 export type ConnectorWay = typeof ConnectorWay.Type
@@ -1707,7 +1707,7 @@ export const PluginView = Schema.Struct({
   icon: Schema.String,
   group: Schema.Literals(['capability', 'connector']),
   enabled: Schema.Boolean,
-  /** The Home's settings for the plugin: its form and the values saved (secret fields only say whether one is stored). */
+  /** The Space's settings for the plugin: its form and the values saved (secret fields only say whether one is stored). */
   fields: Schema.Array(PluginField),
   values: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean, Schema.Array(Schema.String)])),
   secretsSet: Schema.Array(Schema.String),
@@ -1772,7 +1772,7 @@ export const SessionCaptureStarted = Schema.Struct({ robotId: Schema.String, rob
 export type SessionCaptureStarted = typeof SessionCaptureStarted.Type
 
 /**
- * A connection of the Member's that acts as them and was shared with the Home, unshared by the v1.12
+ * A connection of the Member's that acts as them and was shared with the Space, unshared by the v1.12
  * update (ux-cop2): shown on the Connections section until the Member dismisses it.
  */
 export const ConnectionNote = Schema.Struct({
@@ -1803,16 +1803,16 @@ export const SettingsCatalog = Schema.Struct({
   models: Schema.Array(ModelOption),
   /** Models of Providers this Member has not connected; shown so the list explains itself. */
   unavailableModels: Schema.optional(Schema.Array(ModelOption)),
-  /** The Home admin's Workers AI switch (ux-101w); off: chains skip their Workers AI entries (ux-zh1l). */
+  /** The Space admin's Workers AI switch (ux-101w); off: chains skip their Workers AI entries (ux-zh1l). */
   workersAiEnabled: Schema.Boolean,
-  /** Browser backends and whether this Home can use them (rb-wgtd). */
+  /** Browser backends and whether this Space can use them (rb-wgtd). */
   browserBackends: Schema.optional(Schema.Array(BrowserBackendOption)),
   defaultBrowserBackend: Schema.optional(BrowserBackend),
   /** Hosts the owner reaches, for per-host grants (hs-5ktw). */
   hosts: Schema.optional(Schema.Array(HostView)),
-  /** Provider accounts the owner's Robots may put in a model chain: their own and the Home's shared ones (pa-mho0). */
+  /** Provider accounts the owner's Robots may put in a model chain: their own and the Space's shared ones (pa-mho0). */
   accounts: Schema.optional(Schema.Array(ProviderView)),
-  /** Connections the owner can grant: their own and the Home's shared ones (cn-xezx). */
+  /** Connections the owner can grant: their own and the Space's shared ones (cn-xezx). */
   connections: Schema.optional(Schema.Array(CatalogConnection)),
 })
 export type SettingsCatalog = typeof SettingsCatalog.Type
@@ -1830,7 +1830,7 @@ export const PushSubscriptionInput = Schema.Struct({
 
 // ---------------------------------------------------------------- Small responses
 
-/** A named text: a member file, a skill, HOME.md. */
+/** A named text: a member file, a skill, SPACE.md. */
 export const NamedText = Schema.Struct({ name: Schema.String, content: Schema.String })
 export type NamedText = typeof NamedText.Type
 export const TextContent = Schema.Struct({ content: Schema.String })

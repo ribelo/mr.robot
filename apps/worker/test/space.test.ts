@@ -8,11 +8,11 @@ beforeEach(async () => {
   await stubModels()
 })
 
-describe('signing in to the Home', () => {
+describe('signing in to the Space', () => {
   it('makes the first person the admin and reuses them on the next sign-in (robot-7v5x, robot-q7rj)', async () => {
     const first = await api<Me>('anna@example.com', '/api/me')
     expect(first.status).toBe(200)
-    expect(first.body).toMatchObject({ email: 'anna@example.com', role: 'admin', status: 'active', home: 'Test Home' })
+    expect(first.body).toMatchObject({ email: 'anna@example.com', role: 'admin', status: 'active', home: 'Test Space' })
     const again = await api<Me>('Anna@Example.com', '/api/me')
     expect(again.body.id).toBe(first.body.id)
   })

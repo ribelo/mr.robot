@@ -51,7 +51,7 @@ const robotId = { type: 'string', description: 'Id of another Robot (from robot_
 const taskId = { type: 'string', description: 'Task id from task_list' }
 const assignee = {
   type: 'string',
-  description: 'Who does it: "self" (you), "owner" (your owner), "nobody", "robot:<id>" (one of your owner\'s Robots), or "member:<name or e-mail>" (another Member of the Home, only when they accept Tasks from your owner\'s Robots).',
+  description: 'Who does it: "self" (you), "owner" (your owner), "nobody", "robot:<id>" (one of your owner\'s Robots), or "member:<name or e-mail>" (another Member of the Space, only when they accept Tasks from your owner\'s Robots).',
 }
 const timing = {
   type: 'object',

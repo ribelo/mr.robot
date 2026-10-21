@@ -65,7 +65,7 @@ describe('plugins and their settings (cn-dbm9, cn-s1pd, cn-a1i0)', () => {
     expect(JSON.stringify(again.body)).not.toContain('GOCSPX-very-secret')
     // Saving without the secret keeps the stored one.
     await api(ANNA, '/api/admin/plugins/google/settings', { method: 'PUT', body: { values: { clientId: 'client-456' } } })
-    expect((await env.HOME.getByName('home').pluginSettings('google')).secrets).toEqual({ clientSecret: 'GOCSPX-very-secret' })
+    expect((await env.SPACE.getByName('home').pluginSettings('google')).secrets).toEqual({ clientSecret: 'GOCSPX-very-secret' })
     expect((await api(BEN, '/api/admin/plugins/google/settings', { method: 'PUT', body: { values: { clientId: 'x' } } })).status).toBe(403)
   })
 
@@ -121,15 +121,15 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
     expect(JSON.parse(moved!)).toMatchObject({ account: 'anna@work.test' })
   })
 
-  it("a Home-shared connection is usable by another Member's robot once granted, and stops when unshared (cn-qs78)", async () => {
+  it("a Space-shared connection is usable by another Member's robot once granted, and stops when unshared (cn-qs78)", async () => {
     fakeConnectors.set('google', fakeConnector('google'))
-    const bens = await addConnection(benId, 'Household', 'ben@home.test', 'token-ben', true)
+    const bens = await addConnection(benId, 'Household', 'ben@space.test', 'token-ben', true)
     const mine = (await api<ConnectionView[]>(ANNA, '/api/connections')).body
     expect(mine).toEqual([expect.objectContaining({ id: bens.id, ownerName: 'Ben', mine: false, shared: true })])
     expect(JSON.stringify(mine)).not.toContain('token-ben')
     const id = await robotOf(ANNA, { connections: [bens.id] })
     const [used] = await say(ANNA, id, [{ name: 'fake_whoami', args: {} }])
-    expect(used).toContain('The service says: ben@home.test')
+    expect(used).toContain('The service says: ben@space.test')
     // Anna cannot change Ben's connection.
     expect((await api(ANNA, `/api/connections/${bens.id}`, { method: 'PATCH', body: { shared: false } })).status).toBe(404)
     await api(BEN, `/api/connections/${bens.id}`, { method: 'PATCH', body: { shared: false } })

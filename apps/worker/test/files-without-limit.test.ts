@@ -441,7 +441,7 @@ describe('a copy\'s permit at the Box\'s door (deep review P4)', () => {
     expect(seen).toEqual({ 'permit put': 403, 'permit get': 403, 'permit rm': 403, 'script ls': 403 })
   })
 
-  it('closes when the box grant is taken back or the Home switches the plugin off, without a new Turn', async () => {
+  it('closes when the box grant is taken back or the Space switches the plugin off, without a new Turn', async () => {
     const id = await robotWith({ tools: { box: 'allow', files: 'allow' } })
     await calls(id, [{ name: 'run', args: { on: 'box', command: 'echo up' } }])
     const token = tokenOf(id)

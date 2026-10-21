@@ -1,6 +1,6 @@
 /**
  * Every Cloudflare resource of a Mr. Robot deployment (robot-h3vr, robot-scwl).
- * One Home per deployment; its name comes from MR_ROBOT_HOME (default "Home").
+ * One Space per deployment; its name comes from MR_ROBOT_SPACE (default "Space").
  */
 import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
@@ -8,7 +8,7 @@ import * as Output from 'alchemy/Output'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Redacted from 'effect/Redacted'
-import type { ComputerContainer, Home, Member, Robot } from '../apps/worker/src/index.ts'
+import type { ComputerContainer, Space, Member, Robot } from '../apps/worker/src/index.ts'
 import { vapidPublicKey } from './vapid.ts'
 
 /**
@@ -50,7 +50,9 @@ export const Edge = Effect.gen(function* () {
     env: {
       ROBOT: Cloudflare.DurableObject<Robot>('Robot', { className: 'Robot' }),
       MEMBER: Cloudflare.DurableObject<Member>('Member', { className: 'Member' }),
-      HOME: Cloudflare.DurableObject<Home>('Home', { className: 'Home' }),
+      // The Space (v1.18 ticket 09): the logical id stays 'Home', so Alchemy sees the same namespace with a new class and uploads a
+      // renamed_classes migration (Home → Space) that keeps its storage.
+      SPACE: Cloudflare.DurableObject<Space>('Home', { className: 'Space' }),
       FILES: files,
       // The Files bucket's S3 credentials (v1.16 ticket 06): Alchemy creates an R2 API token scoped to this bucket and the Worker holds it as a
       // secret. It signs the presigned URLs a Host app and ws use for one key under a Robot's prefix, and the control calls of a multipart upload.
@@ -73,7 +75,8 @@ export const Edge = Effect.gen(function* () {
       LOADER: Cloudflare.WorkerLoader('LOADER'),
       // The account's Zero Trust team (created when Zero Trust was enabled on 2026-10-06).
       ACCESS_TEAM_DOMAIN: Config.String('MR_ROBOT_ACCESS_TEAM_DOMAIN').pipe(Config.withDefault('withered-snow-6eaa.cloudflareaccess.com')),
-      HOME_NAME: Config.String('MR_ROBOT_HOME').pipe(Config.withDefault('Home')),
+      // MR_ROBOT_HOME is the name's variable before v1.18; it is still read when MR_ROBOT_SPACE is not set.
+      SPACE_NAME: Config.String('MR_ROBOT_SPACE').pipe(Config.orElse(() => Config.String('MR_ROBOT_HOME')), Config.withDefault('Space')),
       DATA_KEY: dataKey.text,
       VAPID_PRIVATE_KEY: vapidKey.text,
       // Signs the Box tokens (v1.16 deep review P5): the Box channel is outside Access, and the edge refuses an unsigned token before it names a Robot.
@@ -116,7 +119,7 @@ export const SharedPages = Effect.gen(function* () {
 
 /**
  * The libraries a rendered Page loads (v1.17 review 3): /vendor/* (KaTeX's styles and fonts, Mermaid) is outside the Access login, so a shared Page
- * and Browser Rendering load them from this origin and no CDN. They are public open-source files; nothing of the Home is under /vendor.
+ * and Browser Rendering load them from this origin and no CDN. They are public open-source files; nothing of the Space is under /vendor.
  */
 export const PublicVendor = Effect.gen(function* () {
   const edge = yield* Edge

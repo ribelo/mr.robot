@@ -16,7 +16,7 @@ export function NewRobot({ onCancel, onCreated }: { onCancel: () => void; onCrea
   const [chosen, setModel] = useState<ModelChoice>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
-  // Until the person picks one: the Home default when they can use it, else their first model.
+  // Until the person picks one: the Space default when they can use it, else their first model.
   const model = chosen ?? (providers === undefined ? undefined : startingModel(providers))
   const create = async () => {
     setBusy(true)

@@ -11,7 +11,7 @@ import { QUIET_DUE } from '../src/robot/programs.ts'
 import { CHAPTER_COMPACTED } from '../src/robot/robot.ts'
 import { moveColdChapters } from '../src/robot/cold-chapters.ts'
 import type { Chapter } from '../src/robot/chapters.ts'
-import { currentMonth } from '../src/home/home.ts'
+import { currentMonth } from '../src/space/space.ts'
 import type { BoxBackend } from '../src/box/backend.ts'
 import { FakeChannel } from './fake-channel.ts'
 import { fakeConnectors, fakeService } from './fake-connector.ts'
@@ -34,10 +34,18 @@ import { yearSpans, type YearShape } from './scale-year.ts'
 export const delivered = new Map<string, PushNotification[]>()
 
 export { default } from '../src/index.ts'
-import { Home as ProductionHome } from '../src/index.ts'
+import { Space as ProductionSpace } from '../src/index.ts'
+import { renameHomeMemory } from '../src/space/space.ts'
 
-/** The production Home with recorded HTTP for Discord. */
-export class Home extends ProductionHome {
+/** The production Space with recorded HTTP for Discord. */
+export class Space extends ProductionSpace {
+  /** SPACE.md as v1.17 stored it, under the key of HOME.md; then the store opened again (v1.18 ticket 09). */
+  async legacyHomeMemoryForTest(content: string): Promise<void> {
+    this.ctx.storage.sql.exec("DELETE FROM setting WHERE k IN ('space-md', 'space-md-author')")
+    this.ctx.storage.sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?)", JSON.stringify(content))
+    renameHomeMemory(this.ctx.storage.sql)
+  }
+
   /** Every Thread's last message moves into the past by `ms`, and the alarm is due now. */
   async backdateThreadsForTest(ms: number): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE thread SET last_activity_at = last_activity_at - ?', ms)
@@ -73,7 +81,7 @@ export class Home extends ProductionHome {
     this.migrateSpendLimits()
   }
 
-  /** The Home as v1.15 left it: a removed default browser backend, a VPN configuration and a proxy address, migrated as at start (v1.16 ticket 08). */
+  /** The Space as v1.15 left it: a removed default browser backend, a VPN configuration and a proxy address, migrated as at start (v1.16 ticket 08). */
   async legacyBrowserForTest(defaultBackend: string): Promise<void> {
     const sql = this.ctx.storage.sql
     sql.exec("INSERT OR REPLACE INTO setting (k, v) VALUES ('defaultBrowserBackend', ?), ('vpn-config', '\"sealed\"'), ('vpn-summary', '{\"endpoint\":\"1.2.3.4:51820\"}'), ('proxy-config', '\"sealed\"')", JSON.stringify(defaultBackend))
@@ -460,7 +468,7 @@ export class Robot extends ProductionRobot {
 
   /**
    * The Robot as it was before v1.13 (ticket 05): Routine tables with these rows and runs, as the old migrations
-   * left them, so the Home's migration finds something to take.
+   * left them, so the Space's migration finds something to take.
    */
   async seedRoutinesForTest(routines: ReadonlyArray<{ id: string; name: string; prompt: string; record: Record<string, unknown>; nextRun: number | null; paused?: boolean; runs: ReadonlyArray<{ startedAt: number; outcome: string; firstLine: string }> }>): Promise<void> {
     const sql = this.store.sql

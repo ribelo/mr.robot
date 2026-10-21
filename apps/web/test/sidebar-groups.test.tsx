@@ -101,7 +101,7 @@ describe('sidebar groups (v1.12 ticket 12)', () => {
   })
 
   it('renames, reorders and deletes a group from its menu; its Robots return to the ungrouped list (ux-o7po)', async () => {
-    const server: Server = { robots: [robot('r-1', 'Bills', { groupId: 'g-1' }), robot('r-2', 'Gym')], groups: [{ id: 'g-1', name: 'Work', collapsed: false }, { id: 'g-2', name: 'Home', collapsed: false }], changes: [] }
+    const server: Server = { robots: [robot('r-1', 'Bills', { groupId: 'g-1' }), robot('r-2', 'Gym')], groups: [{ id: 'g-1', name: 'Work', collapsed: false }, { id: 'g-2', name: 'Space', collapsed: false }], changes: [] }
     show(server)
     fireEvent.click(screen.getByRole('button', { name: 'Work group menu' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
@@ -109,16 +109,16 @@ describe('sidebar groups (v1.12 ticket 12)', () => {
     expect(field.value).toBe('Work')
     fireEvent.change(field, { target: { value: 'Office' } })
     fireEvent.keyDown(field, { key: 'Enter' })
-    await waitFor(() => expect(sections()).toEqual([['No group 1', 'Gym'], ['Office 1', 'Bills'], ['Home 0']]))
+    await waitFor(() => expect(sections()).toEqual([['No group 1', 'Gym'], ['Office 1', 'Bills'], ['Space 0']]))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Home group menu' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Space group menu' }))
     expect((screen.getByRole('menuitem', { name: 'Move down' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(screen.getByRole('menuitem', { name: 'Move up' }))
-    await waitFor(() => expect(sections().map((entry) => entry[0])).toEqual(['No group 1', 'Home 0', 'Office 1']))
+    await waitFor(() => expect(sections().map((entry) => entry[0])).toEqual(['No group 1', 'Space 0', 'Office 1']))
 
     fireEvent.click(screen.getByRole('button', { name: 'Office group menu' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete group' }))
-    await waitFor(() => expect(sections()).toEqual([['No group 2', 'Bills', 'Gym'], ['Home 0']]))
+    await waitFor(() => expect(sections()).toEqual([['No group 2', 'Bills', 'Gym'], ['Space 0']]))
     expect(server.changes).toEqual([
       { kind: 'rename', id: 'g-1', name: 'Office' },
       { kind: 'order', ids: ['g-2', 'g-1'] },
@@ -179,12 +179,12 @@ describe('sidebar groups (v1.12 ticket 12)', () => {
   })
 
   it('moves a Robot by drag and drop, hides it by dropping it on Hidden, and reorders groups by their headers (ux-0qjq)', async () => {
-    const server: Server = { robots: [robot('r-1', 'Bills'), robot('r-2', 'Gym', { groupId: 'g-1' })], groups: [{ id: 'g-1', name: 'Work', collapsed: false }, { id: 'g-2', name: 'Home', collapsed: true }], changes: [] }
+    const server: Server = { robots: [robot('r-1', 'Bills'), robot('r-2', 'Gym', { groupId: 'g-1' })], groups: [{ id: 'g-1', name: 'Work', collapsed: false }, { id: 'g-2', name: 'Space', collapsed: true }], changes: [] }
     show(server)
-    drag(item('Bills'), section('Home'))
-    await waitFor(() => expect(sections()).toEqual([['No group 0'], ['Work 1', 'Gym'], ['Home 1']]))
+    drag(item('Bills'), section('Space'))
+    await waitFor(() => expect(sections()).toEqual([['No group 0'], ['Work 1', 'Gym'], ['Space 1']]))
     drag(item('Gym'), document.querySelector('.robot-list > .robot-group')!)
-    await waitFor(() => expect(sections()).toEqual([['No group 1', 'Gym'], ['Work 0'], ['Home 1']]))
+    await waitFor(() => expect(sections()).toEqual([['No group 1', 'Gym'], ['Work 0'], ['Space 1']]))
 
     // Hidden appears as a target while a Robot is dragged, even when nothing is hidden yet.
     const carried = dataTransfer()
@@ -192,10 +192,10 @@ describe('sidebar groups (v1.12 ticket 12)', () => {
     await waitFor(() => expect(header('Hidden')).toBeTruthy())
     fireEvent.dragOver(section('Hidden'), { dataTransfer: carried })
     fireEvent.drop(section('Hidden'), { dataTransfer: carried })
-    await waitFor(() => expect(sections()).toEqual([['No group 0'], ['Work 0'], ['Home 1'], ['Hidden 1']]))
+    await waitFor(() => expect(sections()).toEqual([['No group 0'], ['Work 0'], ['Space 1'], ['Hidden 1']]))
 
-    drag(section('Home').querySelector('.group-head')!, section('Work'))
-    await waitFor(() => expect(sections().map((entry) => entry[0])).toEqual(['No group 0', 'Home 1', 'Work 0', 'Hidden 1']))
+    drag(section('Space').querySelector('.group-head')!, section('Work'))
+    await waitFor(() => expect(sections().map((entry) => entry[0])).toEqual(['No group 0', 'Space 1', 'Work 0', 'Hidden 1']))
     expect(server.changes).toEqual([
       { kind: 'list', id: 'r-1', change: { group: { kind: 'group', groupId: 'g-2' } } },
       { kind: 'list', id: 'r-2', change: { group: { kind: 'ungrouped' } } },

@@ -35,7 +35,7 @@ export class GoogleConsents {
    */
   async start(owner: string, origin: string, services: readonly string[], shared: boolean, reconnect: string | null, external = false): Promise<string> {
     const client = await this.client()
-    if (client === null) throw new GoogleConsentFailed('the Home admin has not set up the Google OAuth client yet')
+    if (client === null) throw new GoogleConsentFailed('the Space admin has not set up the Google OAuth client yet')
     const repaired = reconnect === null ? undefined : this.store.get(reconnect)
     if (reconnect !== null && repaired === undefined) throw new GoogleConsentFailed('no such connection of yours')
     const chosen = (repaired?.services ?? services).filter(isGoogleService)
@@ -53,7 +53,7 @@ export class GoogleConsents {
     this.sql.exec('DELETE FROM oauth_state WHERE state = ?', state)
     if (row === undefined || row.created_at < Date.now() - STATE_TTL_MS) throw new GoogleConsentFailed('this sign-in expired or was already used; start again from your connections')
     const client = await this.client()
-    if (client === null) throw new GoogleConsentFailed('the Home admin has not set up the Google OAuth client yet')
+    if (client === null) throw new GoogleConsentFailed('the Space admin has not set up the Google OAuth client yet')
     const outcome = await Effect.runPromise(Effect.result(exchangeCode(this.fetch, client, origin, code, Date.now())))
     if (outcome._tag === 'Failure') throw new GoogleConsentFailed(`Google did not complete the sign-in: ${describeConnectorFailure(outcome.failure)}`)
     const granted = outcome.success

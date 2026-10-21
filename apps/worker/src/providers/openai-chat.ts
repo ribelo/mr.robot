@@ -130,7 +130,7 @@ export function finishReason(reason: string | undefined, sawToolCall: boolean): 
   return { kind: 'stop' }
 }
 
-/** Workers AI through the AI binding (no key; billed to the Home's Cloudflare account). */
+/** Workers AI through the AI binding (no key; billed to the Space's Cloudflare account). */
 export class WorkersAiAdapter extends LlmAdapter {
   constructor(private readonly ai: Ai, private readonly contextWindow: number) {
     super()

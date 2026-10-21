@@ -12,7 +12,7 @@ export interface TakeoverProps {
 }
 
 /** Keys the browser page needs as key events; printable characters go as text. */
-const SPECIAL = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Delete', 'Home', 'End', 'PageUp', 'PageDown'])
+const SPECIAL = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Delete', 'Space', 'End', 'PageUp', 'PageDown'])
 
 /** CDP modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8. */
 const modifiersOf = (event: KeyboardEvent) => (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)

@@ -64,12 +64,12 @@ describe('Clear history and Start over in the robot list (sk-8won)', () => {
 })
 
 describe('Reset everything dialog (sk-gf2e)', () => {
-  it('says what is kept: logins, Provider accounts, Hosts, the skill library and Home settings', () => {
+  it('says what is kept: logins, Provider accounts, Hosts, the skill library and Space settings', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({})))
-    const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeHome: false, drawer: false }, acceptTasksFrom: [] }
+    const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] }
     render(<RegistryProvider><Profile me={me as never} /></RegistryProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Reset everything…' }))
     const dialog = screen.getByRole('dialog', { name: 'Reset everything' })
-    expect(within(dialog).getByText('Kept: logins, Provider accounts, Hosts, the skill library and Home settings.')).toBeTruthy()
+    expect(within(dialog).getByText('Kept: logins, Provider accounts, Hosts, the skill library and Space settings.')).toBeTruthy()
   })
 })

@@ -1,4 +1,4 @@
-/** Tasks: the product's own tools over the Home's Task store. */
+/** Tasks: the product's own tools over the Space's Task store. */
 import z from '@deepseek-ai/schemastery'
 import { taskTools, type TasksHost } from '../agent/tools/tasks.ts'
 import { capability } from './define.ts'

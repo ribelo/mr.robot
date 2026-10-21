@@ -1,6 +1,6 @@
 /**
  * The names a Robot calls the Hosts it reaches by (deep review P14b). Two Hosts can share a name: another Member shares a "Desk" with the
- * Home and the owner has a "Desk" too, and `on` matches a name without regard to case. Then each of them goes by its name and its owner's
+ * Space and the owner has a "Desk" too, and `on` matches a name without regard to case. Then each of them goes by its name and its owner's
  * name, "Desk (Anna)" and "Desk (Ben)"; a Host whose name no other Host has keeps it. One owner with two Hosts of one name, or a Host
  * whose own name is already "Desk (Anna)", gets the Host id too: "Desk (Anna, h-…)". The names are unique without regard to case, so `on`
  * finds at most one Host by them, and they hold for as long as the set of Hosts does.

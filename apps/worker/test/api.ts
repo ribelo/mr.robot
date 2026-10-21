@@ -4,9 +4,9 @@ import type { Robot as TestRobot } from './worker.ts'
 
 export const STUB_MODEL = { provider: 'stub', model: 'stub', effort: 'off' } as const
 
-/** Use the stub model for every Robot the Home creates (call before the first sign-in). */
+/** Use the stub model for every Robot the Space creates (call before the first sign-in). */
 export async function stubModels(): Promise<void> {
-  await env.HOME.getByName('home').updateSettings({ defaultModel: STUB_MODEL })
+  await env.SPACE.getByName('home').updateSettings({ defaultModel: STUB_MODEL })
 }
 
 /** Call the edge API as a person (signed in through the dev identity). */

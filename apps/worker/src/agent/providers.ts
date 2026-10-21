@@ -1,6 +1,6 @@
 /**
  * LLM Providers as DSH adapters. Credentials are resolved per request through the
- * Robot's owner (private first, then Home-shared), so a refreshed OAuth token or a
+ * Robot's owner (private first, then Space-shared), so a refreshed OAuth token or a
  * rotated key applies without rebuilding the composition.
  */
 import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
@@ -30,7 +30,7 @@ export interface ProviderContext {
   readonly robotId: string
   readonly credentials: CredentialSource
   readonly ai?: Ai
-  /** From the Home's model list; unknown models assume 128k. */
+  /** From the Space's model list; unknown models assume 128k. */
   readonly contextWindow?: number
   /** The model the Robot runs on (OpenCode Go picks its wire format per model). */
   readonly model?: string
@@ -85,7 +85,7 @@ export function providerAdapter(provider: string, context: ProviderContext): Llm
 async function oauth(context: ProviderContext, provider: ProviderId): Promise<{ access: string; accountId?: string }> {
   const credential = await context.credentials.resolve(provider)
   if (credential?.kind === 'oauth') return { access: credential.access, ...(credential.accountId === undefined ? {} : { accountId: credential.accountId }) }
-  throw new LlmError(`No ${provider} subscription: connect one under Providers, or use one shared with the Home`, 'MISSING_CREDENTIAL')
+  throw new LlmError(`No ${provider} subscription: connect one under Providers, or use one shared with the Space`, 'MISSING_CREDENTIAL')
 }
 
 async function apiKey(context: ProviderContext, provider: ProviderId): Promise<string> {

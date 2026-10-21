@@ -8,7 +8,7 @@ import { SubagentsControl } from '../src/components/SubagentsControl.tsx'
 import { DelegationList } from '../src/dsh/RobotTrajectory.tsx'
 
 const now = Date.now()
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Home', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeHome: false, drawer: false }, acceptTasksFrom: [] } as Me
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as Me
 const identity = { name: 'Researcher', title: '', description: '', avatarColor: '#f4a03a', avatarSeed: 'seed-1' }
 const robot: RobotSummary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'working', turn: null, lastWakeup: null, identity, lastLine: '', lastAt: 0, unread: false, subagents: [{ id: 'sa-1', label: 'Read the pages', since: now - 5 * 60_000, activity: 'web_fetch' }] }
 const children: SubagentView[] = [

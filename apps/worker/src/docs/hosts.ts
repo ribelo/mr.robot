@@ -1,6 +1,6 @@
 export const HOSTS = `# Hosts
 
-A Host is a computer that runs the Mr. Robot desktop app and is paired to a Member. A Host is private to the Member who paired it, or shared with the Home. The platform skill hosts has the practice: load it before you use a Host.
+A Host is a computer that runs the Mr. Robot desktop app and is paired to a Member. A Host is private to the Member who paired it, or shared with the Space. The platform skill hosts has the practice: load it before you use a Host.
 
 ## Pairing
 
@@ -36,7 +36,7 @@ The app reports its sandbox as full, partial (some file changes are not confined
 
 Host tools run as the signed-in OS user. The grant and its mode are the gates. A tool-call Ask for a facet of a Host also shows as a notification on that Host if it is your owner's and online, else on your owner's online computers. It opens the Ask in the app. The Member's Host page logs each call.
 
-A shared Host serves the Robots of every Member, as the OS user who installed the app. For a computer that serves the Home, for example a NAS, install the app under its own OS account and pair it from there. That account is the real boundary.
+A shared Host serves the Robots of every Member, as the OS user who installed the app. For a computer that serves the Space, for example a NAS, install the app under its own OS account and pair it from there. That account is the real boundary.
 
 ## A Host that is offline
 

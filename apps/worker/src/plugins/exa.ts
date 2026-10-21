@@ -9,7 +9,7 @@ import { capability } from './define.ts'
 export interface ExaConfig {
   readonly research: boolean
   readonly agentRuns: boolean
-  /** A fixed key (desktop use); otherwise the host supplies the Home's key. */
+  /** A fixed key (desktop use); otherwise the host supplies the Space's key. */
   readonly apiKey?: string
   readonly host?: ExaHost
 }

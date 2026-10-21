@@ -1,10 +1,10 @@
 /**
- * The Home's Workers AI switch (v1.12 ticket 04): off, Workers AI leaves every model list, the
- * Home default moves off it, and model chains skip it, block on it and resume when it is on again.
+ * The Space's Workers AI switch (v1.12 ticket 04): off, Workers AI leaves every model list, the
+ * Space default moves off it, and model chains skip it, block on it and resume when it is on again.
  */
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AdminView, Conversation, HomeSettingsSaved, HomeSettingsView, ModelOption, ProvidersView, SettingsCatalog } from '@mr-robot/protocol'
+import type { AdminView, Conversation, SpaceSettingsSaved, SpaceSettingsView, ModelOption, ProvidersView, SettingsCatalog } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { scriptedProviders, scripts } from './stub-llm.ts'
 
@@ -36,7 +36,7 @@ afterEach(() => {
   scriptedProviders.delete('workers-ai')
 })
 
-const switchWorkersAi = (enabled: boolean) => api<HomeSettingsSaved>(ANNA, '/api/admin/settings', { method: 'PATCH', body: { workersAiEnabled: enabled } })
+const switchWorkersAi = (enabled: boolean) => api<SpaceSettingsSaved>(ANNA, '/api/admin/settings', { method: 'PATCH', body: { workersAiEnabled: enabled } })
 const hasKimi = (models: readonly ModelOption[]) => models.some((option) => option.provider === 'workers-ai')
 const notices = async (id: string) => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.flatMap((item) => (item.kind === 'notice' ? [item.text] : []))
 const lastReply = async (id: string) => (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'reply').at(-1)
@@ -50,13 +50,13 @@ async function robotOf(as: string): Promise<string> {
 }
 
 describe('the Workers AI switch (ux-101w, ux-xsnr)', () => {
-  it('is on by default; off, Workers AI leaves the Providers view, the settings catalogue and the Home settings models', async () => {
+  it('is on by default; off, Workers AI leaves the Providers view, the settings catalogue and the Space settings models', async () => {
     const id = await robotOf(BEN)
     const providers = (await api<ProvidersView>(BEN, '/api/providers')).body
     expect(providers.workersAiEnabled).toBe(true)
     expect(hasKimi(providers.models)).toBe(true)
     expect(hasKimi((await api<SettingsCatalog>(BEN, `/api/robots/${id}/catalog`)).body.models)).toBe(true)
-    expect(hasKimi((await api<HomeSettingsView>(ANNA, '/api/admin/settings')).body.models)).toBe(true)
+    expect(hasKimi((await api<SpaceSettingsView>(ANNA, '/api/admin/settings')).body.models)).toBe(true)
 
     const saved = await switchWorkersAi(false)
     expect(saved.status).toBe(200)
@@ -70,7 +70,7 @@ describe('the Workers AI switch (ux-101w, ux-xsnr)', () => {
     expect(catalog.workersAiEnabled).toBe(false)
     expect(hasKimi(catalog.models)).toBe(false)
     expect(hasKimi(catalog.unavailableModels ?? [])).toBe(false)
-    expect(hasKimi((await api<HomeSettingsView>(ANNA, '/api/admin/settings')).body.models)).toBe(false)
+    expect(hasKimi((await api<SpaceSettingsView>(ANNA, '/api/admin/settings')).body.models)).toBe(false)
     const admin = (await api<AdminView>(ANNA, '/api/admin')).body
     expect(admin.settings.workersAiEnabled).toBe(false)
     expect(hasKimi(admin.settings.models)).toBe(false)
@@ -82,7 +82,7 @@ describe('the Workers AI switch (ux-101w, ux-xsnr)', () => {
   })
 })
 
-describe('the Home default model when Workers AI goes off (ux-jseo)', () => {
+describe('the Space default model when Workers AI goes off (ux-jseo)', () => {
   it('stays when the admin can use no other model, and moves to the first usable model when one exists', async () => {
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { defaultModel: KIMI_CHOICE } })
     const kept = await switchWorkersAi(false)
