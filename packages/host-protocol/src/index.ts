@@ -370,10 +370,63 @@ export const WorkingDirectory = Rpc.make('WorkingDirectory', {
   error: HostError,
 })
 
-/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
-export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory']
+/** The budget of the rendered instruction chain, as DSH's base profile gives it (cw-ec6f). */
+export const INSTRUCTIONS_MAX_BYTES = 65_536
 
-export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory) {}
+/** One instruction file of the chain: its path as the Robot reads it, its content digest, and its content unless the Worker said it has it. */
+export const InstructionFileState = Schema.Struct({ path: Schema.String, digest: Schema.String, content: Schema.NullOr(Schema.String) })
+export type InstructionFileState = typeof InstructionFileState.Type
+
+/** Where a Host skill comes from (cw-s2rt): the OS user's home roots, or the repository's. */
+export const HostSkillScope = Schema.Literals(['home', 'repository'])
+export type HostSkillScope = typeof HostSkillScope.Type
+
+export const HostSkillEntry = Schema.Struct({ name: Schema.String, description: Schema.String, scope: HostSkillScope })
+export type HostSkillEntry = typeof HostSkillEntry.Type
+
+/**
+ * The Workspace's context for the Robot's current directory (v1.21, cw-ec6f, cw-hm3d, cw-s2rt, cw-rkud). The chain is DSH's: the user-
+ * global AGENTS.md files, then every AGENTS.md, CLAUDE.md and .local.md overlay from the repository root down to the current directory,
+ * duplicates collapsed, rendered broad to specific within INSTRUCTIONS_MAX_BYTES (`rendered`, only when `known` is null); then the
+ * instruction files of deeper directories a read or write of the Robot touched (`nested`). Nothing is read outside the repository but
+ * the two global files, and no link is followed out of it (cw-jc3f). `known` is the digest of each file the Worker holds: their content
+ * is not sent again. The skills are the Host's (DSH's skill-filesystem: the home and the repository roots); `skillsDigest` the catalog the
+ * Worker holds, which is not sent again when it is the same.
+ */
+export const WorkspaceContextRequest = {
+  access: HostAccess,
+  known: Schema.NullOr(Schema.Record(Schema.String, Schema.String)),
+  skillsDigest: Schema.NullOr(Schema.String),
+}
+export const WorkspaceContext = Schema.Struct({
+  /** The digest of the whole chain: equal to the Worker's last, nothing changed. */
+  digest: Schema.String,
+  rendered: Schema.NullOr(Schema.String),
+  /** The files of the chain, broad to specific: the baseline's, then the nested ones. */
+  files: Schema.Array(InstructionFileState),
+  /** How many of `files` are nested (touched below the current directory), at the end. */
+  nested: Schema.Number,
+  skills: Schema.Struct({ digest: Schema.String, entries: Schema.NullOr(Schema.Array(HostSkillEntry)) }),
+})
+export type WorkspaceContext = typeof WorkspaceContext.Type
+
+/** The Workspace's context when a session opens in a chapter (cw-hm3d): the whole chain rendered, and the skills. */
+export const WorkspaceOpen = Rpc.make('WorkspaceOpen', { payload: WorkspaceContextRequest, success: WorkspaceContext, error: HostError })
+
+/** The Workspace's context since what the Worker holds (cw-rkud): at a Turn's start, after a cd, after a touch. */
+export const WorkspaceState = Rpc.make('WorkspaceState', { payload: WorkspaceContextRequest, success: WorkspaceContext, error: HostError })
+
+/** The body of a Host skill (cw-s2rt), as DSH's skill-filesystem loads it for the current directory. */
+export const SkillLoad = Rpc.make('SkillLoad', {
+  payload: { name: Schema.String, access: HostAccess },
+  success: Schema.Struct({ name: Schema.String, content: Schema.String, path: Schema.NullOr(Schema.String) }),
+  error: HostError,
+})
+
+/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
+export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory', 'WorkspaceOpen', 'WorkspaceState', 'SkillLoad']
+
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory, WorkspaceOpen, WorkspaceState, SkillLoad) {}
 
 /** The sandbox state of a Host, as its heartbeat reports it. */
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])

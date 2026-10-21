@@ -42,7 +42,7 @@ A service Host runs the app with no window (systemd, launchd). It has no SSH age
 
 Host tools run as the signed-in OS user. The grant and its mode are the gates. A tool-call Ask for a Host's facet also shows as a notification on that Host, or on your owner's online computers. The Member's Host page logs each call.
 
-A shared Host serves the Robots of every Member, as the OS user who installed the app. For a computer that serves the Space, install the app under its own OS account and pair it from there. That account is the real boundary.
+A shared Host serves the Robots of every Member, as the OS user who installed the app. That user's global AGENTS.md and home skills reach every Robot with a Workspace there. For a computer that serves the Space, install the app under its own OS account and pair it from there. That account is the real boundary.
 
 ## A Host that is offline
 

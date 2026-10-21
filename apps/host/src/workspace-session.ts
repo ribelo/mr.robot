@@ -10,6 +10,8 @@ import type { WorkspaceAccess } from '@mr-robot/host-protocol'
 export class WorkspaceSession {
   private readonly closers: Array<() => Promise<void> | void> = []
   private closed = false
+  /** The directories a read or a write of the Robot touched in the repository (cw-hm3d): their instruction files join the chain. */
+  readonly touched = new Set<string>()
 
   constructor(
     /** The Robot's directory name, which keys the sessions (HostAccess.robot). */

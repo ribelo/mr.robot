@@ -139,8 +139,17 @@ export class HostDisk {
   }
 
   /** A file's content, and its size, line-ending style and content hash (cw-vwo1). */
+  /** A read or a write in the Workspace's repository: its directory is touched (cw-hm3d), as DSH's own tools touch it. */
+  private touch(access: HostAccess, full: string): void {
+    const session = access.workspace === undefined ? undefined : this.changes.sessions.get(access.robot)
+    if (session === undefined) return
+    const from = relative(session.workspace.repository, full)
+    if (!from.startsWith('..') && !isAbsolute(from)) session.touched.add(dirname(full))
+  }
+
   async read(access: HostAccess, path: string): Promise<{ path: string; size: number; text: string | null; base64: string | null; lineEnding: LineEnding; hash: string }> {
     const full = await this.full(access, path)
+    this.touch(access, full)
     const info = await stat(full)
     if (info.size > MAX_READ) throw failure(`${full} is ${info.size} bytes; files over 10 MB are not read`, 'EFBIG')
     const body = await readFile(full)
@@ -172,6 +181,7 @@ export class HostDisk {
       if (now !== input.expectedHash) throw failure(`${full} changed since you read it (someone else wrote it, or it was deleted), so it was not written. Read it again and make your change on what is there now.`, STALE_CONTENT)
     }
     await this.changes.change(access, { _tag: 'Write', path: full, offset: 0, truncate: true }, body)
+    this.touch(access, full)
     const written = { path: full, bytes: body.length, hash: await contentHash(body) }
     if (input.id !== undefined) this.changes.recentWrites.set(input.id, written)
     return written

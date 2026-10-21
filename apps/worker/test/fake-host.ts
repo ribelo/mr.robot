@@ -6,7 +6,7 @@ import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import { expect } from 'vitest'
-import { contentHash, CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HOST_PROTOCOL_VERSION, HostError, lineEndingOf, LISTING_MAX_FILES, HostRpcs, STALE_CONTENT, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
+import { contentHash, CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HOST_PROTOCOL_VERSION, HostError, INSTRUCTIONS_MAX_BYTES, lineEndingOf, LISTING_MAX_FILES, HostRpcs, STALE_CONTENT, type HostSkillEntry, type WorkspaceContext, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -68,6 +68,57 @@ const normal = (path: string): string => {
 /** A path of a call as the app resolves it: on the Workspace a relative path starts in the Robot's current directory (access.cwd); otherwise as given. */
 const onPlace = (access: HostAccess, path: string): string => (access.cwd !== undefined && !path.startsWith('/') && !path.startsWith('~') ? normal(`${access.cwd}/${path}`) : path)
 
+/** The directories a read or write in a Workspace touched, per Robot directory name, as the app's sessions keep them. */
+export const workspaceTouched = new Map<string, Set<string>>()
+/** The context calls the fake app answered: which RPC, the current directory, and whether the Worker sent what it holds. */
+export const contextCalls: Array<{ rpc: 'WorkspaceOpen' | 'WorkspaceState'; cwd: string | undefined; known: boolean }> = []
+const textOf = (path: string): string | undefined => { const bytes = hostDisk.get(path); return bytes === undefined ? undefined : new TextDecoder().decode(bytes) }
+const CANDIDATES = ['AGENTS.md', 'CLAUDE.md', 'AGENTS.local.md', 'CLAUDE.local.md']
+/** The instruction files of one directory, as the app reads them: a link (linkedRoots) is not followed, a repeated text renders once. */
+const candidatesIn = (directory: string): Array<{ path: string; content: string }> => {
+  const found: Array<{ path: string; content: string }> = []
+  for (const name of CANDIDATES) {
+    const path = `${directory}/${name}`
+    const content = textOf(path)
+    if (content === undefined || linkedRoots.has(path) || found.some((kept) => kept.content.trim() === content.trim())) continue
+    found.push({ path, content })
+  }
+  return found
+}
+/** The chain the app would give (a stand-in for DSH's loader, which the app's own tests run): global files, root to cwd, nested. */
+async function fakeContext(access: HostAccess, known: Readonly<Record<string, string>> | null, skillsDigest: string | null): Promise<WorkspaceContext> {
+  const repository = access.workspace!.repository
+  const cwd = access.cwd ?? access.workspace!.root
+  const chainDirs: string[] = []
+  for (let at = cwd; at.startsWith(repository); at = parentOf(at)) { chainDirs.unshift(at); if (at === repository) break }
+  const globals = [`${FAKE_HOME}/.dsh/AGENTS.md`, `${FAKE_HOME}/.agents/AGENTS.md`].flatMap((path) => { const content = textOf(path); return content === undefined ? [] : [{ path, content }] })
+  const baseline = [...globals, ...chainDirs.flatMap(candidatesIn)]
+  const touched = [...(workspaceTouched.get(access.robot) ?? [])].filter((dir) => dir.startsWith(`${cwd}/`)).sort()
+  const deeper = [...new Set(touched.flatMap((dir) => { const chain: string[] = []; for (let at = dir; at !== cwd; at = parentOf(at)) chain.unshift(at); return chain }))].sort()
+  const nested = deeper.flatMap(candidatesIn)
+  // The budget drops the broadest files first.
+  const blocks = baseline.map((file) => `Instructions from: ${file.path.startsWith(`${repository}/`) ? file.path.slice(repository.length + 1) : file.path}\n\n${file.content}`)
+  while (blocks.length > 1 && new TextEncoder().encode(blocks.join('\n\n')).length > INSTRUCTIONS_MAX_BYTES) blocks.shift()
+  const rendered = blocks.join('\n\n')
+  const files = await Promise.all([...baseline, ...nested].map(async (file) => { const digest = await contentHash(new TextEncoder().encode(file.content)); return { path: file.path, digest, content: known?.[file.path] === digest ? null : file.content } }))
+  const digest = await contentHash(new TextEncoder().encode(JSON.stringify([rendered, files.map((file) => [file.path, file.digest])])))
+  const skillOf = (path: string, scope: HostSkillEntry['scope']): HostSkillEntry[] => {
+    const text = textOf(path) ?? ''
+    const name = /^name:\s*(.+)$/m.exec(text)?.[1]?.trim()
+    return name === undefined ? [] : [{ name, description: /^description:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? '', scope }]
+  }
+  const all = [...hostDisk.keys()].sort().flatMap((path) => path.startsWith(`${repository}/.agents/skills/`) && path.endsWith('/SKILL.md') ? skillOf(path, 'repository') : path.startsWith(`${FAKE_HOME}/.agents/skills/`) && path.endsWith('/SKILL.md') ? skillOf(path, 'home') : [])
+  // The repository's skill wins a name over the home one on the Host, as DSH's provider ranks its roots.
+  const entries = all.filter((skill) => skill.scope === 'repository' || !all.some((other) => other.scope === 'repository' && other.name === skill.name)).sort((a, b) => (a.name < b.name ? -1 : 1))
+  const skills = await contentHash(new TextEncoder().encode(JSON.stringify(entries)))
+  return { digest, rendered: known === null ? rendered : null, files, nested: nested.length, skills: { digest: skills, entries: skills === skillsDigest ? null : entries } }
+}
+const touchIn = (access: HostAccess, path: string) => {
+  const repository = access.workspace?.repository
+  if (repository === undefined || !path.startsWith(`${repository}/`)) return
+  workspaceTouched.set(access.robot, new Set([...(workspaceTouched.get(access.robot) ?? []), parentOf(path)]))
+}
+
 /** Every directory the fake disk knows: the listed ones, and those its files lie in. */
 const knownDirectories = (): Set<string> => {
   const all = new Set<string>()
@@ -114,6 +165,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     Read: ({ path: given, access }) => {
       const path = onPlace(access, given)
       hostFileCalls.push({ rpc: 'Read', path, access })
+      touchIn(access, path)
       if (path === '/root/secret') return Effect.fail(new HostError({ message: 'permission denied', code: 'EACCES' }))
       const bytes = hostDisk.get(path)
       if (bytes === undefined) return Effect.promise(async () => ({ path, size: 5, text: 'hello', base64: null, lineEnding: 'none' as const, hash: await contentHash(new TextEncoder().encode('hello')) }))
@@ -130,6 +182,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     Write: ({ path: given, text, base64, access, expectedHash, id }) => {
       const path = onPlace(access, given)
       hostFileCalls.push({ rpc: 'Write', path, access })
+      touchIn(access, path)
       const answered = id === undefined ? undefined : writeAnswers.get(id)
       if (answered !== undefined) {
         hostWrites.push({ path, id, expectedHash, wrote: false })
@@ -272,7 +325,17 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       for (let at = full; kind === 'directory' && repository === null && at !== '/' && at !== ''; at = parentOf(at)) if (known.has(`${at}/.git`) || hostDisk.has(`${at}/.git`)) repository = at
       return { path: full, kind, link: linkedRoots.has(full) ? full : null, repository }
     }),
-    WorkspaceClose: ({ robot }) => Effect.sync(() => { workspaceCloses.push(robot) }),
+    WorkspaceClose: ({ robot }) => Effect.sync(() => { workspaceCloses.push(robot); workspaceTouched.delete(robot) }),
+    WorkspaceOpen: ({ access, skillsDigest }) => { contextCalls.push({ rpc: 'WorkspaceOpen', cwd: access.cwd, known: false }); return Effect.promise(() => fakeContext(access, null, skillsDigest)) },
+    WorkspaceState: ({ access, known, skillsDigest }) => { contextCalls.push({ rpc: 'WorkspaceState', cwd: access.cwd, known: known !== null }); return Effect.promise(() => fakeContext(access, known, skillsDigest)) },
+    SkillLoad: ({ name, access }) => {
+      const repository = access.workspace?.repository ?? ''
+      for (const path of [`${repository}/.agents/skills/${name}/SKILL.md`, `${FAKE_HOME}/.agents/skills/${name}/SKILL.md`]) {
+        const content = textOf(path)
+        if (content !== undefined) return Effect.succeed({ name, content, path })
+      }
+      return Effect.fail(new HostError({ message: `there is no skill "${name}" on this computer for your Workspace`, code: 'ENOENT' }))
+    },
     WorkingDirectory: ({ cd, access }) => {
       const target = cd.startsWith('/') || cd.startsWith('~') || access.cwd === undefined ? expanded(cd) : normal(`${access.cwd}/${cd}`)
       if (!knownDirectories().has(target)) return Effect.fail(new HostError({ message: `${target} does not exist`, code: 'ENOENT' }))
@@ -382,6 +445,8 @@ export async function closeHosts(): Promise<void> {
   workspaceCloses.length = 0
   hostWrites.length = 0
   writeAnswers.clear()
+  workspaceTouched.clear()
+  contextCalls.length = 0
   cut.nextWrite = false
   hostJobCalls.length = 0
   for (const socket of open.splice(0)) {

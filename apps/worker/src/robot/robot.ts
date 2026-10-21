@@ -70,6 +70,9 @@ import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts
 import type { CredentialSave } from '@mr-robot/protocol'
 import type { ChainEntry, GrantLevel, SpaceSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource, WorkspaceChoice, WorkspaceSetting } from '@mr-robot/protocol'
 import { checkRoot, sameWorkspace, WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace } from './workspace-setting.ts'
+import { baselineText, changesText, stateAfter, WORKSPACE_CHAIN, WORKSPACE_SKILLS, type ChainState, type SkillsState } from './workspace-context.ts'
+import { WorkspaceInstructions } from '../plugins/workspace-instructions.ts'
+import type { WorkspaceContext } from '@mr-robot/host-protocol'
 import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedHeader, storedLength, storeSession } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
@@ -1097,6 +1100,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       workspaceSetting: () => this.store.get<WorkspaceSetting>(WORKSPACE),
       currentDirectory: (exec) => this.currentDirectory(exec),
       setCurrentDirectory: (exec, path) => this.setCurrentDirectory(exec, path),
+      touched: (exec) => { this.touchedSessions.add(String(exec.agent?.session.id ?? this.store.requireConfig().liveSessionId)) },
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
       link: (host, reach, cwd) => hostLink(this.hostCaller(), host, reach, cwd),
       jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach, place.workspace?.cwd),
@@ -1122,10 +1126,95 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * root until it moves; a Subagent starts in the Robot's and keeps its own in memory.
    */
   private currentDirectory(exec: ToolRunContext): string {
-    const own = this.store.get<string>(WORKSPACE_CWD) ?? this.store.get<WorkspaceSetting>(WORKSPACE)?.root ?? ''
     const session = exec.agent?.session.id
-    if (session === undefined || String(session) === this.store.requireConfig().liveSessionId) return own
-    return this.subagentDirectories.get(String(session)) ?? own
+    return this.directoryOf(session === undefined ? undefined : String(session))
+  }
+
+  /** The current directory of a session: the Robot's live one (or none named), or a Subagent's. */
+  private directoryOf(sessionId: string | undefined): string {
+    const own = this.store.get<string>(WORKSPACE_CWD) ?? this.store.get<WorkspaceSetting>(WORKSPACE)?.root ?? ''
+    if (sessionId === undefined || sessionId === this.store.requireConfig().liveSessionId) return own
+    return this.subagentDirectories.get(sessionId) ?? own
+  }
+
+  // ---------------------------------------------------------------- the Workspace's instructions and skills (v1.21 ticket 04)
+
+  /** What each Subagent's session was given of the chain (the live session's is kept in WORKSPACE_CHAIN). */
+  private readonly subagentChains = new Map<string, ChainState>()
+  /** Sessions whose read or write in the Workspace may have reached a deeper directory since their last check (cw-hm3d). */
+  private readonly touchedSessions = new Set<string>()
+  private readonly hostSkillListeners = new Set<() => void>()
+
+  private chainOf(sessionId: string): ChainState | undefined {
+    if (sessionId !== this.store.requireConfig().liveSessionId) return this.subagentChains.get(sessionId)
+    const kept = this.store.get<ChainState>(WORKSPACE_CHAIN)
+    return kept?.sessionId === sessionId ? kept : undefined
+  }
+
+  private keepChain(state: ChainState): void {
+    if (state.sessionId === this.store.requireConfig().liveSessionId) this.store.set(WORKSPACE_CHAIN, state)
+    else this.subagentChains.set(state.sessionId, state)
+  }
+
+  /** The Host's context for a directory; undefined when the Host cannot give it now (offline, an older app), which leaves the session as it was. */
+  private async askContext(setting: WorkspaceSetting, cwd: string, known: Record<string, string> | null): Promise<WorkspaceContext | undefined> {
+    const skills = this.store.get<SkillsState>(WORKSPACE_SKILLS)
+    const key = `${setting.hostId}:${setting.root}`
+    try {
+      const context = answerOf(await (await this.hostOwnerStub(setting.hostId)).hostWorkspaceContext(setting.hostId, this.store.requireConfig().id, { open: known === null, cwd, known, skillsDigest: skills?.workspace === key ? skills.digest : null }))
+      if (context.skills.entries !== null) {
+        this.store.set(WORKSPACE_SKILLS, { workspace: key, digest: context.skills.digest, entries: context.skills.entries } satisfies SkillsState)
+        for (const listener of this.hostSkillListeners) listener()
+      }
+      return context
+    } catch (error) {
+      if (!isHostCallError(error) && !(error instanceof HostOffline)) console.warn('workspace context not read', error)
+      return undefined
+    }
+  }
+
+  /**
+   * What a model step of a session gets of the Workspace's instructions (cw-hm3d): the whole chain when the session has none or moved to
+   * another directory; at a Turn's first step, and after a read or write in the Workspace, what changed since; else nothing.
+   */
+  async workspaceInstructions(sessionId: string, step: number): Promise<{ readonly text: string; readonly form: 'baseline' | 'changes' } | undefined> {
+    const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
+    if (setting === undefined || this.store.config()?.status === 'setup') return undefined
+    const cwd = this.directoryOf(sessionId)
+    const before = this.chainOf(sessionId)
+    const whole = before === undefined || before.cwd !== cwd
+    const touched = this.touchedSessions.delete(sessionId)
+    if (!whole && step !== 1 && !touched) return undefined
+    const context = await this.askContext(setting, cwd, whole ? null : { ...before.files })
+    if (context === undefined) return undefined
+    this.keepChain(stateAfter(sessionId, cwd, context))
+    if (whole) return { text: baselineText(context, { host: setting.host, repository: setting.repository, cwd }), form: 'baseline' }
+    const text = changesText(before, context, setting.repository)
+    return text === undefined ? undefined : { text, form: 'changes' }
+  }
+
+  /** The Host's skills for the catalog (cw-s2rt): the last catalog the Host gave, asked for when there is none for this Workspace. */
+  private async hostSkillsFor(): Promise<{ host: string; entries: SkillsState['entries'] }> {
+    const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
+    if (setting === undefined || this.store.config()?.status === 'setup') return { host: '', entries: [] }
+    const key = `${setting.hostId}:${setting.root}`
+    let kept = this.store.get<SkillsState>(WORKSPACE_SKILLS)
+    if (kept?.workspace !== key) {
+      await this.askContext(setting, this.directoryOf(undefined), {})
+      kept = this.store.get<SkillsState>(WORKSPACE_SKILLS)
+    }
+    return { host: setting.host, entries: kept?.workspace === key ? kept.entries : [] }
+  }
+
+  private async hostSkillContent(name: string): Promise<string | null> {
+    const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
+    if (setting === undefined) return null
+    try {
+      return answerOf(await (await this.hostOwnerStub(setting.hostId)).hostSkillLoad(setting.hostId, this.store.requireConfig().id, name, this.directoryOf(undefined))).content
+    } catch (error) {
+      if (isHostCallError(error) || error instanceof HostOffline) return null
+      throw error
+    }
   }
 
   private setCurrentDirectory(exec: ToolRunContext, path: string): void {
@@ -2227,6 +2316,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(PlacesCapability, { host: this.places(), reach: { files: true, box: false, hosts: { files: [], shell: [] } } satisfies PlacesReach }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
     mounts.push(mount(ConversationPlugin, { host: this }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), mount(Ask, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
+    // The Workspace's instructions (v1.21 ticket 04): a message of their own after the memory; nothing without a Workspace.
+    mounts.push(mount(WorkspaceInstructions, { host: { instructions: (sessionId, step) => this.workspaceInstructions(sessionId, step) } }))
     // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
     const grants = this.store.effectiveGrants()
     // Plugins the Space switched off are not mounted for anyone (cn-dbm9).
@@ -2257,6 +2348,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         local: () => holdsSkills ? this.localSkills() : Promise.resolve([]),
         localContent: (name) => holdsSkills ? this.run(this.workspace.readText(`skills/${name}/SKILL.md`)).then((text) => text ?? null) : Promise.resolve(null),
         platform: () => platformSkillsFor(this.platformSkillAudience(granted)),
+        host: () => this.hostSkillsFor(),
+        hostContent: (name) => this.hostSkillContent(name),
+        onHostChange: (listener) => { this.hostSkillListeners.add(listener) },
       },
     }, gate(items.skills(granted.has('skills')))))
     if (holdsSkills) mounts.push(mount(Skills, { host: this }, gate(items.skills(granted.has('skills')))))

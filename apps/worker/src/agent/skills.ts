@@ -19,6 +19,47 @@ export interface SkillSource {
   localContent(name: string): Promise<string | null>
   /** The platform skills this Robot is shown now (v1.15 ticket 12): they need no Grant. */
   platform(): readonly PlatformSkill[]
+  /** The skills of the Host its Workspace is on (v1.21, cw-s2rt): the OS user's home roots and the repository's; none without a Workspace. */
+  host(): Promise<{ readonly host: string; readonly entries: ReadonlyArray<{ name: string; description: string; scope: 'home' | 'repository' }> }>
+  hostContent(name: string): Promise<string | null>
+  /** Tell the catalog to read the Host's skills again (their catalog changed). */
+  onHostChange(listener: () => void): void
+}
+
+/** One skill as the catalog ranks it: lower rank wins a name (DSH's registry), platform -1, library and Host home 0, local and Host repository 1. */
+interface Ranked {
+  readonly name: string
+  readonly description: string
+  readonly provider: string
+  readonly rank: number
+  /** Where it is from, for the shadow note. */
+  readonly from: string
+  readonly base: string
+}
+
+/**
+ * The whole catalog with its shadow notes (v1.21, cw-s2rt): the winner of a name says which skills of the same name it hides, so that the
+ * owner can rename his. A repository's skill never shadows a platform skill: the platform's practice is the platform's.
+ */
+async function rankedCatalog(source: SkillSource): Promise<Ranked[]> {
+  const host = await source.host()
+  const all: Ranked[] = [
+    ...source.platform().map((skill) => ({ name: skill.name, description: skill.description, provider: 'platform', rank: -1, from: 'platform', base: 'the platform skills (read-only, docs/skills/)' })),
+    ...(await source.granted()).map((skill) => ({ name: skill.name, description: skill.description, provider: 'space-library', rank: 0, from: 'Space library', base: 'the Space skill library (read-only)' })),
+    ...host.entries.filter((skill) => skill.scope === 'home').map((skill) => ({ name: skill.name, description: skill.description, provider: 'host', rank: 0, from: `${host.host} home`, base: `${host.host}: the OS user's skills` })),
+    ...(await source.local()).map((skill) => ({ name: skill.name, description: skill.description, provider: 'local', rank: 1, from: 'local', base: `your Files, skills/${skill.name}/` })),
+    ...host.entries.filter((skill) => skill.scope === 'repository').map((skill) => ({ name: skill.name, description: skill.description, provider: 'host', rank: 1, from: `${host.host} repository`, base: `${host.host}: the repository's .agents/skills` })),
+  ]
+  const byName = new Map<string, Ranked[]>()
+  for (const skill of all) byName.set(skill.name, [...(byName.get(skill.name) ?? []), skill])
+  return all.map((skill) => {
+    const same = byName.get(skill.name) ?? []
+    // The registry keeps the first of the lowest rank; the others are shadowed by it.
+    const winner = [...same].sort((a, b) => a.rank - b.rank)[0]
+    if (winner !== skill || same.length === 1) return skill
+    const hidden = same.filter((other) => other !== skill).map((other) => `also: ${other.from} skill of the same name, shadowed`)
+    return { ...skill, description: `${skill.description} (${hidden.join('; ')})` }
+  })
 }
 
 export function skillsPlugin(source: SkillSource): (ctx: Context) => Promise<void> {
@@ -28,10 +69,11 @@ export function skillsPlugin(source: SkillSource): (ctx: Context) => Promise<voi
       name, description, invocation: { modelInvocable: true, userInvocable: false }, source: 'custom', provider, rank, locator: name,
       resourceBase: { kind: 'opaque', description: base },
     })
-    // Platform skills first: the skill tool resolves one before a library or a local skill of the same name (gb-n6by).
+    // One catalog for every provider, so that a winner can name what it shadows (cw-s2rt). Platform skills win a name (gb-n6by).
+    const listed = (provider: string) => async () => (await rankedCatalog(source)).filter((skill) => skill.provider === provider).map((skill) => candidate(skill.name, skill.description, provider, skill.base, skill.rank))
     ctx.skills.registerProvider(() => ({
       name: 'platform',
-      list: async () => source.platform().map((skill) => candidate(skill.name, skill.description, 'platform', 'the platform skills (read-only, docs/skills/)', -1)),
+      list: listed('platform'),
       get: async (found) => {
         const skill = source.platform().find((entry) => entry.name === String(found.locator))
         return skill === undefined ? undefined : { ...found, content: skill.text }
@@ -39,7 +81,7 @@ export function skillsPlugin(source: SkillSource): (ctx: Context) => Promise<voi
     }))
     ctx.skills.registerProvider(() => ({
       name: 'space-library',
-      list: async () => (await source.granted()).map((skill) => candidate(skill.name, skill.description, 'space-library', 'the Space skill library (read-only)')),
+      list: listed('space-library'),
       get: async (found) => {
         const content = await source.content(String(found.locator))
         return content === null ? undefined : { ...found, content }
@@ -47,12 +89,24 @@ export function skillsPlugin(source: SkillSource): (ctx: Context) => Promise<voi
     }))
     ctx.skills.registerProvider(() => ({
       name: 'local',
-      list: async () => (await source.local()).map((skill) => candidate(skill.name, skill.description, 'local', `your Workspace, skills/${skill.name}/`)),
+      list: listed('local'),
       get: async (found) => {
         const content = await source.localContent(String(found.locator))
         return content === null ? undefined : { ...found, content }
       },
     }))
+    // The skills of the Workspace's Host (v1.21, cw-s2rt): home ones rank with the library, repository ones with the local skills.
+    ctx.skills.registerProvider((control) => {
+      source.onHostChange(() => control.invalidate())
+      return {
+        name: 'host',
+        list: listed('host'),
+        get: async (found) => {
+          const content = await source.hostContent(String(found.locator))
+          return content === null ? undefined : { ...found, content }
+        },
+      }
+    })
     await ctx.plugin(ToolSkill, {})
   }
 }

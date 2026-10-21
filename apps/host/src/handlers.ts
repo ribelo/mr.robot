@@ -3,7 +3,8 @@
  * browser sessions relayed between Mr. Robot and the host's Chrome (hs-mqwd).
  */
 import * as Effect from 'effect/Effect'
-import { downloadFile, HostError, HostRpcs, uploadFile, type CopyIo } from '@mr-robot/host-protocol'
+import { downloadFile, HostError, HostRpcs, uploadFile, type CopyIo, type HostAccess } from '@mr-robot/host-protocol'
+import { workspaceContext } from './workspace-context.ts'
 import WebSocket from 'ws'
 import type { HostChrome } from './chrome.ts'
 import { fileSize, nodeCopyIo, sourceFile, type HostDownloads } from './copy.ts'
@@ -11,6 +12,9 @@ import { HostDisk } from './files.ts'
 import type { HostShell } from './shell.ts'
 
 const fail = (error: unknown) => new HostError({ message: error instanceof Error ? error.message : String(error), ...(typeof (error as { code?: unknown }).code === 'string' ? { code: (error as { code: string }).code } : {}) })
+
+/** The directory a Workspace call works in: its current directory, else the Workspace's root. */
+const where = (access: HostAccess): string => access.cwd ?? access.workspace?.root ?? '.'
 
 export interface Relay {
   readonly hostId: string
@@ -27,6 +31,12 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
     found?.remote.close()
     found?.local.close()
     onSessions(sessions.size)
+  }
+  const context = async (access: HostAccess, known: Readonly<Record<string, string>> | null, skillsDigest: string | null) => {
+    const workspace = access.workspace
+    if (workspace === undefined) throw Object.assign(new Error('This call names no Workspace.'), { code: 'ENOENT' })
+    const session = await shell.sessions.touch(access.robot, workspace)
+    return workspaceContext({ home: shell.home, repository: workspace.repository, cwd: where(access), touched: [...(session?.touched ?? [])], known, skillsDigest, skills: shell.skills })
   }
   return HostRpcs.toLayer({
     Read: ({ path, access }) => Effect.tryPromise({ try: () => disk.read(access, path), catch: fail }),
@@ -89,5 +99,16 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
     Stat: ({ path }) => Effect.tryPromise({ try: () => disk.stat(path), catch: fail }),
     WorkspaceClose: ({ robot }) => Effect.tryPromise({ try: () => shell.sessions.close(robot), catch: fail }),
     WorkingDirectory: ({ cd, access }) => Effect.tryPromise({ try: () => disk.workingDirectory(access, cd), catch: fail }),
+    // The Workspace's instructions and skills (v1.21 ticket 04): Open renders the whole chain, State answers what changed.
+    WorkspaceOpen: ({ access, skillsDigest }) => Effect.tryPromise({ try: () => context(access, null, skillsDigest), catch: fail }),
+    WorkspaceState: ({ access, known, skillsDigest }) => Effect.tryPromise({ try: () => context(access, known, skillsDigest), catch: fail }),
+    SkillLoad: ({ name, access }) => Effect.tryPromise({
+      try: async () => {
+        const loaded = await shell.skills.load(where(access), name)
+        if (loaded === undefined) throw Object.assign(new Error(`there is no skill "${name}" on this computer for your Workspace`), { code: 'ENOENT' })
+        return loaded
+      },
+      catch: fail,
+    }),
   })
 }

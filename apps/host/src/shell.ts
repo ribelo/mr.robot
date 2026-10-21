@@ -28,6 +28,7 @@ import { startRunnersAsNode } from './run-as-node.ts'
 import { aclRunnerWorks, findInstalledPwsh7 } from './windows.ts'
 import { WorkspaceSessions } from './workspace-session.ts'
 import { RecentWrites } from './files.ts'
+import { HostSkills } from './workspace-context.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
@@ -221,6 +222,8 @@ export class HostShell implements FileChanges {
     readonly home: string,
     /** The environment every command gets (environment.ts); undefined when the login environment could not be captured. */
     private env: Readonly<Record<string, string>> | undefined,
+    /** DSH's skill-filesystem for the Workspaces here (cw-s2rt). */
+    readonly skills: HostSkills,
     private readonly environment: EnvironmentConfig,
     private readonly capture: () => Promise<Record<string, string> | undefined>,
     /** How completely this computer confines a command, found when the app started. */
@@ -275,7 +278,7 @@ export class HostShell implements FileChanges {
     // Robots' calls refuse such a link (access.ts, ensureRobotDirectory).
     await mkdir(probeRoot).catch((error: unknown) => { if (errorCode(error) !== 'EEXIST') throw error })
     const sandbox = await probeSandbox(ctx, kind, probeRoot, env)
-    const shell = new HostShell(ctx, home, env, environment, capture, sandbox, kind, await sandboxWritable(ctx, probeRoot))
+    const shell = new HostShell(ctx, home, env, await HostSkills.start(home), environment, capture, sandbox, kind, await sandboxWritable(ctx, probeRoot))
     await shell.recheck()
     return shell
   }
@@ -399,6 +402,7 @@ export class HostShell implements FileChanges {
   /** The app quits: the Workspace sessions close, then DSH's layer (its jobs and processes) goes. */
   async dispose(): Promise<void> {
     await this.sessions.closeAll()
+    await this.skills.dispose()
     await this.ctx.fiber.dispose()
   }
 }

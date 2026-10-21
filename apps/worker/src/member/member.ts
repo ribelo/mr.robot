@@ -1180,6 +1180,16 @@ export class Member extends DurableObject<Env> {
   hostListDirectory(id: string, robotId: string, path: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.ListDirectory({ path, access }))) }
   hostStat(id: string, robotId: string, path: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.Stat({ path, access }))) }
   hostDelete(id: string, robotId: string, path: string, reach: Reach = 'granted', cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Delete({ path, access }), 60_000, { action: reach === 'escalated' ? 'delete (escalated)' : 'delete', detail: path }, reach, at(cwd))) }
+  /**
+   * The Workspace's instructions and skills for a current directory (v1.21 ticket 04): the whole chain rendered (open), or what changed
+   * since the files and the skill catalog the Robot holds. Not in the Host's log: it is the platform's, at the Robot's Turns.
+   */
+  hostWorkspaceContext(id: string, robotId: string, input: { open: boolean; cwd: string; known: Record<string, string> | null; skillsDigest: string | null }) {
+    const payload = { known: input.open ? null : input.known, skillsDigest: input.skillsDigest }
+    return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => (input.open ? client.WorkspaceOpen({ ...payload, access }) : client.WorkspaceState({ ...payload, access })), 30_000, undefined, input.cwd))
+  }
+  /** The body of a Host skill (cw-s2rt). */
+  hostSkillLoad(id: string, robotId: string, name: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.SkillLoad({ name, access }), 30_000, { action: 'skill', detail: name }, cwd)) }
   /** The Robot moves within its Workspace (v1.21, cw-llvx): the app checks the directory; the Robot keeps it. */
   hostWorkingDirectory(id: string, robotId: string, cd: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.WorkingDirectory({ cd, access }), 30_000, { action: 'cd', detail: cd }, cwd)) }
   /**

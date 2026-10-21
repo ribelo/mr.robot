@@ -58,6 +58,8 @@ export interface PlacesDeps {
    */
   currentDirectory(exec: ToolRunContext): string
   setCurrentDirectory(exec: ToolRunContext, path: string): void
+  /** A read, write or edit of the agent reached into its Workspace: its instructions may have grown (cw-hm3d). */
+  touched(exec: ToolRunContext): void
   readonly box: BoxAccess
   /** One Host; `cwd` when the calls name the Robot's Workspace there. */
   link(host: HostView, reach: Reach, cwd?: string): HostLink
@@ -337,6 +339,7 @@ export class Places {
     const unconfined = this.unconfined(call, target, `${call.tool}: escalate lifts the sandbox of a computer. ${target.place.kind === 'box' ? 'Your Box has none to lift: it is yours.' : 'Your Files have none to lift.'}`)
     const waiting = this.waiting(call, [target], unconfined)
     if (waiting !== undefined) return waiting
+    if (target.place.kind === 'host' && target.place.workspace !== undefined && ['read', 'write', 'edit'].includes(call.tool)) this.deps.touched(call.exec)
     return action(this.filesOf(target.place, unconfined === undefined ? 'granted' : 'escalated', call.exec))
   }
 

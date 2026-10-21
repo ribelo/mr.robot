@@ -9,7 +9,7 @@ const access: HostAccess = { robot: 'bot-1', mode: 'workspace-write', roots: [] 
 /** A call these tests do not make. */
 const unused = () => Effect.fail(new HostError({ message: 'not used in this test' }))
 /** Every handler of the group, each refusing; a test replaces the ones it calls. */
-const refusing = { Read: unused, Write: unused, CopyStat: unused, Upload: unused, Download: unused, Glob: unused, Grep: unused, Delete: unused, Run: unused, JobList: unused, JobOutput: unused, JobKill: unused, BrowserOpen: unused, BrowserClose: unused, ListDirectory: unused, Stat: unused, WorkspaceClose: unused, WorkingDirectory: unused }
+const refusing = { Read: unused, Write: unused, CopyStat: unused, Upload: unused, Download: unused, Glob: unused, Grep: unused, Delete: unused, Run: unused, JobList: unused, JobOutput: unused, JobKill: unused, BrowserOpen: unused, BrowserClose: unused, ListDirectory: unused, Stat: unused, WorkspaceClose: unused, WorkingDirectory: unused, WorkspaceOpen: unused, WorkspaceState: unused, SkillLoad: unused }
 
 describe('the host protocol over a socket', () => {
   it('carries a typed call and a typed error both ways', async () => {
