@@ -83,7 +83,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
     }),
     tool<{ robot_id: string }>({
       name: 'robot_files',
-      description: "List the files in another Robot's Workspace: Persona files (SOUL.md, IDENTITY.md, AGENTS.md, TOOLS.md, MEMORY.md), daily notes, local skills, artefacts. Read one with robot_file_read.",
+      description: "List the files in another Robot's Workspace: Persona files (SOUL.md, AGENTS.md, MEMORY.md), daily notes, local skills, artefacts. Read one with robot_file_read.",
       parameters: { properties: { robot_id: robotId }, required: ['robot_id'] },
       concurrencySafe: true,
       execute: async ({ robot_id }) => {

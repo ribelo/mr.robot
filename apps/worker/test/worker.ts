@@ -220,6 +220,13 @@ export class Robot extends ProductionRobot {
     return id
   }
 
+  /** A Workspace as v1.17 left it: five persona files and a MEMORY.md without sections, to be folded at the next Turn (v1.18 ticket 01). */
+  async oldPersonaForTest(files: Record<string, string>, identity?: { name: string; title: string; description: string }): Promise<void> {
+    for (const [path, content] of Object.entries(files)) await this.env.FILES.put(`robots/${this.store.requireConfig().id}/${path}`, content)
+    if (identity !== undefined) this.store.updateConfig((config) => ({ identity: { ...config.identity, ...identity } }))
+    this.store.delete('persona-folded')
+  }
+
   /** The history trim of one file at a moment the test picks (v1.18 ticket 02). */
   async trimHistoryForTest(path: string, now: number): Promise<void> {
     await this.workspace.history.trim(path, now)

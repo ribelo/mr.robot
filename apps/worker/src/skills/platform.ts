@@ -340,6 +340,29 @@ Read this before you use a Host: a computer that belongs to your owner.
 - A shared Host serves the Robots of every Member, all as the same OS user. Your directory is not private from them.
 - Write nothing there that your owner wants private.
 `),
+  skill('memory', 'What goes where in memory; the memory sweep.', 'everyone', `
+# Memory
+
+Read this before you write to MEMORY.md or a daily note, and when what you remember disagrees with what you see.
+
+## What goes where
+- memory/YYYY-MM-DD.md, today's daily note: the raw detail of the day. Write what happened, what you learned, what is still open. Write it as you go; it is cheap.
+- MEMORY.md: only what lasts, in its three sections.
+  - Facts: what is true about your owner's world and your work here (an account number, who does what, how a supplier invoices).
+  - Preferences: what your owner wants and does not want, in their words where you can.
+  - Commitments: what you or your owner promised, with the date and who waits for it. Remove a commitment when it is done.
+- AGENTS.md: how you work here; its Tool notes section holds the quirks of the tools here (device names, host aliases).
+- SOUL.md: who you are and how you talk. Change it rarely, and tell your owner when you do.
+- Your owner's files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) and the Home's (HOME.md) are not yours: propose an edit, or, as Mr. Robot, write it with memory_write_shared.
+
+## How to correct
+- When a newer claim replaces an older one, change the old line where it stands. Do not add a second line that disagrees with it.
+- Remove what is no longer true. Do not keep history in MEMORY.md: the file history keeps every version, and your owner can bring one back.
+- Never write what you only guess. Mark what you are unsure of, or leave it in the daily note.
+
+## The memory sweep
+Before an idle compaction you get one bounded step: the memory sweep. Read the daily notes since the last sweep and MEMORY.md; move what lasts into its section; correct what is superseded where it stands; invent nothing; then end. Its writes are versions by "the memory sweep", and your owner sees them in the file history.
+`),
 ]
 
 /** The platform skills this Robot is shown now. `has` says which of the things they are about the Robot holds. */

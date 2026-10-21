@@ -166,6 +166,7 @@ import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, normalizePath, workspacePrefix, type WorkspaceShape } from '../workspace/workspace.ts'
 import { authorLabel, authorOf, FileHistory, isTrackedFile, robotHistoryBase, versionView } from '../workspace/file-history.ts'
+import { foldIdentity, foldTools, shapeMemory, withSection } from '../workspace/persona-fold.ts'
 import type { FileHistoryView, FileVersionContent } from '@mr-robot/protocol'
 import { boxCost, containerBox, type BoxBackend } from '../box/backend.ts'
 import { HOME_ID, type Env } from '../env.ts'
@@ -2649,6 +2650,38 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * when they still hold the template text; a file the Robot wrote into stays. A Robot that took screenshots
    * before v1.11 gets its sweep armed, so the ones in its Workspace age out.
    */
+  /**
+   * IDENTITY.md folds into the identity fields (only empty ones) and SOUL.md's "Identity notes", TOOLS.md into AGENTS.md's "Tool notes",
+   * and MEMORY.md gets Facts, Preferences and Commitments (rm-x8nc, rm-8le0). Deleting the old files keeps their last version.
+   */
+  private async foldPersona(): Promise<void> {
+    const ws = this.workspace
+    const platform = { kind: 'platform' } as const
+    const write = (path: string, text: string) => this.run(ws.write(path, text, 'text/markdown; charset=utf-8', platform))
+    const identity = await this.run(ws.readText('IDENTITY.md'))
+    if (identity !== undefined) {
+      const { fields, rest } = foldIdentity(identity)
+      const current = this.store.requireConfig().identity
+      const fill = {
+        ...(current.name.trim() === '' && fields.name !== undefined ? { name: fields.name } : {}),
+        ...(current.title.trim() === '' && fields.title !== undefined ? { title: fields.title } : {}),
+        ...(current.description.trim() === '' && fields.description !== undefined ? { description: fields.description } : {}),
+      }
+      if (Object.keys(fill).length > 0) this.store.updateConfig((config) => ({ identity: { ...config.identity, ...fill } }))
+      if (rest !== '') await write('SOUL.md', withSection((await this.run(ws.readText('SOUL.md'))) ?? '# SOUL.md\n', 'Identity notes', rest))
+      await this.run(ws.remove('IDENTITY.md', platform))
+    }
+    const tools = await this.run(ws.readText('TOOLS.md'))
+    if (tools !== undefined) {
+      const notes = foldTools(tools)
+      if (notes !== '') await write('AGENTS.md', withSection((await this.run(ws.readText('AGENTS.md'))) ?? '# AGENTS.md\n', 'Tool notes', notes))
+      await this.run(ws.remove('TOOLS.md', platform))
+    }
+    const memory = await this.run(ws.readText('MEMORY.md'))
+    const shaped = memory === undefined ? undefined : shapeMemory(memory)
+    if (shaped !== undefined) await write('MEMORY.md', shaped)
+  }
+
   private async tidyWorkspace(): Promise<void> {
     if (this.store.get('bank-retired') === undefined) {
       const ws = this.workspace
@@ -2667,6 +2700,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         await this.run(ws.remove(entry.path))
       }
       this.store.set('box-folder-moved', true)
+    }
+    // Two persona files and MEMORY.md's sections (v1.18 ticket 01): folded once, the old files' versions kept.
+    if (this.store.get('persona-folded') === undefined) {
+      await this.foldPersona()
+      this.store.set('persona-folded', true)
     }
     if (this.store.get('screen') !== undefined && this.store.get('screens-sweep-next') === undefined) {
       this.store.set('screens-sweep-next', Date.now() + SCREEN_SWEEP_EVERY_MS)

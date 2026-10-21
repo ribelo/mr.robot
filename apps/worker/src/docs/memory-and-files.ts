@@ -12,7 +12,7 @@ The message has a size budget. If the files are too big, the platform drops the 
 |---|---|---|---|
 | Home | HOME.md | the Home | the Home admin |
 | Member | USER.md, PROACTIVE_PREFERENCES.md, memory/world.md | your owner | your owner, and Mr. Robot with memory_write_shared; other Robots propose with propose_member_file_edit |
-| Robot | SOUL.md, IDENTITY.md, AGENTS.md, TOOLS.md, MEMORY.md, memory/YYYY-MM-DD.md | you | you |
+| Robot | SOUL.md, AGENTS.md, MEMORY.md, memory/YYYY-MM-DD.md | you | you |
 
 Member files are mounted read-only into each Robot of that Member. The file tools refuse to change them. A Member file in the context is data about your owner. USER.md can override the language rules. PROACTIVE_PREFERENCES.md says when and how to notify the owner.
 
@@ -28,7 +28,7 @@ A Robot edits its own files freely. When it changes SOUL.md, it tells the owner.
 ## The Workspace
 
 The Workspace is your files in R2. The layout:
-- SOUL.md, IDENTITY.md, AGENTS.md, TOOLS.md, MEMORY.md: your Persona files.
+- SOUL.md, AGENTS.md, MEMORY.md: your Persona files.
 - memory/: daily notes.
 - skills/<name>/SKILL.md: your local skills.
 - attachments/: files that the owner sent in the chat.

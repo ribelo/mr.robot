@@ -262,17 +262,15 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
 describe("the Fleet's running tool (v1.19, ec-es5g)", () => {
   it('names the command the Turn runs now, read from the tail of the live chapter', async () => {
     const id = await robotWith({ box: 'allow' })
-    // A foreground command runs as a Job the tool waits for (or, at boot, as a plain run): both are held.
-    holdBoxRun(id, 'make report')
+    // A foreground command runs as a Job the tool waits for: it is held until the test has seen the Fleet row.
     holdBoxJob(id, 'make report')
     scripts.set(id, [{ calls: [{ name: 'run', args: { on: 'box', command: 'make report' } }] }, { say: 'Made.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'make the report' } })
     const row = async () => (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((entry) => entry.id === id)!
+    await vi.waitFor(() => expect(boxLog.get(id)?.some((line) => line.startsWith('spawn ') && line.endsWith('make report'))).toBe(true), { timeout: 20_000 })
     await vi.waitFor(async () => expect((await row()).turn?.activity).toBe('run'), { timeout: 10_000 })
-    // The command went one of the two ways: release the run, and finish the Job when it is one.
-    releaseBoxRun(id, 'make report')
-    if (boxLog.get(id)?.some((line) => line.startsWith('spawn ')) === true) finishBoxJob(id, 'make report', { stdout: 'done' })
+    finishBoxJob(id, 'make report', { stdout: 'done' })
     await settle(id)
     expect((await row()).turn).toBeNull()
-  })
+  }, 60_000)
 })

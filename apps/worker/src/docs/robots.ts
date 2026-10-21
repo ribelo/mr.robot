@@ -24,11 +24,9 @@ The owner approves only the Grants. Then the Robot is active. During setup it ca
 ## Persona files
 
 Persona files belong to the Robot. The Robot edits them with the file tools.
-- SOUL.md: who the Robot is and how it behaves.
-- IDENTITY.md: its name, role and description.
-- AGENTS.md: its working rules.
-- TOOLS.md: its notes about tools.
-- MEMORY.md: facts it keeps for the long term.
+- SOUL.md: who the Robot is, how it talks, what it never does.
+- AGENTS.md: how it works here, with a Tool notes section.
+- MEMORY.md: what lasts, in three sections: Facts, Preferences, Commitments.
 - memory/YYYY-MM-DD.md: daily notes.
 
 When a Robot changes SOUL.md, it tells the owner. Read memory-and-files.md for the other files.

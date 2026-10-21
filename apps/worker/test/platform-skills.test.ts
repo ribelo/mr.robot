@@ -50,24 +50,24 @@ const toolResults = (id: string) => requests.get(id)!.at(-1)!.messages.filter((m
 describe('the catalog lists platform skills by what the Robot holds (gb-n6by, gb-kwhl, gb-ekkf)', () => {
   it('every Robot sees tasks-cadence and asking, with no Grant at all; the group skills are absent', async () => {
     const id = await robotWith()
-    expect(await catalog(id)).toEqual(sorted('tasks-cadence', 'asking'))
+    expect(await catalog(id)).toEqual(sorted('tasks-cadence', 'asking', 'memory'))
     expect(requests.get(id)!.at(-1)!.tools!.map((definition) => definition.name)).toContain('skill')
   })
 
   it('subagents shows with the subagents group, browser with the browser group', async () => {
-    expect(await catalog(await robotWith({ tools: { subagents: 'allow' }, subagentModels: [] }))).toEqual(sorted('tasks-cadence', 'asking', 'subagents'))
-    expect(await catalog(await robotWith({ tools: { browser: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'browser'))
-    expect(await catalog(await robotWith({ tools: { subagents: 'ask', browser: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'subagents', 'browser'))
+    expect(await catalog(await robotWith({ tools: { subagents: 'allow' }, subagentModels: [] }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'subagents'))
+    expect(await catalog(await robotWith({ tools: { browser: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'browser'))
+    expect(await catalog(await robotWith({ tools: { subagents: 'ask', browser: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'subagents', 'browser'))
   })
 
   it('channels shows with a Discord channel of its own or a chat Connection; writing-as-owner also with any Connection', async () => {
-    expect(await catalog(await robotWith({}, { discordChannel: 'C-1' }))).toEqual(sorted('tasks-cadence', 'asking', 'channels', 'writing-as-owner'))
+    expect(await catalog(await robotWith({}, { discordChannel: 'C-1' }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'channels', 'writing-as-owner'))
     const slack = await env.MEMBER.getByName(annaId).addConnection({ kind: 'slack', label: 'Work', account: 'acme', services: [], shared: false, meta: {}, secrets: { token: 't', cookie: 'c' } })
     const mail = await env.MEMBER.getByName(annaId).addConnection({ kind: 'google', label: 'Private', account: 'anna@gmail.test', services: ['gmail'], shared: false, meta: { expiresAt: Date.now() + 3_600_000 }, secrets: { accessToken: 'a', refreshToken: 'r' } })
-    expect(await catalog(await robotWith({ connections: { [slack.id]: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'channels', 'writing-as-owner'))
-    expect(await catalog(await robotWith({ connections: { [mail.id]: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'writing-as-owner'))
+    expect(await catalog(await robotWith({ connections: { [slack.id]: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'channels', 'writing-as-owner'))
+    expect(await catalog(await robotWith({ connections: { [mail.id]: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'writing-as-owner'))
     // Not granted: not shown.
-    expect(await catalog(await robotWith({}))).toEqual(sorted('tasks-cadence', 'asking'))
+    expect(await catalog(await robotWith({}))).toEqual(sorted('tasks-cadence', 'asking', 'memory'))
   })
 
   it('Mr. Robot sees them too, by what he holds', async () => {
@@ -83,24 +83,24 @@ describe('the catalog lists platform skills by what the Robot holds (gb-n6by, gb
 
 describe('box and hosts follow the box grant and the Host facets (ob-vw9d, ob-ivby)', () => {
   it('box shows with the box grant at allow or ask, and hosts is absent', async () => {
-    expect(await catalog(await robotWith({ tools: { box: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'box'))
-    expect(await catalog(await robotWith({ tools: { box: 'ask' } }))).toEqual(sorted('tasks-cadence', 'asking', 'box'))
-    expect(await catalog(await robotWith({ tools: { box: 'deny' } }))).toEqual(sorted('tasks-cadence', 'asking'))
+    expect(await catalog(await robotWith({ tools: { box: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'box'))
+    expect(await catalog(await robotWith({ tools: { box: 'ask' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'box'))
+    expect(await catalog(await robotWith({ tools: { box: 'deny' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory'))
   })
 
   it('hosts shows with any facet of a Host, files, shell or browser, and box is absent', async () => {
     const desk = await fakeHost()
     for (const facet of ['files', 'shell', 'browser']) {
-      expect(await catalog(await robotWith({ hosts: { [`${desk.hostId}:${facet}`]: 'ask' } })), facet).toEqual(sorted('tasks-cadence', 'asking', 'hosts'))
+      expect(await catalog(await robotWith({ hosts: { [`${desk.hostId}:${facet}`]: 'ask' } })), facet).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'hosts'))
     }
-    expect(await catalog(await robotWith({ hosts: { [`${desk.hostId}:shell`]: 'deny' } }))).toEqual(sorted('tasks-cadence', 'asking'))
+    expect(await catalog(await robotWith({ hosts: { [`${desk.hostId}:shell`]: 'deny' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory'))
   })
 
   it('a Robot with the box grant and a Host facet sees both; one with neither sees neither', async () => {
     const desk = await fakeHost()
-    expect(await catalog(await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'box', 'hosts'))
+    expect(await catalog(await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'box', 'hosts'))
     // The files group writes Pages: it brings the skill pages (v1.17, dp-3wnd).
-    expect(await catalog(await robotWith({ tools: { files: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'pages'))
+    expect(await catalog(await robotWith({ tools: { files: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'pages'))
   })
 
   it('Mr. Robot sees hosts through the Hosts his owner reaches, and box only when his owner grants it', async () => {
@@ -186,15 +186,15 @@ describe('read-only, and not in the Home library (gb-n6by, gb-8wx5)', () => {
     expect((await api(ANNA, '/api/skills/asking')).status).toBeGreaterThanOrEqual(400)
     // Deleting a global skill of that name changes nothing for a platform skill: it is not in the library to delete.
     await api(ANNA, '/api/admin/skills/asking', { method: 'DELETE' })
-    expect(await catalog(id)).toEqual(sorted('tasks-cadence', 'asking'))
+    expect(await catalog(id)).toEqual(sorted('tasks-cadence', 'asking', 'memory'))
   })
 })
 
 describe('the texts (gb-vmmx, gb-58ad, gb-ej8r)', () => {
   const text = (name: string) => PLATFORM_SKILLS.find((skill) => skill.name === name)!.text
 
-  it('are nine, each with a one-line description in its frontmatter and under two printed pages', () => {
-    expect(PLATFORM_SKILLS.map((skill) => skill.name)).toEqual(['tasks-cadence', 'asking', 'pages', 'subagents', 'browser', 'channels', 'writing-as-owner', 'box', 'hosts'])
+  it('are ten, each with a one-line description in its frontmatter and under two printed pages', () => {
+    expect(PLATFORM_SKILLS.map((skill) => skill.name)).toEqual(['tasks-cadence', 'asking', 'pages', 'subagents', 'browser', 'channels', 'writing-as-owner', 'box', 'hosts', 'memory'])
     for (const skill of PLATFORM_SKILLS) {
       expect(skill.description, skill.name).not.toContain('\n')
       expect(skill.description.length, skill.name).toBeLessThan(140)

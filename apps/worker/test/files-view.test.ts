@@ -24,8 +24,9 @@ describe('the Files view (v1.1 ticket 08)', () => {
     await settle(body.id)
     await testRobot(body.id).activateForTest()
     const files = (await api<WorkspaceFileView[]>(ANNA, `/api/robots/${body.id}/files`)).body
-    expect(files.slice(0, 5).map((file) => file.path)).toEqual(['SOUL.md', 'IDENTITY.md', 'AGENTS.md', 'TOOLS.md', 'MEMORY.md'])
-    expect(files.slice(0, 5).every((file) => file.group === 'persona')).toBe(true)
+    expect(files.slice(0, 3).map((file) => file.path)).toEqual(['SOUL.md', 'AGENTS.md', 'MEMORY.md'])
+    expect(files.slice(0, 3).every((file) => file.group === 'persona')).toBe(true)
+    expect(files.some((file) => file.path === 'IDENTITY.md' || file.path === 'TOOLS.md')).toBe(false)
 
     const saved = await api<WorkspaceFileContent>(ANNA, `/api/robots/${body.id}/file?path=MEMORY.md`, { method: 'PUT', body: { content: '# MEMORY.md\n\nThe owner pays invoices on the 10th.\n' } })
     expect(saved.body.text).toContain('pays invoices on the 10th')

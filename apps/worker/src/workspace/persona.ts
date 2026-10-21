@@ -2,7 +2,8 @@
  * The Robot's persona and memory as the model sees them: the Muse layout read from its
  * Workspace before every Turn (robot-om9f), plus the owner's Member files (robot-mj7v).
  */
-export const PERSONA_FILES = ['SOUL.md', 'IDENTITY.md', 'AGENTS.md', 'TOOLS.md', 'MEMORY.md'] as const
+/** Who the Robot is, how it works here, and what it remembers (v1.18, rm-2asl): IDENTITY.md and TOOLS.md are folded into these. */
+export const PERSONA_FILES = ['SOUL.md', 'AGENTS.md', 'MEMORY.md'] as const
 
 export interface PersonaSnapshot {
   readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>

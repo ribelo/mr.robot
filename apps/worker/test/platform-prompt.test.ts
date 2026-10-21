@@ -116,7 +116,7 @@ describe('the v1.15 prompt (ticket 13, gb-3ih8, gb-gwes, gb-ycy1, gb-dqjy, gb-82
     expect(text).toContain('- asking: ')
     expect(text).not.toContain('- browser: ')
     const skills = (await api<{ skills: string[] }>(ANNA, `/api/robots/${id}/prompt`)).body.skills
-    expect(skills.filter((skill) => skill.includes('(platform)')).map((skill) => skill.split(' ')[0])).toEqual(['tasks-cadence', 'asking'])
+    expect(skills.filter((skill) => skill.includes('(platform)')).map((skill) => skill.split(' ')[0])).toEqual(['tasks-cadence', 'asking', 'memory'])
   })
 
   it('stays under 2 900 words for a Robot with every group granted, the capability rules included (gb-4wem)', async () => {

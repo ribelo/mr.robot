@@ -42,7 +42,7 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
     const id = await activeRobot(['files'])
     await turn(id, 'list your files', [{ calls: [{ name: 'glob', args: { on: 'workspace', pattern: '**' } }] }, { text: 'done' }])
     const listing = toolResults(id).at(-1)!
-    for (const file of ['SOUL.md', 'IDENTITY.md', 'AGENTS.md', 'TOOLS.md', 'MEMORY.md', 'USER.md', 'PROACTIVE_PREFERENCES.md']) {
+    for (const file of ['SOUL.md', 'AGENTS.md', 'MEMORY.md', 'USER.md', 'PROACTIVE_PREFERENCES.md']) {
       expect(listing).toContain(file)
     }
     // Persona and memory are the context's first message, not the system prompt (pl-w3n0).

@@ -41,7 +41,7 @@ export const VERSIONS_KEPT = 50
 export const VERSION_DAYS_KEPT = 90
 const DAY_MS = 86_400_000
 
-/** The Robot's files with history: its persona and memory (rm-d68k). */
+/** The Robot's files with history: its persona and memory (rm-d68k); IDENTITY.md and TOOLS.md stay, for the versions their fold kept. */
 export function isTrackedFile(path: string): boolean {
   return ['SOUL.md', 'AGENTS.md', 'MEMORY.md', 'IDENTITY.md', 'TOOLS.md'].includes(path) || /^memory\/[^/]+\.md$/.test(path)
 }
