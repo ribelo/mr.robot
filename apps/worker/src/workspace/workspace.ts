@@ -103,6 +103,25 @@ export function normalizePath(path: string): string | undefined {
 const fail = (message: string) => (cause: unknown) => new WorkspaceError({ message, cause })
 
 /** `writer`: who writes when a write names nobody (the Robot, or the memory sweep while it runs). */
+/**
+ * Secrets outlive a Turn (v1.20.1, cross-review #1): the Workspace a Robot writes through masks every secret it may read in the text of a
+ * file under the given paths (Pages, dreams, spill files, definition drafts) before it is stored. A stream or a binary body is left alone.
+ */
+export function withWriteMask(workspace: WorkspaceShape, applies: (path: string) => boolean, mask: (text: string) => string): WorkspaceShape {
+  const masked = (body: string | ArrayBuffer | Uint8Array | ReadableStream): string | ArrayBuffer | Uint8Array | ReadableStream => {
+    if (typeof body === 'string') return mask(body)
+    if (!(body instanceof ArrayBuffer) && !(body instanceof Uint8Array)) return body
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(body)
+      const after = mask(text)
+      return after === text ? body : new TextEncoder().encode(after)
+    } catch {
+      return body
+    }
+  }
+  return { ...workspace, write: (path, body, contentType, by) => workspace.write(path, applies(path) ? masked(body) : body, contentType, by) }
+}
+
 /** After a write or a delete: the file's path, its text when the write gave one (undefined for a stream or a delete), its new etag (undefined for a delete). */
 export type WorkspaceChange = (path: string, text: string | undefined, etag: string | undefined) => void
 

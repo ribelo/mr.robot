@@ -98,6 +98,25 @@ export function reviewHistory(events: readonly SessionEvent[], context: ReviewCo
   return items
 }
 
+/** The reviewer's history is one Turn, bounded (v1.20.1, cross-review #2): its last items, at most this many and this many tokens. */
+export const REVIEW_HISTORY_ITEMS = 24
+export const REVIEW_HISTORY_TOKENS = 16_000
+
+/** The last items of the history that fit both bounds, each with its secrets masked; a rough four characters per token. */
+export function boundHistory(items: readonly HistoryItem[], mask: (text: string) => string): HistoryItem[] {
+  const kept: HistoryItem[] = []
+  let tokens = 0
+  for (const item of [...items].reverse()) {
+    if (kept.length >= REVIEW_HISTORY_ITEMS) break
+    const masked = JSON.parse(mask(JSON.stringify(item))) as HistoryItem
+    const size = Math.ceil(JSON.stringify(masked).length / 4)
+    if (tokens + size > REVIEW_HISTORY_TOKENS) break
+    tokens += size
+    kept.unshift(masked)
+  }
+  return kept
+}
+
 /** The user text of the review request: sections two to five. */
 export function reviewUserText(snapshot: { readonly cwd: string; readonly history: readonly HistoryItem[]; readonly action: PendingAction }): string {
   return ['ENVIRONMENT', json({ cwd: snapshot.cwd }), 'PROJECT_INSTRUCTIONS', json([]), 'FILTERED_HISTORY', json(snapshot.history), 'PENDING_ACTION', json(snapshot.action)].join('\n\n')

@@ -161,7 +161,7 @@ import type { MemberFileName } from '../member/member.ts'
 import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
-import { makeWorkspace, normalizePath, workspacePrefix, type WorkspaceShape } from '../workspace/workspace.ts'
+import { makeWorkspace, normalizePath, withWriteMask, workspacePrefix, type WorkspaceShape } from '../workspace/workspace.ts'
 import { authorLabel, authorOf, FileHistory, isTrackedFile, robotHistoryBase, versionView, type FileAuthor } from '../workspace/file-history.ts'
 import { foldIdentity, foldTools, shapeMemory, withSection } from '../workspace/persona-fold.ts'
 import { grantsFormOf, tasksFormOf, writeGrants, writeTasks } from '../definitions/definition.ts'
@@ -384,6 +384,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       modelList: () => this.space().modelList(),
       adapter: (provider, window, model, wire) => this.adapter(provider, window, model, wire),
       recordUsage: (source, input, output, cost) => this.recordUsage(source, input, output, cost),
+      turnStart: (sessionId) => {
+        const active = this.store.activeTurn()
+        return active !== undefined && active.sessionId === sessionId ? active.startSeq : undefined
+      },
+      mask: (text) => this.mask(text),
     }
   }
 
@@ -766,6 +771,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
     const { agent, ctx } = await this.agent()
     await this.refreshPersona()
+    // The values to mask, read again each Turn: a Grant changed since adds or drops one (v1.20.1).
+    await this.loadSecretMasks().catch((error: unknown) => console.warn('secret masks not loaded', error))
     // The memory index catches up a bounded number of files per Turn (v1.20, dm-yn3q).
     await this.catchUpMemoryIndex().catch((error: unknown) => console.warn('memory index not caught up', error))
     // The dream's fence holds before its Wake-up reaches the agent, so no step of it runs unfenced (v1.20.1).
@@ -2047,7 +2054,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         this.broadcast()
         this.reportActivity()
       },
-      redact: (json) => maskSecrets(json, this.turnSecrets),
+      // Every secret the Robot may read, not only the ones this Turn revealed: a value repeated in a later Turn is masked too (v1.20.1).
+      redact: (json) => maskSecrets(json, [...this.secretValues, ...this.turnSecrets]),
       // The chat is stored with the events it shows (v1.19); a Subagent's is read from its own log.
       onStored: (sessionId, from) => {
         if (!sessionId.startsWith('sa-')) this.store.chat.extend(sessionId, from, this.store.chatInput(sessionId))
@@ -2663,7 +2671,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private writer: FileAuthor = { kind: 'robot' }
 
   get workspace(): WorkspaceShape {
-    return makeWorkspace(this.env.FILES, this.store.requireConfig().id, this.writer, (path, text, etag) => this.memoryWritten(path, text, etag))
+    // Secrets the Robot may read never reach a Page, a dream, a spill file or a definition draft (v1.20.1, cross-review #1).
+    return withWriteMask(makeWorkspace(this.env.FILES, this.store.requireConfig().id, this.writer, (path, text, etag) => this.memoryWritten(path, text, etag)), (path) => MASKED_WRITES.test(path), (text) => this.mask(text))
   }
 
   private memoryIndexCache: MemoryIndex | undefined
@@ -3932,7 +3941,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     if (!files.has('README.md')) files.set('README.md', new TextEncoder().encode(`# ${config.identity.name}\n\n${config.identity.description}\n`))
     await this.run(ws.removeUnder(draft))
     await this.changed()
-    return this.space().saveDefinition(slug, [...files.entries()].map(([path, body]) => ({ path, body })), config.ownerId, this.owner().name)
+    // A secret the Robot may read never leaves in a definition: its Task instructions and every text file are masked (v1.20.1).
+    const masked = [...files.entries()].map(([path, body]) => {
+      const text = new TextDecoder().decode(body)
+      const after = this.mask(text)
+      return { path, body: after === text ? body : new TextEncoder().encode(after) }
+    })
+    return this.space().saveDefinition(slug, masked, config.ownerId, this.owner().name)
   }
 
   /** A persona or memory file's history (v1.18, rm-7jo4): who wrote it now, and its kept versions. */
@@ -4523,6 +4538,8 @@ const SUBAGENT_DENIED_TOOLS = [
 ]
 /** Where Save as definition stages a Robot's files (v1.18 ticket 04). */
 const DEFINITION_DRAFT = 'definition-draft'
+/** The Workspace files whose text is masked at write (v1.20.1). */
+const MASKED_WRITES = /^(pages|dreams|spill|definition-draft)\//
 /** The step limit of the owner scrub. */
 const DEFINITION_SCRUB_STEPS = 6
 

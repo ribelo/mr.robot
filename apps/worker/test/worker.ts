@@ -260,6 +260,13 @@ export class Robot extends ProductionRobot {
   }
 
   /** One tidy pass of cold chapters at a moment the test picks (v1.19 ticket 06); how many moved. */
+  /** Everything the Robot stored of its Conversation, as text: the events, the stored chat and the search index (v1.20.1). */
+  async storedTextForTest(): Promise<string> {
+    const sql = this.store.sql
+    const all = (query: string) => sql.exec<Record<string, SqlStorageValue>>(query).toArray().map((row) => JSON.stringify(row)).join('\n')
+    return [all('SELECT event FROM session_event'), all('SELECT * FROM chat_item'), all('SELECT text FROM chat_search')].join('\n')
+  }
+
   async tidyChaptersForTest(now: number, limit?: number): Promise<number> {
     return moveColdChapters(this.store, this.env.FILES, this.store.requireConfig().id, now, limit)
   }
