@@ -944,7 +944,7 @@ export const rewind = (atSeq: number) => Effect.gen(function* () {
     store.addRewind(record)
     // The new session is the next chapter, seeded from the live one up to the point (v1.19).
     store.chapters.branch(current.liveSessionId, atSeq, now)
-    store.chapters.close(current.liveSessionId, 'rewind', now)
+    store.chapters.close(current.liveSessionId, 'rewind', now, events)
     store.openChapter(sessionId, { sessionId: current.liveSessionId, seq: atSeq }, atSeq + 1, now)
     // The seeded prefix keeps the voice it had (gb-psyl); what follows the rewind point is say only.
     store.setVoiceFrom(sessionId, Math.min(store.voiceFrom(current.liveSessionId), atSeq + 1))

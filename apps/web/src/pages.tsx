@@ -23,6 +23,7 @@ import { Takeover } from './components/Takeover.tsx'
 import { ConfirmButton } from './components/RobotSheets.tsx'
 import { MissionControl } from './components/MissionControl.tsx'
 import { SubagentPage } from './components/SubagentPage.tsx'
+import { ChapterBar } from './components/ChapterBar.tsx'
 
 // The DSH trajectory (with its code highlighter) loads only when its page opens.
 const RobotTrajectory = lazy(() => import('./dsh/RobotTrajectory.tsx').then((module) => ({ default: module.RobotTrajectory })))
@@ -97,13 +98,20 @@ function TrajectoryPage({ id, robot, me }: { id: string; robot: RobotSummary | u
   const liveVersion = AsyncResult.getOrElse(useAtomValue(robotFeedAtom(id)), () => ({ changes: 0 })).changes
   const [viewKey, setViewKey] = useState(0)
   const [rewinding, setRewinding] = useState(false)
+  // One chapter at a time (v1.19, ec-mwvo): the live one unless the reader picked another.
+  const [picked, setPicked] = useState<number>()
+  const liveResult = useAtomValue(trajectoryAtom(id))
+  const live = AsyncResult.isSuccess(liveResult) ? liveResult.value : undefined
+  const liveOrdinal = live?.chapter
+  const chapter = picked === undefined || picked === liveOrdinal ? undefined : picked
   const canRewind = robot?.ownerId === me.id
   return (
     <div className="page page-wide">
       <PageHead title={`${robot?.identity.name ?? 'Robot'} · Trajectory`} back={{ page: 'robot', id, panel: true }} />
       {canRewind ? <div className="question-actions"><button type="button" className="button" onClick={() => setRewinding(true)}>Rewind…</button></div> : null}
+      {live === undefined || live.chapters.length < 2 ? null : <ChapterBar chapters={live.chapters} shown={chapter ?? live.chapter} onShow={setPicked} />}
       <Suspense fallback={<div className="muted">Loading the trajectory…</div>}>
-        <RobotTrajectory key={viewKey} robotId={id} liveVersion={liveVersion} />
+        <RobotTrajectory key={`${viewKey}-${chapter ?? 'live'}`} robotId={id} liveVersion={liveVersion} {...(chapter === undefined ? {} : { chapter })} />
       </Suspense>
       {rewinding ? <RewindSheet id={id} onClose={() => setRewinding(false)} onDone={() => { setRewinding(false); setViewKey((key) => key + 1) }} /> : null}
     </div>

@@ -1282,7 +1282,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     this.store.transaction(() => {
       storeSession(sql, nextHeader, seed.inheritedEventCount, seed.events)
       this.store.search.track(next, seed.inheritedEventCount)
-      this.store.chapters.close(from, 'compaction', now)
+      this.store.chapters.close(from, 'compaction', now, events)
       this.store.openChapter(next, { sessionId: from, seq: events.length - 1 }, seed.inheritedEventCount, now, seed.events.length)
       if (this.store.get<string>('memory-baseline') === from) this.store.set('memory-baseline', next)
       this.store.delete(CHAPTER_COMPACTED)
@@ -3430,18 +3430,19 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * The live session's DSH events exactly as stored (every field, including surfaceOp), secrets
    * masked, for the DSH trajectory view (ticket 22). Pages backwards with before, forwards with after.
    */
-  sessionEvents(input: { before?: number; after?: number; limit?: number }): Promise<{ events: string; hasMore: boolean; sessionId: string }> {
+  sessionEvents(input: { before?: number; after?: number; limit?: number; chapter?: number }): Promise<{ events: string; hasMore: boolean; sessionId: string }> {
     return this.program(Views.sessionEvents(input))
   }
 
 
   /** The live log's events, secrets masked. */
   async trajectory(): Promise<TrajectoryEvent[]> {
-    return [...(await this.program(Views.trajectory)).events]
+    return [...(await this.program(Views.trajectory())).events]
   }
 
-  trajectoryMasked(): Promise<Trajectory> {
-    return this.program(Views.trajectory)
+  /** One chapter's log with the chapter list (v1.19); the live chapter without an ordinal. */
+  trajectoryMasked(chapter?: number): Promise<Trajectory> {
+    return this.program(Views.trajectory(chapter))
   }
 
 

@@ -194,7 +194,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 25
+const SCHEMA_VERSION = 26
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -315,6 +315,8 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // How many Turns a closed chapter holds, counted once (v1.19 ticket 04, ec-mwvo).
+  26: [(sql) => addColumns(sql, 'chapter', ['turns INTEGER'])],
   // The chat stored as items per chapter (v1.19 ticket 03, ec-2sra); the chapters before it are folded by the backfill.
   25: CHAT_SCHEMA,
   // The Conversation as a chain of chapters (v1.19 ticket 02, ec-7oq8): every session so far is one, linked by its Rewinds.

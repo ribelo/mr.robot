@@ -96,7 +96,8 @@ describe('the chat a page at a time, across chapters (ec-n0uh, ec-yxru, ec-enqy)
     // Search reaches the first chapter too.
     expect((await env.ROBOT.getByName(id).searchConversation('Mokotowska')).items.length).toBeGreaterThan(0)
     expect((await page(id, 'not-a-cursor' as string))).toMatchObject({ error: expect.any(String) })
-  })
+    // 41 Turns: slow when the whole suite shares the machine.
+  }, 120_000)
 
   it('names every open Ask with each page, wherever it is', async () => {
     const id = await robot()

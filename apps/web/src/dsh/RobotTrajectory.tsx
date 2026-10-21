@@ -117,22 +117,29 @@ const windowOf = (robotId: string): EventWindow => {
 }
 const trajectoryStateAtom = Atom.family((_robotId: string) => Atom.make(INITIAL).pipe(Atom.keepAlive))
 
-type Load = { readonly robotId: string; readonly kind: 'open' | 'refresh' | 'older'; /** A Subagent's own log (ao-ce55). */ readonly child?: string }
+type Load = {
+  readonly robotId: string
+  readonly kind: 'open' | 'refresh' | 'older'
+  /** A Subagent's own log (ao-ce55). */
+  readonly child?: string
+  /** A chapter of the Robot's Conversation other than the live one (v1.19, ec-mwvo). */
+  readonly chapter?: number
+}
 
-/** Whose log a window holds: the Robot's, or one of its Subagents'. */
-const sourceKey = (robotId: string, child?: string) => (child === undefined ? robotId : `${robotId}|${child}`)
+/** Whose log a window holds: the Robot's live chapter or another one, or one of its Subagents'. */
+const sourceKey = (robotId: string, child?: string, chapter?: number) => (child !== undefined ? `${robotId}|${child}` : chapter !== undefined ? `${robotId}#${chapter}` : robotId)
 
 /** Open the latest page, append newer events (live), or prepend an older page; resolves whether older rows were added. */
 const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* () {
   const api = yield* MrRobotApi
-  const key = sourceKey(load.robotId, load.child)
+  const key = sourceKey(load.robotId, load.child, load.chapter)
   const state = trajectoryStateAtom(key)
   const window = windowOf(key)
   // Read through the registry: a subscribed read would restart this command each time it updates the state.
   const read = () => get.registry.get(state)
   const write = (next: TrajectoryState) => get.registry.set(state, next)
   const open = Effect.gen(function* () {
-    const page = yield* api.events(load.robotId, { limit: PAGE }, load.child)
+    const page = yield* api.events(load.robotId, { limit: PAGE }, load.child, load.chapter)
     window.sessionId = page.sessionId
     window.firstSeq = page.events[0]?.seq
     window.lastSeq = page.events.at(-1)?.seq
@@ -146,7 +153,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   // Nothing loaded yet: the open in flight brings the latest events.
   if (window.lastSeq === undefined) return false
   if (load.kind === 'refresh') {
-    const page = yield* api.events(load.robotId, { after: window.lastSeq, limit: 2000 }, load.child)
+    const page = yield* api.events(load.robotId, { after: window.lastSeq, limit: 2000 }, load.child, load.chapter)
     // A different session (after a rewind) replaces the whole window.
     if (page.sessionId !== window.sessionId) return yield* open
     window.events = [...window.events, ...page.events]
@@ -158,7 +165,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   const current = read()
   if (window.firstSeq === undefined || !current.paging.hasMore) return false
   write({ ...current, paging: { ...current.paging, loadingOlder: true } })
-  const page = yield* api.events(load.robotId, { before: window.firstSeq, limit: PAGE }, load.child).pipe(
+  const page = yield* api.events(load.robotId, { before: window.firstSeq, limit: PAGE }, load.child, load.chapter).pipe(
     Effect.ensuring(Effect.sync(() => { const now = read(); write({ ...now, paging: { ...now.paging, loadingOlder: false } }) })),
   )
   const before = read().snapshot
@@ -172,7 +179,7 @@ const loadEventsAtom = apiRuntime.fn((load: Load, get) => Effect.gen(function* (
   write({ ...now, snapshot, paging: { ...now.paging, hasMore: page.hasMore } })
   return snapshot !== before
 }).pipe(Effect.tapError((failure) => Effect.sync(() => {
-  const target = trajectoryStateAtom(sourceKey(load.robotId, load.child))
+  const target = trajectoryStateAtom(sourceKey(load.robotId, load.child, load.chapter))
   get.registry.set(target, { ...get.registry.get(target), failure: describeFailure(failure) })
 }))), { concurrent: true })
 
@@ -307,8 +314,8 @@ export function FallbackList({ fallbacks }: { fallbacks: readonly FallbackRow[] 
   )
 }
 
-export function RobotTrajectory({ robotId, liveVersion, child }: { robotId: string; liveVersion: number; child?: string }) {
-  const key = sourceKey(robotId, child)
+export function RobotTrajectory({ robotId, liveVersion, child, chapter }: { robotId: string; liveVersion: number; child?: string; chapter?: number }) {
+  const key = sourceKey(robotId, child, chapter)
   const state = useAtomValue(trajectoryStateAtom(key))
   const load = useAtomSet(loadEventsAtom, { mode: 'promiseExit' })
   const loadImage = useMemo(() => imageLoader(robotId) as unknown as MessageImageLoader, [robotId])
@@ -316,15 +323,16 @@ export function RobotTrajectory({ robotId, liveVersion, child }: { robotId: stri
   // The setter's identity is not stable across renders; effects read the latest one through a ref.
   const loadRef = useRef(load)
   loadRef.current = load
-  const source = child === undefined ? {} : { child }
-  useEffect(() => { void loadRef.current({ robotId, kind: 'open', ...source }) }, [robotId, child])
+  const source = { ...(child === undefined ? {} : { child }), ...(chapter === undefined ? {} : { chapter }) }
+  useEffect(() => { void loadRef.current({ robotId, kind: 'open', ...source }) }, [robotId, child, chapter])
   // Every change the Robot announces after the page opened brings the events written since (fe-xp06).
   const openedAt = useRef(liveVersion)
-  useEffect(() => { if (liveVersion !== openedAt.current) void loadRef.current({ robotId, kind: 'refresh', ...source }) }, [robotId, child, liveVersion])
+  // A closed chapter does not change; only the live one is read again.
+  useEffect(() => { if (liveVersion !== openedAt.current && chapter === undefined) void loadRef.current({ robotId, kind: 'refresh', ...source }) }, [robotId, child, chapter, liveVersion])
   const loadOlder = useCallback(async () => {
     const exit = await loadRef.current({ robotId, kind: 'older', ...source })
     return Exit.isSuccess(exit) && exit.value
-  }, [robotId, child])
+  }, [robotId, child, chapter])
   const snapshot = state.snapshot
   const paging = state.paging
   const useTrajectory = useCallback(<S,>(select: (value: TrajectorySnapshot) => S) => select(snapshot), [snapshot])

@@ -157,3 +157,30 @@ describe('the upgrade registers old Conversations as chapters (ec-eaz3)', () => 
     expect(await chat(id)).toEqual(before)
   })
 })
+
+describe('the Trajectory a chapter at a time (v1.19 ticket 04, ec-mwvo, ec-elhb)', () => {
+  it('lists every chapter with its dates, Turns and why it closed, and shows one chapter\'s own log', async () => {
+    const id = await robot()
+    await turn(id, 'I like the blue apartment.', [{ say: 'Noted.' }])
+    const first = await trajectory(id)
+    await compacted(id)
+    const live = await trajectory(id)
+    expect(live.chapter).toBe(2)
+    expect(live.chapters.map((chapter) => [chapter.ordinal, chapter.closedBy, chapter.superseded])).toEqual([[1, 'compaction', false], [2, null, false]])
+    expect(live.chapters[0]!.turns).toBe(first.events.filter((event) => event.type === 'turn/start').length + 2)
+    expect(live.chapters[0]!.closedAt).toBeGreaterThanOrEqual(live.chapters[0]!.openedAt)
+    expect(live.chapters[1]!.turns).toBe(1)
+
+    const old = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory?chapter=1`)).body
+    expect(old.sessionId).toBe(first.sessionId)
+    expect(old.chapter).toBe(1)
+    expect(old.events.slice(0, first.events.length)).toEqual(first.events)
+    expect(JSON.stringify(old.events)).toContain('I like the blue apartment.')
+    expect(JSON.stringify(live.events)).not.toContain('I like the blue apartment.')
+    const page = (await api<{ sessionId: string; events: Array<{ seq: number }> }>(ANNA, `/api/robots/${id}/events?chapter=1&limit=5`)).body
+    expect(page.sessionId).toBe(first.sessionId)
+    expect(page.events.map((event) => event.seq)).toEqual(old.events.slice(-5).map((event) => event.seq))
+    expect((await api(ANNA, `/api/robots/${id}/trajectory?chapter=9`)).status).toBe(404)
+    expect((await api(ANNA, `/api/robots/${id}/trajectory?chapter=two`)).status).toBe(400)
+  })
+})

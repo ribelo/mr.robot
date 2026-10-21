@@ -1,3 +1,5 @@
+import type { ChapterView } from '@mr-robot/protocol'
+
 /**
  * The chapters of a Robot's Conversation (v1.19, ec-7oq8): each chapter is one DSH session in the log, from a compaction checkpoint (or a
  * Rewind's point) to the next. They form a chain by parent: the Conversation is the live chapter and its ancestors, each ancestor up to
@@ -42,12 +44,13 @@ export const CHAPTER_SCHEMA = `CREATE TABLE IF NOT EXISTS chapter (
   opened_at INTEGER NOT NULL,
   closed_at INTEGER,
   closed_by TEXT,
-  superseded INTEGER NOT NULL DEFAULT 0
+  superseded INTEGER NOT NULL DEFAULT 0,
+  turns INTEGER
 ) WITHOUT ROWID`
 
 type Row = {
   session_id: string; ordinal: number; parent_session: string | null; parent_seq: number | null; first_seq: number; cut: number | null
-  opened_at: number; closed_at: number | null; closed_by: ChapterClose | null; superseded: number
+  opened_at: number; closed_at: number | null; closed_by: ChapterClose | null; superseded: number; turns: number | null
 }
 
 const fromSql = (row: Row): Chapter => ({
@@ -105,9 +108,11 @@ export class ChapterStore {
     return this.get(sessionId)!
   }
 
-  /** The live chapter closes: a compaction opened the next one, or a Rewind did. */
-  close(sessionId: string, by: ChapterClose, now: number): void {
-    this.sql.exec('UPDATE chapter SET closed_at = ?, closed_by = ? WHERE session_id = ? AND closed_at IS NULL', now, by, sessionId)
+  /** The live chapter closes: a compaction opened the next one, or a Rewind did; its events give its count of Turns. */
+  close(sessionId: string, by: ChapterClose, now: number, events: ReadonlyArray<{ readonly type: string; readonly seq: number }>): void {
+    const first = this.get(sessionId)?.firstSeq ?? 0
+    const turns = events.filter((event) => event.seq >= first && event.type === 'turn/start').length
+    this.sql.exec('UPDATE chapter SET closed_at = ?, closed_by = ?, turns = ? WHERE session_id = ? AND closed_at IS NULL', now, by, turns, sessionId)
   }
 
   /**
@@ -125,6 +130,28 @@ export class ChapterStore {
   restore(sessionId: string, from: string, now: number): void {
     this.sql.exec("UPDATE chapter SET superseded = 1, closed_at = COALESCE(closed_at, ?), closed_by = COALESCE(closed_by, 'rewind') WHERE session_id = ?", now, from)
     this.sql.exec('UPDATE chapter SET closed_at = NULL, closed_by = NULL, cut = NULL, superseded = 0 WHERE session_id = ?', sessionId)
+  }
+
+  /** The chapter with this ordinal, on the Conversation or superseded. */
+  byOrdinal(ordinal: number): Chapter | undefined {
+    const row = this.sql.exec<Row>('SELECT * FROM chapter WHERE ordinal = ?', ordinal).toArray()[0]
+    return row === undefined ? undefined : fromSql(row)
+  }
+
+  /** Every chapter as the Trajectory lists it (ec-mwvo); a closed chapter's Turns are counted once, the live one's each time. */
+  views(): ChapterView[] {
+    return this.sql.exec<Row>('SELECT * FROM chapter ORDER BY ordinal').toArray().map((row) => {
+      let turns = row.turns
+      if (turns === null) {
+        // Stored events begin with their type: the count reads one chapter, never the history.
+        turns = this.sql.exec<{ count: number }>(`SELECT COUNT(*) AS count FROM session_event WHERE session_id = ? AND seq >= ? AND event LIKE '{"type":"turn/start"%'`, row.session_id, row.first_seq).one().count
+        if (row.closed_at !== null) this.sql.exec('UPDATE chapter SET turns = ? WHERE session_id = ?', turns, row.session_id)
+      }
+      return {
+        ordinal: row.ordinal, sessionId: row.session_id, openedAt: row.opened_at, closedAt: row.closed_at, closedBy: row.closed_by,
+        superseded: row.superseded === 1, turns, firstSeq: row.first_seq,
+      }
+    })
   }
 
   clear(): void {

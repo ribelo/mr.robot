@@ -360,11 +360,27 @@ const trajectoryEvents = (sessionId: string) => Effect.gen(function* () {
   }))
 })
 
-/** The full session log of the live Conversation (robot-h5v3), secrets masked. */
-export const trajectory = Effect.gen(function* () {
+/** A chapter by its ordinal, or the live one (v1.19). */
+const chapterOf = (ordinal: number | undefined) => Effect.gen(function* () {
   const store = yield* RobotState
   const current = yield* config
-  return { robotId: current.id, sessionId: current.liveSessionId, events: yield* trajectoryEvents(current.liveSessionId), rewinds: store.rewinds() } as Trajectory
+  const chapter = ordinal === undefined ? store.chapters.get(current.liveSessionId) : store.chapters.byOrdinal(ordinal)
+  if (chapter === undefined) return yield* notFound(`no chapter ${ordinal ?? 'live'} in this Conversation`)
+  return chapter
+})
+
+/**
+ * One chapter's whole log (robot-h5v3, v1.19 ec-mwvo, ec-elhb), the live one by default, secrets masked, with the list of every
+ * chapter: an old chapter reads its own events only.
+ */
+export const trajectory = (ordinal?: number) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const current = yield* config
+  const chapter = yield* chapterOf(ordinal)
+  return {
+    robotId: current.id, sessionId: chapter.sessionId, chapter: chapter.ordinal, chapters: store.chapters.views(),
+    events: yield* trajectoryEvents(chapter.sessionId), rewinds: store.rewinds(),
+  } as Trajectory
 })
 
 /** An archived log, read-only (the rewind archive). */
@@ -378,9 +394,8 @@ export const archivedTrajectory = (sessionId: string) => Effect.gen(function* ()
  * The live session's DSH events exactly as stored (every field, including surfaceOp), secrets
  * masked, for the DSH trajectory view. Pages backwards with before, forwards with after.
  */
-export const sessionEvents = (input: { before?: number; after?: number; limit?: number }) => Effect.gen(function* () {
-  const current = yield* config
-  return yield* eventsPage(current.liveSessionId, input)
+export const sessionEvents = (input: { before?: number; after?: number; limit?: number; chapter?: number }) => Effect.gen(function* () {
+  return yield* eventsPage((yield* chapterOf(input.chapter)).sessionId, input)
 })
 
 const eventsPage = (sessionId: string, input: { before?: number; after?: number; limit?: number }) => Effect.gen(function* () {

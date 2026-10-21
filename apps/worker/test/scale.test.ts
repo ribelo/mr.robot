@@ -120,16 +120,19 @@ describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
     expect(deputy.sessionRows).toBeLessThanOrEqual(CHAT_ROWS)
   }, 300_000)
 
-  it('opens the Trajectory reading one span (ec-elhb)', async () => {
-    const run = await measured(() => api<{ events: unknown[] }>(ANNA, `/api/robots/${id}/trajectory`))
-    report('trajectory', run, run.value.status === 200 ? `${run.value.body.events.length} events` : `status ${run.value.status}`)
-    expect(run.value.status).toBe(200)
-    expect(run.sessionRows).toBeLessThanOrEqual(TRAJECTORY_ROWS)
-    expect(run.ms).toBeLessThan(TRAJECTORY_MS)
+  it('opens the Trajectory reading one span, the live one or an old one (ec-elhb)', async () => {
+    for (const [name, query] of [['trajectory', ''], ['trajectory chapter 200', '?chapter=200']] as const) {
+      const run = await measured(() => api<{ events: unknown[]; chapters: unknown[] }>(ANNA, `/api/robots/${id}/trajectory${query}`))
+      report(name, run, run.value.status === 200 ? `${run.value.body.events.length} events, ${run.value.body.chapters.length} chapters listed` : `status ${run.value.status}`)
+      expect(run.value.status).toBe(200)
+      expect(run.value.body.chapters).toHaveLength(SPANS)
+      expect(run.sessionRows).toBeLessThanOrEqual(TRAJECTORY_ROWS)
+      expect(run.ms).toBeLessThan(TRAJECTORY_MS)
+    }
   }, 300_000)
 
   it('pages the raw events of the Trajectory reading one page', async () => {
-    const run = await measured(() => api<{ events: unknown[] }>(ANNA, `/api/robots/${id}/events?limit=400`))
+    const run = await measured(() => api<{ events: unknown[] }>(ANNA, `/api/robots/${id}/events?limit=400&chapter=200`))
     report('trajectory events page', run, `${run.value.body.events.length} events`)
     expect(run.sessionRows).toBeLessThanOrEqual(TRAJECTORY_ROWS)
     expect(run.ms).toBeLessThan(TRAJECTORY_MS)

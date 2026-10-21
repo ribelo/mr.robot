@@ -123,6 +123,13 @@ const TIME_ZONE_HEADER = 'X-Time-Zone'
 
 const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
 
+/** The ?chapter= of a request (v1.19): undefined when absent, null when it is not a chapter number. */
+function chapterParam(request: Request): number | undefined | null {
+  const value = new URL(request.url).searchParams.get('chapter')
+  if (value === null) return undefined
+  return /^\d+$/.test(value) ? Number(value) : null
+}
+
 /**
  * The caller of a Task route: the Member, recorded as themselves. The Home admin sees every Task with Whole Home
  * (mc-m7gg): a list asks for it with scope=home; one Task's routes follow the admin's remembered switch.
@@ -474,7 +481,13 @@ export const api = new Router<ApiContext>()
     }),
     Effect.tap(() => call(() => c.env.MEMBER.getByName(c.member.id).markSeen(id, Date.now()))),
   ))
-  .on('GET', '/api/robots/:id/trajectory', (c, { id }) => reach(c, id).pipe(Effect.andThen(call(() => robot(c, id).trajectoryMasked()))))
+  .on('GET', '/api/robots/:id/trajectory', (c, { id }) => Effect.gen(function* () {
+    yield* reach(c, id)
+    // One chapter at a time (v1.19, ec-mwvo): ?chapter=<ordinal>, the live one without it.
+    const chapter = chapterParam(c.request)
+    if (chapter === null) return yield* Effect.fail(badRequest('chapter is a chapter number'))
+    return yield* call(() => robot(c, id).trajectoryMasked(chapter))
+  }))
   .on('POST', '/api/robots/:id/rewind', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
     const input = yield* decodeBody(c.request, RewindRequest)
@@ -616,7 +629,10 @@ export const api = new Router<ApiContext>()
     yield* reach(c, id)
     const query = new URL(c.request.url).searchParams
     const number = (name: string) => (query.get(name) === null ? undefined : Number(query.get(name)))
+    const chapter = chapterParam(c.request)
+    if (chapter === null) return yield* Effect.fail(badRequest('chapter is a chapter number'))
     const page = yield* call(() => robot(c, id).sessionEvents({
+      ...(chapter === undefined ? {} : { chapter }),
       ...(number('before') === undefined ? {} : { before: number('before')! }),
       ...(number('after') === undefined ? {} : { after: number('after')! }),
       ...(number('limit') === undefined ? {} : { limit: number('limit')! }),

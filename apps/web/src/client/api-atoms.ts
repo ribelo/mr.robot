@@ -62,7 +62,11 @@ export const subagentConversationAtom = Atom.family((key: string) => {
 export const catalogAtom = Atom.family((id: string) => query((api) => api.catalog(id), [keys.robot(id)]))
 export const promptAtom = Atom.family((id: string) => query((api) => api.prompt(id), [keys.robot(id)]))
 export const webhookAtom = Atom.family((id: string) => query((api) => api.webhook(id), [keys.robot(id)]))
-export const trajectoryAtom = Atom.family((id: string) => query((api) => api.trajectory(id), [keys.robot(id)]))
+/** Keyed "<robot id>" for the live chapter or "<robot id>|<ordinal>" for another one (v1.19). */
+export const trajectoryAtom = Atom.family((key: string) => {
+  const [id = '', chapter] = key.split('|')
+  return query((api) => api.trajectory(id, chapter === undefined ? undefined : Number(chapter)), [keys.robot(id)])
+})
 export const filesAtom = Atom.family((id: string) => query((api) => api.files(id), [keys.files(id)]))
 /** Keyed "<robot id>\n<path>". */
 export const fileAtom = Atom.family((key: string) => {

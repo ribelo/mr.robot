@@ -1281,9 +1281,30 @@ export const RewindView = Schema.Struct({
 })
 export type RewindView = typeof RewindView.Type
 
+/**
+ * One chapter of a Conversation (v1.19, ec-mwvo): one session of the log, from a compaction checkpoint (or a Rewind's point) to the
+ * next. closedBy is null while it is live; a superseded one is off the Conversation (a Rewind went back before it) and read-only.
+ * Its own events start at firstSeq; the ones before are its seed.
+ */
+export const ChapterView = Schema.Struct({
+  ordinal: Schema.Number,
+  sessionId: Schema.String,
+  openedAt: Schema.Number,
+  closedAt: Schema.NullOr(Schema.Number),
+  closedBy: Schema.NullOr(Schema.Literals(['compaction', 'rewind'])),
+  superseded: Schema.Boolean,
+  turns: Schema.Number,
+  firstSeq: Schema.Number,
+})
+export type ChapterView = typeof ChapterView.Type
+
+/** One chapter's events with the list of every chapter (v1.19, ec-mwvo, ec-elhb). */
 export const Trajectory = Schema.Struct({
   robotId: Schema.String,
   sessionId: Schema.String,
+  /** The chapter shown. */
+  chapter: Schema.Number,
+  chapters: Schema.Array(ChapterView),
   events: Schema.Array(TrajectoryEvent),
   rewinds: Schema.Array(RewindView),
 })

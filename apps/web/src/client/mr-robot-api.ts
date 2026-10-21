@@ -70,10 +70,11 @@ const make = Effect.gen(function* () {
     createRobot: (input: { readonly brief?: string; readonly model?: ModelChoice }) => request(CreatedRobot, 'POST', '/api/robots', input),
     /** The newest page of the chat, or the one older than a page's cursor (v1.19, ec-n0uh). */
     conversation: (id: string, details: boolean, before?: string) => get(Conversation, `/api/robots/${enc(id)}/conversation?details=${details ? '1' : '0'}${before === undefined ? '' : `&before=${encodeURIComponent(before)}`}`),
-    trajectory: (id: string) => get(Trajectory, `/api/robots/${enc(id)}/trajectory`),
+    /** One chapter's log with the chapter list; the live chapter without one (v1.19, ec-mwvo). */
+    trajectory: (id: string, chapter?: number) => get(Trajectory, `/api/robots/${enc(id)}/trajectory${chapter === undefined ? '' : `?chapter=${chapter}`}`),
     /** A page of raw session events: the latest (no cursor), newer than after, or older than before. */
-    events: (id: string, page: { readonly before?: number; readonly after?: number; readonly limit: number }, child?: string) =>
-      get(SessionEventsPage, `/api/robots/${enc(id)}${child === undefined ? '' : `/subagents/${enc(child)}`}/events?limit=${page.limit}${page.before === undefined ? '' : `&before=${page.before}`}${page.after === undefined ? '' : `&after=${page.after}`}`),
+    events: (id: string, page: { readonly before?: number; readonly after?: number; readonly limit: number }, child?: string, chapter?: number) =>
+      get(SessionEventsPage, `/api/robots/${enc(id)}${child === undefined ? '' : `/subagents/${enc(child)}`}/events?limit=${page.limit}${page.before === undefined ? '' : `&before=${page.before}`}${page.after === undefined ? '' : `&after=${page.after}`}${chapter === undefined ? '' : `&chapter=${chapter}`}`),
     /** A Robot's Subagents, each with its own Chat and Trajectory (ao-ce55). */
     subagents: (id: string) => get(Schema.Array(SubagentView), `/api/robots/${enc(id)}/subagents`),
     subagentConversation: (id: string, child: string) => get(Conversation, `/api/robots/${enc(id)}/subagents/${enc(child)}/conversation`),
