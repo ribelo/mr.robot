@@ -227,6 +227,17 @@ export class Robot extends ProductionRobot {
   }
 
   /** A compaction happened in the live chapter and the Turn ended: it closes as the Robot closes it (v1.19). */
+  /** The conversation index as before v1.20.1 left a chapter that went cold unindexed: forgotten (v1.20.1 ticket 04). */
+  async forgetSearchForTest(): Promise<void> {
+    this.store.search.clear()
+  }
+
+  /** A Clear history evicted after its transaction: these cold objects are named for the purge and not yet removed. */
+  async coldPurgeForTest(keys: string[]): Promise<void> {
+    this.store.set('cold-purge', keys)
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
+  }
+
   async closeChapterForTest(): Promise<void> {
     this.store.set(CHAPTER_COMPACTED, this.store.requireConfig().liveSessionId)
     await this.rollChapter()

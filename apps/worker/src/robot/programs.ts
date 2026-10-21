@@ -20,7 +20,8 @@ import { setupGrants } from '../agent/catalog.ts'
 import { effectiveSpendLimit, emptyGrants, GRANT_FIELDS, grantSetFrom, overlayGrants, usableNames, type GrantItemRef, type GrantSet, type SpaceSpendLimit } from '@mr-robot/protocol'
 import { THREAD_PAUSE_AT, timeLabel, type AskAnswerLabel } from '../agent/sources.ts'
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
-import { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Chapter } from './chapters.ts'
 import { chapterSeed } from '../agent/chapter-seed.ts'
 import type { GrantsForm, TasksForm } from '../definitions/definition.ts'
 import { coldChapter } from './cold-chapters.ts'
@@ -1034,7 +1035,7 @@ export const rewind = (atSeq: number, ordinal?: number) => Effect.gen(function* 
   const refused = Result.try(() => Session.create(SessionId(sessionId), seed.events, nextHeader, SessionLogOffset(seed.inheritedEventCount)))
   if (Result.isFailure(refused)) return yield* conflict(`that point cannot start a chapter: ${String(refused.failure)}`)
   const later = store.chapters.chain().filter((chapter) => chapter.ordinal > target.ordinal)
-  const label = rewindLabel(timeLabel(events[atSeq]!.time, current.timeZone), toolsSince(store, target.sessionId, atSeq, later.map((chapter) => chapter.sessionId)))
+  const label = rewindLabel(timeLabel(events[atSeq]!.time, current.timeZone), yield* toolsSince(store, events, atSeq, target, later))
   const record = { id: `rw-${crypto.randomUUID().slice(0, 8)}`, atSeq, archivedSessionId: target.sessionId, liveSessionId: sessionId, at: now }
   const liveEvents = current.liveSessionId === target.sessionId ? events : readStoredEvents(store.sql, current.liveSessionId)
   yield* platform.releaseAgent()
@@ -1054,13 +1055,27 @@ export const rewind = (atSeq: number, ordinal?: number) => Effect.gen(function* 
   return { ...record, undone: false } as RewindView
 })
 
-/** The tools used after the point: in the chapter after it, and in every chapter the Rewind supersedes. */
-function toolsSince(store: RobotStore, sessionId: string, atSeq: number, later: readonly string[]): string[] {
-  const names = (session: string, from: number) => store.sql.exec<{ name: string | null }>(
-    `SELECT DISTINCT json_extract(event, '$.data.name') AS name FROM session_event WHERE session_id = ? AND seq > ? AND event LIKE '{"type":"tool/call"%'`, session, from,
-  ).toArray().flatMap((row) => (row.name === null ? [] : [row.name]))
-  return [...new Set([...names(sessionId, atSeq), ...later.flatMap((session) => names(session, -1))])]
-}
+/**
+ * The tools used after the point (v1.20.1, v1.19-review #1, #6): in the chapter after it, in every chapter the Rewind supersedes, and in the
+ * Subagents that ran in them. Each log is read where it is, SQLite or a cold chapter's object in R2, so a cold chapter is not silent; a
+ * program's inner calls count by their own names, and run_code itself is not an effect.
+ */
+const toolsSince = (store: RobotStore, targetEvents: readonly SessionEvent[], atSeq: number, target: Chapter, later: readonly Chapter[]) => Effect.gen(function* () {
+  const names = (events: readonly SessionEvent[], from: number) => events.flatMap((event) => {
+    if (event.seq <= from || (event.type !== 'tool/call' && event.type !== 'tool/ptc-dispatch')) return []
+    const name = (event.data as { name?: unknown }).name
+    return typeof name === 'string' && name !== 'run_code' ? [name] : []
+  })
+  const subagents = new SubagentStore(store.sql)
+  const found: string[] = [...names(targetEvents, atSeq)]
+  // A Subagent of the target chapter started after the point counts; so does every Subagent of a later chapter.
+  for (const child of subagents.of(target.sessionId)) if (child.parentSeq > atSeq) found.push(...names(yield* logOf(child.id), -1))
+  for (const chapter of later) {
+    found.push(...names(yield* logOf(chapter.sessionId), -1))
+    for (const child of subagents.of(chapter.sessionId)) found.push(...names(yield* logOf(child.id), -1))
+  }
+  return [...new Set(found)]
+})
 
 /** The next Wake-up's label after a Rewind (ec-utsf). */
 function rewindLabel(when: string, tools: readonly string[]): string {

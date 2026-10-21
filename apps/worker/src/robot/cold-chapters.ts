@@ -45,6 +45,8 @@ export async function moveColdChapters(store: RobotStore, bucket: R2Bucket, robo
     if (!store.chat.current(chapter.sessionId)) continue
     const children = subagents.of(chapter.sessionId)
     if (children.some((row) => row.status === 'running')) continue
+    // Indexed before its rows go, so search finds it after (v1.20.1, v1.19-review #5).
+    store.search.catchUp(chapter.sessionId, chapter.firstSeq)
     const events = readStoredEvents(store.sql, chapter.sessionId)
     const body: ColdChapter = { sessionId: chapter.sessionId, events, subagents: Object.fromEntries(children.map((row) => [row.id, readStoredEvents(store.sql, row.id)])) }
     await bucket.put(coldKey(robotId, chapter.ordinal), JSON.stringify(body), { httpMetadata: { contentType: 'application/json' } })
@@ -54,6 +56,12 @@ export async function moveColdChapters(store: RobotStore, bucket: R2Bucket, robo
       store.chapters.markCold(chapter.sessionId, turns)
     })
     moved += 1
+  }
+  // A chapter that went cold before this fix without being indexed: read it from R2 and index it.
+  for (const behind of store.search.behind().filter((row) => row.cold === 1).slice(0, limit)) {
+    const chapter = store.chapters.get(behind.session_id)
+    const cold = chapter === undefined ? undefined : await coldChapter(bucket, robotId, chapter)
+    if (cold !== undefined) store.search.indexEvents(behind.session_id, cold.events, behind.first_seq)
   }
   return moved
 }
@@ -68,6 +76,18 @@ export async function coldChapter(bucket: R2Bucket, robotId: string, chapter: Ch
 }
 
 /** Delete every cold chapter of a Robot: it is deleted, or its history is cleared (ec-cgsl). */
+/** Every cold chapter object of a Robot, by key. */
+export async function listColdChapters(bucket: R2Bucket, robotId: string): Promise<string[]> {
+  const keys: string[] = []
+  let cursor: string | undefined
+  do {
+    const page = await bucket.list({ prefix: coldPrefix(robotId), ...(cursor === undefined ? {} : { cursor }) })
+    keys.push(...page.objects.map((object) => object.key))
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor !== undefined)
+  return keys
+}
+
 export async function deleteColdChapters(bucket: R2Bucket, robotId: string): Promise<void> {
   let cursor: string | undefined
   do {

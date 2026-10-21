@@ -20,7 +20,7 @@ import { BOX_ROOT } from '../places/files.ts'
 import type { OpencodePool } from '../providers/opencode-go.ts'
 import { buildForkSeed, Session, SessionId, SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { chapterSeed } from '../agent/chapter-seed.ts'
-import { deleteColdChapters, moveColdChapters } from './cold-chapters.ts'
+import { deleteColdChapters, listColdChapters, moveColdChapters } from './cold-chapters.ts'
 import type {
   HostView,
   WorkspaceFileContent,
@@ -313,6 +313,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       stopBox: async () => { await this.stopBox() },
     }, BOX_IDLE_MS, JOB_CHECK_MS))
     this.duties.register(idleDuty(this.idleHost()))
+    this.duties.register({ name: 'cold-purge', order: 45, scope: 'alive', nextAt: (now) => ((store.get<string[]>(COLD_PURGE) ?? []).length > 0 ? now : undefined), run: () => this.purgeCold() })
     this.duties.register(dreamDuty({
       store,
       nextDreamHour: (after) => nextRun({ kind: 'daily', time: DREAM_TIME }, store.requireConfig().timeZone, after, after) ?? after + 86_400_000,
@@ -503,24 +504,41 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * rewinds or queued wake-ups. Configuration, grants and every Workspace file stay (v1.11, sk-8won); its Tasks live at the Space.
    */
   async clearHistory(): Promise<void> {
-    if (this.store.activeTurn() !== undefined) throw new Error('the Robot is working; wait for it to finish, then clear')
-    this.interruptChildren()
-    this.children.clear()
-    await this.releaseComposition()
-    this.subagentRows.clear()
-    const sql = this.ctx.storage.sql
-    for (const table of ['session_event', 'session_log', 'chapter', 'chat_item', 'chat_fold', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
-    // Answered Asks go with the history; open ones are still decisions the owner owes.
-    sql.exec("DELETE FROM proposal WHERE status != 'open'")
-    this.store.search.clear()
-    // The cold chapters are the history too (v1.19, ec-cgsl); their ordinals start again.
-    await deleteColdChapters(this.env.FILES, this.store.requireConfig().id)
-    for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen', CHAPTER_COMPACTED]) this.store.delete(key)
-    const next = this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
-    this.store.openChapter(next.liveSessionId, null, 0, Date.now())
-    // The Asks still open are decisions the owner owes: the new chat starts with them.
-    for (const row of this.store.proposals('open')) this.store.chat.side(next.liveSessionId, (seq) => ({ kind: 'proposal', id: `proposal-${row.id}`, seq, at: row.createdAt, proposalId: row.id }))
+    if (this.store.activeTurn() !== undefined || this.platformTurn !== undefined) throw new Error('the Robot is working; wait for it to finish, then clear')
+    await this.asTurn(async () => {
+      this.interruptChildren()
+      this.children.clear()
+      await this.releaseComposition()
+      const robotId = this.store.requireConfig().id
+      // The cold chapters to remove, named before anything changes (v1.20.1, v1.19-review #2).
+      const coldKeys = await listColdChapters(this.env.FILES, robotId)
+      // One transaction: the old history goes and the new live chapter is there, or nothing changed. An eviction after it leaves a
+      // working Robot; the R2 objects named in the purge are removed after, and again by the alarm until they are gone.
+      this.store.transaction(() => {
+        this.subagentRows.clear()
+        const sql = this.ctx.storage.sql
+        for (const table of ['session_event', 'session_log', 'chapter', 'chat_item', 'chat_fold', 'notice', 'rewind', 'wakeup', 'turn', 'outbox', 'intake', 'reply_handle']) sql.exec(`DELETE FROM ${table}`)
+        // Answered Asks go with the history; open ones are still decisions the owner owes.
+        sql.exec("DELETE FROM proposal WHERE status != 'open'")
+        this.store.search.clear()
+        for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen', CHAPTER_COMPACTED]) this.store.delete(key)
+        const next = this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
+        this.store.openChapter(next.liveSessionId, null, 0, Date.now())
+        // The Asks still open are decisions the owner owes: the new chat starts with them.
+        for (const row of this.store.proposals('open')) this.store.chat.side(next.liveSessionId, (seq) => ({ kind: 'proposal', id: `proposal-${row.id}`, seq, at: row.createdAt, proposalId: row.id }))
+        this.store.set(COLD_PURGE, [...(this.store.get<string[]>(COLD_PURGE) ?? []), ...coldKeys])
+      })
+      await this.purgeCold()
+    }, 'Clear history')
     await this.changed()
+  }
+
+  /** The cold chapter objects a Clear history left to remove: removed now; what fails stays named for the next try (v1.20.1). */
+  private async purgeCold(): Promise<void> {
+    const keys = this.store.get<string[]>(COLD_PURGE) ?? []
+    if (keys.length === 0) return
+    for (let at = 0; at < keys.length; at += 1000) await this.env.FILES.delete(keys.slice(at, at + 1000))
+    this.store.delete(COLD_PURGE)
   }
 
   /**
@@ -1395,12 +1413,22 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
    * parent. The session and the switch to it are stored in one transaction. A memory baseline the context holds stays current, so
    * the memory plugin acts exactly as after the compaction (ec-ndqf). A seed DSH would refuse leaves the chapter live, as before chapters.
    */
-  protected async rollChapter(): Promise<void> {
+  protected rollChapter(): Promise<void> {
+    // Single flight (v1.20.1, v1.19-review #3): a second caller waits for the first and then finds nothing to close.
+    this.rolling ??= this.rollChapterOnce().finally(() => { this.rolling = undefined })
+    return this.rolling
+  }
+
+  private rolling: Promise<void> | undefined
+
+  private async rollChapterOnce(): Promise<void> {
     const from = this.store.requireConfig().liveSessionId
     if (this.store.get<string>(CHAPTER_COMPACTED) !== from) return
     if (this.store.activeTurn() !== undefined || this.subagentRows.running().length > 0) return
     const projections = this.composition?.value.ctx.sessions.messageProjections ?? []
     await this.releaseComposition()
+    // What was checked before the await still holds, or nothing closes: the same chapter, and no Turn began meanwhile.
+    if (this.store.requireConfig().liveSessionId !== from || this.store.get<string>(CHAPTER_COMPACTED) !== from || this.store.activeTurn() !== undefined) return
     const sql = this.ctx.storage.sql
     const events = readStoredEvents(sql, from)
     const header = storedHeader(sql, from)
@@ -4244,7 +4272,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Rewind to before a Turn of a chapter, the live one by default (v1.19, ec-i74p). */
   async rewindBeforeTurn(turn: number, chapter?: number): Promise<RewindView> {
     const before = this.store.requireConfig().liveSessionId
-    const view = await this.program(Programs.rewindBeforeTurn(turn, chapter))
+    // The Turn lock (v1.20.1, v1.19-review #4): no Turn starts while the Rewind reads and switches the chapter.
+    const view = await this.asTurn(() => this.program(Programs.rewindBeforeTurn(turn, chapter)), 'a Rewind')
     this.archiveRewound(before, view)
     return view
   }
@@ -4252,7 +4281,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Rewind to an event of a chapter, the live one by default (v1.19, ec-i74p). */
   async rewind(atSeq: number, chapter?: number): Promise<RewindView> {
     const before = this.store.requireConfig().liveSessionId
-    const view = await this.program(Programs.rewind(atSeq, chapter))
+    const view = await this.asTurn(() => this.program(Programs.rewind(atSeq, chapter)), 'a Rewind')
     this.archiveRewound(before, view)
     return view
   }
@@ -4543,6 +4572,8 @@ const SUBAGENT_DENIED_TOOLS = [
 ]
 /** Where Save as definition stages a Robot's files (v1.18 ticket 04). */
 const DEFINITION_DRAFT = 'definition-draft'
+/** The kv key of the cold chapter objects a Clear history still has to remove (v1.20.1). */
+const COLD_PURGE = 'cold-purge'
 /** The Workspace files whose text is masked at write (v1.20.1). */
 const MASKED_WRITES = /^(pages|dreams|spill|definition-draft)\//
 /** The step limit of the owner scrub. */

@@ -68,25 +68,50 @@ export class ConversationIndex {
 
   /** Index every stored event of the session that is not indexed yet; a session never indexed starts at `from` (its own first event). */
   catchUp(sessionId: string, from = 0): void {
-    let next = this.sql.exec<{ next_seq: number }>('SELECT next_seq FROM chat_search_state WHERE session_id = ?', sessionId).toArray()[0]?.next_seq ?? from
-    const legacy = this.assistantRepliesBefore(sessionId)
+    let next = this.nextSeq(sessionId, from)
     for (;;) {
       const rows = this.sql.exec<{ seq: number; event: string }>(
         'SELECT seq, event FROM session_event WHERE session_id = ? AND seq >= ? ORDER BY seq LIMIT ?', sessionId, next, CATCH_UP_BATCH,
       ).toArray()
       if (rows.length === 0) break
-      for (const row of rows) {
-        const event = JSON.parse(row.event) as SessionEvent
-        const found = chatTextOf(event, legacy)
-        if (found === undefined) continue
-        this.sql.exec(
-          'INSERT INTO chat_search (text, id, session_id, seq, kind, sender, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          found.text, found.id, sessionId, row.seq, found.kind, found.sender, event.time,
-        )
-      }
+      this.indexEvents(sessionId, rows.map((row) => JSON.parse(row.event) as SessionEvent), from)
       next = rows[rows.length - 1]!.seq + 1
     }
+  }
+
+  private nextSeq(sessionId: string, from: number): number {
+    return this.sql.exec<{ next_seq: number }>('SELECT next_seq FROM chat_search_state WHERE session_id = ?', sessionId).toArray()[0]?.next_seq ?? from
+  }
+
+  /**
+   * Index events of a session that are not indexed yet, wherever they were read from: SQLite, or a cold chapter's object in R2 (v1.20.1,
+   * v1.19-review #5). The state moves to after the last one.
+   */
+  indexEvents(sessionId: string, events: readonly SessionEvent[], from = 0): void {
+    const start = this.nextSeq(sessionId, from)
+    const legacy = this.assistantRepliesBefore(sessionId)
+    let next = start
+    for (const event of events) {
+      if (event.seq < start) continue
+      const found = chatTextOf(event, legacy)
+      if (found !== undefined) {
+        this.sql.exec(
+          'INSERT INTO chat_search (text, id, session_id, seq, kind, sender, at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          found.text, found.id, sessionId, event.seq, found.kind, found.sender, event.time,
+        )
+      }
+      next = event.seq + 1
+    }
     this.sql.exec('INSERT INTO chat_search_state (session_id, next_seq) VALUES (?, ?) ON CONFLICT (session_id) DO UPDATE SET next_seq = excluded.next_seq', sessionId, next)
+  }
+
+  /** The chapters on the chain whose index is behind their log: a cold one is read from R2 by the cold tidy (cold-chapters.ts). */
+  behind(): Array<{ session_id: string; first_seq: number; cold: number }> {
+    return this.sql.exec<{ session_id: string; first_seq: number; cold: number }>(
+      `SELECT chapter.session_id, chapter.first_seq, chapter.cold FROM chapter JOIN session_log ON session_log.id = chapter.session_id
+        LEFT JOIN chat_search_state ON chat_search_state.session_id = chapter.session_id
+        WHERE chapter.superseded = 0 AND (chat_search_state.next_seq IS NULL OR chat_search_state.next_seq < session_log.length)`,
+    ).toArray()
   }
 
   /** Forget everything (the Conversation was cleared). */
@@ -106,13 +131,9 @@ export class ConversationIndex {
     this.catchUp(sessionId)
     // A chapter written before search existed, or before the index was rebuilt, is indexed at the first search; chapters opened since are tracked.
     if (this.sql.exec('SELECT 1 FROM chat_search_state WHERE session_id = ?', ALL_INDEXED).toArray().length > 0) return this.page(terms, number)
-    const behind = this.sql.exec<{ session_id: string; first_seq: number }>(
-      `SELECT chapter.session_id, chapter.first_seq FROM chapter JOIN session_log ON session_log.id = chapter.session_id
-        LEFT JOIN chat_search_state ON chat_search_state.session_id = chapter.session_id
-        WHERE chapter.superseded = 0 AND (chat_search_state.next_seq IS NULL OR chat_search_state.next_seq < session_log.length)`,
-    ).toArray()
-    for (const chapter of behind) this.catchUp(chapter.session_id, chapter.first_seq)
-    this.sql.exec('INSERT OR REPLACE INTO chat_search_state (session_id, next_seq) VALUES (?, 0)', ALL_INDEXED)
+    for (const chapter of this.behind()) if (chapter.cold === 0) this.catchUp(chapter.session_id, chapter.first_seq)
+    // Every chapter is indexed only when none is left behind: a cold one waits for the cold tidy, which reads it from R2 (v1.20.1).
+    if (this.behind().length === 0) this.sql.exec('INSERT OR REPLACE INTO chat_search_state (session_id, next_seq) VALUES (?, 0)', ALL_INDEXED)
     return this.page(terms, number)
   }
 

@@ -48,7 +48,9 @@ const FILE_LIST_LIMIT = 300
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text)
 
 const robotId = { type: 'string', description: 'Robot id from robot_list' }
-const page = { type: 'integer', description: 'Page number, from 1 (the default)' }
+/** A page deeper than this reads too much at once (v1.20.1, v1.19-review #8): search with query instead. */
+const MAX_PAGE = 50
+const page = { type: 'integer', description: `Page number, from 1 (the default) to ${MAX_PAGE}; search with query for older items` }
 
 /** The tool group `deputy` (Mr. Robot only): the owner's eyes and non-dangerous hands on the Robots the owner reaches. */
 export function deputyTools(host: DeputyHost): ToolDefinition[] {
@@ -67,7 +69,7 @@ export function deputyTools(host: DeputyHost): ToolDefinition[] {
       concurrencySafe: true,
       execute: async ({ robot_id, query, page: number }) => {
         if (query !== undefined && query.trim() !== '') return host.searchConversation(robot_id, query, number ?? 1)
-        const view = await host.conversation(robot_id, number ?? 1)
+        const view = await host.conversation(robot_id, Math.max(1, Math.min(MAX_PAGE, Math.floor(number ?? 1))))
         return {
           ...view,
           items: view.items.map((item) => ('text' in item && item.text.length > ITEM_TEXT_CHARS ? { ...item, text: clip(item.text, ITEM_TEXT_CHARS) } : item)),
