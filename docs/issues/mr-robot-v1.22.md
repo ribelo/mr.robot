@@ -5,7 +5,7 @@ story-prefix: td
 parent: mr-robot-v1.21.md
 ---
 
-# Mr. Robot v1.22 — Tool discovery
+# Mr. Robot v1.22 — Tool discovery (revision 2: DSH-native)
 
 ## Problem Statement
 
@@ -13,17 +13,17 @@ A Robot's context carries the declaration of every tool its grants mount: in cod
 
 ## Solution
 
-One mode: code mode, everywhere, setup included. Every tool stays bound in the program runtime under its own name; nothing about calling changes. Declared in the context: a fixed set that a Robot needs to talk and to work (say, ask, react, skill, request_credential) and tool_search. Every other tool is undeclared: tool_search returns full declarations of the best matches among the tools the Robot holds; a wrong name answers with the nearest matches. Discovered declarations live only in tool_search results in the history, so compaction removes them and the declared set never changes between steps. The prompt names no tool. The index is built from the mounted tools with weighted keyword search tuned on an evaluation set kept in the repository.
+One mode: code mode, everywhere, setup included. Every tool stays registered and bound under its own name; nothing about calling changes. At the start of a chapter the Robot's tool set is restricted (DSH's restrict) to a fixed set that a Robot needs to talk and to work (say, ask, react, skill, request_credential) plus tool_search. tool_search finds the best matches among the tools the Robot's grants mount and lifts the restriction on them; DSH then announces them itself, as it announces any tool added during a session (a tool-addition developer message in the history; on routes that declare addition-only tool updates the request prefix is kept, on others DSH starts a new request series once, as for any tool change). Found tools stay available for the rest of the chapter; a new chapter starts restricted again, so the set is bounded by use. Declarations are never shortened; no wrapper; the prompt says one sentence.
 
 ## User Stories
 
 1. As an owner, I want code mode to be the only mode: the codeMode setting, the direct-call composition and their UI and deputy fields removed, the setup interview running in code mode too, so that one calling convention exists ^td-2z82
 2. As a Robot, I want every tool I may call to be bound in my program runtime under its own name, exactly as today, so that calling a tool never changes ^td-o271
-3. As a Robot, I want no tool declared in my context except a fixed set (say, ask, react, skill, request_credential and tool_search), so that the size of my tool catalog costs my context nothing ^td-jj8e
-4. As a Robot, I want tool_search({ query, limit? }) to return the full declarations (name, description, parameters with their descriptions, token for token) of the best matches among the tools I hold, ranked, so that I learn a tool by reading its result ^td-x998
+3. As a Robot, I want my tool set restricted at the start of a chapter to a fixed set (say, ask, react, skill, request_credential and tool_search), so that the size of my tool catalog costs my context only what I use ^td-jj8e
+4. As a Robot, I want tool_search({ query, limit? }) to find the best matches among the tools I hold and make them available, their full declarations arriving the way DSH announces any added tool, so that I learn a tool without anyone rewriting it ^td-x998
 5. As a Robot, I want a call to a bound tool whose name I got wrong to fail with the top matches for that name, so that a guess costs one step ^td-qswl
-6. As an owner, I want discovered declarations to live only in tool_search results in the history, never registered, never written to memory or prompt, so that nothing accumulates over an endless Conversation ^td-irxd
-7. As an owner, I want the declared set and the prompt to be identical from one step to the next, so that the provider's prefix cache is never invalidated by discovery ^td-5z44
+6. As an owner, I want found tools to stay available for the rest of the chapter and a new chapter to start restricted again, so that the set is bounded by use and nothing is registered twice ^td-irxd
+7. As an owner, I want discovery to use DSH's own tool-update path and nothing else, so that the cache behaves as it does for any tool change on that route and no harness change exists ^td-5z44
 8. As an operator, I want the search index built at composition from the tools the Robot's grants mount, rebuilt when grants change, with field weights (name, namespace, description, parameter names) whose values come from a measured evaluation set, so that ranking is tuned on evidence, not taste ^td-gcoj
 9. As an operator, I want an evaluation set of real queries with expected tools, kept in the repository, run as a test with a recall@5 floor, so that a ranking regression fails a test ^td-cpuu
 10. As an operator, I want the token count of a Turn's first request measured before and after on a Robot with every group granted, recorded in the closing note, so that the gain is known ^td-ycsz
@@ -35,11 +35,11 @@ One mode: code mode, everywhere, setup included. Every tool stays bound in the p
 ## Implementation Decisions
 
 - **One mode.** The codeMode flag, the direct composition branch, the settings field, the deputy field and the direct-mode tests go; the setup composition mounts the program runtime too; tests that pinned direct mode are rewritten in code mode.
-- **Declared versus bound.** The program runtime keeps every tool bound and callable through the existing gates (grants, ask gate, Auto review, step fences, presentation). The SDK block renders only the fixed set and tool_search. This needs the harness to honour its own deferLoading mark in the program-runtime renderer while keeping the binding; make that change in the harness's vocabulary, carry it as a local patch of the dependency, and open the upstream change. The fixed set is a constant in the composition; nothing else may join it without a spec.
-- **tool_search.** A tool in the fixed set: query (text), limit (default 5, max 10). Result: the matches as the SDK would have rendered them (name, description, parameters and their descriptions, verbatim), ranked. A call to a bound but undeclared name that does not exist answers with "no such tool; nearest: …" from the same ranking. The index: one document per mounted tool with fields name, namespace (the plugin or connector), description, parameter names and descriptions; keyword ranking (BM25) with per-field weights, token splitting of snake, kebab and camel case, grant-filtered at build (a tool the Robot cannot call is not indexed), rebuilt on grant change (a composition rebuild already happens then).
-- **Evaluation.** apps/worker/test/fixtures/tool-search-queries.json: at least 60 queries written from how a person would ask (in English and Polish), each with the expected tool names; a test asserts recall@5 ≥ 0.9 and prints the misses; the weights are constants with the measured values and the date. The closing note records the first request's token count before and after on a fully granted Robot.
-- **Platform steps and Subagents.** The fences keep working on execution; a fenced step's declared set is the fixed set plus tool_search (a refused tool is still refused at call). Subagent child presets declare the same.
-- **Prompt and docs.** The tools section says: find a tool with tool_search; call it by its name in a program. Nothing else about tools in the prompt. Glossary: Declared tool, Bound tool, tool_search.
+- **Restriction, not a renderer change.** The composition registers every tool as today and applies DSH's restrict so that only the fixed set and tool_search are visible and callable; tool_search widens the restriction by name for its matches, and DSH's own tool-update path declares them (no change to the harness; no patch). The fixed set is a constant in the composition; nothing else may join it without a spec. A chapter seed starts with the fixed set; the chapter's found tools are not carried over.
+- **tool_search.** A tool in the fixed set: query (text), limit (default 5, max 10). It ranks the mounted, grant-filtered tools with weighted keyword search (BM25; fields name, namespace, description, parameter names and descriptions; snake, kebab and camel splitting), lifts the restriction on the matches, and returns their names with one line each (the full declarations arrive through DSH's tool-addition message, verbatim). A call to a hidden tool by name fails with "not available; search for it" and the nearest names, so a guess costs one step. The index is built at composition and rebuilt when grants change.
+- **Evaluation.** apps/worker/test/fixtures/tool-search-queries.json: at least 60 queries written from how a person would ask (in English and Polish), each with the expected tool names; a test asserts recall@5 ≥ 0.9 and prints the misses; the weights are constants with the measured values and the date. The closing note records the first request's token count before and after on a fully granted Robot, and the cache behaviour observed on the DeepSeek and the Anthropic routes.
+- **Platform steps and Subagents.** The fences keep working on execution; a fenced step starts from the fixed set as well. Subagent child presets start restricted the same way.
+- **Prompt and docs.** The tools section says: find a tool with tool_search; call it by its name in a program. Glossary: Fixed set, tool_search.
 
 ## Testing Decisions
 
@@ -47,8 +47,8 @@ Through the edge API in workerd with the scripted model (the stub model writes p
 
 ## Out of Scope
 
-MCP; a call or execute wrapper; shortening or rewriting any declaration; any tool list in the prompt, memory, skills or definitions; registering discovered tools; embeddings; a native-call mode.
+MCP; a call or execute wrapper; shortening or rewriting any declaration; a change to the harness; a tool list in the prompt; embeddings; a native-call mode.
 
 ## Further Notes
 
-Decisions from 2026-10-21 (evening), with what was weighed. The owner rejected, in order: a help tool with derived names, shortened descriptions, a generic call wrapper, anything in the prompt, and any accumulation of discovered tools; then asked that every tool of every plugin go through the one mechanism, with a fixed set only for what an agent needs to talk and work. Zed's published result for the same problem (weighted keyword search over a few hundred tools, weights measured on a query set) is the reference; the evaluation set is the owner's "measure, don't guess". Direct mode leaves now because the 2026-10-20 audit decided it and no ticket did it.
+Decisions from 2026-10-21 (evening). The owner asked that every tool of every plugin go through one mechanism, with a fixed set only for what an agent needs to talk and work, no wrapper, no MCP, and no cache breakage. The first draft of this spec invented a "bound but undeclared" mechanism with a harness patch and its own constraints (no accumulation, byte-identical declarations); the owner objected that DSH already has a mechanism, and it does: restrict plus the tool-update developer messages. The spec now uses that and nothing else. Zed's published result for the same ranking problem (weighted keyword search, weights measured on a query set) is the reference for tool_search. Direct mode leaves now because the 2026-10-20 audit decided it and no ticket did it.
