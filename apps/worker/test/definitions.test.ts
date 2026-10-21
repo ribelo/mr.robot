@@ -210,3 +210,40 @@ describe('Add a definition (v1.18 ticket 05, rm-xgau)', () => {
     expect(JSON.stringify(wakeOf(requests.get(id)!.at(-1)!))).not.toContain('Ask your owner once')
   }, 60_000)
 })
+
+describe('the Marketplace (v1.18 ticket 06, rm-vhrq, rm-mv69, rm-10ai)', () => {
+  it('lists what a Member sees with his needs matched; the admin publishes and removes; a Member adds', async () => {
+    const ben = (await api<Me>(BEN, '/api/me')).body
+    await env.MEMBER.getByName(ben.id).addConnection({ kind: 'google', label: 'Ben mail', account: 'ben@example.com', services: ['gmail'], shared: false, meta: {}, secrets: { token: 't' } })
+    await api(BEN, '/api/secrets/bank', { method: 'PUT', body: { username: 'ben', password: 'pw', websites: ['https://www.bank.test'], shared: false } })
+    const grants: GrantsForm = { version: 1, tools: { files: 'allow' }, connectors: [{ kind: 'google', write: true, level: 'ask' }, { kind: 'slack', write: false, level: 'allow' }], logins: [{ purpose: 'bank.test', level: 'ask' }, { purpose: 'shop.test', level: 'ask' }], hosts: [{ facet: 'shell', level: 'ask' }] }
+    await sync(new Map([
+      ['robots/bookkeeper/README.md', text('# Bookkeeper\n\nCollects the invoices every week.\n')],
+      ['robots/bookkeeper/grants.yaml', text(writeGrants(grants))],
+    ]))
+    const market = async (as: string) => (await api<Array<{ definition: DefinitionView; tools: string[]; needs: Array<{ kind: string; label: string; met: boolean }> }>>(as, '/api/marketplace')).body
+    const [entry] = await market(BEN)
+    expect(entry!.definition).toMatchObject({ slug: 'bookkeeper', title: 'Bookkeeper', paragraph: 'Collects the invoices every week.', author: 'the library repository', source: 'git' })
+    expect(entry!.tools).toEqual(['files'])
+    expect(entry!.needs).toEqual([
+      { kind: 'connector', label: 'google (sends)', met: true },
+      { kind: 'connector', label: 'slack', met: false },
+      { kind: 'login', label: 'bank.test', met: true },
+      { kind: 'login', label: 'shop.test', met: false },
+      { kind: 'host', label: 'a computer (shell)', met: false },
+    ])
+    // Publishing and removal are the admin's (Anna); Ben may not.
+    expect((await api(BEN, '/api/admin/definitions/bookkeeper/publish', { body: { published: false } })).status).toBe(403)
+    expect((await api(ANNA, '/api/admin/definitions/bookkeeper/publish', { body: { published: false } })).status).toBe(200)
+    expect(await market(BEN)).toEqual([])
+    expect((await api(BEN, '/api/definitions/bookkeeper/add', { body: {} })).status).toBe(404)
+    await api(ANNA, '/api/admin/definitions/bookkeeper/publish', { body: { published: true } })
+    scripts.set('*', [{ say: 'Hello.' }])
+    const added = await api<RobotSummary>(BEN, '/api/definitions/bookkeeper/add', { body: {} })
+    expect(added.status).toBe(200)
+    await settle(added.body.id)
+    expect((await api(BEN, '/api/admin/definitions/bookkeeper', { method: 'DELETE' })).status).toBe(403)
+    expect((await api(ANNA, '/api/admin/definitions/bookkeeper', { method: 'DELETE' })).status).toBe(200)
+    expect(await market(BEN)).toEqual([])
+  })
+})

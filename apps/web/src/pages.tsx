@@ -24,6 +24,7 @@ import { ConfirmButton } from './components/RobotSheets.tsx'
 import { MissionControl } from './components/MissionControl.tsx'
 import { SubagentPage } from './components/SubagentPage.tsx'
 import { ChapterBar } from './components/ChapterBar.tsx'
+import { Marketplace } from './components/Marketplace.tsx'
 
 // The DSH trajectory (with its code highlighter) loads only when its page opens.
 const RobotTrajectory = lazy(() => import('./dsh/RobotTrajectory.tsx').then((module) => ({ default: module.RobotTrajectory })))
@@ -35,6 +36,12 @@ export function Pages({ route, me, robots }: { route: Route; me: Me; robots: rea
     case 'subagent': return <SubagentPage robotId={route.id} child={route.child} tab={route.tab} robot={robots.find((robot) => robot.id === route.id)} me={me} />
     case 'advanced': return <AdvancedPage id={route.id} />
     case 'mission': return <MissionControl me={me} />
+    case 'marketplace': return (
+      <div className="page">
+        <PageHead title="Marketplace" back={{ page: 'home' }} />
+        <Marketplace isAdmin={me.role === 'admin'} />
+      </div>
+    )
     case 'admin': return (
       <div className="page">
         <PageHead title="Admin" back={{ page: 'home' }} />
@@ -221,9 +228,32 @@ function AdvancedPage({ id }: { id: string }) {
           }}
         />
       })}
+      {AsyncResult.isSuccess(panel) && panel.value.canEdit ? <SaveAsDefinition id={id} /> : null}
     </div>
   )
 }
+
+/** Save as definition (v1.18, rm-gv6s): the Robot takes out what is about its owner, and the definition enters the Space's library. */
+function SaveAsDefinition({ id }: { id: string }) {
+  const command = useCommand()
+  const [slug, setSlug] = useState('')
+  const [status, setStatus] = useState<string>()
+  const save = async () => {
+    setStatus('The Robot is taking out what is about you…')
+    const exit = await command((api) => api.saveAsDefinition(id, slug), [keys.marketplace])
+    setStatus(Exit.isSuccess(exit) ? `Saved as "${exit.value.title}"${exit.value.published ? ', in the Marketplace' : ', yours until the admin publishes it'}.` : exitFailure(exit))
+  }
+  return (
+    <section className="form">
+      <h2>Save as definition</h2>
+      <div className="muted">Others can add a Robot like this one. Its persona, memory, skills, Tasks and the Grants it needs are copied; it removes what is about you first.</div>
+      <label>Name <input value={slug} placeholder="lowercase-with-dashes" onChange={(event) => setSlug(event.target.value)} /></label>
+      <div><button type="button" className="button" disabled={slug.trim() === ''} onClick={() => void save()}>Save as definition</button></div>
+      {status === undefined ? null : <div className="muted">{status}</div>}
+    </section>
+  )
+}
+
 function TakeoverPage({ id, robot }: { id: string; robot: RobotSummary | undefined }) {
   return (
     <AtomView atom={panelAtom(id)} what="the browser">

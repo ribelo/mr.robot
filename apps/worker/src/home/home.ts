@@ -56,6 +56,7 @@ import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/l
 import { DEFINITION_SCHEMA, DefinitionLibrary, type DefinitionRow } from '../definitions/library.ts'
 import * as Result from 'effect/Result'
 import { checkForms, definitionsInTree } from '../definitions/definition.ts'
+import { registrableDomain } from '../platform/logins.ts'
 import type { RobotInit } from '../robot/programs.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import type { Env } from '../env.ts'
@@ -1627,6 +1628,42 @@ export class Home extends DurableObject<Env> {
 
   definitions(memberId: string): DefinitionRow[] {
     return this.definitionLibrary.visible(memberId)
+  }
+
+  /**
+   * The Marketplace (v1.18 ticket 06, rm-vhrq, rm-10ai): the definitions a Member sees, with what each needs matched against his
+   * Connections (by kind), his logins (by site) and his Hosts. The rows are sorted by title.
+   */
+  async marketplace(memberId: string): Promise<Array<{ row: DefinitionRow; tools: string[]; needs: Array<{ kind: 'connector' | 'login' | 'host'; label: string; met: boolean }> }>> {
+    const rows = this.definitionLibrary.visible(memberId)
+    if (rows.length === 0) return []
+    const [connections, hosts, logins] = await Promise.all([
+      this.connectionsFor(memberId),
+      this.hostsFor(memberId),
+      this.env.MEMBER.getByName(memberId).logins().catch(() => []),
+    ])
+    const sites = new Set(logins.flatMap((entry) => entry.websites.map((site) => registrableDomain(site) ?? site)))
+    return Promise.all(rows.map(async (row) => {
+      const grants = this.definitionLibrary.grantsOf(await this.definitionLibrary.files(row.slug))
+      const needs = [
+        ...grants.connectors.map((need) => ({ kind: 'connector' as const, label: `${need.kind}${need.write ? ' (sends)' : ''}`, met: connections.some((connection) => connection.kind === need.kind) })),
+        ...grants.logins.map((need) => ({ kind: 'login' as const, label: need.purpose, met: sites.has(need.purpose) })),
+        ...grants.hosts.map((need) => ({ kind: 'host' as const, label: `a computer (${need.facet})`, met: hosts.length > 0 })),
+      ]
+      return { row, tools: Object.keys(grants.tools), needs }
+    }))
+  }
+
+  /** The admin publishes a definition to every Member or takes it back (rm-mv69). */
+  setDefinitionPublished(slug: string, published: boolean): void {
+    if (this.definitionLibrary.get(slug) === undefined) throw Object.assign(new Error('no such definition'), { name: 'NotFound', status: 404 })
+    this.definitionLibrary.setPublished(slug, published)
+  }
+
+  /** The admin removes a definition from the library; one from the repository comes back at the next sync unless it is gone there too. */
+  async removeDefinition(slug: string): Promise<void> {
+    if (this.definitionLibrary.get(slug) === undefined) throw Object.assign(new Error('no such definition'), { name: 'NotFound', status: 404 })
+    await this.definitionLibrary.remove(slug)
   }
 
   /** A definition's files, for a Member who sees it; null when he does not. */

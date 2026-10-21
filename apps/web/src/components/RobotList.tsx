@@ -299,6 +299,7 @@ export function RobotList({ robots, groups, selected, meName, meAvatar, isAdmin,
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" />
       </label>
       <button type="button" className="mission-link" onClick={() => go({ page: 'mission' })}>Mission Control</button>
+      <button type="button" className="mission-link" onClick={() => go({ page: 'marketplace' })}>Marketplace</button>
       <ul className="robot-list">{list}</ul>
       <div className="sidebar-foot">
         <button type="button" className="me" title={meName} onClick={onProfile}>

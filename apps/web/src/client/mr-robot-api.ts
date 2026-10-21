@@ -14,7 +14,7 @@ import {
   LoginView, Me, MemberAvatar, MemberCosts, MemberView, SubagentView, ModelListRefresh, NamedText, OAuthFinished, OAuthStart, PromptPreview, ProposalView,
   AccountUsage, ProvidersView, RetryResult, RevealedLogin, RobotGroup, RobotPanel, RobotSettings, SessionEventsPage, RobotSummary, SettingsCatalog, SkillsSynced, TaskPage, TaskView, MissionView,
   PageContent, PageView, SharedPageView, SessionCapture, SessionCaptureStarted, TextContent, Trajectory, WebhookView, WorkspaceFileContent, WorkspaceFileView,
-  FileHistoryView, FileVersionContent,
+  FileHistoryView, FileVersionContent, MarketplaceEntry, DefinitionView,
   type CredentialSave, type GroupPatch, type HomeSettingsPatch, type TaskAssignee, type TaskInput, type TaskPatch, type ListPrefPatch, type MePatch, type ModelChoice, type SendMessage, type SettingsPatch,
 } from '@mr-robot/protocol'
 import { ApiRejected, ApiResponseInvalid, ApiUnreachable, type ApiFailure } from './api-failure.ts'
@@ -137,6 +137,12 @@ const make = Effect.gen(function* () {
     files: (id: string) => get(Schema.Array(WorkspaceFileView), `/api/robots/${enc(id)}/files`),
     file: (id: string, path: string) => get(WorkspaceFileContent, `/api/robots/${enc(id)}/file?path=${enc(path)}`),
     saveFile: (id: string, path: string, content: string) => request(WorkspaceFileContent, 'PUT', `/api/robots/${enc(id)}/file?path=${enc(path)}`, { content }),
+    /** The Marketplace (v1.18, rm-vhrq): definitions with their needs; Add makes a Robot in setup; the admin publishes and removes. */
+    marketplace: get(Schema.Array(MarketplaceEntry), '/api/marketplace'),
+    addDefinition: (slug: string) => request(RobotSummary, 'POST', `/api/definitions/${enc(slug)}/add`, {}),
+    publishDefinition: (slug: string, published: boolean) => send('POST', `/api/admin/definitions/${enc(slug)}/publish`, { published }),
+    removeDefinition: (slug: string) => send('DELETE', `/api/admin/definitions/${enc(slug)}`),
+    saveAsDefinition: (id: string, slug: string) => request(DefinitionView, 'POST', `/api/robots/${enc(id)}/definition`, { slug }),
     /** A persona or memory file's history (v1.18, rm-7jo4). */
     fileHistory: (id: string, path: string) => get(FileHistoryView, `/api/robots/${enc(id)}/file/history?path=${enc(path)}`),
     fileVersion: (id: string, path: string, version: string) => get(FileVersionContent, `/api/robots/${enc(id)}/file/version?path=${enc(path)}&version=${enc(version)}`),

@@ -429,6 +429,15 @@ export const api = new Router<ApiContext>()
     return definitionView(row, c.member.id)
   }))
   // Add a definition: a new Robot of the Member in setup, from the definition's files (v1.18 ticket 05).
+  // The Marketplace (v1.18 ticket 06): every definition a Member sees with its needs matched; the admin publishes and removes.
+  .on('GET', '/api/marketplace', (c) => call(() => home(c.env).marketplace(c.member.id)).pipe(Effect.map((entries) => entries.map((entry) => ({ definition: definitionView(entry.row, c.member.id), tools: entry.tools, needs: entry.needs })))))
+  .on('POST', '/api/admin/definitions/:slug/publish', (c, { slug }) => Effect.gen(function* () {
+    yield* admin(c)
+    const { published } = yield* decodeBody(c.request, Schema.Struct({ published: Schema.Boolean }))
+    yield* call(() => home(c.env).setDefinitionPublished(slug, published))
+    return { ok: true }
+  }))
+  .on('DELETE', '/api/admin/definitions/:slug', (c, { slug }) => admin(c).pipe(Effect.andThen(call(() => home(c.env).removeDefinition(slug))), Effect.as({ ok: true })))
   .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(() => home(c.env).addDefinition(c.member.id, slug)))
   .on('GET', '/api/definitions', (c) => call(() => home(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
   .on('GET', '/api/definitions/:slug/archive', (c, { slug }) => Effect.gen(function* () {

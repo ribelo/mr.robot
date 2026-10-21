@@ -31,6 +31,7 @@ export const keys = {
   connections: 'connections',
   tasks: 'tasks',
   sharedPages: 'shared-pages',
+  marketplace: 'marketplace',
 } as const
 
 type Read<A> = (api: MrRobotApi['Service']) => Effect.Effect<A, ApiFailure>
@@ -67,6 +68,8 @@ export const trajectoryAtom = Atom.family((key: string) => {
   const [id = '', chapter] = key.split('|')
   return query((api) => api.trajectory(id, chapter === undefined ? undefined : Number(chapter)), [keys.robot(id)])
 })
+/** The Marketplace's definitions with their needs (v1.18). */
+export const marketplaceAtom = query((api) => api.marketplace, [keys.marketplace, keys.connections, keys.hosts])
 export const filesAtom = Atom.family((id: string) => query((api) => api.files(id), [keys.files(id)]))
 /** Keyed "<robot id>\n<path>". */
 export const fileAtom = Atom.family((key: string) => {

@@ -5,7 +5,7 @@
  * Robot also saved, the repository's wins and the saved one goes (the admin committed the downloaded directory by hand).
  */
 import * as Result from 'effect/Result'
-import { checkForms, readmeSummary, type DefinitionFiles } from './definition.ts'
+import { checkForms, readmeSummary, type DefinitionFiles, type GrantsForm } from './definition.ts'
 
 export type DefinitionSource = 'git' | 'robot' | 'import'
 
@@ -105,6 +105,12 @@ export class DefinitionLibrary {
       await this.remove(gone)
     }
     return { synced, refused }
+  }
+
+  /** A definition's grants.yaml as read (a stored definition's forms parsed when it entered the library). */
+  grantsOf(files: DefinitionFiles): GrantsForm {
+    const forms = checkForms(files)
+    return Result.isSuccess(forms) ? forms.success.grants : { version: 1, tools: {}, connectors: [], logins: [], hosts: [] }
   }
 
   setPublished(slug: string, published: boolean): void {

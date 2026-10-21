@@ -755,3 +755,7 @@ a.button.disabled { opacity: 0.5; pointer-events: none; }
 .file-versions { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .file-versions li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .file-version-text { white-space: pre-wrap; max-height: 40vh; overflow: auto; font-size: 13px; }
+/* The Marketplace (v1.18). */
+.marketplace { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.definition-needs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.definition-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }

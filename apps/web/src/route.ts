@@ -5,6 +5,8 @@ export type Route =
   /** `from`: opened from Mission Control, which is where Back goes when the tab has no earlier entry (mc-m8hh). */
   | { readonly page: 'robot'; readonly id: string; readonly panel: boolean; readonly from?: 'mission' }
   | { readonly page: 'mission' }
+  /** The Marketplace of Robot definitions (v1.18, rm-vhrq). */
+  | { readonly page: 'marketplace' }
   | { readonly page: 'trajectory'; readonly id: string }
   /** A Subagent's own Chat or Trajectory (ao-ce55), under its Robot: #/r/:id/subagents/:child. */
   | { readonly page: 'subagent'; readonly id: string; readonly child: string; readonly tab: 'chat' | 'trajectory' }
@@ -37,6 +39,7 @@ export function parse(hash: string): Route {
   }
   if (parts[0] === 'admin') return { page: 'admin' }
   if (parts[0] === 'mission') return { page: 'mission' }
+  if (parts[0] === 'marketplace') return { page: 'marketplace' }
   if (parts[0] === 'me') return { page: 'profile' }
   if (parts[0] === 'this-computer') return { page: 'this-computer' }
   if (parts[0] === 'plugins') return parts[1] === undefined ? { page: 'plugins' } : { page: 'plugin', name: decodeURIComponent(parts[1]) }
@@ -56,6 +59,7 @@ export function href(route: Route): string {
     case 'page': return `#/r/${encodeURIComponent(route.id)}/pages/${route.path.split('/').map(encodeURIComponent).join('/')}`
     case 'admin': return '#/admin'
     case 'mission': return '#/mission'
+    case 'marketplace': return '#/marketplace'
     case 'profile': return '#/me'
     case 'this-computer': return '#/this-computer'
     case 'pair': return `#/pair/${encodeURIComponent(route.code)}`

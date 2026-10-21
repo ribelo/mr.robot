@@ -344,6 +344,22 @@ export const DefinitionView = Schema.Struct({
 })
 export type DefinitionView = typeof DefinitionView.Type
 
+/** One need of a definition (v1.18, rm-10ai): a Connection of a kind, a login for a site, a Host facet; met when the Member has it. */
+export const DefinitionNeed = Schema.Struct({
+  kind: Schema.Literals(['connector', 'login', 'host']),
+  label: Schema.String,
+  met: Schema.Boolean,
+})
+export type DefinitionNeed = typeof DefinitionNeed.Type
+
+/** A definition in the Marketplace (rm-vhrq): its view and what it needs, matched against the Member. */
+export const MarketplaceEntry = Schema.Struct({
+  definition: DefinitionView,
+  tools: Schema.Array(Schema.String),
+  needs: Schema.Array(DefinitionNeed),
+})
+export type MarketplaceEntry = typeof MarketplaceEntry.Type
+
 /** Save a Robot as a definition under this name. */
 export const SaveDefinition = Schema.Struct({ slug: Schema.String })
 
