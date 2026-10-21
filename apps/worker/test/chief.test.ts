@@ -20,12 +20,14 @@ beforeEach(async () => {
   annaId = (await api<Me>(ANNA, '/api/me')).body.id
   chiefId = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
   await settle(chiefId)
+  await api(ANNA, `/api/robots/${chiefId}/settings`, { method: 'PATCH', body: { codeMode: false } })
 })
 
 async function newRobot(): Promise<string> {
   scripts.set('*', [{ text: '' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   return body.id
 }
 

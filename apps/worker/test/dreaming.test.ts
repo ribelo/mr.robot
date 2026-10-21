@@ -7,13 +7,21 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { Conversation, FileHistoryView, RobotPanel } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts, type StubReply } from './stub-llm.ts'
+import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const DREAMER = { provider: 'stub', model: 'dreamer', effort: 'off' }
 
+/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
+const MODES = [['code mode', true], ['direct calls', false]] as const
+let codeMode = true
+
+afterEach(() => {
+  programmed.on = false
+})
 
 beforeEach(async () => {
+  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -25,7 +33,7 @@ async function staff(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['files', 'web'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants: { tools: ['files', 'web'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -47,8 +55,9 @@ const userText = (request: GenerateOptions) => JSON.stringify(request.messages.f
 const toolTexts = (request: GenerateOptions) => request.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 const dreamDate = (request: GenerateOptions) => /dreams\/(\d{4}-\d{2}-\d{2})\.md/.exec(userText(request))![1]!
 
-describe('the dream (dm-hx44, dm-ox7j, dm-pzxk, dm-alok, dm-4ybd, dm-s11z, dm-vjnv)', () => {
+describe.each(MODES)('the dream, %s (dm-hx44, dm-ox7j, dm-pzxk, dm-alok, dm-4ybd, dm-s11z, dm-vjnv)', (_mode, code) => {
   beforeEach(() => {
+    codeMode = code
   })
 
   it('dreams on the Space\'s dream model with its inputs and tools, writes its outputs, asks once, and books memory', async () => {

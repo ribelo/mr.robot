@@ -27,7 +27,7 @@ async function robot(as: string, name: string, tools: string[] = []): Promise<st
   await settle(body.id)
   await api(as, `/api/robots/${body.id}/settings`, {
     method: 'PATCH',
-    body: { identity: { name, title: '', description: `${name} does things`, avatarColor: '#8b5cf6' }, grants: { tools, skills: [], recipients: [], secrets: [] } },
+    body: { codeMode: false, identity: { name, title: '', description: `${name} does things`, avatarColor: '#8b5cf6' }, grants: { tools, skills: [], recipients: [], secrets: [] } },
   })
   await testRobot(body.id).activateForTest()
   return body.id
@@ -36,6 +36,7 @@ async function robot(as: string, name: string, tools: string[] = []): Promise<st
 async function chiefId(): Promise<string> {
   const id = (await robots(ANNA)).find((entry) => entry.kind === 'mr-robot')!.id
   await settle(id)
+  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   return id
 }
 
@@ -177,14 +178,14 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
     const [changed] = (await chief(chiefRobot, [{
       name: 'robot_settings_set',
       args: {
-        robot_id: accountant, model: { provider: 'stub', model: 'stub-2' }, thinking: 'high', contextBudget: 40_000,
+        robot_id: accountant, model: { provider: 'stub', model: 'stub-2' }, thinking: 'high', codeMode: true, contextBudget: 40_000,
         compactionInstruction: 'Keep the invoices.', discordProactive: false, notifications: { channels: ['pwa', 'fake'] }, wakeOnScreenNotifications: false,
       },
     }])).map((text) => JSON.parse(text) as RobotPanel['settings'])
     const after = (await panel(accountant)).settings
     expect(changed).toEqual(after)
     expect(after).toMatchObject({
-      model: { provider: 'stub', model: 'stub-2', effort: 'high' }, contextBudget: 40_000, compactionInstruction: 'Keep the invoices.',
+      model: { provider: 'stub', model: 'stub-2', effort: 'high' }, codeMode: true, contextBudget: 40_000, compactionInstruction: 'Keep the invoices.',
       discordProactive: false, notifications: { enabled: true, channels: ['pwa', 'fake'] },
       grants: before.grants, spendLimit: before.spendLimit, sharing: before.sharing,
     })
@@ -197,7 +198,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
     const [foreign] = await chief(chiefRobot, [{ name: 'robot_settings_set', args: { robot_id: accountant, chain: [{ ...chain[0], account: 'acc-not-hers' }] } }])
     expect(foreign).toContain('not yours or shared')
     expect(await notices(accountant)).toEqual(expect.arrayContaining([
-      'Mr. Robot changed model to stub-2 (stub).', 'Mr. Robot changed thinking to high.',
+      'Mr. Robot changed model to stub-2 (stub).', 'Mr. Robot changed thinking to high.', 'Mr. Robot changed code mode to on.',
       'Mr. Robot changed the context budget to 40000 tokens.', 'Mr. Robot changed the compaction instruction.',
       'Mr. Robot changed Discord proactive messages to off.', 'Mr. Robot changed notification channels to pwa, fake.',
     ]))

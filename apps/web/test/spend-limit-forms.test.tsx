@@ -96,7 +96,7 @@ describe("a Robot's spend limit in Advanced settings (ux-q8ve, ux-en86)", () => 
     summary,
     settings: {
       identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
-      wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
+      codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
       notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'space' }, spaceSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
     },
     tasks: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'space' }), canEdit: true, takeover: null,

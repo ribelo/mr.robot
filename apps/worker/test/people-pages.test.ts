@@ -6,13 +6,21 @@ import { reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { FileHistoryView, WorkspaceFileView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts, type StubReply } from './stub-llm.ts'
+import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const BEN = 'ben@example.com'
 
+/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
+const MODES = [['code mode', true], ['direct calls', false]] as const
+let codeMode = true
+
+afterEach(() => {
+  programmed.on = false
+})
 
 beforeEach(async () => {
+  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -26,7 +34,7 @@ async function staff(as: string, name: string): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(as, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { identity: { name, title: '', description: `${name} does things`, avatarColor: '#8b5cf6' }, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
+  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, identity: { name, title: '', description: `${name} does things`, avatarColor: '#8b5cf6' }, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -47,8 +55,9 @@ const turnResults = (id: string, message: string) => {
 }
 const PAGE = '# Jan Kowalski\n\nRole: customer\nHow we know them: he wrote about the flat.\n\n## Facts\n- 2026-10-20 Wants a flat with a garage.\n'
 
-describe('people pages (dm-wtn9, dm-s0gy, dm-p7l1, dm-ii3r)', () => {
+describe.each(MODES)('people pages (dm-wtn9, dm-s0gy, dm-p7l1, dm-ii3r), %s', (_mode, code) => {
   beforeEach(() => {
+    codeMode = code
   })
 
   it('two Robots of one owner write one page, named in its history; INDEX.md follows; search finds it; Files shows it', async () => {

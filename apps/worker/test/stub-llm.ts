@@ -1,16 +1,13 @@
 import { LlmAdapter, ToolCallId, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SAFETY_NET_PREFIX } from '../src/agent/say.ts'
 
-/** One scripted tool call; native: sent as a native call of that name even when the request offers only run_code (a log from before v1.22). */
-export interface StubCall { readonly name: string; readonly args: unknown; readonly native?: true }
-
 /** One scripted model reply: text, or tool calls. */
 export type StubReply =
-  | { readonly text: string; readonly inputTokens?: number; readonly thinking?: string; /** Tool calls after the text: the text is an interim message of the Turn. */ readonly calls?: ReadonlyArray<StubCall> }
+  | { readonly text: string; readonly inputTokens?: number; readonly thinking?: string; /** Tool calls after the text: the text is an interim message of the Turn. */ readonly calls?: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   | { readonly hang: true }
   /** The Robot says this (a say call); the request after the call, which carries its result, is answered with an empty end without using up the script. */
   | { readonly say: string; readonly attachments?: readonly string[]; readonly channel?: string }
-  | { readonly calls: ReadonlyArray<StubCall> }
+  | { readonly calls: ReadonlyArray<{ readonly name: string; readonly args: unknown }> }
   /** The model call waits until the gate opens, then replies: a Turn that is working while the test acts. */
   | { readonly gate: Promise<unknown>; readonly then: StubReply }
   | ((request: GenerateOptions) => StubReply)
@@ -48,18 +45,19 @@ function isSafetyNetStep(options: GenerateOptions): boolean {
 }
 
 /**
- * Code mode, the one mode (v1.22): when the request offers run_code and not a scripted tool, each scripted call of a step becomes a
- * run_code program of its own that makes that call and returns its result, all in the same step. A failed call fails its program,
- * so every call still has its own result, in order, as a script names it.
+ * Code mode (v1.20.1): while programmed.on, when the request offers run_code and not a scripted tool, the scripted calls of one step
+ * become one run_code program that makes them in order, each failure caught and returned as "Error: <message>", so a script reads the
+ * same in both modes. The tests that run in both modes switch it on.
  */
+export const programmed = { on: false }
+
 function inCodeMode(options: GenerateOptions, reply: StubReply): StubReply {
-  if (typeof reply === 'function' || !('calls' in reply) || reply.calls === undefined || reply.calls.length === 0) return reply
+  if (!programmed.on || typeof reply === 'function' || !('calls' in reply) || reply.calls === undefined || reply.calls.length === 0) return reply
   const offered = new Set((options.tools ?? []).map((definition) => definition.name))
-  if (!offered.has('run_code') || reply.calls.every((call) => call.name === 'run_code' || call.native === true || offered.has(call.name))) return reply
-  const programs = reply.calls.map((call) => (call.name === 'run_code' || call.native === true || offered.has(call.name)
-    ? call
-    : { name: 'run_code', args: { code: `return await tools[${JSON.stringify(call.name)}](${JSON.stringify(call.args)})`, description: call.name } }))
-  return 'text' in reply ? { ...reply, calls: programs } : { calls: programs }
+  if (!offered.has('run_code') || reply.calls.every((call) => call.name === 'run_code' || offered.has(call.name))) return reply
+  const lines = reply.calls.map((call) => `try { out.push(await tools[${JSON.stringify(call.name)}](${JSON.stringify(call.args)})) } catch (error) { out.push('Error: ' + (error instanceof Error ? error.message : String(error))) }`)
+  const program = { name: 'run_code', args: { code: ['const out = []', ...lines, 'return out'].join('\n'), description: reply.calls.map((call) => call.name).join(', ') } }
+  return 'text' in reply ? { ...reply, calls: [program] } : { calls: [program] }
 }
 
 export class StubLlm extends LlmAdapter {
@@ -136,10 +134,4 @@ export class StubLlm extends LlmAdapter {
     yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 10 } }
     yield { type: 'finish', reason: { kind: 'tool-calls' } }
   }
-}
-/** The names the SDK block of a request declares (the tools:sdk section of its system prompt): one per member of ToolOutputMap. */
-export function declaredTools(request: GenerateOptions): string[] {
-  const system = request.messages.filter((message) => message.role === 'system').map((message) => message.content.map((block) => (block.type === 'text' ? block.text : '')).join('')).join('\n')
-  const block = /interface ToolOutputMap \{\n([\s\S]*?)\n\}/.exec(system)?.[1] ?? ''
-  return [...block.matchAll(/^ {2}("(?:[^"\\]|\\.)*"|[\w$]+): /gm)].map((match) => (match[1]!.startsWith('"') ? JSON.parse(match[1]!) as string : match[1]!)).sort()
 }

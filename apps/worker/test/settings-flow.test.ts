@@ -64,7 +64,7 @@ describe('configuring a Robot', () => {
     await api(ANNA, '/api/secrets/bank', { method: 'PUT', body: { password: 'very-secret-pin-123', allowRead: true, shared: false } })
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['web', 'secrets'], skills: [], recipients: [], secrets: ['bank'] } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['web', 'secrets'], skills: [], recipients: [], secrets: ['bank'] } } })
     await testRobot(body.id).activateForTest()
     const preview = (await api<{ sections: Array<{ name: string; text: string }>; tools: string[] }>(ANNA, `/api/robots/${body.id}/prompt`)).body
     expect(preview.sections.map((section) => section.name)).toEqual(['Platform', 'mr-robot:logins', 'Memory (first message of the context)'])

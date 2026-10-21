@@ -49,8 +49,7 @@ describe('a Robot runs a Turn', () => {
     await r.wake(say('Run this every week.'))
     await r.settled()
     const { items } = await r.conversation()
-    // It reacted from a program, which the chat shows as its activity.
-    expect(items).toEqual([expect.objectContaining({ kind: 'message', text: 'Run this every week.', reaction: '👍' }), expect.objectContaining({ kind: 'activity', tools: ['code'] })])
+    expect(items).toEqual([expect.objectContaining({ kind: 'message', text: 'Run this every week.', reaction: '👍' })])
   })
 
   it('resumes a Turn interrupted by a crash from the last persisted event (robot-p9jm)', async () => {

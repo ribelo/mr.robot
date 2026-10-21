@@ -31,13 +31,13 @@ async function robotWith(grants: { tools?: Record<string, string>; hosts?: Recor
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { contextBudget: 32_000, grants: { tools: grants.tools ?? {}, hosts: grants.hosts ?? {} } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget: 32_000, grants: { tools: grants.tools ?? {}, hosts: grants.hosts ?? {} } } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
 }
 
-type Call = { name: string; args: Record<string, unknown>; native?: true }
+type Call = { name: string; args: Record<string, unknown> }
 /** The calls go one after the other, one step each; the results come back in the same order. */
 async function calls(id: string, list: Call[]): Promise<string[]> {
   scripts.set(id, [...list.map((call): StubReply => ({ calls: [call] })), { text: 'Done.' }])
@@ -305,9 +305,8 @@ describe('old events still render (ob-j9nx)', () => {
   it('shows the calls of the removed box_ and host_ tools in a Conversation that holds them', async () => {
     const id = await robotWith({ tools: { files: 'allow' } })
     const [boxRun, hostRead] = await calls(id, [
-      // Native calls, as a Conversation from before v1.22 holds them.
-      { name: 'box_run', args: { command: 'echo old' }, native: true },
-      { name: 'host_read', args: { host: 'Desk', path: '/etc/hostname' }, native: true },
+      { name: 'box_run', args: { command: 'echo old' } },
+      { name: 'host_read', args: { host: 'Desk', path: '/etc/hostname' } },
     ])
     expect(boxRun).toBeDefined()
     expect(hostRead).toBeDefined()

@@ -25,7 +25,7 @@ const panel: RobotPanel = {
   settings: {
     identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' },
     chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
-    wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
+    codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'space' }, spaceSpendLimit: { kind: 'none' },
     discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
   },

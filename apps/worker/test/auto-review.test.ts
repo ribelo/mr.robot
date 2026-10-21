@@ -30,7 +30,7 @@ async function reviewedRobot(files: 'allow' | 'ask' = 'allow'): Promise<string> 
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { autoReview: true, reviewer: REVIEWER, grants: { tools: { files } } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, autoReview: true, reviewer: REVIEWER, grants: { tools: { files } } } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
@@ -118,7 +118,7 @@ describe('Auto review (ao-wkpt, ao-gf33, ao-c8k9, ao-6m9i, ao-hfni, ao-jn6z)', (
     await settle(body.id)
     expect((await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body.settings).toMatchObject({ autoReview: false, reviewer: null, spaceReviewer: null })
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { defaultReviewer: REVIEWER } })
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { autoReview: true, grants: { tools: { files: 'allow' } } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, autoReview: true, grants: { tools: { files: 'allow' } } } })
     await testRobot(body.id).activateForTest()
     expect((await api<RobotPanel>(ANNA, `/api/robots/${body.id}/panel`)).body.settings).toMatchObject({ autoReview: true, reviewer: null, spaceReviewer: REVIEWER })
     requests.delete(body.id)

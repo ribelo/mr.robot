@@ -25,7 +25,7 @@ async function robot(as: string, settings: Record<string, unknown> = {}): Promis
   scripts.set('*', [{ text: '' }])
   const { body } = await api<{ id: string }>(as, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' } }, ...settings } })
+  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' } }, ...settings } })
   await testRobot(body.id).activateForTest()
   return body.id
 }

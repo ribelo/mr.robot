@@ -5,7 +5,7 @@
  */
 import { reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost, hostDirectories, lspCalls } from './fake-host.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
@@ -36,7 +36,7 @@ async function coder(host: { hostId: string }, workspace: boolean): Promise<stri
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow' } } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow' } } } })
   await testRobot(body.id).activateForTest()
   if (workspace) await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { workspace: { host: host.hostId, root: REPO } } })
   requests.delete(body.id)
@@ -68,6 +68,6 @@ describe('lsp (cw-lx4f, cw-xxqw)', () => {
     expect(lspCalls).toEqual([])
     const plain = await coder(desk, false)
     await calls(plain, [])
-    expect(await boundToolNames(plain)).not.toContain('lsp')
+    expect(requests.get(plain)!.at(-1)!.tools!.map((tool) => tool.name)).not.toContain('lsp')
   })
 })

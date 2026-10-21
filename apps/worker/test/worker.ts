@@ -212,12 +212,6 @@ export class Robot extends ProductionRobot {
     return { events, bytes, ms: Date.now() - started, chapters: this.store.chapters.all().length }
   }
 
-  /** The tools bound in the program runtime of the current composition, as registered (gates applied): name, description, parameters. */
-  async boundToolsForTest(): Promise<Array<{ name: string; description: string; parameters: Record<string, unknown> }>> {
-    const composition = await (this as unknown as { agent(): Promise<{ ctx: { tools: { schemas(): ReadonlyArray<{ name: string; description: string; parameters: unknown }> } } }> }).agent()
-    return composition.ctx.tools.schemas().filter((schema) => schema.name !== 'run_code').map((schema) => ({ name: schema.name, description: schema.description, parameters: schema.parameters as Record<string, unknown> }))
-  }
-
   /** The chat as a Robot before v1.19 kept it: not stored, projected from the log (v1.19 ticket 03). */
   async unstoreChatForTest(): Promise<void> {
     this.store.chat.clear()

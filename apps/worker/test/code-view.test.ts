@@ -25,7 +25,7 @@ async function robot(extra: Record<string, unknown> = {}): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' }, hosts: {} }, ...extra } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' }, hosts: {} }, ...extra } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -66,14 +66,10 @@ describe('the page\'s calls from the log (cw-sc3z)', () => {
     const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation?details=1`)).body.items
     const activities = items.filter((item): item is Extract<ChatItem, { kind: 'activity' }> => item.kind === 'activity' && (item.calls ?? []).length > 0)
     const clipped = activities.flatMap((item) => item.calls ?? [])
-    // Each call ran in a program of its own; the row keeps the program with a clipped result.
-    expect(clipped.find((call) => call.inner.some((inner) => inner.name === 'read'))!.result.length).toBeLessThan(7_000)
+    expect(clipped.find((call) => call.name === 'read')!.result.length).toBeLessThan(7_000)
     const { body } = await api<ToolCallDetails>(ANNA, `/api/robots/${id}/conversation/calls`, { body: { items: activities.map((item) => ({ id: item.id, calls: (item.calls ?? []).map((call) => call.id) })) } })
     expect(body.truncated).toBe(false)
-    // The programs and the calls they made, each call under its program (v1.22).
-    expect(body.calls.map((call) => call.name).sort()).toEqual(['read', 'run_code', 'run_code', 'write'])
-    const programs = new Set(body.calls.filter((call) => call.name === 'run_code').map((call) => call.id))
-    for (const call of body.calls.filter((entry) => entry.name !== 'run_code')) expect(programs.has(call.program!)).toBe(true)
+    expect(body.calls.map((call) => call.name).sort()).toEqual(['read', 'write'])
     expect(JSON.parse(body.calls.find((call) => call.name === 'write')!.args)).toMatchObject({ content: long })
     expect(body.calls.find((call) => call.name === 'read')!.result).toContain('900: line 900 of a long file')
     // Only the calls asked for.

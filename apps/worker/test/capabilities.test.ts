@@ -20,11 +20,11 @@ beforeEach(async () => {
   await api(ANNA, '/api/me', { headers: { 'X-Time-Zone': WARSAW } })
 })
 
-async function activeRobot(grants: Partial<GrantSet>): Promise<string> {
+async function activeRobot(grants: Partial<GrantSet>, codeMode = false): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -120,7 +120,7 @@ describe('my_capabilities (sk-e1hh, sk-ixvp)', () => {
     await reachableThings()
     const mr = await mrRobot()
     const shown = (await api<RobotPanel>(ANNA, `/api/robots/${mr}/panel`)).body.settings.grants
-    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { grants: { ...shown, tools: { ...shown.tools, exa: 'deny', browser: 'ask' }, secrets: { shop: 'deny' } } } })
+    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { ...shown, tools: { ...shown.tools, exa: 'deny', browser: 'ask' }, secrets: { shop: 'deny' } } } })
     await testRobot(mr).activateForTest()
     const { items, view } = await toolList(mr)
     expect(byKey(items)).toEqual(byKey(await settingsList(mr)))
@@ -211,7 +211,7 @@ describe('labels of plugin tools and Hosts (ux-5g3w, ux-q8o6, ux-qm6u, ux-ywxa, 
     expect(catalog.hosts).toEqual([expect.objectContaining({ id: host.id, name: 'Desk', online: false, mine: true })])
     expect(catalog.toolGroups.find((group) => group.name === 'web')!.description).toBe('Fetch pages by address (web_fetch, free; searching the web is the exa group).')
 
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { web: 'allow' }, connections: { [google.id]: 'allow' }, hosts: { [`${host.id}:files`]: 'ask' } } } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { web: 'allow' }, connections: { [google.id]: 'allow' }, hosts: { [`${host.id}:files`]: 'ask' } } } })
     await testRobot(id).activateForTest()
 
     // my_capabilities names the items the same way.
@@ -300,7 +300,7 @@ describe('the time of a Wake-up (sk-nitq)', () => {
     expect(found, wake).not.toBeNull()
     expect([warsaw(before), warsaw(after)]).toContain(found![1])
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.filter((item) => item.kind !== 'activity').slice(-2)).toEqual([
+    expect(conversation.items.slice(-2)).toEqual([
       expect.objectContaining({ kind: 'task', action: 'ran', title: 'Pulse' }),
       expect.objectContaining({ kind: 'reply', text: 'Checked.' }),
     ])

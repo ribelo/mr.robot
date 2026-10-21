@@ -25,7 +25,7 @@ async function robotWithPages(): Promise<string> {
   scripts.set('*', [{ text: '' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' } } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' } } } })
   await testRobot(body.id).activateForTest()
   await env.ROBOT.getByName(body.id).saveFile('pages/report.md', '# Flats\n\n| Flat | Rent |\n|---|---|\n| A | 3 200 zł |\n\n<script>alert(1)</script>\n')
   await env.ROBOT.getByName(body.id).saveFile('pages/site.html', '<html><head><title>Budget</title></head><body><p>Less in November.</p><script>fetch("/api/me")</script></body></html>')

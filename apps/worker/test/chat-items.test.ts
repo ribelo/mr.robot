@@ -28,7 +28,7 @@ async function robot(tools: Record<string, string> = { files: 'allow', tasks: 'a
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools, skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools, skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -70,7 +70,7 @@ describe('the chat is stored with the events (ec-2sra)', () => {
       ['Message 0', '👍'], ['Message 1', null], ['Message 2', null], ['Message 3', '👍'], ['Message 4', null], ['Message 5', null],
     ])
     expect(stored.compact.some((item) => item.kind === 'task' && item.title === 'Task 1')).toBe(true)
-    expect(stored.details.some((item) => item.kind === 'activity' && item.calls?.some((call) => call.inner.some((inner) => inner.name === 'glob')))).toBe(true)
+    expect(stored.details.some((item) => item.kind === 'activity' && item.calls?.some((call) => call.name === 'glob'))).toBe(true)
     await testRobot(id).unstoreChatForTest()
     expect(strip(await whole(id))).toEqual(strip(stored.compact))
     expect(strip(await whole(id, true))).toEqual(strip(stored.details))

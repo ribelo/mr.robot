@@ -84,7 +84,7 @@ describe('Save as definition (rm-gv6s, rm-gxp7, rm-77oh)', () => {
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     const id = body.id
     await settle(id)
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow', secrets: 'ask', web: 'deny' }, skills: [], recipients: [], secrets: { bank: 'ask' }, connections: { [gmail.id]: 'allow', [`${gmail.id}:write`]: 'ask' } } } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow', secrets: 'ask', web: 'deny' }, skills: [], recipients: [], secrets: { bank: 'ask' }, connections: { [gmail.id]: 'allow', [`${gmail.id}:write`]: 'ask' } } } })
     await testRobot(id).activateForTest()
     await api(ANNA, `/api/robots/${id}/file?path=MEMORY.md`, { method: 'PUT', body: { content: '# MEMORY.md\n\n## Facts\n- Anna lives at Mokotowska 1.\n- Invoices are due on the 10th.\n\n## Preferences\n\n## Commitments\n' } })
     await api(ANNA, '/api/tasks', { body: { title: 'Weekly invoices', instructions: 'Collect the invoices.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'recurring', schedule: { kind: 'weekly', time: '09:00', weekdays: [1] } } } })

@@ -31,7 +31,7 @@ async function coder(host: { hostId: string }): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow', subagents: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow' } }, subagentModels: [{ provider: 'stub', model: 'stub' }] } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow', subagents: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow' } }, subagentModels: [{ provider: 'stub', model: 'stub' }] } })
   await testRobot(body.id).activateForTest()
   expect((await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { workspace: { host: host.hostId, root: REPO } } })).status).toBe(200)
   requests.delete(body.id)

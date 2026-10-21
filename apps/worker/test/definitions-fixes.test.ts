@@ -7,7 +7,7 @@ import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DefinitionView, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { requests, scripts, type StubReply } from './stub-llm.ts'
+import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const BEN = 'ben@example.com'
@@ -15,6 +15,7 @@ const DAY = 86_400_000
 const realFetch = globalThis.fetch
 
 beforeEach(async () => {
+  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -24,6 +25,7 @@ beforeEach(async () => {
   await api(BEN, '/api/me')
 })
 afterEach(() => {
+  programmed.on = false
   globalThis.fetch = realFetch
 })
 

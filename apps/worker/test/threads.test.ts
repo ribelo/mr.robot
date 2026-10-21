@@ -5,7 +5,7 @@
 import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AdminView, ChatItem, Conversation, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
-import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -28,6 +28,7 @@ beforeEach(async () => {
 async function chief(as: string): Promise<string> {
   const id = (await api<RobotSummary[]>(as, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
   await settle(id)
+  await api(as, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   return id
 }
 
@@ -151,13 +152,14 @@ describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', (
     scripts.set('*', [{ text: 'Hello.' }])
     const created = (await api<{ id: string }>(ANNA, '/api/robots', { body: {} })).body.id
     await settle(created)
-    await api(ANNA, `/api/robots/${created}/settings`, { method: 'PATCH', body: { grants: { tools: ['messaging', 'robots', 'files'], skills: [], recipients: [], secrets: [] } } })
+    await api(ANNA, `/api/robots/${created}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['messaging', 'robots', 'files'], skills: [], recipients: [], secrets: [] } } })
     await testRobot(created).activateForTest()
     await say(ANNA, created, [{ text: 'ok' }])
-    const offered = await boundToolNames(created)
+    const offered = requests.get(created)!.at(-1)!.tools!.map((tool) => tool.name)
     expect(offered.filter((name) => name.startsWith('thread_'))).toEqual([])
     await say(ANNA, anna, [{ text: 'ok' }])
-    expect(await boundToolNames(anna)).toEqual(expect.arrayContaining(['thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
+    const chiefTools = requests.get(anna)!.at(-1)!.tools!
+    expect(chiefTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
   })
 })
 

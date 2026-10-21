@@ -20,7 +20,7 @@ async function robot(name: string, tools: string[] = [], recipients: string[] = 
   await settle(body.id)
   await api(ANNA, `/api/robots/${body.id}/settings`, {
     method: 'PATCH',
-    body: { identity: { name, title: '', description: `${name} does things`, avatarColor: '#8b5cf6' }, grants: { tools, skills: [], recipients, secrets: [] } },
+    body: { codeMode: false, identity: { name, title: '', description: `${name} does things`, avatarColor: '#8b5cf6' }, grants: { tools, skills: [], recipients, secrets: [] } },
   })
   await testRobot(body.id).activateForTest()
   return body.id
@@ -76,7 +76,7 @@ describe('Robot-to-Robot messaging', () => {
     expect(atAccountant).toMatchObject({ kind: 'message', text: 'What is revenue?', sender: { kind: 'robot', robotId: sales, name: 'Sales', avatarColor: '#8b5cf6' } })
     const atSales = (await chat(sales)).find((item) => item.kind === 'message' && item.sender.kind === 'robot')
     expect(atSales).toMatchObject({ kind: 'message', text: 'Revenue is 42k.', sender: { kind: 'robot', robotId: accountant, name: 'Accountant' } })
-    expect((await chat(sales)).filter((item) => item.kind !== 'activity').at(-1)).toMatchObject({ kind: 'reply', text: 'Revenue noted.' })
+    expect((await chat(sales)).at(-1)).toMatchObject({ kind: 'reply', text: 'Revenue noted.' })
   })
 
   it('delivers exactly once: an exact retry is not a second message and the outbox survives a crash', async () => {
@@ -118,6 +118,7 @@ describe('Robot-to-Robot messaging', () => {
 
   it('lets Mr. Robot create a Robot that he can then message (robot-hk2s, robot-70kf)', async () => {
     const mrRobot = (await robots(ANNA)).find((entry) => entry.kind === 'mr-robot') as RobotSummary
+    await api(ANNA, `/api/robots/${mrRobot.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set('*', [{ say: 'Hi, I am new. What should I watch?' }])
     await say(mrRobot.id, 'I need someone to watch flat prices', [
       { calls: [{ name: 'robot_create', args: { brief: 'Watch flat prices in Warsaw' } }] },
@@ -127,6 +128,6 @@ describe('Robot-to-Robot messaging', () => {
     expect(created.status).toBe('setup')
     expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [created.id]: 'allow' })
     await settle(created.id)
-    expect((await chat(created.id)).filter((item) => item.kind !== 'activity').at(-1)).toMatchObject({ kind: 'reply', text: 'Hi, I am new. What should I watch?' })
+    expect((await chat(created.id)).at(-1)).toMatchObject({ kind: 'reply', text: 'Hi, I am new. What should I watch?' })
   })
 })

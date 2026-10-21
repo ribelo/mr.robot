@@ -43,7 +43,7 @@ async function robotWithSkills(skills: string[]): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['skills'], skills, recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['skills'], skills, recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -168,7 +168,7 @@ describe('skill_library', () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: [], skills: [], recipients: [], secrets: [] } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: [], skills: [], recipients: [], secrets: [] } } })
     await testRobot(body.id).activateForTest()
     scripts.set(body.id, [{ calls: [{ name: 'skill_library', args: {} }] }, { text: 'Listed.' }])
     await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'which skills could help?' } })
@@ -190,6 +190,7 @@ describe('skill_library', () => {
     const chief = chiefRow.id
     const chiefName = chiefRow.identity.name
     await settle(chief)
+    await api(ANNA, `/api/robots/${chief}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(chief, [{ calls: [{ name: 'skill_library', args: {} }] }, { text: 'Listed.' }])
     await api(ANNA, `/api/robots/${chief}/messages`, { body: { text: 'who knows what?' } })
     await settle(chief)

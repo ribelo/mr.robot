@@ -23,6 +23,7 @@ beforeEach(async () => {
 async function activeRobot(): Promise<string> {
   const id = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
   await settle(id)
+  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   return id
 }
 

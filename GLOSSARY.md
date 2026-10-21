@@ -55,7 +55,7 @@ Vocabulary for Mr. Robot. Specs, code and tests use these words and no synonyms.
 - **Spill** — the complete result of a tool call over the inline budget, kept under spill/ in the Files while the model gets its head, its tail and the path; tidied after 30 days.
 - **Skill library** — the Space's single collection of skills in R2, synchronised from a Git repository and extended by approved Robot proposals; granted per Robot.
 - **Robot message** — a work request or a question from one Robot to a granted recipient Robot, or its reply, delivered through a durable outbox and shown as a labelled message.
-- **Code mode** — the only execution mode (DSH PTC): the model writes a program that calls its tools inside an isolate. Direct tool calls were removed in v1.22.
+- **Code mode** — the default execution mode (DSH PTC): the model writes a program that calls its tools inside an isolate; the alternative is direct tool calls.
 - **Browser backend** — what runs a Robot's Chrome behind the browser seam: Browser Run (in the cloud) or a Host browser (on a real computer). Chosen per Robot, defaulting to the Space's.
 - **Login entry** — name, username, password, websites, notes, scope; granted per Robot; filled into matching pages without the password reaching the Robot's program. Replaces Secret.
 - **Ask** — a pending decision a Robot puts to its owner (setup approval, grant proposal, member-file edit, skill, Takeover, review, Thread invitation, tool call, question, credential), shown in place of the composer. Stored exactly; the stored Ask is applied, never prose.

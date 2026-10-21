@@ -28,7 +28,7 @@ async function coder(host: { hostId: string }): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow', [`${host.hostId}:shell`]: 'allow' } } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow', [`${host.hostId}:shell`]: 'allow' } } } })
   await testRobot(body.id).activateForTest()
   await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { workspace: { host: host.hostId, root: REPO } } })
   requests.delete(body.id)

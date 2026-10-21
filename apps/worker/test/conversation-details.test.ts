@@ -18,7 +18,7 @@ async function robotWith(tools: string[]): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools, skills: [], recipients: [], secrets: [], hosts: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools, skills: [], recipients: [], secrets: [], hosts: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -26,6 +26,7 @@ async function robotWith(tools: string[]): Promise<string> {
 describe('conversation: streaming and Work details (v1.3 ticket 03)', () => {
   it('pushes the reply text over the live socket while it is produced (pl-jzr7)', async () => {
     const id = await robotWith([])
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true } })
     const response = await SELF.fetch(`https://mr-robot.test/api/robots/${id}/ws`, { headers: { upgrade: 'websocket', 'x-dev-identity': ANNA } })
     const socket = response.webSocket!
     socket.accept()
@@ -53,7 +54,7 @@ describe('conversation: streaming and Work details (v1.3 ticket 03)', () => {
     const compact = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'activity')
     expect(compact?.kind === 'activity' && compact.calls).toBeUndefined()
     const detailed = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation?details=1`)).body.items.find((item) => item.kind === 'activity')
-    expect(detailed?.kind === 'activity' && detailed.calls?.[0]).toMatchObject({ name: 'run_code', error: false, inner: [expect.objectContaining({ name: 'write' })] })
+    expect(detailed?.kind === 'activity' && detailed.calls?.[0]).toMatchObject({ name: 'write', error: false })
     expect(detailed?.kind === 'activity' && detailed.calls?.[0]?.args).toContain('notes.md')
 
     expect((await api<Me>(ANNA, '/api/me')).body.workDetails).toBe('compact')

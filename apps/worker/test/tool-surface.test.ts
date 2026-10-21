@@ -8,7 +8,7 @@ import { jsonSchemaToTs } from '@deepseek-ai/dsh-tools'
 import { emptyGrants, type Conversation, type GrantSet, type RobotPanel, type RobotSummary, type Trajectory } from '@mr-robot/protocol'
 import { EXPLICIT_TOOL_GROUPS, TOOL_GROUP_NAMES } from '../src/agent/catalog.ts'
 import { CONNECTOR_PLUGINS } from '../src/connectors/registry.ts'
-import { api, boundTools, settle, stubModels, testRobot } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { account, testHost } from './connector-host.ts'
 import { connectorFixtures } from './connector-fixtures.ts'
 import { requests, scripts } from './stub-llm.ts'
@@ -29,7 +29,7 @@ async function robotWith(grants: { tools?: string[]; connections?: string[] }): 
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: grants.tools ?? [], skills: [], recipients: [], secrets: [], connections: grants.connections ?? [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: grants.tools ?? [], skills: [], recipients: [], secrets: [], connections: grants.connections ?? [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -42,8 +42,7 @@ async function say(id: string, calls: Array<{ name: string; args: Record<string,
   return last.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 }
 
-/** The tools bound in the program runtime: what a program may call. */
-const lastTools = (id: string) => boundTools(id)
+const lastTools = (id: string) => requests.get(id)!.at(-1)!.tools ?? []
 
 describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)', () => {
   it('delete_file on a missing file fails instead of reporting a deletion (ts-6z2k)', async () => {
@@ -112,7 +111,7 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
     expect(names).not.toContain('browser_open')
     // What the model is offered follows the same levels.
     await say(id, [])
-    const offered = (await lastTools(id)).map((tool) => tool.name)
+    const offered = lastTools(id).map((tool) => tool.name)
     expect(offered).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa']))
     expect(offered).not.toContain('browser_open')
   })
@@ -167,7 +166,7 @@ describe('grant levels decide what a Robot is given (v1.11)', () => {
 describe('code mode declares only the tools a Robot may use (sk-3i46)', () => {
   it('has allow and ask tools in the SDK the model reads and no deny tool', async () => {
     const id = await robotWith({})
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow', web: 'ask', browser: 'deny', exa: 'deny', tasks: 'deny' } } } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true, grants: { tools: { files: 'allow', web: 'ask', browser: 'deny', exa: 'deny', tasks: 'deny' } } } })
     await say(id, [])
     const request = requests.get(id)!.at(-1)!
     // Code mode offers one tool; the SDK it declares is part of the system prompt.
@@ -215,7 +214,7 @@ async function fullGrants(): Promise<{ tools: string[]; skills: string[]; recipi
   return { tools: [...TOOL_GROUP_NAMES], skills: [], recipients: [], secrets: [], hosts: [`${hostId}:files`, `${hostId}:shell`], connections }
 }
 
-type Offered = Awaited<ReturnType<typeof lastTools>>
+type Offered = ReturnType<typeof lastTools>
 
 /** What breaks the contract in a mounted tool list: a missing description, an undescribed parameter, untyped SDK parameters. */
 function contractProblems(offered: Offered): string[] {
@@ -238,6 +237,7 @@ function contractProblems(offered: Offered): string[] {
 async function returnedWithoutArguments(id: string, offered: Offered): Promise<string[]> {
   const names = offered.filter((tool) => ((tool.parameters as { required?: string[] }).required ?? []).length > 0).map((tool) => tool.name)
   expect(names.length).toBeGreaterThan(30)
+  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true } })
   const program = [
     `const names = ${JSON.stringify(names)}`,
     'const returned = []',
@@ -259,7 +259,7 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
     const id = await robotWith({})
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: await fullGrants() } })
     await say(id, [])
-    const offered = await lastTools(id)
+    const offered = lastTools(id)
     const names = offered.map((tool) => tool.name)
     expect(names).toEqual(expect.arrayContaining(['web_fetch', 'web_search_exa', 'exa_agent_list_events', 'task_list', 'task_create', 'task_update', 'task_assign', 'task_focus', 'task_done', 'task_cancel', 'task_pause', 'drive_replace', 'browser_wait', 'discord_accounts', 'copy', 'run', 'login_fill', 'propose_member_file_edit']))
     expect(names).not.toContain('web_search')
@@ -283,10 +283,10 @@ describe('the mounted tool list of a fully granted Robot (ts-2zf7, ts-6b3k, ts-p
   it("holds for Mr. Robot's own tools too (robots, deputy, memory_write_shared, threads)", async () => {
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await settle(mr)
-    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { grants: await fullGrants() } })
+    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: await fullGrants() } })
     await testRobot(mr).activateForTest()
     await say(mr, [])
-    const offered = await lastTools(mr)
+    const offered = lastTools(mr)
     expect(offered.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_write_shared', 'robot_directory', 'copy', 'robot_list', 'robot_settings_set', 'task_create', 'conversation_search', 'thread_chiefs', 'thread_open', 'thread_send', 'thread_close', 'thread_list']))
     expect(contractProblems(offered)).toEqual([])
     expect(await returnedWithoutArguments(mr, offered)).toEqual([])

@@ -6,7 +6,7 @@
 import { reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DefinitionView, RobotSettings, RobotSummary } from '@mr-robot/protocol'
-import { api, settle, stubModels, boundTools } from './api.ts'
+import { api, settle, stubModels } from './api.ts'
 import { closeHosts, fakeHost, hostDirectories, hostFileCalls } from './fake-host.ts'
 import { requests, scripts } from './stub-llm.ts'
 
@@ -33,10 +33,11 @@ describe('Mr. Robot as the chief of coding Robots (cw-evn7)', () => {
     const settings = await settingsOf(chief)
     expect(settings.workspace).toBeNull()
     expect(settings.workDetails).toBeNull()
+    await api(ANNA, `/api/robots/${chief}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(chief, [{ text: 'Hello.' }])
     await api(ANNA, `/api/robots/${chief}/messages`, { body: { text: 'hi' } })
     await settle(chief)
-    const deputy = (await boundTools(chief)).find((tool) => tool.name === 'robot_settings_set')!
+    const deputy = requests.get(chief)!.at(-1)!.tools!.find((tool) => tool.name === 'robot_settings_set')!
     expect(JSON.stringify(deputy)).toContain('workspace {host, root}')
   })
 })

@@ -39,6 +39,7 @@ When a Robot changes SOUL.md, it tells the owner. Read memory-and-files.md for t
 - While idle: cache warming (Mr. Robot's default) refreshes the model's cache at 54, 108 and 162 minutes, so the next message is cheap; idle compaction (other Robots' default) compacts once at 54 minutes, after one step to write memory. Neither runs during a Turn or while work waits. A context below the floor (20 000 tokens by default) is not compacted.
 - Auto review and the reviewer's model. Read auto-review.md.
 - The models of its Subagents. Read subagents.md.
+- Code mode or direct tool calls.
 - Grants. Read grants.md.
 - Spend limit: the Space's, no limit, or an amount. Read providers.md.
 - Notifications.

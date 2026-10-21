@@ -1,7 +1,7 @@
 import { reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RobotPanel, SettingsCatalog } from '@mr-robot/protocol'
-import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -31,11 +31,12 @@ async function robotWith(tools: string[]): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools, skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools, skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
 
+const lastTools = (id: string) => (requests.get(id)!.at(-1)!.tools ?? []).map((definition: { name: string }) => definition.name)
 const toolResults = (id: string) => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 
 describe('Exa (v1.1 ticket 11)', () => {
@@ -47,9 +48,9 @@ describe('Exa (v1.1 ticket 11)', () => {
     await settle(id)
     expect(exaCalls[0]).toMatchObject({ path: '/search', key: 'exa-test-key', body: { query: 'cloudflare containers pricing', numResults: 3 } })
     expect(toolResults(id)[0]).toContain('developers.cloudflare.com/containers/pricing')
-    expect(await boundToolNames(id)).toEqual(expect.arrayContaining(['web_search_exa', 'crawling_exa', 'get_code_context_exa']))
+    expect(lastTools(id)).toEqual(expect.arrayContaining(['web_search_exa', 'crawling_exa', 'get_code_context_exa']))
     // Agent runs are a separate grant (rb-a0x0).
-    expect(await boundToolNames(id)).not.toContain('exa_agent_create_run')
+    expect(lastTools(id)).not.toContain('exa_agent_create_run')
     const usage = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.usage
     expect(usage.services).toEqual([{ service: 'exa', calls: 1, costUsd: 0.007 }])
     expect(usage.costUsd).toBeGreaterThanOrEqual(0.007)

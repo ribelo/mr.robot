@@ -124,7 +124,7 @@ describe('the v1.15 prompt (ticket 13, gb-3ih8, gb-gwes, gb-ycy1, gb-dqjy, gb-82
     const desk = await fakeHost('Desk')
     hostDirectories.add('/home/anna/repo/.git')
     const id = await newRobot()
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { autoReview: true, grants: { tools: [...TOOL_GROUP_NAMES], skills: [], recipients: [], secrets: [], hosts: { [`${desk.hostId}:files`]: 'allow', [`${desk.hostId}:shell`]: 'allow', [`${desk.hostId}:browser`]: 'allow' }, connections: [] } } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false, autoReview: true, grants: { tools: [...TOOL_GROUP_NAMES], skills: [], recipients: [], secrets: [], hosts: { [`${desk.hostId}:files`]: 'allow', [`${desk.hostId}:shell`]: 'allow', [`${desk.hostId}:browser`]: 'allow' }, connections: [] } } })
     await testRobot(id).activateForTest()
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { workspace: { host: desk.hostId, root: '/home/anna/repo' } } })
     const words = (await preview(id)).filter((section) => !section.name.startsWith('Memory')).reduce((total, section) => total + section.text.split(/\s+/).filter(Boolean).length, 0)

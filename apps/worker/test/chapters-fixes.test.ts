@@ -23,7 +23,7 @@ async function robot(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { subagents: 'allow', files: 'allow' }, skills: [], recipients: [], secrets: [] }, subagentModels: [{ provider: 'stub', model: 'stub' }] } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { subagents: 'allow', files: 'allow' }, skills: [], recipients: [], secrets: [] }, subagentModels: [{ provider: 'stub', model: 'stub' }] } })
   await testRobot(body.id).activateForTest()
   return body.id
 }

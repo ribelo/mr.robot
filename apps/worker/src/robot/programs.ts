@@ -390,6 +390,7 @@ export const settingsWith = (defaults: SpaceDefaults) => Effect.gen(function* ()
     model: current.model,
     chain: chainOf(current),
     contextBudget: current.contextBudget,
+    codeMode: current.codeMode,
     wakeOnScreenNotifications: current.wakeOnScreenNotifications === true,
     browserBackend: current.browserBackend ?? null,
     discordChannel: current.discordChannel ?? null,
@@ -476,6 +477,7 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   note(before.identity.avatarSeed !== after.identity.avatarSeed, 'gave the avatar another look.')
   note(before.model.provider !== after.model.provider || before.model.model !== after.model.model, `changed model to ${after.model.model} (${after.model.provider}).`)
   note(before.model.effort !== after.model.effort, `changed thinking to ${after.model.effort}.`)
+  note(before.codeMode !== after.codeMode, `changed code mode to ${after.codeMode ? 'on' : 'off'}.`)
   note(before.contextBudget !== after.contextBudget, `changed the context budget to ${after.contextBudget} tokens.`)
   note(before.compactionInstruction !== after.compactionInstruction, 'changed the compaction instruction.')
   note((before.discordChannel ?? null) !== (after.discordChannel ?? null), after.discordChannel ? `set the Discord channel to ${after.discordChannel}.` : 'removed the Discord channel.')
@@ -545,6 +547,7 @@ export const updateSettings = (patch: SettingsPatch, by?: string, workspace?: Ch
       ...(patch.sharing === undefined ? {} : { sharing: patch.sharing }),
       ...(chain === undefined ? {} : { chain, model: modelOf(chain[nextActive]!) }),
       ...(patch.contextBudget === undefined ? {} : { contextBudget: Math.max(8_000, Math.round(patch.contextBudget)) }),
+      ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
       ...(patch.wakeOnScreenNotifications === undefined ? {} : { wakeOnScreenNotifications: patch.wakeOnScreenNotifications }),
       ...(patch.browserBackend === undefined ? {} : { browserBackend: patch.browserBackend }),
       ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
@@ -1162,7 +1165,7 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
   if (existing !== undefined) return existing
   const config: RobotConfig = {
     id: init.id, ownerId: init.ownerId, kind: init.kind, identity: init.identity, sharing: init.sharing, status: init.status,
-    blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, compactionInstruction: init.kind === 'mr-robot' ? MR_ROBOT_COMPACTION : '',
+    blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: init.kind === 'mr-robot' ? MR_ROBOT_COMPACTION : '',
     // Mr. Robot, talked to all day, keeps his cache warm; other Robots compact while idle (ao-jlr0, ao-f4sp).
     // Mr. Robot, talked to all day, keeps his cache warm and closes the chapter after the third warming (v1.20, dm-zyxz).
     cacheWarming: init.kind === 'mr-robot', idleCompaction: true, idleCompactionFloorTokens: DEFAULT_IDLE_FLOOR_TOKENS,

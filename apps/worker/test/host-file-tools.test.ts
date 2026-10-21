@@ -29,7 +29,7 @@ async function robotOn(host: { hostId: string }, name = 'Coder'): Promise<string
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: { name } })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow' } } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' }, hosts: { [`${host.hostId}:files`]: 'allow' } } } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id

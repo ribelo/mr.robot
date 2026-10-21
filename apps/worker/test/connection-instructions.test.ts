@@ -27,7 +27,7 @@ async function robotWith(connections: Record<string, 'allow' | 'ask'>): Promise<
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: [], skills: [], recipients: [], secrets: [], connections } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: [], skills: [], recipients: [], secrets: [], connections } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -81,6 +81,7 @@ describe("Mr. Robot's Connection tools", () => {
   async function chief(): Promise<string> {
     const id = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await settle(id)
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     return id
   }
   async function call(id: string, calls: Array<{ name: string; args: Record<string, unknown> }>): Promise<string[]> {

@@ -9,7 +9,7 @@ import type { Conversation, ConnectionView, Me } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
 import { connectorFixtures, type RecordedCall } from './connector-fixtures.ts'
 import { fakeOutbox } from './fake-channel.ts'
-import { requests, scripts, stepRequests, stepScripts, type StubReply, declaredTools } from './stub-llm.ts'
+import { requests, scripts, stepRequests, stepScripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const API = 'https://discord.com/api/v10'
@@ -36,7 +36,7 @@ async function activeRobot(settings: Record<string, unknown> = {}): Promise<stri
   scripts.set('*', [{ text: '' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['files', 'tasks', 'subagents'], skills: [], recipients: [], secrets: [] }, ...settings } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['files', 'tasks', 'subagents'], skills: [], recipients: [], secrets: [] }, ...settings } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   stepRequests.delete(body.id)
@@ -73,7 +73,7 @@ describe('say is the Robot\'s voice (gb-s81e, gb-6c8d, gb-wma6, gb-25jb)', () =>
   })
 
   it('works from a code-mode program: several messages at the right moments of one step (gb-25jb)', async () => {
-    const id = await activeRobot()
+    const id = await activeRobot({ codeMode: true })
     const program = [
       "await tools.say({ text: 'Starting.' })",
       "const text = await tools.read({ on: 'files', file_path: 'SOUL.md' })",
@@ -116,7 +116,7 @@ describe('say is the Robot\'s voice (gb-s81e, gb-6c8d, gb-wma6, gb-25jb)', () =>
     scripts.set(`${id}:sub`, [{ text: 'Looked.' }])
     await owner(id, 'delegate', [{ calls: [{ name: 'subagent', args: { description: 'Look', prompt: 'Look at it.' } }] }, { say: 'Started.' }])
     await vi.waitFor(() => expect(requests.get(`${id}:sub`)?.length ?? 0).toBeGreaterThan(0), { timeout: 10_000 })
-    const offered = declaredTools(requests.get(`${id}:sub`)![0]!)
+    const offered = (requests.get(`${id}:sub`)?.[0]?.tools ?? []).map((definition) => definition.name)
     expect(offered.length).toBeGreaterThan(0)
     expect(offered).not.toContain('say')
   })

@@ -1,7 +1,7 @@
 import { reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, ProposalView, Trajectory } from '@mr-robot/protocol'
-import { api, boundToolNames, settle, stubModels, testRobot } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -14,11 +14,11 @@ beforeEach(async () => {
   await api(ANNA, '/api/me')
 })
 
-async function activeRobot(tools: string[]): Promise<string> {
+async function activeRobot(tools: string[], codeMode: boolean): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools, skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants: { tools, skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -34,7 +34,7 @@ const toolNames = (id: string) => (lastRequest(id).tools ?? []).map((tool) => to
 
 describe('code mode (robot-5ewr, robot-ax7s)', () => {
   it('runs three tool calls as one executed program', async () => {
-    const id = await activeRobot(['files'])
+    const id = await activeRobot(['files'], true)
     const program = [
       "await tools.write({ on: 'files', file_path: 'notes/a.md', content: 'alpha' })",
       "const text = await tools.read({ on: 'files', file_path: 'notes/a.md' })",
@@ -51,38 +51,17 @@ describe('code mode (robot-5ewr, robot-ax7s)', () => {
     expect(result.data).toContain('notes/a.md')
   })
 
-  it('is the only mode: the settings refuse codeMode, and the model is offered run_code alone (v1.22, td-2z82)', async () => {
-    const id = await activeRobot(['files'])
-    for (const codeMode of [false, true]) {
-      const refused = await api<string>(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode } })
-      expect(refused.status).toBe(400)
-    }
-    expect((await api<Record<string, unknown>>(ANNA, `/api/robots/${id}/panel`)).body).not.toHaveProperty('settings.codeMode')
+  it('switches to direct tool calls per Robot', async () => {
+    const id = await activeRobot(['files'], false)
     await say(id, 'hi', [{ text: 'hi' }])
-    expect(toolNames(id)).toEqual(['run_code'])
-    expect(await boundToolNames(id)).toContain('read')
-  })
-
-  it('runs a program in setup too (v1.22, td-2z82)', async () => {
-    scripts.set('*', [{ text: 'Hello.' }])
-    const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
-    await settle(body.id)
-    const program = [
-      "await tools.write({ on: 'files', file_path: 'SOUL.md', content: '# Soul\\nI watch prices.' })",
-      "return await tools.read({ on: 'files', file_path: 'SOUL.md' })",
-    ].join('\n')
-    await say(body.id, 'you watch prices', [{ calls: [{ name: 'run_code', args: { code: program, description: 'write and read the soul' } }] }, { text: 'Noted.' }])
-    expect(toolNames(body.id)).toEqual(['run_code'])
-    const { events } = (await api<Trajectory>(ANNA, `/api/robots/${body.id}/trajectory`)).body
-    expect(events.filter((event) => event.type === 'tool/ptc-dispatch').map((event) => JSON.parse(event.data).name)).toEqual(['write', 'read'])
-    expect(events.find((event) => event.type === 'tool/result')!.data).toContain('I watch prices.')
-    expect((await api<{ status: string }[]>(ANNA, '/api/robots')).body).toEqual(expect.arrayContaining([expect.objectContaining({ id: body.id, status: 'setup' })]))
+    expect(toolNames(id)).toContain('read')
+    expect(toolNames(id)).not.toContain('run_code')
   })
 })
 
 describe('Grants (robot-f9ln, robot-0ms7)', () => {
   it('keeps an ungranted tool out of the catalog and out of the executor', async () => {
-    const id = await activeRobot([])
+    const id = await activeRobot([], true)
     await say(id, 'try files', [
       { calls: [{ name: 'run_code', args: { code: "return await tools.read({ on: 'files', file_path: 'SOUL.md' })", description: 'read soul' } }] },
       { text: 'I cannot.' },
@@ -94,17 +73,20 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
     expect(result.data).toContain('tools.read is not a function')
     expect(result.data).not.toContain("You're not a chatbot")
 
+    const direct = await activeRobot([], false)
+    await say(direct, 'hi', [{ text: 'hi' }])
     // Conversation-level tools only (ask, draft_revise and say need no Grant); robot_reply works only with a handle another Robot sent.
-    expect(await boundToolNames(id)).toEqual(['ask', 'conversation_search', 'draft_revise', 'memory_search', 'my_capabilities', 'propose_grants', 'propose_member_file_edit', 'propose_review', 'react', 'request_credential', 'robot_reply', 'say', 'set_identity', 'skill', 'skill_library'])
+    expect(toolNames(direct)).toEqual(['ask', 'conversation_search', 'draft_revise', 'memory_search', 'my_capabilities', 'propose_grants', 'propose_member_file_edit', 'propose_review', 'react', 'request_credential', 'robot_reply', 'say', 'set_identity', 'skill', 'skill_library'])
   })
 
   it('has no shell, terminal or container tool at all', async () => {
-    const id = await activeRobot(['files', 'web', 'tasks', 'notify'])
-    for (const name of await boundToolNames(id)) expect(name).not.toMatch(/bash|shell|terminal|exec|container|subagent/)
+    const id = await activeRobot(['files', 'web', 'tasks', 'notify'], false)
+    await say(id, 'hi', [{ text: 'hi' }])
+    for (const name of toolNames(id)) expect(name).not.toMatch(/bash|shell|terminal|exec|container|subagent/)
   })
 
   it('applies exactly the stored Grant proposal when the owner answers (robot-vy9z)', async () => {
-    const id = await activeRobot([])
+    const id = await activeRobot([], false)
     await say(id, 'please watch prices', [
       { calls: [{ name: 'propose_grants', args: { purpose: 'Read listing pages', tools: ['web', 'files'] } }] },
       { text: 'I asked for access.' },
@@ -117,24 +99,24 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
     await settle(id)
     const settings = await testRobot(id).settings()
     expect(settings.grants.tools).toEqual({ files: 'allow', web: 'allow' })
-    expect(await boundToolNames(id)).toEqual(expect.arrayContaining(['read', 'web_fetch']))
-    expect(await boundToolNames(id)).not.toContain('web_search')
+    expect(toolNames(id)).toEqual(expect.arrayContaining(['read', 'web_fetch']))
+    expect(toolNames(id)).not.toContain('web_search')
   })
 })
 
 describe('advanced settings (robot-vqtw)', () => {
-  it('take effect on the next Turn: model, effort, budget, Grants', async () => {
-    const id = await activeRobot([])
+  it('take effect on the next Turn: model, effort, budget, code mode, Grants', async () => {
+    const id = await activeRobot([], true)
     await say(id, 'one', [{ text: 'one' }])
     expect(lastRequest(id).model).toBe('stub')
     expect(toolNames(id)).toEqual(['run_code'])
     await api(ANNA, `/api/robots/${id}/settings`, {
       method: 'PATCH',
-      body: { model: { provider: 'stub', model: 'stub-large', effort: 'high' }, contextBudget: 64000, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } },
+      body: { model: { provider: 'stub', model: 'stub-large', effort: 'high' }, codeMode: false, contextBudget: 64000, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } },
     })
     await say(id, 'two', [{ text: 'two' }])
     expect(lastRequest(id).model).toBe('stub-large')
-    expect(toolNames(id)).toEqual(['run_code'])
-    expect(await boundToolNames(id)).toContain('read')
+    expect(toolNames(id)).toContain('read')
+    expect(toolNames(id)).not.toContain('run_code')
   })
 })

@@ -1,7 +1,7 @@
 import { reset, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, ProposalView, RobotPanel, Trajectory } from '@mr-robot/protocol'
-import { api, robots, settle, stubModels, testRobot, boundTools } from './api.ts'
+import { api, robots, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -15,11 +15,11 @@ beforeEach(async () => {
 })
 
 /** An active Robot holding files at ask (sk-hx8j). */
-async function askingRobot(): Promise<string> {
+async function askingRobot(codeMode: boolean): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'ask' } } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants: { tools: { files: 'ask' } } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -50,9 +50,9 @@ const write = (content: string) => ({ name: 'write', args: { on: 'files', file_p
 
 describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
   it('stores an Ask for an ask-level call, does not run the tool, and waits for the owner', async () => {
-    const id = await askingRobot()
+    const id = await askingRobot(false)
     await say(id, 'save the list', [{ calls: [write('milk')] }, { text: 'Waiting for your answer.' }])
-    const schema = (await boundTools(id)).find((tool) => tool.name === 'write')
+    const schema = requests.get(id)!.at(-1)!.tools?.find((tool) => tool.name === 'write')
     expect(schema?.parameters).toMatchObject({ required: expect.arrayContaining(['reason']) })
     const [ask] = await asks(id)
     expect(ask).toMatchObject({ kind: 'tool-call', status: 'open', toolCall: { tool: 'write', reason: 'Keep the shopping list', note: null } })
@@ -63,7 +63,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
   })
 
   it('runs the stored call once on approval and wakes the Robot with its result; a second approval is refused', async () => {
-    const id = await askingRobot()
+    const id = await askingRobot(false)
     await say(id, 'save the list', [{ calls: [write('milk')] }, { text: 'Waiting.' }])
     const [ask] = await asks(id)
     // The woken Robot tries the tool again: nothing was remembered, so that call asks again (sk-fx6q).
@@ -80,7 +80,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
   })
 
   it('wakes the Robot with the owner\'s reason on rejection and never runs the call', async () => {
-    const id = await askingRobot()
+    const id = await askingRobot(false)
     await say(id, 'save the list', [{ calls: [write('milk')] }, { text: 'Waiting.' }])
     const [ask] = await asks(id)
     scripts.set(id, [{ text: 'Understood.' }])
@@ -92,7 +92,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
   })
 
   it('gives a code-mode program the waiting result; approval runs the call without running the program again', async () => {
-    const id = await askingRobot()
+    const id = await askingRobot(true)
     const program = "const saved = await tools.write({ on: 'files', file_path: 'notes/a.md', content: 'milk', reason: 'Keep the shopping list' })\nreturn saved"
     await say(id, 'save the list', [{ calls: [{ name: 'run_code', args: { code: program, description: 'save' } }] }, { text: 'Waiting.' }])
     const result = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body.events.find((event) => event.type === 'tool/result')!
@@ -110,7 +110,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
   })
 
   it('lets the Turn of a Task end waiting and resumes the work on the answer', async () => {
-    const id = await askingRobot()
+    const id = await askingRobot(false)
     scripts.set(id, [{ calls: [write('report')] }, { text: 'Waiting for my owner.' }])
     await testRobot(id).wake({ kind: 'task', sender: { kind: 'task', taskId: 'rt-1', name: 'Night' }, text: 'Write the report.' })
     await settle(id)
@@ -127,7 +127,7 @@ describe('ask per call (sk-hx8j, sk-ed7r, sk-c1vz, sk-fx6q)', () => {
 
 describe('Always allow this (dp-u9z9, dp-2xp4)', () => {
   it('raises the item to allow for the Robot, runs the call, records the Ask in the Conversation, and stops asking; the grants lower it again', async () => {
-    const id = await askingRobot()
+    const id = await askingRobot(false)
     await say(id, 'save the list', [{ calls: [write('milk')] }, { text: 'Waiting.' }])
     const [ask] = await asks(id)
     expect(ask!.toolCall!.alwaysAllow).toEqual([{ kind: 'tool', name: 'files' }])

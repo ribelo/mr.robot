@@ -7,7 +7,7 @@ import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ConnectionView, Me, RobotSummary, SkillView, WorkspaceFileView } from '@mr-robot/protocol'
 import { PLATFORM_SKILLS } from '../src/skills/platform.ts'
-import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { closeHosts, fakeHost } from './fake-host.ts'
 import { requests, scripts } from './stub-llm.ts'
 
@@ -28,7 +28,7 @@ async function robotWith(grants: Record<string, unknown> = {}, settings: Record<
   scripts.set('*', [{ text: '' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: [], skills: [], recipients: [], secrets: [], ...grants }, ...settings } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: [], skills: [], recipients: [], secrets: [], ...grants }, ...settings } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
@@ -51,11 +51,11 @@ describe('the catalog lists platform skills by what the Robot holds (gb-n6by, gb
   it('every Robot sees tasks-cadence and asking, with no Grant at all; the group skills are absent', async () => {
     const id = await robotWith()
     expect(await catalog(id)).toEqual(sorted('tasks-cadence', 'asking', 'memory'))
-    expect(await boundToolNames(id)).toContain('skill')
+    expect(requests.get(id)!.at(-1)!.tools!.map((definition) => definition.name)).toContain('skill')
   })
 
   it('subagents shows with the subagents group, browser with the browser group', async () => {
-    expect(await catalog(await robotWith({ tools: { subagents: 'allow' } }, { subagentModels: [] }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'subagents'))
+    expect(await catalog(await robotWith({ tools: { subagents: 'allow' }, subagentModels: [] }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'subagents'))
     expect(await catalog(await robotWith({ tools: { browser: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'browser'))
     expect(await catalog(await robotWith({ tools: { subagents: 'ask', browser: 'allow' } }))).toEqual(sorted('tasks-cadence', 'asking', 'memory', 'subagents', 'browser'))
   })
@@ -73,6 +73,7 @@ describe('the catalog lists platform skills by what the Robot holds (gb-n6by, gb
   it('Mr. Robot sees them too, by what he holds', async () => {
     const id = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await settle(id)
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     const names = await catalog(id)
     expect(names).toEqual(expect.arrayContaining(['tasks-cadence', 'asking', 'browser']))
     // The subagents group is held by Mr. Robot only when granted.
@@ -106,6 +107,7 @@ describe('box and hosts follow the box grant and the Host facets (ob-vw9d, ob-iv
     await fakeHost()
     const id = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     await settle(id)
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     const names = await catalog(id)
     expect(names).toContain('hosts')
     expect(names).not.toContain('box')

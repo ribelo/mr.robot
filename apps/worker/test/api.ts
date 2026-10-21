@@ -30,12 +30,3 @@ export async function settle(id: string): Promise<void> {
 export function testRobot(id: string): DurableObjectStub<TestRobot> {
   return env.ROBOT.getByName(id) as unknown as DurableObjectStub<TestRobot>
 }
-
-/** The tools bound in a Robot's program runtime, as registered: what its programs may call (v1.22: code mode is the only mode). */
-export async function boundTools(id: string): Promise<Array<{ name: string; description: string; parameters: Record<string, unknown> }>> {
-  return testRobot(id).boundToolsForTest()
-}
-
-export async function boundToolNames(id: string): Promise<string[]> {
-  return (await boundTools(id)).map((tool) => tool.name).sort()
-}

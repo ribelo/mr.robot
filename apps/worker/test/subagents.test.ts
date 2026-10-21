@@ -7,8 +7,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { RobotPanel, RobotSummary, SubagentView } from '@mr-robot/protocol'
 import { REVIEW_POLICY } from '../src/agent/auto-review.ts'
-import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
-import { requests, scripts, type StubReply, declaredTools } from './stub-llm.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
+import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const PASSWORD = 'hunter2-Very-Secret!'
@@ -27,6 +27,7 @@ async function delegating(options: { models?: Array<{ provider: string; model: s
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
   await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: {
+    codeMode: false,
     grants: { tools: { subagents: 'allow', files: 'allow', ...options.tools }, skills: [], recipients: [], secrets: options.secrets ?? [] },
     subagentModels: options.models ?? [STUB],
     ...options.settings,
@@ -69,10 +70,10 @@ describe('the subagents grant and its model list (ao-zzga, ao-2z4n, ao-r3oq)', (
     expect(unlisted).toContain('stub/other is not a model your owner allowed for Subagents. Allowed: stub/stub')
     expect(JSON.parse(listed!)).toMatchObject({ kind: 'activation', subagentId: expect.stringMatching(/^sa-/) })
     // Not granted: no tool at all.
-    expect(await boundToolNames(empty)).toContain('subagent')
+    expect(requests.get(empty)![0]!.tools?.some((tool) => tool.name === 'subagent')).toBe(true)
     const none = await delegating({ tools: { subagents: 'deny' } })
     await say(none, 'go', [{ text: 'Ok.' }])
-    expect(await boundToolNames(none)).not.toContain('subagent')
+    expect(requests.get(none)![0]!.tools?.map((tool) => tool.name)).not.toContain('subagent')
   })
 })
 
@@ -81,6 +82,7 @@ describe('the list is a setting the owner and Mr. Robot edit (ao-2z4n)', () => {
     const id = await delegating({ models: [] })
     const chief = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((entry) => entry.kind === 'mr-robot')!.id
     await settle(chief)
+    await env.ROBOT.getByName(chief).updateSettings({ codeMode: false })
     await say(chief, 'let it delegate', [{ calls: [{ name: 'robot_settings_set', args: { robot_id: id, subagentModels: [STUB] } }] }, { text: 'Done.' }])
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.subagentModels).toEqual([STUB])
     await say(chief, 'and grant it', [{ calls: [{ name: 'robot_settings_set', args: { robot_id: id, grants: { tools: { subagents: 'allow' } } } }] }, { text: 'Refused.' }])
@@ -100,7 +102,7 @@ describe('a Subagent (ao-8s1d, ao-sbc9, ao-3umf, ao-w9lq)', () => {
     // The Robot's Turn is over while its Subagent works; the row says it works.
     expect((await row(id)).fleetState).toBe('working')
     expect((await row(id)).subagents).toEqual([expect.objectContaining({ label: 'Read the pages' })])
-    const offered = declaredTools(requests.get(sub(id))![0]!)
+    const offered = requests.get(sub(id))![0]!.tools!.map((tool) => tool.name)
     for (const name of ['subagent', 'subagent_fork', 'send_message', 'interrupt_agent', 'list_agents', 'robot_send', 'robot_directory', 'propose_grants', 'propose_review', 'ask', 'request_credential', 'say', 'react', 'propose_member_file_edit']) expect(offered).not.toContain(name)
     expect(offered).toContain('write')
     expect(offered).toContain('notify_owner')

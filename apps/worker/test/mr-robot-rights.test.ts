@@ -24,6 +24,7 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     await settle(id)
     // His settings show what he really holds: every login his owner has, at allow (sk-8llz).
     expect((await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body.settings.grants.secrets).toEqual({ shop: 'allow' })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(id, [
       { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] },
       { calls: [{ name: 'login_fill', args: { name: 'shop' } }] },
@@ -44,6 +45,7 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     await settle(other)
     await testRobot(other).activateForTest()
     const id = await mrRobotId()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(id, [{ calls: [{ name: 'robot_propose_grants', args: { robot_id: other, purpose: 'it needs to search the web', tools: ['web'] } }] }, { text: 'Asked.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'give the new robot web access' } })
     await settle(id)
@@ -60,6 +62,7 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
     await api(ANNA, `/api/robots/${other}/settings`, { method: 'PATCH', body: { grants: { tools: { tasks: 'allow', files: 'allow' } } } })
     await testRobot(other).activateForTest()
     const id = await mrRobotId()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     const tools = ['web', { name: 'browser', level: 'ask' }, { name: 'tasks', level: 'deny' }]
     scripts.set(id, [{ calls: [{ name: 'robot_propose_grants', args: { robot_id: other, purpose: 'it should browse with you watching', tools } }] }, { text: 'Asked.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'set up the new robot' } })
@@ -80,6 +83,7 @@ describe("Mr. Robot's rights (v1.1 ticket 10)", () => {
   it('edits a library skill without approval (rb-axxy)', async () => {
     await api(ANNA, '/api/admin/skills/checklist', { method: 'PUT', body: { description: 'A list', content: '---\nname: checklist\ndescription: A list\n---\n1.' } })
     const id = await mrRobotId()
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(id, [{ calls: [{ name: 'skill_write', args: { name: 'checklist', content: '---\nname: checklist\ndescription: A better list\n---\n1. 2.' } }] }, { text: 'Updated.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'improve the checklist skill' } })
     await settle(id)

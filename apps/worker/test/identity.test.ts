@@ -5,7 +5,7 @@
 import { reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RobotPanel } from '@mr-robot/protocol'
-import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -22,7 +22,7 @@ async function activeRobot(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { identity: { name: 'Flat Watcher', title: 'Housing', description: 'Watches apartment prices.', avatarColor: '#3b82f6' } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, identity: { name: 'Flat Watcher', title: 'Housing', description: 'Watches apartment prices.', avatarColor: '#3b82f6' } } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
@@ -39,7 +39,7 @@ describe('set_identity after setup', () => {
     ])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'You are more than a watcher now.' } })
     await settle(id)
-    expect(await boundToolNames(id)).toContain('set_identity')
+    expect(requests.get(id)![0]!.tools!.map((tool) => tool.name)).toContain('set_identity')
     const result = JSON.parse(results(id)[0]!) as { identity: Record<string, string>; changed: string[] }
     expect(result.changed).toEqual(['title', 'description', 'avatarColor'])
     const panel = (await api<RobotPanel>(ANNA, `/api/robots/${id}/panel`)).body

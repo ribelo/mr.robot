@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { RobotPanel, RobotSummary } from '@mr-robot/protocol'
 import { REVIEW_POLICY } from '../src/agent/auto-review.ts'
-import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { boxDisks, boxLog, boxScripts, finishBoxJob, holdBoxJob, holdBoxRun, releaseBoxRun, StubBox } from './stub-box.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
@@ -29,7 +29,7 @@ async function robotWith(tools: Record<string, string>, settings: Record<string,
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { contextBudget: 32_000, grants: { tools }, ...settings } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget: 32_000, grants: { tools }, ...settings } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
@@ -49,11 +49,11 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
   it('its tools exist only with the box grant', async () => {
     const without = await robotWith({ files: 'allow' })
     await say(without, 'hi', [{ text: 'Hi.' }])
-    expect(await boundToolNames(without)).not.toContain('run')
+    expect(requests.get(without)![0]!.tools!.map((tool) => tool.name)).not.toContain('run')
     expect((await panel(without)).box).toBeUndefined()
     const granted = await robotWith({ box: 'allow' })
     await say(granted, 'hi', [{ text: 'Hi.' }])
-    expect(await boundToolNames(granted)).toEqual(expect.arrayContaining(['run', 'read', 'write']))
+    expect(requests.get(granted)![0]!.tools!.map((tool) => tool.name)).toEqual(expect.arrayContaining(['run', 'read', 'write']))
     expect((await panel(granted)).box).toEqual({ state: 'off', since: null, lastCommandAt: null })
   })
 
@@ -177,7 +177,7 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     expect(await workspaceText(id, 'box/data.csv')).toBe('new\n')
     expect(await workspaceText(id, 'computer/setup.sh')).toBeNull()
     expect(await workspaceText(id, 'computer/data.csv')).toBeNull()
-    expect(await boundToolNames(id)).toEqual(expect.arrayContaining(['run']))
+    expect(requests.get(id)![0]!.tools!.map((tool) => tool.name)).toEqual(expect.arrayContaining(['run']))
   })
 
   it('keeps the uv and Bun caches whole as one archive: sent with ws at the stop, back before setup.sh at the next boot; a broken one is a cold cache (deep review P7)', async () => {

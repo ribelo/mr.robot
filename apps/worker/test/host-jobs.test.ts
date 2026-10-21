@@ -31,7 +31,7 @@ async function robotOn(host: { hostId: string }): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { contextBudget: 32_000, grants: { tools: {}, hosts: { [`${host.hostId}:shell`]: 'allow' } } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget: 32_000, grants: { tools: {}, hosts: { [`${host.hostId}:shell`]: 'allow' } } } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
@@ -357,7 +357,7 @@ describe('a Host the Robot can no longer reach (S6)', () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(BEN, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(BEN, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { contextBudget: 32_000, grants: { tools: {}, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
+    await api(BEN, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget: 32_000, grants: { tools: {}, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
     await testRobot(body.id).activateForTest()
     requests.delete(body.id)
     heldCommands.add('sleep 1000')

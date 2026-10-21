@@ -5,7 +5,7 @@
 import { env, reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ConnectionView, Conversation, Me, ProposalView, RobotPanel } from '@mr-robot/protocol'
-import { api, settle, stubModels, testRobot, boundTools } from './api.ts'
+import { api, settle, stubModels, testRobot } from './api.ts'
 import { connectorFixtures } from './connector-fixtures.ts'
 import { decodeRaw } from './connector-host.ts'
 import { requests, scripts } from './stub-llm.ts'
@@ -31,7 +31,7 @@ async function mailRobot(write: 'allow' | 'ask', settings: Record<string, unknow
   scripts.set('*', [{ text: '' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' }, connections: { [mail.id]: 'allow', [`${mail.id}:write`]: write } }, ...settings } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' }, connections: { [mail.id]: 'allow', [`${mail.id}:write`]: write } }, ...settings } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return { id: body.id, connection: mail.id }
@@ -107,7 +107,7 @@ describe('a send tool at ask is a draft (dp-si4p, dp-wd2q, dp-qbt7, dp-ky1h)', (
   it('draft: true asks even when the Robot may send on its own (dp-yhn7)', async () => {
     const { id } = await mailRobot('allow')
     connectorFixtures.on('POST', `${GMAIL}/messages/send`, { id: 'm-1', threadId: 't-1' })
-    const schema = async () => (await boundTools(id)).find((tool) => tool.name === 'gmail_send')?.parameters as { properties: Record<string, unknown> }
+    const schema = async () => requests.get(id)!.at(-1)!.tools?.find((tool) => tool.name === 'gmail_send')?.parameters as { properties: Record<string, unknown> }
     const ask = await drafted(id, { to: ['ben@example.com'], subject: 'Dinner', body: 'Hi', draft: true })
     expect((await schema()).properties).toHaveProperty('draft')
     expect(ask).toMatchObject({ status: 'open', toolCall: { tool: 'gmail_send', alwaysAllow: null, draft: { subject: 'Dinner', body: 'Hi' } } })

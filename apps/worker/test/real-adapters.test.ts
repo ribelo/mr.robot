@@ -58,7 +58,7 @@ async function turnOn(model: { provider: string; model: string }): Promise<Conve
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
   await testRobot(body.id).activateForTest()
-  const changed = await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { model: { ...model, effort: 'high' } } })
+  const changed = await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, model: { ...model, effort: 'high' } } })
   expect(changed.status).toBe(200)
   await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'hi' } })
   await settle(body.id)
