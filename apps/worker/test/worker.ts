@@ -278,6 +278,18 @@ export class Robot extends ProductionRobot {
     return [all('SELECT event FROM session_event'), all('SELECT * FROM chat_item'), all('SELECT text FROM chat_search')].join('\n')
   }
 
+  /** The daily tidy as at a moment (spill, cold chapters, file history). */
+  async tidyForTest(now: number): Promise<void> {
+    this.store.delete('spill-sweep-next')
+    await this.tidySpill(now)
+  }
+
+  /** A version kept long ago in this Robot's file history (v1.20.1). */
+  async oldVersionForTest(path: string, replacedAt: number): Promise<void> {
+    const key = `history/robots/${this.store.requireConfig().id}/${encodeURIComponent(path)}/${String(9_999_999_999_999 - replacedAt).padStart(13, '0')}-aaaaaa`
+    await this.env.FILES.put(key, 'old', { customMetadata: { by: JSON.stringify({ kind: 'robot' }), at: String(replacedAt), replaced: String(replacedAt) } })
+  }
+
   async tidyChaptersForTest(now: number, limit?: number): Promise<number> {
     return moveColdChapters(this.store, this.env.FILES, this.store.requireConfig().id, now, limit)
   }

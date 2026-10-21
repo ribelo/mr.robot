@@ -50,7 +50,8 @@ describe('importing a Grok Bot template (rm-pdgk, rm-ewhv)', () => {
     expect(imported.status, JSON.stringify(imported.body)).toBe(200)
     expect(userAgent).toContain('Mozilla/5.0')
     expect(imported.body).toMatchObject({ slug: 'grok-overheard', title: 'Overheard', source: 'import', author: 'Lenny Rachitsky (Grok Bot, imported)', published: false, mine: true })
-    expect((await api<DefinitionView[]>(ANNA, '/api/definitions')).body).toEqual([])
+    // Not published: the Space admin sees it to publish it (v1.20.1); another Member would not.
+    expect((await api<DefinitionView[]>(ANNA, '/api/definitions')).body.map((row) => [row.slug, row.published])).toEqual([['grok-overheard', false]])
 
     const read = await files(BEN, 'grok-overheard')
     expect(read('README.md')).toContain('Imported summary; Grok Bot keeps the recipe closed. Source: https://x.ai/bot/marketplace/bots/overheard')

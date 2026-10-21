@@ -66,6 +66,7 @@ function DefinitionCard({ entry, isAdmin }: { entry: MarketplaceEntry; isAdmin: 
             {entry.needs.map((need) => <span key={`${need.kind}-${need.label}`} className={need.met ? 'pill' : 'pill pill-warn'} title={need.met ? 'You have this' : 'Add will ask for this'}>{need.met ? '✓ ' : ''}{need.label}</span>)}
           </span>
         )}
+        {definition.invalid === undefined ? null : <span className="muted">The repository's version is refused, so this is the last good one: {definition.invalid}</span>}
         {error === undefined ? null : <span className="muted">{error}</span>}
       </span>
       <span className="definition-actions">

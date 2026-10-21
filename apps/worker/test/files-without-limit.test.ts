@@ -99,6 +99,8 @@ describe('the Box token and the presign door (ob-qshq, ob-o6aw)', () => {
     // The owner's files and the docs are not objects a Box may write.
     expect((await presign(token, { op: 'put', path: 'USER.md', size: 5 })).status).toBe(400)
     expect((await presign(token, { op: 'put', path: 'docs/robots.md', size: 5 })).status).toBe(400)
+    // A file with history is written by the file tools only (v1.20.1, v1.18-review #10).
+    for (const path of ['MEMORY.md', 'SOUL.md', 'memory/2026-10-21.md']) expect((await presign(token, { op: 'put', path, size: 5 })).status).toBe(400)
     expect((await presign(token, { op: 'get', path: 'no/such/file' })).status).toBe(404)
     expect((await presign(token, { op: 'rm', path: 'no/such/file' })).status).toBe(404)
     expect((await presign(token, { op: 'nonsense', path: 'a' })).status).toBe(400)

@@ -2927,6 +2927,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await sweepStaged(this.env.FILES, robotId, now)
     // Chapters outside the retention window go to R2 (v1.19, ec-4qsf).
     await moveColdChapters(this.store, this.env.FILES, robotId, now)
+    // File history older than 90 days goes, also of a file not written since (v1.20.1).
+    await this.workspace.history.trimAll(now)
     this.store.set('spill-sweep-next', now + SPILL_SWEEP_EVERY_MS)
   }
 
@@ -3951,30 +3953,44 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       const file = await this.run(ws.read(path))
       if (file !== undefined) await this.run(ws.write(`${draft}/${path}`, file.body, file.contentType, { kind: 'platform' }))
     }
-    // The owner scrub: one bounded step of the Robot on its own model (rm-gv6s), as a Turn of its own (v1.20.1).
+    // What the platform writes from the owner's world is staged before the scrub, so the scrub reads it too (v1.20.1, v1.18-review #15):
+    // the Tasks (titles and instructions verbatim) and a README from the identity. grants.yaml names kinds and sites only and is the platform's.
+    const tasks = await this.space().listTasks({ kind: 'robot', robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot', robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }, { state: 'open', assignee: { kind: 'robot', robotId: config.id } })
+    await this.run(ws.write(`${draft}/tasks.yaml`, writeTasks(tasksFormOf(tasks.tasks)), 'text/yaml; charset=utf-8', { kind: 'platform' }))
+    await this.run(ws.write(`${draft}/README.md`, `# ${config.identity.name}\n\n${config.identity.description}\n`, 'text/markdown; charset=utf-8', { kind: 'platform' }))
+    // The owner scrub: one bounded step of the Robot on its own model (rm-gv6s), as a Turn of its own, writing only under the draft (v1.20.1).
     const { agent } = await this.agent()
-    await this.asTurn(() => platformStep(agent, this.stepHost(), {
+    const inDraft = (tool: string, args: Readonly<Record<string, unknown>>) => {
+      const refused = workspaceOnly(tool, args)
+      if (refused !== undefined) return refused
+      if (tool !== 'write' && tool !== 'edit') return undefined
+      const path = normalizePath(String(args['file_path'] ?? args['path'] ?? '').replace(/^\/workspace\//, ''))
+      return path !== undefined && path.startsWith(`${draft}/`) ? undefined : `the scrub writes only under ${draft}/`
+    }
+    const scrub = await this.asTurn(() => platformStep(agent, this.stepHost(), {
       label: 'the definition scrub',
       instruction: wakeupMessage({ sender: { kind: 'platform' }, text: definitionScrubNote(draft), summary: `Saving as the definition ${slug}`, woke: { at: Date.now(), timeZone: config.timeZone } }),
       steps: DEFINITION_SCRUB_STEPS,
       tools: MEMORY_STEP_TOOLS,
-      args: workspaceOnly,
+      args: inDraft,
       usage: 'robot',
     }), 'the definition scrub')
+    // Published only after a scrub that ran and ended by the model's choice, not cut at its limit or refused (v1.20.1, v1.20-review #2).
+    if (!scrub.ran || !scrub.endedByModel) {
+      await this.run(ws.removeUnder(draft))
+      throw Object.assign(new Error('the Robot did not finish taking out what is about you; nothing was saved. Try again.'), { name: 'Conflict', status: 409 })
+    }
     const files = new Map<string, Uint8Array>()
     for (const entry of await this.run(ws.list(draft))) {
       const file = await this.run(ws.read(entry.path))
       if (file !== undefined) files.set(entry.path.slice(draft.length + 1), new Uint8Array(file.body))
     }
-    const tasks = await this.space().listTasks({ kind: 'robot', robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot', robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }, { state: 'open', assignee: { kind: 'robot', robotId: config.id } })
     const logins = await this.logins().catch(() => [])
     const sites = (name: string) => [...new Set((logins.find((entry) => entry.name === name)?.websites ?? []).map((site) => registrableDomain(site) ?? site))]
-    files.set('tasks.yaml', new TextEncoder().encode(writeTasks(tasksFormOf(tasks.tasks))))
     files.set('grants.yaml', new TextEncoder().encode(writeGrants(grantsFormOf(this.store.effectiveGrants(), this.knownConnections, sites))))
-    if (!files.has('README.md')) files.set('README.md', new TextEncoder().encode(`# ${config.identity.name}\n\n${config.identity.description}\n`))
     await this.run(ws.removeUnder(draft))
     await this.changed()
-    // A secret the Robot may read never leaves in a definition: its Task instructions and every text file are masked (v1.20.1).
+    // A secret the Robot may read never leaves in a definition: every text file is masked (v1.20.1).
     const masked = [...files.entries()].map(([path, body]) => {
       const text = new TextDecoder().decode(body)
       const after = this.mask(text)
@@ -4582,9 +4598,9 @@ const DEFINITION_SCRUB_STEPS = 6
 /** The owner scrub's instruction (rm-gv6s): the copies are to install for someone else. */
 function definitionScrubNote(draft: string): string {
   return [
-    `Save as definition: your SOUL.md, AGENTS.md, MEMORY.md and skills/ are copied to ${draft}/. Another person will install a Robot from these copies.`,
+    `Save as definition: your SOUL.md, AGENTS.md, MEMORY.md and skills/ are copied to ${draft}/, with tasks.yaml (your Tasks) and a first README.md. Another person will install a Robot from these copies.`,
     `Edit only the copies in ${draft}/: take out everything about your owner and their world (names, addresses, accounts, people, private facts, dates of their life). Keep how you work, the rules, the conventions, and facts about the job itself.`,
-    `Then write ${draft}/README.md: a first line "# <title>", one paragraph on what this Robot does, and a list "The interview will ask:" of what the new owner must tell you.`,
+    `In tasks.yaml change only the title and instructions text. Then rewrite ${draft}/README.md: a first line "# <title>", one paragraph on what this Robot does, and a list "The interview will ask:" of what the new owner must tell you.`,
     'Change nothing outside it, then stop. Do not reply to your owner.',
   ].join(' ')
 }

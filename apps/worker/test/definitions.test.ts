@@ -136,7 +136,8 @@ describe('Save as definition (rm-gv6s, rm-gxp7, rm-77oh)', () => {
     scripts.set(body.id, [{ text: '' }])
     expect((await api(BEN, `/api/robots/${body.id}/definition`, { body: { slug: 'helper' } })).status).toBe(200)
     expect((await list(BEN)).map((row) => [row.slug, row.published])).toEqual([['helper', false]])
-    expect(await list(ANNA)).toEqual([])
+    // The Space admin sees it, unpublished, to publish it (v1.20.1, v1.18-review #3).
+    expect((await list(ANNA)).map((row) => [row.slug, row.published, row.mine])).toEqual([['helper', false, false]])
     expect((await api(BEN, `/api/robots/${body.id}/definition`, { body: { slug: 'Not A Slug' } })).status).toBe(400)
 
     const first = await sync(new Map([
@@ -147,7 +148,7 @@ describe('Save as definition (rm-gv6s, rm-gxp7, rm-77oh)', () => {
     expect(first.definitions).toEqual(['good'])
     expect(first.refusedDefinitions.map((entry) => entry.slug)).toEqual(['broken'])
     expect((await sync(new Map([['robots/other/SOUL.md', text('# SOUL.md\n')]]))).definitions).toEqual(['other'])
-    expect((await list(ANNA)).map((row) => row.slug)).toEqual(['other'])
+    expect((await list(ANNA)).map((row) => row.slug)).toEqual(['helper', 'other'])
     expect((await api<RobotSummary[]>(ANNA, '/api/robots')).status).toBe(200)
   })
 })

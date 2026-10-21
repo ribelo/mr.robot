@@ -122,6 +122,20 @@ export class FileHistory {
     if (gone.length > 0) await this.bucket.delete(gone.map((version) => this.dir(name) + version.id))
   }
 
+  /** The 90-day bound for every file under the base, not only one just written (v1.20.1, v1.18-review #13): run by the daily tidy. */
+  async trimAll(now: number): Promise<number> {
+    const before = now - VERSION_DAYS_KEPT * DAY_MS
+    const gone: string[] = []
+    let cursor: string | undefined
+    do {
+      const page = await this.bucket.list({ prefix: this.base, include: ['customMetadata'], ...(cursor === undefined ? {} : { cursor }) })
+      for (const object of page.objects) if (Number(object.customMetadata?.['replaced'] ?? object.uploaded.getTime()) < before) gone.push(object.key)
+      cursor = page.truncated ? page.cursor : undefined
+    } while (cursor !== undefined)
+    for (let at = 0; at < gone.length; at += 1000) await this.bucket.delete(gone.slice(at, at + 1000))
+    return gone.length
+  }
+
   /** Forget every version under the base (the Robot or the Member is deleted). */
   async clear(): Promise<void> {
     let cursor: string | undefined

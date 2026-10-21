@@ -20,6 +20,9 @@ export const DEFINITION_SCHEMA = `CREATE TABLE IF NOT EXISTS definition (
   updated_at INTEGER NOT NULL
 )`
 
+/** v1.20.1: a repository form that no longer parses marks its definition invalid, with the error, and keeps the last good files. */
+export const DEFINITION_INVALID = 'ALTER TABLE definition ADD COLUMN invalid TEXT'
+
 export interface DefinitionRow {
   readonly slug: string
   readonly title: string
@@ -31,10 +34,12 @@ export interface DefinitionRow {
   /** In the Marketplace for every Member; otherwise its owner's only (ticket 06 publishes). */
   readonly published: boolean
   readonly updatedAt: number
+  /** Why the repository's current form was refused; null when it parses. */
+  readonly invalid: string | null
 }
 
-type Row = { slug: string; title: string; paragraph: string; source: DefinitionSource; owner_id: string | null; author: string; published: number; updated_at: number }
-const fromSql = (row: Row): DefinitionRow => ({ slug: row.slug, title: row.title, paragraph: row.paragraph, source: row.source, ownerId: row.owner_id, author: row.author, published: row.published === 1, updatedAt: row.updated_at })
+type Row = { slug: string; title: string; paragraph: string; source: DefinitionSource; owner_id: string | null; author: string; published: number; updated_at: number; invalid?: string | null }
+const fromSql = (row: Row): DefinitionRow => ({ slug: row.slug, title: row.title, paragraph: row.paragraph, source: row.source, ownerId: row.owner_id, author: row.author, published: row.published === 1, updatedAt: row.updated_at, invalid: row.invalid ?? null })
 
 export const definitionPrefix = (slug: string) => `definitions/${slug}/`
 
@@ -46,8 +51,9 @@ export class DefinitionLibrary {
     return row === undefined ? undefined : fromSql(row)
   }
 
-  /** The definitions a Member sees: the published ones and his own. */
-  visible(memberId: string): DefinitionRow[] {
+  /** The definitions a Member sees: the published ones and his own; the Space admin sees every one, to publish it (v1.20.1). */
+  visible(memberId: string, admin = false): DefinitionRow[] {
+    if (admin) return this.all()
     return this.sql.exec<Row>('SELECT * FROM definition WHERE published = 1 OR owner_id = ? ORDER BY title', memberId).toArray().map(fromSql)
   }
 
@@ -89,6 +95,7 @@ export class DefinitionLibrary {
          author = excluded.author, published = excluded.published, updated_at = excluded.updated_at`,
       slug, title, paragraph, meta.source, meta.ownerId, meta.author, meta.published ? 1 : 0, now,
     )
+    this.sql.exec('UPDATE definition SET invalid = NULL WHERE slug = ?', slug)
     return Result.succeed(this.get(slug)!)
   }
 
@@ -97,9 +104,16 @@ export class DefinitionLibrary {
     const synced: string[] = []
     const refused: Array<{ slug: string; reason: string }> = []
     for (const definition of found) {
-      const stored = await this.store(definition.slug, definition.files, { source: 'git', ownerId: null, author: 'the library repository', published: true }, now)
-      if (Result.isFailure(stored)) refused.push({ slug: definition.slug, reason: stored.failure })
-      else synced.push(definition.slug)
+      const previous = this.get(definition.slug)
+      const stored = await this.store(definition.slug, definition.files, { source: 'git', ownerId: null, author: 'the library repository', published: previous?.source === 'git' ? previous.published : true }, now)
+      if (Result.isFailure(stored)) {
+        refused.push({ slug: definition.slug, reason: stored.failure })
+        // The last good copy stays, marked with why the repository's is refused (v1.20.1, v1.18-review #4).
+        if (previous?.source === 'git') {
+          this.sql.exec('UPDATE definition SET invalid = ? WHERE slug = ?', stored.failure, definition.slug)
+          synced.push(definition.slug)
+        }
+      } else synced.push(definition.slug)
     }
     for (const gone of this.sql.exec<{ slug: string }>("SELECT slug FROM definition WHERE source = 'git'").toArray().map((row) => row.slug).filter((slug) => !synced.includes(slug))) {
       await this.remove(gone)

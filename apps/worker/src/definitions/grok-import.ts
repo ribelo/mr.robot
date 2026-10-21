@@ -164,13 +164,45 @@ export function briefOf(template: GrokTemplate, source: string): Map<string, Uin
   return files
 }
 
-/** Fetch a marketplace page as a browser would (the site serves the flight data to a browser User-Agent). */
-export async function fetchMarketplacePage(url: string): Promise<Result.Result<string, GrokImportError>> {
+/** The most of a page the importer reads, and how long it waits (v1.20.1, v1.18-review #17). */
+export const MAX_PAGE_BYTES = 5 * 1024 * 1024
+export const FETCH_TIMEOUT_MS = 15_000
+
+/**
+ * Fetch a marketplace page as a browser would (the site serves the flight data to a browser User-Agent), bounded: x.ai only, no redirect
+ * elsewhere, at most MAX_PAGE_BYTES, at most FETCH_TIMEOUT_MS. The edge Worker calls it; the Space gets the text.
+ */
+export async function fetchGrokPage(address: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<Result.Result<{ readonly url: string; readonly slug: string; readonly html: string }, GrokImportError>> {
+  const parsed = parseMarketplaceUrl(address)
+  if (Result.isFailure(parsed)) return Result.fail(parsed.failure)
   try {
-    const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36', accept: 'text/html' } })
+    const response = await fetch(parsed.success.url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs), headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36', accept: 'text/html' } })
+    if (response.status >= 300 && response.status < 400) return Result.fail(new GrokImportError({ message: 'the marketplace answered with a redirect; only the page itself is read' }))
     if (!response.ok) return Result.fail(new GrokImportError({ message: `the marketplace answered ${response.status}` }))
-    return Result.succeed(await response.text())
+    if (Number(response.headers.get('content-length') ?? 0) > MAX_PAGE_BYTES) return Result.fail(new GrokImportError({ message: 'the page is larger than 5 MB' }))
+    const reader = response.body?.getReader()
+    if (reader === undefined) return Result.fail(new GrokImportError({ message: 'the page was empty' }))
+    const parts: Uint8Array[] = []
+    let size = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_PAGE_BYTES) {
+        await reader.cancel()
+        return Result.fail(new GrokImportError({ message: 'the page is larger than 5 MB' }))
+      }
+      parts.push(value)
+    }
+    const body = new Uint8Array(size)
+    let at = 0
+    for (const part of parts) {
+      body.set(part, at)
+      at += part.byteLength
+    }
+    return Result.succeed({ url: parsed.success.url, slug: parsed.success.slug, html: new TextDecoder().decode(body) })
   } catch (error) {
-    return Result.fail(new GrokImportError({ message: `the page could not be fetched: ${error instanceof Error ? error.message : String(error)}` }))
+    const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+    return Result.fail(new GrokImportError({ message: timedOut ? 'the marketplace did not answer within 15 seconds' : `the page could not be fetched: ${error instanceof Error ? error.message : String(error)}` }))
   }
 }

@@ -16,6 +16,7 @@ import type { CompletedPart, ObjectStore } from '../workspace/object-store.ts'
 import { ObjectStoreError } from '../workspace/object-store.ts'
 import { BadPath, MissingFile, ReadOnlyPath } from './errors.ts'
 import { workspaceKey, writableWorkspaceKey } from './files.ts'
+import { isTrackedFile } from '../workspace/file-history.ts'
 
 /** The size of one part of a multipart upload. */
 export const PART_BYTES = 64 * 1024 * 1024
@@ -106,7 +107,11 @@ export class Transfers {
   }
 
   private key(path: string, writable: boolean): string {
-    return writable ? writableWorkspaceKey(path) : workspaceKey(path)
+    if (!writable) return workspaceKey(path)
+    const key = writableWorkspaceKey(path)
+    // A presigned PUT bypasses the Workspace's one write path, so a file with history is never written that way (v1.20.1, v1.18-review #10).
+    if (isTrackedFile(key)) throw new ReadOnlyPath({ path: key, message: `${key} keeps a file history: write it with the file tools (write or edit on the Workspace), not by a copy or ws put` })
+    return key
   }
 
   private async sign(request: { method: 'GET' | 'PUT'; key: string; query?: Record<string, string> }, holder: LinkHolder): Promise<string> {

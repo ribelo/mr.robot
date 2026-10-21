@@ -53,10 +53,10 @@ import { fetchMetadata, type MetadataIndex } from '../providers/model-metadata.t
 import { PROVIDER_IDS } from '../agent/providers.ts'
 import { makeVault, type VaultShape } from '../platform/vault.ts'
 import { fetchRepository, skillsInTree, type SkillRepository } from '../skills/library.ts'
-import { DEFINITION_SCHEMA, DefinitionLibrary, type DefinitionRow } from '../definitions/library.ts'
+import { DEFINITION_INVALID, DEFINITION_SCHEMA, DefinitionLibrary, type DefinitionRow } from '../definitions/library.ts'
 import * as Result from 'effect/Result'
 import { checkForms, definitionsInTree } from '../definitions/definition.ts'
-import { briefOf, fetchMarketplacePage, parseMarketplaceUrl, templateOf } from '../definitions/grok-import.ts'
+import { briefOf, templateOf } from '../definitions/grok-import.ts'
 import { registrableDomain } from '../platform/logins.ts'
 import type { RobotInit } from '../robot/programs.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
@@ -1394,6 +1394,9 @@ export class Space extends DurableObject<Env> {
     this.migrateBrowserBackends()
     // Robot definitions in the library (v1.18 ticket 04).
     sql.exec(DEFINITION_SCHEMA)
+    try { sql.exec(DEFINITION_INVALID) } catch { /* added before */ }
+    // An Add creates one Robot per Member and definition while it is in setup (v1.20.1, v1.18-review #1).
+    sql.exec('CREATE TABLE IF NOT EXISTS definition_add (member_id TEXT NOT NULL, slug TEXT NOT NULL, robot_id TEXT NOT NULL, PRIMARY KEY (member_id, slug)) WITHOUT ROWID')
     sql.exec(`CREATE TABLE IF NOT EXISTS skill (
       name TEXT PRIMARY KEY, description TEXT NOT NULL, source TEXT NOT NULL, visibility TEXT NOT NULL,
       owner_id TEXT, updated_at INTEGER NOT NULL
@@ -1671,7 +1674,7 @@ export class Space extends DurableObject<Env> {
   }
 
   definitions(memberId: string): DefinitionRow[] {
-    return this.definitionLibrary.visible(memberId)
+    return this.definitionLibrary.visible(memberId, this.isAdmin(memberId))
   }
 
   /**
@@ -1679,7 +1682,7 @@ export class Space extends DurableObject<Env> {
    * Connections (by kind), his logins (by site) and his Hosts. The rows are sorted by title.
    */
   async marketplace(memberId: string): Promise<Array<{ row: DefinitionRow; tools: string[]; needs: Array<{ kind: 'connector' | 'login' | 'host'; label: string; met: boolean }> }>> {
-    const rows = this.definitionLibrary.visible(memberId)
+    const rows = this.definitionLibrary.visible(memberId, this.isAdmin(memberId))
     if (rows.length === 0) return []
     const [connections, hosts, logins] = await Promise.all([
       this.connectionsFor(memberId),
@@ -1709,13 +1712,10 @@ export class Space extends DurableObject<Env> {
    * Import a Grok Bot marketplace template as a brief (v1.18 ticket 07): stored for the importing Member as source 'import', not published,
    * under grok-<slug>; importing it again replaces it. Throws Invalid with the plain reason when the page cannot be read.
    */
-  async importGrokTemplate(memberId: string, address: string): Promise<DefinitionRow> {
+  async importGrokTemplate(memberId: string, url: string, slug: string, html: string): Promise<DefinitionRow> {
     const refuse = (message: string) => Object.assign(new Error(message), { name: 'Invalid', status: 400 })
-    const parsed = parseMarketplaceUrl(address)
-    if (Result.isFailure(parsed)) throw refuse(parsed.failure.message)
-    const page = await fetchMarketplacePage(parsed.success.url)
-    if (Result.isFailure(page)) throw refuse(page.failure.message)
-    const template = templateOf(page.success, parsed.success.slug)
+    const parsed = { success: { url, slug } }
+    const template = templateOf(html, slug)
     if (Result.isFailure(template)) throw refuse(`The page could not be imported: ${template.failure.message}`)
     const stored = await this.definitionLibrary.store(`grok-${parsed.success.slug}`.slice(0, 64), briefOf(template.success, parsed.success.url), { source: 'import', ownerId: memberId, author: `${template.success.creatorName} (Grok Bot, imported)`, published: false }, Date.now())
     if (Result.isFailure(stored)) throw refuse(stored.failure)
@@ -1733,6 +1733,13 @@ export class Space extends DurableObject<Env> {
    * the Robot for setup_complete and the Tasks. README.md, tasks.yaml and grants.yaml stay with the definition, not in the Workspace.
    */
   async addDefinition(memberId: string, slug: string, model?: ModelChoice): Promise<RegistryEntry> {
+    // Added before and still in setup: the same Robot (a retry after a lost answer creates no second one).
+    const before = this.ctx.storage.sql.exec<{ robot_id: string }>('SELECT robot_id FROM definition_add WHERE member_id = ? AND slug = ?', memberId, slug).toArray()[0]?.robot_id
+    const existing = before === undefined ? undefined : this.ctx.storage.sql.exec<{ status: string }>('SELECT status FROM robot WHERE id = ?', before).toArray()[0]
+    if (before !== undefined && existing?.status === 'setup') {
+      const found = await this.run(entry(before))
+      if (found !== undefined) return found
+    }
     const row = this.definitionLibrary.get(slug)
     if (row === undefined || (!row.published && row.ownerId !== memberId)) throw Object.assign(new Error('no such definition'), { name: 'NotFound', status: 404 })
     const files = await this.definitionLibrary.files(slug)
@@ -1740,7 +1747,9 @@ export class Space extends DurableObject<Env> {
     if (Result.isFailure(forms)) throw Object.assign(new Error(`${forms.failure.file}: ${forms.failure.message}`), { name: 'Invalid', status: 400 })
     const readme = new TextDecoder().decode(files.get('README.md') ?? new Uint8Array())
     const own = [...files.entries()].filter(([path]) => !['README.md', 'tasks.yaml', 'grants.yaml'].includes(path)).map(([path, body]) => ({ path, body }))
-    return this.run(createRobot(memberId, undefined, model, { slug, title: row.title, readme, grants: forms.success.grants, tasks: forms.success.tasks, files: own }))
+    const created = await this.run(createRobot(memberId, undefined, model, { slug, title: row.title, readme, grants: forms.success.grants, tasks: forms.success.tasks, files: own }))
+    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO definition_add (member_id, slug, robot_id) VALUES (?, ?, ?)', memberId, slug, created.id)
+    return created
   }
 
   async definitionFiles(slug: string, memberId: string): Promise<Array<{ path: string; body: Uint8Array }> | null> {

@@ -57,7 +57,9 @@ import {
 } from '@mr-robot/protocol'
 import { SPACE_ID, type Env } from '../env.ts'
 import type { DefinitionRow } from '../definitions/library.ts'
+import * as Result from 'effect/Result'
 import { definitionArchive } from '../definitions/tarball.ts'
+import { fetchGrokPage } from '../definitions/grok-import.ts'
 import type { DefinitionView } from '@mr-robot/protocol'
 import { memberAvatarObject } from '../space/space.ts'
 import { makeWorkspace, normalizePath } from '../workspace/workspace.ts'
@@ -136,7 +138,7 @@ function wholeSpaceAsked(query: URLSearchParams): boolean {
 
 /** A definition row as a Member sees it. */
 function definitionView(row: DefinitionRow, memberId: string): DefinitionView {
-  return { slug: row.slug, title: row.title, paragraph: row.paragraph, source: row.source, author: row.author, published: row.published, mine: row.ownerId === memberId, updatedAt: row.updatedAt }
+  return { slug: row.slug, title: row.title, paragraph: row.paragraph, source: row.source, author: row.author, published: row.published, mine: row.ownerId === memberId, updatedAt: row.updatedAt, ...(row.invalid === null ? {} : { invalid: row.invalid }) }
 }
 
 /** The ?chapter= of a request (v1.19): undefined when absent, null when it is not a chapter number. */
@@ -447,9 +449,18 @@ export const api = new Router<ApiContext>()
   // Add from a Grok Bot marketplace address (v1.18 ticket 07): a brief, the Member's own until the admin publishes it.
   .on('POST', '/api/definitions/import', (c) => Effect.gen(function* () {
     const { url } = yield* decodeBody(c.request, Schema.Struct({ url: Schema.String }))
-    return definitionView(yield* call(() => space(c.env).importGrokTemplate(c.member.id, url)), c.member.id)
+    // The edge fetches the page, bounded (v1.20.1, v1.18-review #17), and hands the Space the text.
+    const page = yield* Effect.promise(() => fetchGrokPage(url))
+    if (Result.isFailure(page)) return yield* Effect.fail(badRequest(page.failure.message))
+    return definitionView(yield* call(() => space(c.env).importGrokTemplate(c.member.id, page.success.url, page.success.slug, page.success.html)), c.member.id)
   }))
-  .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(() => space(c.env).addDefinition(c.member.id, slug)))
+  // The Robot as the Robot list shows it (v1.20.1, v1.18-review #1): the PWA reads a RobotSummary and opens it.
+  .on('POST', '/api/definitions/:slug/add', (c, { slug }) => call(async () => {
+    const added = await space(c.env).addDefinition(c.member.id, slug)
+    const listed = (await space(c.env).reachable(c.member.id)).find((summary) => summary.id === added.id)
+    if (listed === undefined) throw Object.assign(new Error('the new Robot is not listed yet; reload'), { name: 'Conflict', status: 409 })
+    return listed
+  }))
   .on('GET', '/api/definitions', (c) => call(() => space(c.env).definitions(c.member.id)).pipe(Effect.map((rows) => rows.map((row) => definitionView(row, c.member.id)))))
   .on('GET', '/api/definitions/:slug/archive', (c, { slug }) => Effect.gen(function* () {
     const files = yield* call(() => space(c.env).definitionFiles(slug, c.member.id))

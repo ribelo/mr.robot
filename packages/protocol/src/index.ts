@@ -342,6 +342,8 @@ export const DefinitionView = Schema.Struct({
   published: Schema.Boolean,
   mine: Schema.Boolean,
   updatedAt: Schema.Number,
+  /** The repository's current form does not parse: the last good copy is shown, with why (v1.20.1). */
+  invalid: Schema.optional(Schema.String),
 })
 export type DefinitionView = typeof DefinitionView.Type
 
