@@ -4,6 +4,6 @@
 
 **Blocked by:** 03
 
-**Status:** postponed
+**Status:** postponed (superseded by ../mr-robot-v1.20.md)
 
 - [ ] Design recorded when taken up
