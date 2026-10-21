@@ -15,7 +15,7 @@ import type { BoxBackend } from '../box/backend.ts'
 import { runWs, type CopyPermits } from './copy-permit.ts'
 import { AmbiguousPlace, ApprovedHostsChanged, BadCall, casesHandled, CopyRefused, MissingFile, NoGrant, UnknownPlace, WrongPlace } from './errors.ts'
 import { shellQuote } from './file-ops.ts'
-import { BoxFiles, boxPath, BOX_ROOT, HostFiles, STAGING_DIRECTORY, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles } from './files.ts'
+import { BoxFiles, boxPath, BOX_ROOT, HostFiles, STAGING_DIRECTORY, ownedBytes, refuseOwnedOnHost, workspaceKey, WorkspaceFiles, writableWorkspaceKey, type BoxAccess, type HostFileLink, type PlaceFiles, type ReadHashes } from './files.ts'
 import { hostFacetKey, hostIdOfPlace } from './host-facet.ts'
 import { lookUpHost } from './host-names.ts'
 import type { JobId } from './job-id.ts'
@@ -135,6 +135,9 @@ interface Granted<P extends Place = Place> {
   readonly item: GrantItem
   readonly level: 'allow' | 'ask'
 }
+
+/** How many read hashes an agent keeps (cw-jko0). */
+const READ_HASHES_KEPT = 500
 
 /** What the owner reads when a call that waits for them came without a reason: the tool was registered when nothing it reaches was at ask, so it asked for none. */
 const NO_REASON = 'No reason given.'
@@ -298,8 +301,31 @@ export class Places {
     return target
   }
 
-  private filesOf(place: Place, reach: Reach): PlaceFiles {
-    return place.kind === 'files' ? this.workspaceFiles : place.kind === 'box' ? new BoxFiles(this.deps.box) : new HostFiles(this.deps.link(place.host, reach, place.workspace?.cwd))
+  private filesOf(place: Place, reach: Reach, exec: ToolRunContext): PlaceFiles {
+    if (place.kind === 'files') return this.workspaceFiles
+    if (place.kind === 'box') return new BoxFiles(this.deps.box)
+    return new HostFiles(this.deps.link(place.host, reach, place.workspace?.cwd), { hostId: place.host.id, cwd: place.workspace?.cwd, hashes: this.hashesOf(exec) })
+  }
+
+  /** The hashes of the files an agent read on computers (cw-jko0), by the agent's session: the Robot's, or each Subagent's. */
+  private readonly readHashes = new Map<string, Map<string, string>>()
+  private hashesOf(exec: ToolRunContext): ReadHashes {
+    const agent = String(exec.agent?.session.id ?? 'robot')
+    const known = this.readHashes.get(agent) ?? new Map<string, string>()
+    this.readHashes.set(agent, known)
+    return {
+      get: (key) => known.get(key),
+      set: (key, hash) => {
+        known.delete(key)
+        known.set(key, hash)
+        // The newest READ_HASHES_KEPT stay; a file read long ago is written as before, without a check.
+        for (const oldest of known.keys()) {
+          if (known.size <= READ_HASHES_KEPT) break
+          known.delete(oldest)
+        }
+      },
+      delete: (key) => { known.delete(key) },
+    }
   }
 
   /**
@@ -311,7 +337,7 @@ export class Places {
     const unconfined = this.unconfined(call, target, `${call.tool}: escalate lifts the sandbox of a computer. ${target.place.kind === 'box' ? 'Your Box has none to lift: it is yours.' : 'Your Files have none to lift.'}`)
     const waiting = this.waiting(call, [target], unconfined)
     if (waiting !== undefined) return waiting
-    return action(this.filesOf(target.place, unconfined === undefined ? 'granted' : 'escalated'))
+    return action(this.filesOf(target.place, unconfined === undefined ? 'granted' : 'escalated', call.exec))
   }
 
   // ---------------------------------------------------------------- run and jobs
@@ -501,7 +527,7 @@ export class Places {
     const key = workspaceKey(workspacePath)
     const owned = await ownedBytes(this.deps.workspace, key)
     if (owned !== undefined) {
-      const written = await link.write(hostPath, new TextDecoder().decode(owned), 'text')
+      const written = await link.write(hostPath, new TextDecoder().decode(owned), 'text', { id: crypto.randomUUID() })
       return { from: `/workspace/${key}`, to: written.path, bytes: written.bytes }
     }
     const { transfers } = this.deps

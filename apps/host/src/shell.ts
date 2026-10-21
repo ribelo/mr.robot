@@ -27,6 +27,7 @@ import { HostJobs } from './jobs.ts'
 import { startRunnersAsNode } from './run-as-node.ts'
 import { aclRunnerWorks, findInstalledPwsh7 } from './windows.ts'
 import { WorkspaceSessions } from './workspace-session.ts'
+import { RecentWrites } from './files.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
@@ -206,6 +207,8 @@ export class HostShell implements FileChanges {
   readonly jobs: HostJobs
   /** The Workspace sessions of this run of the app, one per Robot whose Workspace is here; they outlive the connection too. */
   readonly sessions = new WorkspaceSessions()
+  /** The answers of the recent writes that named an id (cw-6b3r); they outlive the connection too. */
+  readonly recentWrites = new RecentWrites()
   /** Why no command can run on this computer (Windows without PowerShell 7); undefined when they do. Looked at again by recheck(). */
   problem: string | undefined
   private shellReady = false

@@ -10,7 +10,7 @@ import type { BoxBackend } from '../box/backend.ts'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { normalizePath } from '../workspace/workspace.ts'
 import { BadCall, BadPath, FileTooLarge, MissingFile, ReadOnlyPath } from './errors.ts'
-import { globBase, globToRegExp, GREP_MAX_MATCHES } from '@mr-robot/host-protocol'
+import { globBase, globToRegExp, GREP_MAX_MATCHES, WRITE_FRAME_MAX_BYTES, type LineEnding } from '@mr-robot/host-protocol'
 import { grepText, type GrepMatch } from './file-ops.ts'
 import { refuseOwned } from './place.ts'
 
@@ -19,10 +19,17 @@ export const BOX_ROOT = '/workspace'
 /** Where a copy between two places other than the Workspace parks its file (places.ts): tmp/<id>/ in the Workspace. */
 export const STAGING_DIRECTORY = 'tmp'
 
-/** A file read: its text, or base64 when it is not UTF-8. */
+/** What a computer says of a file it read (v1.21, cw-vwo1): its size, line-ending style and content hash. */
+export interface FileFacts {
+  readonly size: number
+  readonly lineEnding: LineEnding
+  readonly hash: string
+}
+
+/** A file read: its text, or base64 when it is not UTF-8; a computer of v1.21 adds its facts. */
 export type FileContent =
-  | { readonly path: string; readonly text: string }
-  | { readonly path: string; readonly size: number; readonly base64: string }
+  | { readonly path: string; readonly text: string; readonly facts?: FileFacts }
+  | { readonly path: string; readonly size: number; readonly base64: string; readonly facts?: FileFacts }
 
 export interface GrepInput {
   readonly pattern: string
@@ -48,7 +55,7 @@ export interface PlaceFiles {
   /** How errors name the place: "your Workspace", "your Box", "Desk". */
   readonly label: string
   readFile(path: string): Promise<FileContent>
-  writeFile(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ readonly path: string; readonly bytes: number }>
+  writeFile(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ readonly path: string; readonly bytes: number; readonly hash?: string }>
   removeFile(path: string): Promise<{ readonly path: string }>
   glob(pattern: string): Promise<FileListing>
   grep(input: GrepInput): Promise<GrepResult>
@@ -303,8 +310,9 @@ export class BoxFiles implements PlaceFiles {
 /** What a Host backend needs of one Host: the file RPCs, all under the Robot's files facet and failing as the Host calls fail. */
 export interface HostFileLink {
   readonly name: string
-  read(path: string): Promise<{ readonly path: string; readonly size: number; readonly text: string | null; readonly base64: string | null }>
-  write(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ readonly path: string; readonly bytes: number }>
+  read(path: string): Promise<{ readonly path: string; readonly size: number; readonly text: string | null; readonly base64: string | null; readonly lineEnding?: LineEnding; readonly hash?: string }>
+  /** `guard`: the hash of the content the Robot read (the app refuses a changed file) and the write's id (a retry is answered, not done again). */
+  write(path: string, content: string, encoding: 'text' | 'base64', guard: { readonly expectedHash?: string; readonly id: string }): Promise<{ readonly path: string; readonly bytes: number; readonly hash?: string }>
   /** The files a glob matches, listed by the app in Node. */
   glob(pattern: string): Promise<{ readonly paths: readonly string[]; readonly truncated: boolean }>
   grep(input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }): Promise<{ readonly matches: readonly GrepMatch[]; readonly truncated: boolean }>
@@ -316,27 +324,72 @@ export const refuseOwnedOnHost = (path: string): void => {
   if (!path.startsWith('/')) refuseOwned(path)
 }
 
+/**
+ * The content hashes an agent has read on computers (v1.21, cw-jko0), by where the file is: a write of a file the agent read names the
+ * hash it read, so a file another Robot (or a person) changed meanwhile is refused instead of overwritten. A file the agent never read is
+ * written as before.
+ */
+export interface ReadHashes {
+  get(key: string): string | undefined
+  set(key: string, hash: string): void
+  delete(key: string): void
+}
+
+/** Where a path of a call on a computer is, as a key for ReadHashes: the Host, and the path from the current directory or the Robot's. */
+export function fileKey(hostId: string, cwd: string | undefined, path: string): string {
+  const absolute = path.startsWith('/') || path.startsWith('~') || /^[A-Za-z]:[\\/]/.test(path)
+  const full = absolute ? path : `${cwd ?? '~robot'}/${path}`
+  const parts: string[] = []
+  for (const part of full.split(/[\\/]+/)) {
+    if (part === '..') parts.pop()
+    else if (part !== '.' && part !== '') parts.push(part)
+  }
+  return `${hostId}:${full.startsWith('/') ? '/' : ''}${parts.join('/')}`
+}
+
+/** The bytes a write's JSON frame carries for its content. */
+const frameBytes = (content: string): number => new TextEncoder().encode(JSON.stringify(content)).length
+
 export class HostFiles implements PlaceFiles {
   readonly label: string
 
-  constructor(private readonly link: HostFileLink) {
+  constructor(private readonly link: HostFileLink, private readonly where: { readonly hostId: string; readonly cwd?: string | undefined; readonly hashes: ReadHashes }) {
     this.label = link.name
+  }
+
+  private key(path: string): string {
+    return fileKey(this.where.hostId, this.where.cwd, path)
   }
 
   async readFile(path: string): Promise<FileContent> {
     refuseOwnedOnHost(path)
     const read = await this.link.read(path)
-    return read.text !== null ? { path: read.path, text: read.text } : { path: read.path, size: read.size, base64: read.base64 ?? '' }
+    const facts = read.hash === undefined ? undefined : { size: read.size, lineEnding: read.lineEnding ?? 'none', hash: read.hash }
+    if (facts !== undefined) this.where.hashes.set(this.key(path), facts.hash)
+    const withFacts = facts === undefined ? {} : { facts }
+    return read.text !== null ? { path: read.path, text: read.text, ...withFacts } : { path: read.path, size: read.size, base64: read.base64 ?? '', ...withFacts }
   }
 
-  async writeFile(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ path: string; bytes: number }> {
+  /**
+   * A whole file to the computer, in one frame of at most WRITE_FRAME_MAX_BYTES (cw-1ov7): a bigger one is refused with the way to move it.
+   * The write names the hash the agent read and an id of its own (cw-jko0, cw-6b3r).
+   */
+  async writeFile(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ path: string; bytes: number; hash?: string }> {
     refuseOwnedOnHost(path)
-    return this.link.write(path, content, encoding)
+    const size = frameBytes(content)
+    if (size > WRITE_FRAME_MAX_BYTES) throw new FileTooLarge({ path, size, message: `${path} was not written: a write carries at most ${WRITE_FRAME_MAX_BYTES} bytes to a computer in one frame, and this one is ${size}. Write the file to your Files (on "files") and move it with copy, which has no size limit.` })
+    const key = this.key(path)
+    const expectedHash = this.where.hashes.get(key)
+    const written = await this.link.write(path, content, encoding, { ...(expectedHash === undefined ? {} : { expectedHash }), id: crypto.randomUUID() })
+    if (written.hash !== undefined) this.where.hashes.set(key, written.hash)
+    return written
   }
 
   async removeFile(path: string): Promise<{ path: string }> {
     refuseOwnedOnHost(path)
-    return this.link.remove(path)
+    const removed = await this.link.remove(path)
+    this.where.hashes.delete(this.key(path))
+    return removed
   }
 
   async glob(pattern: string): Promise<FileListing> {

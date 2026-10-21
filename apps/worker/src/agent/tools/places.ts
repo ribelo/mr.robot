@@ -6,10 +6,10 @@
  * the result says so (cw-shlm). The tools hold no place logic: places/places.ts checks the grants and dispatches.
  */
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { GREP_MAX_MATCHES, LISTING_MAX_FILES, RUN_MAX_WAIT_SECONDS } from '@mr-robot/host-protocol'
+import { GREP_MAX_MATCHES, LISTING_MAX_FILES, RUN_MAX_WAIT_SECONDS, WRITE_FRAME_MAX_BYTES } from '@mr-robot/host-protocol'
 import { isWaitingResult, type WaitingResult } from '../ask-gate.ts'
 import { isPlaceError, placeErrorText } from '../../places/errors.ts'
-import { readWindow, replaceText } from '../../places/file-ops.ts'
+import { readWindow, replaceInStyle } from '../../places/file-ops.ts'
 import { WORKSPACE_GREP_MAX_FILES, type PlaceFiles } from '../../places/files.ts'
 import { parseJobId, type JobId } from '../../places/job-id.ts'
 import type { JobEntry, JobOutputView, KillView, RunResult } from '../../places/jobs.ts'
@@ -122,7 +122,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
     tools.push(
       tool<{ on: string; file_path: string; offset?: number; limit?: number }>({
         name: 'read',
-        description: `Read a file. A text file comes back as numbered lines (offset and limit pick a window of at most 2000 lines); a file that is not text comes back as base64. ${filePlaces(reach)} ${PATH_RULES}`,
+        description: `Read a file. A text file comes back as numbered lines: a window of at most 2000 lines and 50 KiB (offset and limit pick it); a file that is not text comes back as base64; a file over 10 MB is not read. On a computer the result also gives the file's size, line endings and content hash, and a later write or edit of that file is refused if it changed since (read it again). ${filePlaces(reach)} ${PATH_RULES}`,
         parameters: {
           properties: { on: filePlace(reach), file_path: { type: 'string', description: 'The file to read' }, offset: { type: 'integer', description: 'The line to start at, from 1' }, limit: { type: 'integer', description: 'How many lines, at most 2000' } },
           required: ['on', 'file_path'],
@@ -132,13 +132,13 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           const { on, file_path, offset, limit } = args
           return noticed(await host.withFiles(on, callOf('read', args, exec), async (files) => {
             const content = await files.readFile(file_path)
-            return 'text' in content ? readWindow(content.path, content.text, offset, limit) : { path: content.path, size: content.size, encoding: 'base64', base64: content.base64 }
+            return 'text' in content ? readWindow(content.path, content.text, offset, limit, content.facts) : { path: content.path, size: content.size, encoding: 'base64', base64: content.base64, ...(content.facts === undefined ? {} : { hash: content.facts.hash }) }
           }), host.aliasNotice(on))
         }),
       }),
       tool<{ on: string; file_path: string; content: string; encoding?: 'text' | 'base64'; escalate?: boolean; reason?: string }>({
         name: 'write',
-        description: `Write a whole file, creating its folders and replacing what was there. ${filePlaces(reach)} ${PATH_RULES}`,
+        description: `Write a whole file, creating its folders and replacing what was there. On a computer one write carries at most ${WRITE_FRAME_MAX_BYTES} bytes: move a bigger file with copy. ${filePlaces(reach)} ${PATH_RULES}`,
         parameters: {
           properties: {
             on: filePlace(reach),
@@ -159,7 +159,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       }),
       tool<{ on: string; file_path: string; old_string: string; new_string: string; replace_all?: boolean; escalate?: boolean; reason?: string }>({
         name: 'edit',
-        description: `Replace text in a file: old_string must occur exactly once unless replace_all is set. ${filePlaces(reach)} ${PATH_RULES}`,
+        description: `Replace text in a file: old_string must occur exactly once unless replace_all is set. Write the lines as read shows them: a file with CRLF line endings is matched and written in CRLF. ${filePlaces(reach)} ${PATH_RULES}`,
         parameters: {
           properties: {
             on: filePlace(reach),
@@ -178,7 +178,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
           const done = await host.withFiles(on, callOf('edit', args, exec), async (files) => {
             const content = await files.readFile(file_path)
             if (!('text' in content)) throw new Error(`${content.path} is not a text file, so it cannot be edited`)
-            return files.writeFile(file_path, replaceText(content.text, old_string, new_string, replace_all === true), 'text')
+            return files.writeFile(file_path, replaceInStyle(content.text, old_string, new_string, replace_all === true), 'text')
           })
           return isWaitingResult(done) ? done : noticed({ on, edited: done.path }, host.aliasNotice(on))
         }),

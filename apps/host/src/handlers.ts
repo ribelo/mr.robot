@@ -30,7 +30,7 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
   }
   return HostRpcs.toLayer({
     Read: ({ path, access }) => Effect.tryPromise({ try: () => disk.read(access, path), catch: fail }),
-    Write: ({ path, text, base64, access }) => Effect.tryPromise({ try: () => disk.write(access, path, { text, base64 }), catch: fail }),
+    Write: ({ path, text, base64, access, expectedHash, id }) => Effect.tryPromise({ try: () => disk.write(access, path, { text, base64, expectedHash, id }), catch: fail }),
     // Copy (v1.16): the file goes to and from R2 over presigned URLs, in parts, retried (copy.ts, the protocol's copy engine). A download writes, so it runs in the sandbox of the mode and roots.
     // The signal ends when the Worker gives up on the call or the connection is lost: the requests in flight and the writes stop (deep review P12).
     CopyStat: ({ path, access }) => Effect.tryPromise({

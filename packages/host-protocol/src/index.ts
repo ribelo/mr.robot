@@ -71,17 +71,63 @@ export const SANDBOX_DENIED = 'SANDBOX_DENIED'
 /** The code of the HostError a confined command fails with when this computer has no sandbox that can confine it (it fails closed). */
 export const SANDBOX_UNAVAILABLE = 'SANDBOX_UNAVAILABLE'
 
-/** Read a file the signed-in user can reach; text when it is UTF-8, else base64. A relative path is relative to the Robot's directory. */
+/** How a text file ends its lines (v1.21, cw-vwo1): lf, crlf, mixed, or none (one line, or not text). */
+export const LineEnding = Schema.Literals(['lf', 'crlf', 'mixed', 'none'])
+export type LineEnding = typeof LineEnding.Type
+
+/** The line-ending style of a text. */
+export function lineEndingOf(text: string): LineEnding {
+  const crlf = (text.match(/\r\n/g) ?? []).length
+  const lf = (text.match(/\n/g) ?? []).length - crlf
+  return crlf === 0 && lf === 0 ? 'none' : crlf === 0 ? 'lf' : lf === 0 ? 'crlf' : 'mixed'
+}
+
+/** The content hash of a file's bytes (v1.21, cw-jko0): "sha256:" and the hex digest. */
+export async function contentHash(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)
+  return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+/** The most a file read reads (the app refuses a bigger file), and the most one Write carries as its JSON frame (v1.21, cw-1ov7). */
+export const READ_MAX_FILE_BYTES = 10 * 1024 * 1024
+export const WRITE_FRAME_MAX_BYTES = 1024 * 1024
+
+/** The code of the HostError a Write fails with when the file is not the one the call names by its hash (cw-jko0). */
+export const STALE_CONTENT = 'STALE_CONTENT'
+
+/**
+ * Read a file the signed-in user can reach; text when it is UTF-8, else base64. A relative path is relative to the Robot's directory (or
+ * its current directory on the Workspace). An app of v1.21 also says the line-ending style and the content hash (cw-vwo1).
+ */
 export const Read = Rpc.make('Read', {
   payload: { path: Schema.String, access: HostAccess },
-  success: Schema.Struct({ path: Schema.String, size: Schema.Number, text: Schema.NullOr(Schema.String), base64: Schema.NullOr(Schema.String) }),
+  success: Schema.Struct({
+    path: Schema.String,
+    size: Schema.Number,
+    text: Schema.NullOr(Schema.String),
+    base64: Schema.NullOr(Schema.String),
+    lineEnding: Schema.optional(LineEnding),
+    hash: Schema.optional(Schema.String),
+  }),
   error: HostError,
 })
 
-/** Write a file (creating its directories); text or base64. */
+/**
+ * Write a file (creating its directories); text or base64. `expectedHash` is the hash of the content the Robot read: a file that is
+ * not that content now is not written, and the call fails with STALE_CONTENT (cw-jko0). `id` names the write: the app keeps the answers
+ * of its recent writes, and a write with an id it has answered is not done again but answered the same (cw-6b3r). The answer carries the
+ * hash of what was written.
+ */
 export const Write = Rpc.make('Write', {
-  payload: { path: Schema.String, text: Schema.optional(Schema.String), base64: Schema.optional(Schema.String), access: HostAccess },
-  success: Schema.Struct({ path: Schema.String, bytes: Schema.Number }),
+  payload: {
+    path: Schema.String,
+    text: Schema.optional(Schema.String),
+    base64: Schema.optional(Schema.String),
+    access: HostAccess,
+    expectedHash: Schema.optional(Schema.String),
+    id: Schema.optional(Schema.String),
+  },
+  success: Schema.Struct({ path: Schema.String, bytes: Schema.Number, hash: Schema.optional(Schema.String) }),
   error: HostError,
 })
 

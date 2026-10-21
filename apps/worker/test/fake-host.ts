@@ -6,7 +6,7 @@ import { env, SELF } from 'cloudflare:test'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import { expect } from 'vitest'
-import { CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HOST_PROTOCOL_VERSION, HostError, LISTING_MAX_FILES, HostRpcs, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
+import { contentHash, CopyFailed, downloadFile, frame, globToRegExp, GREP_MAX_MATCHES, HOST_PROTOCOL_VERSION, HostError, lineEndingOf, LISTING_MAX_FILES, HostRpcs, STALE_CONTENT, NO_SUCH_JOB, parseFrame, serveHost, skipped, uploadFile, type CopyIo, type HostAccess, type JobEnded, type HostNotification, type JobState, type Sandbox, type SandboxReport, type Shell } from '@mr-robot/host-protocol'
 import { fakeR2 } from './fake-r2.ts'
 import { api } from './api.ts'
 
@@ -44,6 +44,13 @@ const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
 
 /** The fake disk's directories (v1.21, the Workspace picker), absolute; a file's directories count too. Cleared by closeHosts. */
 export const hostDirectories = new Set<string>()
+/** Every Write the fake app received with its id and expected hash, and whether it wrote (a repeated id is answered, not written). */
+export const hostWrites: Array<{ path: string; id: string | undefined; expectedHash: string | undefined; wrote: boolean }> = []
+/** The answers of writes by id, as the app keeps them (cw-6b3r). */
+const writeAnswers = new Map<string, { path: string; bytes: number; hash: string }>()
+/** The next Write is done and then its connection drops before the answer (a test sets it). */
+export const cut = { nextWrite: false }
+
 /** The Workspace sessions the Worker closed on the fake app, by the Robot's directory name. */
 export const workspaceCloses: string[] = []
 const FAKE_HOME = '/home/anna'
@@ -101,27 +108,50 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
   open.push(socket)
   const closes: number[] = []
   socket.addEventListener('close', (event) => closes.push(event.code))
+  /** The connection drops and the same run comes back (set below, once blip exists). */
+  let blipLater: () => Promise<void> = async () => undefined
   const handlers = HostRpcs.toLayer({
     Read: ({ path: given, access }) => {
       const path = onPlace(access, given)
       hostFileCalls.push({ rpc: 'Read', path, access })
       if (path === '/root/secret') return Effect.fail(new HostError({ message: 'permission denied', code: 'EACCES' }))
       const bytes = hostDisk.get(path)
-      if (bytes === undefined) return Effect.succeed({ path, size: 5, text: 'hello', base64: null })
-      try {
-        return Effect.succeed({ path, size: bytes.length, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes), base64: null })
-      } catch {
-        return Effect.succeed({ path, size: bytes.length, text: null, base64: btoa(String.fromCharCode(...bytes)) })
-      }
+      if (bytes === undefined) return Effect.promise(async () => ({ path, size: 5, text: 'hello', base64: null, lineEnding: 'none' as const, hash: await contentHash(new TextEncoder().encode('hello')) }))
+      return Effect.promise(async () => {
+        const hash = await contentHash(bytes)
+        try {
+          const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes)
+          return { path, size: bytes.length, text, base64: null, lineEnding: lineEndingOf(text), hash }
+        } catch {
+          return { path, size: bytes.length, text: null, base64: btoa(String.fromCharCode(...bytes)), lineEnding: 'none' as const, hash }
+        }
+      })
     },
-    Write: ({ path: given, text, base64, access }) => {
+    Write: ({ path: given, text, base64, access, expectedHash, id }) => {
       const path = onPlace(access, given)
       hostFileCalls.push({ rpc: 'Write', path, access })
-      return readOnly(access, path) ?? Effect.sync(() => {
-      const bytes = base64 === undefined ? new TextEncoder().encode(text ?? '') : Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
-      hostDisk.set(path, bytes)
-      return { path, bytes: bytes.length }
-      })
+      const answered = id === undefined ? undefined : writeAnswers.get(id)
+      if (answered !== undefined) {
+        hostWrites.push({ path, id, expectedHash, wrote: false })
+        return Effect.succeed(answered)
+      }
+      return readOnly(access, path) ?? Effect.promise(async () => {
+        const before = hostDisk.get(path)
+        if (expectedHash !== undefined && (before === undefined ? 'none' : await contentHash(before)) !== expectedHash) return { stale: true as const }
+        const bytes = base64 === undefined ? new TextEncoder().encode(text ?? '') : Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
+        hostDisk.set(path, bytes)
+        hostWrites.push({ path, id, expectedHash, wrote: true })
+        const written = { path, bytes: bytes.length, hash: await contentHash(bytes) }
+        if (id !== undefined) writeAnswers.set(id, written)
+        return written
+      }).pipe(Effect.flatMap((done) => {
+        if ('stale' in done) return Effect.fail(new HostError({ message: `${path} changed since you read it (someone else wrote it, or it was deleted), so it was not written. Read it again and make your change on what is there now.`, code: STALE_CONTENT }))
+        if (!cut.nextWrite) return Effect.succeed(done)
+        // The write is done, and the link drops before its answer: the app reconnects as the same run.
+        cut.nextWrite = false
+        setTimeout(() => { void blipLater() }, 10)
+        return Effect.never
+      }))
     },
     CopyStat: ({ path }) => {
       const bytes = hostDisk.get(path)
@@ -296,6 +326,11 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   serve(socket)
+  blipLater = async () => {
+    await disconnect()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await reconnect()
+  }
   await new Promise((resolve) => setTimeout(resolve, 100))
   /** The job's state, found by its command (the latest one). */
   const jobOf = (command: string): FakeJob => {
@@ -345,6 +380,9 @@ export async function closeHosts(): Promise<void> {
   linkedRoots.clear()
   hostDirectories.clear()
   workspaceCloses.length = 0
+  hostWrites.length = 0
+  writeAnswers.clear()
+  cut.nextWrite = false
   hostJobCalls.length = 0
   for (const socket of open.splice(0)) {
     try { socket.close(1000) } catch { /* closed */ }

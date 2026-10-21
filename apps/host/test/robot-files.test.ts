@@ -324,3 +324,23 @@ describe('list, search and delete', () => {
     expect(await readFile(outside, 'utf8')).toBe('keep')
   })
 })
+
+describe('hashes, line endings and ids (v1.21 ticket 03, cw-vwo1, cw-jko0, cw-6b3r)', () => {
+  it('reads the size, line endings and hash; refuses a write against a changed file; answers a repeated id without writing again', async () => {
+    const file = join(robotDir(), 'crlf.txt')
+    await call('Write', { path: 'crlf.txt', text: 'a\r\nb\r\n', access: access() })
+    const read = await call('Read', { path: 'crlf.txt', access: access() })
+    expect(read).toMatchObject({ size: 6, lineEnding: 'crlf', hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) })
+    const id = crypto.randomUUID()
+    const written = await call('Write', { path: 'crlf.txt', text: 'c\n', access: access(), expectedHash: read.hash, id })
+    expect(written).toMatchObject({ path: file, bytes: 2, hash: expect.stringMatching(/^sha256:/) })
+    // The same id again: the stored answer, and nothing written (the file stays 'c').
+    await writeFile(file, 'changed by a person')
+    expect(await call('Write', { path: 'crlf.txt', text: 'd\n', access: access(), id })).toEqual(written)
+    expect(await readFile(file, 'utf8')).toBe('changed by a person')
+    // The hash the Robot read is not the file's any more: refused.
+    const stale = await failure('Write', { path: 'crlf.txt', text: 'e\n', access: access(), expectedHash: written.hash })
+    expect(stale.code).toBe('STALE_CONTENT')
+    expect(await readFile(file, 'utf8')).toBe('changed by a person')
+  })
+})

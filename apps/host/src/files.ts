@@ -5,14 +5,40 @@
  */
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
-import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, LIST_DIRECTORY_MAX, LISTING_MAX_FILES, OUTSIDE_REPOSITORY, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
+import { contentHash, globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, lineEndingOf, LIST_DIRECTORY_MAX, LISTING_MAX_FILES, OUTSIDE_REPOSITORY, READ_MAX_FILE_BYTES, STALE_CONTENT, type HostAccess, type LineEnding, type TargetFile } from '@mr-robot/host-protocol'
 import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, linkOnTheWay, resolvedPath } from './access.ts'
 import type { HostDownloads } from './copy.ts'
 import { errorCode } from './error-code.ts'
 import type { FileChanges } from './file-change.ts'
 import type { WorkspaceSessions } from './workspace-session.ts'
 
-const MAX_READ = 10 * 1024 * 1024
+const MAX_READ = READ_MAX_FILE_BYTES
+
+/** What a write answered. */
+export interface Written {
+  readonly path: string
+  readonly bytes: number
+  readonly hash: string
+}
+
+/**
+ * The answers of the recent writes that named an id (v1.21, cw-6b3r): a write cut off by a lost link is sent again with its id, and the
+ * app answers it from here instead of writing twice. Kept by the shell, so they outlive a connection; the oldest go first.
+ */
+export class RecentWrites {
+  private readonly answers = new Map<string, Written>()
+  constructor(private readonly keep = 500) {}
+  get(id: string): Written | undefined {
+    return this.answers.get(id)
+  }
+  set(id: string, written: Written): void {
+    this.answers.set(id, written)
+    for (const oldest of this.answers.keys()) {
+      if (this.answers.size <= this.keep) break
+      this.answers.delete(oldest)
+    }
+  }
+}
 
 export interface FileMatch {
   readonly path: string
@@ -58,7 +84,7 @@ export async function repositoryOf(directory: string): Promise<string | null> {
 export class HostDisk {
   private readonly home: string
 
-  constructor(private readonly changes: FileChanges & { readonly sessions: WorkspaceSessions }, private readonly downloads: HostDownloads) {
+  constructor(private readonly changes: FileChanges & { readonly sessions: WorkspaceSessions; readonly recentWrites: RecentWrites }, private readonly downloads: HostDownloads) {
     this.home = changes.home
   }
 
@@ -112,24 +138,43 @@ export class HostDisk {
     return { path: full, kind, link: (await linkOnTheWay(this.home, full)) ?? null, repository: kind === 'directory' ? await repositoryOf(full) : null }
   }
 
-  async read(access: HostAccess, path: string): Promise<{ path: string; size: number; text: string | null; base64: string | null }> {
+  /** A file's content, and its size, line-ending style and content hash (cw-vwo1). */
+  async read(access: HostAccess, path: string): Promise<{ path: string; size: number; text: string | null; base64: string | null; lineEnding: LineEnding; hash: string }> {
     const full = await this.full(access, path)
     const info = await stat(full)
     if (info.size > MAX_READ) throw failure(`${full} is ${info.size} bytes; files over 10 MB are not read`, 'EFBIG')
     const body = await readFile(full)
+    const hash = await contentHash(body)
     try {
-      return { path: full, size: body.length, text: new TextDecoder('utf-8', { fatal: true }).decode(body), base64: null }
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(body)
+      return { path: full, size: body.length, text, base64: null, lineEnding: lineEndingOf(text), hash }
     } catch {
-      return { path: full, size: body.length, text: null, base64: body.toString('base64') }
+      return { path: full, size: body.length, text: null, base64: body.toString('base64'), lineEnding: 'none', hash }
     }
   }
 
-  async write(access: HostAccess, path: string, input: { text?: string | undefined; base64?: string | undefined }): Promise<{ path: string; bytes: number }> {
+  /**
+   * Write a whole file. A write with an id this app already answered is answered the same and not done again (cw-6b3r); a write naming
+   * the hash of what the Robot read is refused when the file is something else now (cw-jko0). The check and the write are two steps: a
+   * change between them is not caught.
+   */
+  async write(access: HostAccess, path: string, input: { text?: string | undefined; base64?: string | undefined; expectedHash?: string | undefined; id?: string | undefined }): Promise<Written> {
+    const answered = input.id === undefined ? undefined : this.changes.recentWrites.get(input.id)
+    if (answered !== undefined) return answered
     const full = await this.full(access, path)
     const body = input.base64 !== undefined ? Buffer.from(input.base64, 'base64') : Buffer.from(input.text ?? '', 'utf8')
     await assertMayWrite(this.home, access, full)
+    if (input.expectedHash !== undefined) {
+      const now = await readFile(full).then((bytes) => contentHash(bytes), (error: unknown) => {
+        if (errorCode(error) === 'ENOENT') return 'none'
+        throw error
+      })
+      if (now !== input.expectedHash) throw failure(`${full} changed since you read it (someone else wrote it, or it was deleted), so it was not written. Read it again and make your change on what is there now.`, STALE_CONTENT)
+    }
     await this.changes.change(access, { _tag: 'Write', path: full, offset: 0, truncate: true }, body)
-    return { path: full, bytes: body.length }
+    const written = { path: full, bytes: body.length, hash: await contentHash(body) }
+    if (input.id !== undefined) this.changes.recentWrites.set(input.id, written)
+    return written
   }
 
   /** A file to read as a copy's source: the path as the app resolves it (reads are as wide as the OS user). */

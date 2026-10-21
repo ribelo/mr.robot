@@ -35,7 +35,7 @@ export function hostLink(caller: HostCaller, host: HostView, reach: Reach, cwd?:
   return {
     name: host.name,
     read: (path) => call(async () => (await owner()).hostRead(host.id, robotId, path, cwd)),
-    write: (path, content, encoding) => call(async () => (await owner()).hostWrite(host.id, robotId, encoding === 'base64' ? { path, base64: content } : { path, text: content }, reach, cwd)),
+    write: (path, content, encoding, guard) => call(async () => (await owner()).hostWrite(host.id, robotId, { ...(encoding === 'base64' ? { path, base64: content } : { path, text: content }), ...guard }, reach, cwd)),
     glob: (pattern) => call(async () => (await owner()).hostGlob(host.id, robotId, pattern, cwd)),
     grep: (input) => call(async () => (await owner()).hostGrep(host.id, robotId, input, cwd)),
     remove: (path) => call(async () => (await owner()).hostDelete(host.id, robotId, path, reach, cwd)),

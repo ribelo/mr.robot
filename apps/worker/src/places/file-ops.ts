@@ -7,8 +7,15 @@ export const READ_LIMIT = 2000
 const READ_MAX_LINE = 2000
 const READ_MAX_BYTES = 50 * 1024
 
-/** A numbered window of a text file, with a footer that says how to continue. */
-export function readWindow(displayPath: string, text: string, offset?: number, limit?: number): string {
+/** What a computer says of a file it read (cw-vwo1); shown above the window. */
+export interface WindowFacts {
+  readonly size: number
+  readonly lineEnding: string
+  readonly hash: string
+}
+
+/** A numbered window of a text file, with a footer that says how to continue; with `facts`, the file's size, line endings and hash. */
+export function readWindow(displayPath: string, text: string, offset?: number, limit?: number, facts?: WindowFacts): string {
   const first = offset ?? 1
   const count = Math.min(limit ?? READ_LIMIT, READ_LIMIT)
   if (!Number.isInteger(first) || first < 1) throw new Error('read: offset is a line number from 1')
@@ -35,7 +42,8 @@ export function readWindow(displayPath: string, text: string, offset?: number, l
     : last < lines.length
       ? `(Showing lines ${first}-${last} of ${lines.length}. Use offset=${last + 1} to continue.)`
       : `(End of file - total ${lines.length} lines)`
-  return `<path>${displayPath}</path>\n<type>file</type>\n<content>\n${shown.length > 0 ? `${shown.join('\n')}\n\n${footer}` : footer}\n</content>`
+  const about = facts === undefined ? '' : `<size>${facts.size} bytes</size>\n<line-ending>${facts.lineEnding}</line-ending>\n<hash>${facts.hash}</hash>\n`
+  return `<path>${displayPath}</path>\n<type>file</type>\n${about}<content>\n${shown.length > 0 ? `${shown.join('\n')}\n\n${footer}` : footer}\n</content>`
 }
 
 /** The text with old_string replaced; a missing or ambiguous match is an error that says how to fix the call. */
@@ -46,6 +54,25 @@ export function replaceText(before: string, oldString: string, newString: string
   if (count === 0) throw new Error('the text to replace was not found')
   if (count > 1 && !replaceAll) throw new Error(`the text to replace occurs ${count} times; add context or replace all`)
   return replaceAll ? before.split(oldString).join(newString) : before.replace(oldString, () => newString)
+}
+
+/** Line breaks as CRLF. */
+const asCrlf = (text: string): string => text.replace(/\r?\n/g, '\r\n')
+
+/**
+ * replaceText in the file's own line endings (v1.21, cw-71bx): the read window shows lines without their CR, so in a CRLF file the
+ * texts are matched and written with CRLF. A file of mixed endings is tried as given first, then with CRLF.
+ */
+export function replaceInStyle(before: string, oldString: string, newString: string, replaceAll: boolean): string {
+  const crlf = (before.match(/\r\n/g) ?? []).length
+  const lf = (before.match(/\n/g) ?? []).length - crlf
+  if (crlf === 0 || !oldString.includes('\n') && !newString.includes('\n')) return replaceText(before, oldString, newString, replaceAll)
+  if (lf === 0) return replaceText(before, asCrlf(oldString), asCrlf(newString), replaceAll)
+  try {
+    return replaceText(before, oldString, newString, replaceAll)
+  } catch {
+    return replaceText(before, asCrlf(oldString), asCrlf(newString), replaceAll)
+  }
 }
 
 /** One argument for a POSIX shell, in single quotes (the Box's commands). */

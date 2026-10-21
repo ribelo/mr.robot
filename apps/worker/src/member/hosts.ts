@@ -84,7 +84,15 @@ type Sent<A> = { readonly kind: 'answered'; readonly value: A } | { readonly kin
 export interface CallWhere {
   readonly cwd?: string
   readonly protocol?: number
+  /**
+   * The call may be sent again once when its answer was cut off (the link dropped, the answer was late): a Write with an id, which the app
+   * answers from its memory when it got the first one (v1.21, cw-6b3r). It waits for the Host to come back, up to RETRY_WAIT_MS.
+   */
+  readonly retryCut?: boolean
 }
+
+/** How long a cut call that may be sent again waits for its Host to come back. */
+const RETRY_WAIT_MS = 30_000
 
 export class HostRefused extends Error {
   override readonly name = 'Invalid'
@@ -458,7 +466,8 @@ export class HostHub {
 
   async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string }, reach: Reach = 'granted', where: CallWhere = {}): Promise<A> {
     try {
-      const sent = await this.send(id, robotId, grant, call, timeoutMs, reach, where)
+      let sent = await this.send(id, robotId, grant, call, timeoutMs, reach, where)
+      if (sent.kind === 'cut' && where.retryCut === true && (await this.cameBack(id))) sent = await this.send(id, robotId, grant, call, timeoutMs, reach, where)
       if (sent.kind === 'cut') throw sent.offline ? new HostOffline({ message: sent.message }) : new HostCallFailed({ message: sent.message })
       if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: null })
       return sent.value
@@ -501,6 +510,15 @@ export class HostHub {
     if (error?._tag === 'TimeoutError') return { kind: 'cut', message: `the host did not answer within ${Math.round(timeoutMs / 1000)} s`, offline: false }
     if (this.row(id)?.online !== 1) return { kind: 'cut', message: `the host "${this.row(id)?.name ?? id}" went offline`, offline: true }
     return { kind: 'cut', message: `the host call failed: ${String(error?.message ?? exit.cause)}`, offline: false }
+  }
+
+  /** Whether the Host is online with a connection, now or within RETRY_WAIT_MS. */
+  private async cameBack(id: string): Promise<boolean> {
+    for (let waited = 0; waited <= RETRY_WAIT_MS; waited += 200) {
+      if (this.row(id)?.online === 1 && this.ctx.getWebSockets(`host:${id}`).length > 0) return true
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    return false
   }
 
   /** The protocol version of the app, from its last heartbeat: 1 for an app from before v1.21, which does not say. */
