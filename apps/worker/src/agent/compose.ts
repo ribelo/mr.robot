@@ -14,7 +14,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
-import ToolRuntime, { type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import ToolRuntime, { type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ThinkingEffort } from '@mr-robot/protocol'
 import { BudgetedAdapter } from './budget.ts'
 import { compactionConfig, robotCompaction } from './compaction.ts'
@@ -110,7 +110,10 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     })
     // A tool registers through the gate of the mount being applied, also when a DSH plugin of its seams registers it.
     let gate: ((tool: ToolDefinition) => ToolDefinition) | undefined
-    await ctx.plugin(gatedToolRuntime(() => gate, input.fence), {})
+    await ctx.plugin(gatedToolRuntime(() => gate), {})
+    // While a platform step runs, a call of a tool it does not allow is denied before the tool body (platform-step.ts).
+    const fence = input.fence
+    if (fence !== undefined) ctx.tools.guard((execution) => fence.refusal(execution.name))
     for (const { plugin, config, gate: mountGate } of input.mounts) {
       gate = mountGate
       try {
@@ -189,20 +192,14 @@ export async function compose(input: CompositionInput): Promise<Composition> {
 
 /**
  * DSH's tool registry with every registration decorated in one place (v1.20 ticket 00): a tool marked external has its text fenced
- * (external.ts); then the gate current at that moment wraps it (the ask-per-call wrapper of the mount being applied, sk-hx8j;
- * registrations outside a mount get none); then, for every tool, the platform step's fence (platform-step.ts) refuses a call the
- * running step does not allow.
+ * (external.ts), then the gate current at that moment wraps it (the ask-per-call wrapper of the mount being applied, sk-hx8j).
+ * Registrations outside a mount get no gate.
  */
-function gatedToolRuntime(current: () => ((tool: ToolDefinition) => ToolDefinition) | undefined, fence: StepFence | undefined): typeof ToolRuntime {
+function gatedToolRuntime(current: () => ((tool: ToolDefinition) => ToolDefinition) | undefined): typeof ToolRuntime {
   return class GatedToolRuntime extends ToolRuntime {
     override register(definition: ToolDefinition): () => void {
       const base = isExternal(definition) ? fenced(definition) : definition
-      const gated = current()?.(base) ?? base
-      if (fence === undefined) return super.register(gated)
-      return super.register({ ...gated, execute: (args: unknown, exec: ToolRunContext) => {
-        fence.check(definition.name)
-        return gated.execute(args as never, exec)
-      } } as ToolDefinition)
+      return super.register(current()?.(base) ?? base)
     }
   }
 }

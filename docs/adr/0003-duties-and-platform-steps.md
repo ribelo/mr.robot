@@ -23,7 +23,7 @@ A **platform step** (apps/worker/src/agent/platform-step.ts, platformStep) is on
 - `label`: what errors and the Trajectory call it.
 - `instruction`: the message the agent reads.
 - `steps`: the model steps at most; the agent is cancelled, inbox kept, at the limit.
-- `tools` (optional): the only tools that run while it runs. The gated tool runtime (agent/compose.ts) checks every call of every tool against the Robot's StepFence, so the allow-list holds for tools outside the ask gate too.
+- `tools` (optional): the only tools that run while it runs. A DSH tool guard (ctx.tools.guard, agent/compose.ts) denies every other call before the tool body, for every tool, so the allow-list holds for tools outside the ask gate too. Tool definitions are not wrapped for it: some DSH tools are read by identity or through live getters.
 - `author` (optional): who the Workspace writes are by in the file history; back to the Robot after the step.
 - `usage` (optional): the usage source its tokens are booked under; when absent the Turn it runs in books them.
 - `record` (optional): a Trajectory record written after the step.

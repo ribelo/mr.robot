@@ -25,9 +25,10 @@ export class StepFence {
     this.allowed = undefined
   }
 
-  /** Throws when a step runs and this tool is not one it allows. */
-  check(tool: string): void {
-    if (this.allowed !== undefined && !this.allowed.has(tool)) throw new Error(`${tool} is not available during ${this.label}; use only ${[...this.allowed].join(', ') || 'no tool'}.`)
+  /** Why this tool may not run now: a step runs and does not allow it; undefined when it may. */
+  refusal(tool: string): string | undefined {
+    if (this.allowed === undefined || this.allowed.has(tool)) return undefined
+    return `${tool} is not available during ${this.label}; use only ${[...this.allowed].join(', ') || 'no tool'}.`
   }
 }
 
