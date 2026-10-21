@@ -93,12 +93,21 @@ beforeAll(async () => {
   let cold = 0
   for (let moved = -1; moved !== 0;) cold += moved = await testRobot(id).tidyChaptersForTest(Date.now(), 50)
   numbers.push(`cold                     ${Date.now() - tidied} ms: ${cold} chapters to R2, ${await testRobot(id).storedEventsForTest()} events left in the Durable Object`)
+  // A year of daily notes, indexed (v1.20 ticket 03): the early and the late word in one note each.
+  const noted = Date.now()
+  for (let day = 0; day < 365; day += 1) {
+    const date = new Date(now - (365 - day) * DAY).toISOString().slice(0, 10)
+    const word = day === 0 ? ' A zeppelin flew over.' : day === 364 ? ' A quokka smiled.' : ''
+    await env.FILES.put(`robots/${id}/memory/${date}.md`, `# ${date}\n\n- Anna called about the flat on day ${day}.${word}\n\n- The invoices of day ${day} are filed.\n`)
+  }
+  await testRobot(id).catchUpMemoryForTest()
+  numbers.push(`notes                    ${Date.now() - noted} ms: 365 daily notes written and indexed`)
   // The Robot sleeps: its memory is gone, the year is in its storage.
   await testRobot(id).restartForTest().catch(() => undefined)
 }, 600_000)
 
 afterAll(() => {
-  console.log(`\nscale test (v1.19):\n${numbers.join('\n')}\n`)
+  console.log(`\nscale test (v1.19, v1.20):\n${numbers.join('\n')}\n`)
 })
 
 describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
@@ -152,6 +161,16 @@ describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
     expect(late.value.items).toHaveLength(1)
     expect(early.ms).toBeLessThan(SEARCH_MS)
     expect(late.ms).toBeLessThan(SEARCH_MS)
+  }, 300_000)
+
+  it('finds a word in a year of daily notes within the time (dm-hmet)', async () => {
+    for (const [name, word] of [['memory search early', 'zeppelin'], ['memory search late', 'quokka']] as const) {
+      const run = await measured(() => env.ROBOT.getByName(id).memorySearch(word))
+      report(name, run, `${run.value.length} matches`)
+      expect(run.value).toHaveLength(1)
+      expect(run.value[0]!.path).toMatch(/^memory\/\d{4}-\d{2}-\d{2}\.md$/)
+      expect(run.ms).toBeLessThan(SEARCH_MS)
+    }
   }, 300_000)
 
   it('records where the agent resumes from after a sleep', async () => {

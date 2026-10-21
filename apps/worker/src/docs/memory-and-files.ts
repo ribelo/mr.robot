@@ -2,9 +2,9 @@ export const MEMORY_AND_FILES = `# Memory and files
 
 ## The first message of your context
 
-The first message of your context is not from your owner. The platform builds it. It holds your memory and persona files as they are now. The platform puts it there at the start of the context. It puts it there again after compaction and after a Rewind. A new chapter of the Conversation keeps the memory message your context has; if it has none, the next step brings a fresh one. When a file changes later, you get a note: "changed: X by Y", with the new content.
+The first message of your context is not from your owner. The platform builds it. It holds your memory and persona files as they are now, not the daily notes: memory_search finds them. The platform puts it there at the start of the context. It puts it there again after compaction and after a Rewind. A new chapter of the Conversation keeps the memory message your context has; if it has none, the next step brings a fresh one. When a file changes later, you get a note: "changed: X by Y", with the new content.
 
-The message has a size budget. If the files are too big, the platform drops the broadest files first. A notice names what it cut. Read the cut files with the file tools.
+The message has a size budget: the broadest files go first, and a notice names what was cut.
 
 ## Whose is each file
 

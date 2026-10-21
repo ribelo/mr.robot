@@ -103,7 +103,10 @@ export function normalizePath(path: string): string | undefined {
 const fail = (message: string) => (cause: unknown) => new WorkspaceError({ message, cause })
 
 /** `writer`: who writes when a write names nobody (the Robot, or the memory sweep while it runs). */
-export function makeWorkspace(bucket: R2Bucket, robotId: string, writer: FileAuthor = { kind: 'robot' }): WorkspaceShape {
+/** After a write or a delete: the file's path, its text when the write gave one (undefined for a stream or a delete), its new etag (undefined for a delete). */
+export type WorkspaceChange = (path: string, text: string | undefined, etag: string | undefined) => void
+
+export function makeWorkspace(bucket: R2Bucket, robotId: string, writer: FileAuthor = { kind: 'robot' }, onChange?: WorkspaceChange): WorkspaceShape {
   const prefix = workspacePrefix(robotId)
   const history = new FileHistory(bucket, robotHistoryBase(robotId))
   /** Before a persona or memory file changes, the version it has goes to its history with who wrote it. */
@@ -159,7 +162,10 @@ export function makeWorkspace(bucket: R2Bucket, robotId: string, writer: FileAut
     write: (path, body, contentType, by = writer) => key(path).pipe(Effect.flatMap((k) => Effect.tryPromise({
       try: async () => {
         await keepPrevious(path, k)
-        return entry(await bucket.put(k, body, { httpMetadata: { contentType: contentType ?? guessType(path) }, customMetadata: authorMetadata(by, Date.now()) }))
+        const written = entry(await bucket.put(k, body, { httpMetadata: { contentType: contentType ?? guessType(path) }, customMetadata: authorMetadata(by, Date.now()) }))
+        const text = typeof body === 'string' ? body : body instanceof ArrayBuffer || body instanceof Uint8Array ? new TextDecoder().decode(body) : undefined
+        onChange?.(written.path, text, written.etag)
+        return written
       },
       catch: fail(`cannot write ${path}`),
     }))),
@@ -167,6 +173,7 @@ export function makeWorkspace(bucket: R2Bucket, robotId: string, writer: FileAut
       try: async () => {
         await keepPrevious(path, k)
         await bucket.delete(k)
+        onChange?.(k.slice(prefix.length), undefined, undefined)
       },
       catch: fail(`cannot delete ${path}`),
     }))),

@@ -347,6 +347,7 @@ Read this before you write to MEMORY.md or a daily note, and when what you remem
 
 ## What goes where
 - memory/YYYY-MM-DD.md, today's daily note: the raw detail of the day. Write what happened, what you learned, what is still open. Write it as you go; it is cheap.
+- Daily notes are not in your context. memory_search finds them, and searches MEMORY.md, AGENTS.md, SOUL.md, dreams/, your owner's files and SPACE.md too; words match as written. Read today's note when you need the thread of the day.
 - MEMORY.md: only what lasts, in its three sections.
   - Facts: what is true about your owner's world and your work here (an account number, who does what, how a supplier invoices).
   - Preferences: what your owner wants and does not want, in their words where you can.

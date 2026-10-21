@@ -10,6 +10,7 @@ import z from '@deepseek-ai/schemastery'
 import { renderBaseline, renderChanges, type MemoryChange, type MemoryFile, type SharedFileEdit } from '../agent/memory.ts'
 import { tool } from '../agent/tools/define.ts'
 import { capability } from './define.ts'
+import type { MemoryMatch } from '../robot/memory-index.ts'
 
 export const SHARED_FILES = ['USER.md', 'PROACTIVE_PREFERENCES.md', 'memory/world.md', 'SPACE.md'] as const
 export type SharedFile = (typeof SHARED_FILES)[number]
@@ -25,6 +26,8 @@ export interface MemoryHost {
   memoryDelivered(sessionId: string, baseline: boolean): void
   /** How this Robot changes owner and Space files, by its kind (v1.11, sk-a2yy). */
   readonly shared: SharedFiles
+  /** memory_search over the memory index (v1.20, dm-hmet). */
+  search(query: string, limit?: number): Promise<readonly MemoryMatch[]>
 }
 
 /** Mr. Robot writes owner and Space files directly; other Robots ask the owner to approve an edit. */
@@ -53,12 +56,23 @@ const memoryMessage = (text: string, form: 'baseline' | 'changes'): UserMessage 
 
 const isMemory = (message: unknown) => (message as { source?: { memory?: unknown } }).source?.memory !== undefined
 
+/** memory_search (v1.20, dm-hmet, dm-g4in): read-only, so a Subagent has it too. */
+function searchTool(host: MemoryHost) {
+  return tool<{ query: string; limit?: number }>({
+    name: 'memory_search',
+    description: 'Search your memory: MEMORY.md, AGENTS.md, SOUL.md, your daily notes (memory/) and dreams (dreams/), your owner\'s files and SPACE.md. Words match as written, and a word also matches longer words it begins. Returns the best paragraphs first: path, lines, the note\'s date, a snippet. Read a file with read for the whole of it; read today\'s daily note when you need the thread of the day.',
+    parameters: { properties: { query: { type: 'string', description: 'The words to find' }, limit: { type: 'number', description: 'How many matches, 10 when left out, at most 50' } }, required: ['query'] },
+    execute: async ({ query, limit }) => ({ matches: await host.search(query, limit) }),
+  })
+}
+
 function memoryTools(config: MemoryConfig) {
   const { shared } = config.host
   if (!config.tools) return []
+  const search = searchTool(config.host)
   if (shared.kind === 'mr-robot') {
     const write = shared.write.bind(shared)
-    return [tool<{ file: SharedFile; content: string }>({
+    return [search, tool<{ file: SharedFile; content: string }>({
       name: 'memory_write_shared',
       description: "Write the complete new version of one of your owner's shared memory files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) or the Space's SPACE.md. Every Robot that reads it is told it changed.",
       parameters: { properties: { file: { type: 'string', enum: [...SHARED_FILES], description: 'Which shared memory file to write' }, content: { type: 'string', description: 'The complete new file' } }, required: ['file', 'content'] },
@@ -70,7 +84,7 @@ function memoryTools(config: MemoryConfig) {
       },
     })]
   }
-  return [tool<{ file: SharedFile; content: string; purpose: string }>({
+  return [search, tool<{ file: SharedFile; content: string; purpose: string }>({
     name: 'propose_member_file_edit',
     description: "Propose a new full version of a shared memory file: your owner's USER.md, PROACTIVE_PREFERENCES.md or memory/world.md, or the Space's SPACE.md, with what you learned. Your owner approves or rejects it.",
     parameters: {

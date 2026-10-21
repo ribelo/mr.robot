@@ -129,25 +129,6 @@ describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
     expect(localDate(digest.next, 'Europe/Berlin')).toMatchObject({ hour: 9, minute: 0 })
   })
 
-  it('daily notes follow the new zone at the next baseline', async () => {
-    const day = (zone: string) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now())
-    // 25 hours apart: today's note in one zone is never today's or yesterday's in the other.
-    const behind = 'Pacific/Pago_Pago'
-    const ahead = 'Pacific/Kiritimati'
-    await me(behind)
-    const id = await activeRobot()
-    await api(ANNA, `/api/robots/${id}/file?path=memory/${day(behind)}.md`, { method: 'PUT', body: { content: 'Note written behind the date line.' } })
-    await api(ANNA, `/api/robots/${id}/file?path=memory/${day(ahead)}.md`, { method: 'PUT', body: { content: 'Note written ahead of the date line.' } })
-    await turn(id, 'hi')
-    expect(allUser(id)).toContain('Note written behind the date line.')
-    expect(allUser(id)).not.toContain('Note written ahead of the date line.')
-
-    await me(ahead)
-    await api(ANNA, `/api/robots/${id}/clear`, { body: { confirm: 'New robot' } })
-    await turn(id, 'hi again')
-    expect(allUser(id)).toContain('Note written ahead of the date line.')
-  })
-
   it('a recurring Task made after the zone is known stays in the profile zone through later moves', async () => {
     await me(NEW_YORK)
     const id = await activeRobot()

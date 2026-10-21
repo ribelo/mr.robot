@@ -159,7 +159,7 @@ import type { SessionCapture } from '@mr-robot/protocol'
 import type { Observation } from '../browser/observe.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
-import { dailyNotePaths, PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
+import { PERSONA_FILES, personaText, type PersonaSnapshot } from '../workspace/persona.ts'
 import { RETIRED_ROBOT_FILES, ROBOT_FILES } from '../workspace/templates.ts'
 import { makeWorkspace, normalizePath, workspacePrefix, type WorkspaceShape } from '../workspace/workspace.ts'
 import { authorLabel, authorOf, FileHistory, isTrackedFile, robotHistoryBase, versionView, type FileAuthor } from '../workspace/file-history.ts'
@@ -178,6 +178,7 @@ import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import { Duties } from './duties.ts'
 import { nextRun } from './schedule.ts'
+import { INDEX_BATCH, isIndexedRobotPath, MemoryIndex, versionOf as memoryVersion, type MemoryMatch } from './memory-index.ts'
 import { platformStep, StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
 import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
 import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
@@ -726,6 +727,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
     const { agent, ctx } = await this.agent()
     await this.refreshPersona()
+    // The memory index catches up a bounded number of files per Turn (v1.20, dm-yn3q).
+    await this.catchUpMemoryIndex().catch((error: unknown) => console.warn('memory index not caught up', error))
     if (!resuming) {
       // An approved tool call runs first, exactly as stored, and its result is what the Wake-up says (sk-ed7r).
       const toolCallAnswer = wakeup.kind === 'platform' ? wakeup.payload['toolCallAnswer'] as ToolCallAnswerWake | undefined : undefined
@@ -2590,7 +2593,71 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   private writer: FileAuthor = { kind: 'robot' }
 
   get workspace(): WorkspaceShape {
-    return makeWorkspace(this.env.FILES, this.store.requireConfig().id, this.writer)
+    return makeWorkspace(this.env.FILES, this.store.requireConfig().id, this.writer, (path, text, etag) => this.memoryWritten(path, text, etag))
+  }
+
+  private memoryIndexCache: MemoryIndex | undefined
+
+  /** The full-text index of the Robot's memory (v1.20, memory-index.ts). */
+  protected get memoryIndex(): MemoryIndex {
+    // Reset everything and Start over drop every table: the index is made again then.
+    if (this.memoryIndexCache === undefined || this.ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE name = 'memory_indexed'").toArray().length === 0) this.memoryIndexCache = new MemoryIndex(this.ctx.storage.sql)
+    return this.memoryIndexCache
+  }
+
+  /** Every Workspace write reindexes an indexed file at once (dm-yn3q): the Robot's, the owner's, a memory step's, a restore. */
+  private memoryWritten(path: string, text: string | undefined, etag: string | undefined): void {
+    if (!isIndexedRobotPath(path)) return
+    if (etag === undefined) return this.memoryIndex.remove('robot', path)
+    // A stream's text is not at hand: the next catch-up reads it.
+    if (text === undefined) return this.memoryIndex.index('robot', path, '', 'stale')
+    this.memoryIndex.index('robot', path, text, etag)
+  }
+
+  /**
+   * Bring the index up to date, at most INDEX_BATCH files (dm-yn3q): the Robot's indexed files whose etag changed or that are new, the ones
+   * gone, and the Member and Space files it reads by their content. Run at each Turn's start and before a search.
+   */
+  protected async catchUpMemoryIndex(limit = INDEX_BATCH): Promise<void> {
+    const index = this.memoryIndex
+    const config = this.store.requireConfig()
+    const ws = this.workspace
+    let budget = limit
+    const [memory, dreams, roots] = await Promise.all([
+      this.run(ws.list('memory')),
+      this.run(ws.list('dreams')),
+      Promise.all(['MEMORY.md', 'AGENTS.md', 'SOUL.md'].map((path) => this.run(ws.stat(path)))),
+    ])
+    const present = [...memory, ...dreams, ...roots.flatMap((entry) => (entry === undefined ? [] : [entry]))].filter((entry) => isIndexedRobotPath(entry.path))
+    const known = new Map(index.indexed('robot').map((row) => [row.path, row.version]))
+    for (const entry of present) {
+      if (budget <= 0) break
+      if (known.get(entry.path) === entry.etag) continue
+      const text = await this.run(ws.readText(entry.path))
+      index.index('robot', entry.path, text ?? '', entry.etag)
+      budget -= 1
+    }
+    const paths = new Set(present.map((entry) => entry.path))
+    for (const path of known.keys()) if (!paths.has(path)) index.remove('robot', path)
+    const [member, space] = await Promise.all([
+      this.env.MEMBER.getByName(config.ownerId).files().catch(() => undefined),
+      this.space().spaceMemory().catch(() => undefined),
+    ])
+    const shared: Array<['member' | 'space', Record<string, string> | undefined]> = [['member', member as Record<string, string> | undefined], ['space', space === undefined ? undefined : { 'SPACE.md': space }]]
+    for (const [scope, files] of shared) {
+      if (files === undefined) continue
+      for (const [path, text] of Object.entries(files)) {
+        const version = memoryVersion(text)
+        if (index.version(scope, path) !== version) index.index(scope, path, text, version)
+      }
+      for (const row of index.indexed(scope)) if (!(row.path in files)) index.remove(scope, row.path)
+    }
+  }
+
+  /** memory_search (dm-hmet): the index caught up first, then the ranked matches. */
+  async memorySearch(query: string, limit?: number): Promise<MemoryMatch[]> {
+    await this.catchUpMemoryIndex()
+    return this.memoryIndex.search(query, limit)
   }
 
   run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
@@ -2716,7 +2783,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.refreshReach().catch((error: unknown) => console.warn('reach not refreshed', error))
     const config = this.store.requireConfig()
     const ws = this.workspace
-    const own = [...PERSONA_FILES, ...dailyNotePaths(Date.now(), config.timeZone)]
+    // Daily notes are not in the context (v1.20, dm-cl1p): memory_search finds them; read reads today's.
+    const own = [...PERSONA_FILES]
     const files = await this.run(Effect.forEach(own, (path) => ws.readText(path).pipe(Effect.map((content) => ({ path, content: content ?? '' }))), { concurrency: 8 }))
     const member = await this.env.MEMBER.getByName(config.ownerId).files().catch(() => ({ 'USER.md': '', 'PROACTIVE_PREFERENCES.md': '' }))
     this.persona = {
@@ -3794,6 +3862,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** Someone else changed a file this Robot reads; the note goes out with its next model step (pl-9n7w). */
   async memoryChanged(path: string, by: string): Promise<void> {
+    // A daily note is not in the context (v1.20): nothing to replace; memory_search finds the change.
+    if (/^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path)) return
     const pending = this.store.get<MemoryChange[]>('memory-changes') ?? []
     this.store.set('memory-changes', [...pending, { path, by }].slice(-50))
   }
@@ -3848,7 +3918,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** Every memory file in scope: the Space, the owner, and this Robot's own (pl-o3ck, pl-fkg7, pl-yqno). */
   async memoryFiles(): Promise<MemoryFile[]> {
     const config = this.store.requireConfig()
-    const own = [...PERSONA_FILES, ...dailyNotePaths(Date.now(), config.timeZone)]
+    // Daily notes are not in the context (v1.20, dm-cl1p): memory_search finds them; read reads today's.
+    const own = [...PERSONA_FILES]
     const [robotFiles, member, home] = await Promise.all([
       this.run(Effect.forEach(own, (path) => this.workspace.readText(path).pipe(Effect.map((content) => ({ scope: 'robot' as const, path, content: content ?? '' }))), { concurrency: 8 })),
       this.env.MEMBER.getByName(config.ownerId).files().catch(() => ({}) as Record<string, string>),
@@ -3898,6 +3969,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       shared: config.kind === 'mr-robot'
         ? { kind: 'mr-robot', write: (file: SharedFile, content: string) => this.writeShared(file, content) }
         : { kind: 'robot', propose: (kind, purpose, payload) => this.propose(kind, purpose, payload) },
+      search: (query, limit) => this.memorySearch(query, limit),
     }
   }
 

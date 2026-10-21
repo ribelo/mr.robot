@@ -425,6 +425,26 @@ export class Robot extends ProductionRobot {
 
   /** Skip the setup interview: the Robot becomes active with its current Grants. */
   /** The chain's resume time came (as the alarm sees it). */
+  /** The next step brings the whole memory message again (as after a compaction). */
+  async forgetBaselineForTest(): Promise<void> {
+    this.store.delete('memory-baseline')
+  }
+
+  /** Index every file now, however many (the scale test's year of notes). */
+  async catchUpMemoryForTest(): Promise<void> {
+    await this.catchUpMemoryIndex(Number.MAX_SAFE_INTEGER)
+  }
+
+  /** The memory index as a Robot from before v1.20 has it: empty (v1.20 ticket 03). */
+  async clearMemoryIndexForTest(): Promise<void> {
+    this.memoryIndex.clear()
+  }
+
+  /** How many files of a scope the memory index holds. */
+  async memoryIndexedForTest(scope: 'robot' | 'member' | 'space' = 'robot'): Promise<number> {
+    return this.memoryIndex.indexed(scope).length
+  }
+
   /** This month's tokens per usage source (v1.20 ticket 01). */
   async usageBySourceForTest(): Promise<Record<string, number>> {
     return Object.fromEntries(this.store.sql.exec<{ source: string; tokens: number }>('SELECT source, SUM(input_tokens + output_tokens) AS tokens FROM usage GROUP BY source').toArray().map((row) => [row.source, row.tokens]))

@@ -76,7 +76,7 @@ describe('Grants (robot-f9ln, robot-0ms7)', () => {
     const direct = await activeRobot([], false)
     await say(direct, 'hi', [{ text: 'hi' }])
     // Conversation-level tools only (ask, draft_revise and say need no Grant); robot_reply works only with a handle another Robot sent.
-    expect(toolNames(direct)).toEqual(['ask', 'conversation_search', 'draft_revise', 'my_capabilities', 'propose_grants', 'propose_member_file_edit', 'propose_review', 'react', 'request_credential', 'robot_reply', 'say', 'set_identity', 'skill', 'skill_library'])
+    expect(toolNames(direct)).toEqual(['ask', 'conversation_search', 'draft_revise', 'memory_search', 'my_capabilities', 'propose_grants', 'propose_member_file_edit', 'propose_review', 'react', 'request_credential', 'robot_reply', 'say', 'set_identity', 'skill', 'skill_library'])
   })
 
   it('has no shell, terminal or container tool at all', async () => {

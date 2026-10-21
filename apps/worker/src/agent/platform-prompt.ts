@@ -98,7 +98,7 @@ const memory: PlatformSection = {
     '- Do not turn one unexplained failure into a standing rule.',
     '- Never write credentials: passwords, codes, keys, tokens, card or account numbers. Write that the item exists and where it is, not its value.',
     '- When a fact changes (a plan cancelled, a booking moved), correct the old entry where it is; never leave two entries that disagree.',
-    '- Before you answer about earlier work, decisions, people or preferences, read your memory. Do not answer from what you only seem to remember.',
+    '- Daily notes are not in your context. Before you answer about the past, people or preferences, call memory_search, never your impression.',
   ),
 }
 
