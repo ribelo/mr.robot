@@ -37,7 +37,7 @@ async function turn(id: string, text: string, script: StubReply[]): Promise<void
   await settle(id)
 }
 
-const write = (path: string, content: string) => ({ name: 'write', args: { on: 'workspace', file_path: path, content } })
+const write = (path: string, content: string) => ({ name: 'write', args: { on: 'files', file_path: path, content } })
 
 describe('secrets outlive a Turn (cross-review #1)', () => {
   it('masks a value repeated in a later Turn everywhere it is stored, and in Pages, dreams and definitions', async () => {

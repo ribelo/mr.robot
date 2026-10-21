@@ -170,20 +170,20 @@ describe('copy between a Host and the Workspace (v1.15 ticket 09, gb-iw01, gb-mc
     const id = await robotWith(ANNA, [`${desk.hostId}:files`], ['files'])
     const bytes = binary(2_500_000)
     hostDisk.set('/home/anna/report.bin', bytes)
-    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/report.bin' }, to: { on: 'workspace', path: 'inbox/report.bin' } } }] }, { text: 'Copied.' }])
+    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/report.bin' }, to: { on: 'files', path: 'inbox/report.bin' } } }] }, { text: 'Copied.' }])
     expect(toolResults(id).at(-1)).toBeDefined()
-    expect(JSON.parse(toolResults(id).at(-1)!)).toEqual({ from: { on: 'Desk', path: '/home/anna/report.bin' }, to: { on: 'workspace', path: '/workspace/inbox/report.bin' }, bytes: 2_500_000, ms: expect.any(Number), took: expect.stringMatching(/^2\.4 MB in /) })
+    expect(JSON.parse(toolResults(id).at(-1)!)).toEqual({ from: { on: 'Desk', path: '/home/anna/report.bin' }, to: { on: 'files', path: '/workspace/inbox/report.bin' }, bytes: 2_500_000, ms: expect.any(Number), took: expect.stringMatching(/^2\.4 MB in /) })
     expect(await workspaceBytes(id, 'inbox/report.bin')).toEqual(bytes)
 
     const back = binary(1_048_576)
     await env.FILES.put(`robots/${id}/out/data.bin`, back)
-    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'workspace', path: 'out/data.bin' }, to: { on: 'Desk', path: '/home/anna/copy/data.bin' } } }] }, { text: 'Copied.' }])
-    expect(JSON.parse(toolResults(id).at(-1)!)).toMatchObject({ from: { on: 'workspace', path: '/workspace/out/data.bin' }, to: { on: 'Desk', path: '/home/anna/copy/data.bin' }, bytes: 1_048_576 })
+    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'files', path: 'out/data.bin' }, to: { on: 'Desk', path: '/home/anna/copy/data.bin' } } }] }, { text: 'Copied.' }])
+    expect(JSON.parse(toolResults(id).at(-1)!)).toMatchObject({ from: { on: 'files', path: '/workspace/out/data.bin' }, to: { on: 'Desk', path: '/home/anna/copy/data.bin' }, bytes: 1_048_576 })
     expect(hostDisk.get('/home/anna/copy/data.bin')).toEqual(back)
 
     // An empty file copies too.
     await env.FILES.put(`robots/${id}/out/empty.txt`, new Uint8Array())
-    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'workspace', path: 'out/empty.txt' }, to: { on: 'Desk', path: '/home/anna/empty.txt' } } }] }, { text: 'Copied.' }])
+    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'files', path: 'out/empty.txt' }, to: { on: 'Desk', path: '/home/anna/empty.txt' } } }] }, { text: 'Copied.' }])
     expect(hostDisk.get('/home/anna/empty.txt')).toEqual(new Uint8Array())
 
     const actions = (await api<Array<{ action: string; detail: string; outcome: string }>>(ANNA, `/api/hosts/${desk.hostId}/actions`)).body
@@ -198,10 +198,10 @@ describe('copy between a Host and the Workspace (v1.15 ticket 09, gb-iw01, gb-mc
     const desk = await fakeHost()
     const id = await robotWith(ANNA, [`${desk.hostId}:files`], ['files'])
     await say(ANNA, id, [{ calls: [
-      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/nope' }, to: { on: 'workspace', path: 'nope' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'out/missing.bin' }, to: { on: 'Desk', path: '/home/anna/x' } } },
-      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'workspace', path: '../escape' } } },
-      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'workspace', path: 'docs/robots.md' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/nope' }, to: { on: 'files', path: 'nope' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'out/missing.bin' }, to: { on: 'Desk', path: '/home/anna/x' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'files', path: '../escape' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'files', path: 'docs/robots.md' } } },
       { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'Laptop', path: '/tmp/x' } } },
     ] }, { text: 'Refused.' }])
     const results = toolResults(id).slice(-5)
@@ -232,7 +232,7 @@ describe('copy between a Host and the Workspace (v1.15 ticket 09, gb-iw01, gb-mc
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { grants: { tools: { box: 'allow', files: 'allow' }, skills: [], recipients: [], secrets: [], hosts: { [`${desk.hostId}:files`]: 'allow' } } } })
     const bytes = binary(70_000)
     hostDisk.set('/home/anna/model.bin', bytes)
-    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/model.bin' }, to: { on: 'workspace', path: 'box/model.bin' } } }, { name: 'run', args: { on: 'box', command: 'ls' } }] }, { text: 'Ready.' }])
+    await say(ANNA, id, [{ calls: [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/model.bin' }, to: { on: 'files', path: 'box/model.bin' } } }, { name: 'run', args: { on: 'box', command: 'ls' } }] }, { text: 'Ready.' }])
     expect(boxLog.get(id)![0]).toBe('boot')
     expect(boxDisks.get(id)!.get('/workspace/box/model.bin')?.bytes).toEqual(bytes)
   })

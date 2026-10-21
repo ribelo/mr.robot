@@ -49,6 +49,18 @@ export const workspaceCloses: string[] = []
 const FAKE_HOME = '/home/anna'
 const parentOf = (path: string): string => path.slice(0, Math.max(path.lastIndexOf('/'), 1))
 const expanded = (path: string): string => (path === '~' ? FAKE_HOME : path.startsWith('~/') ? `${FAKE_HOME}/${path.slice(2)}` : path.startsWith('/') ? path : `${FAKE_HOME}/${path}`).replace(/\/+$/, '') || '/'
+/** A path with . and .. taken away. */
+const normal = (path: string): string => {
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '..') parts.pop()
+    else if (part !== '' && part !== '.') parts.push(part)
+  }
+  return `/${parts.join('/')}`
+}
+/** A path of a call as the app resolves it: on the Workspace a relative path starts in the Robot's current directory (access.cwd); otherwise as given. */
+const onPlace = (access: HostAccess, path: string): string => (access.cwd !== undefined && !path.startsWith('/') && !path.startsWith('~') ? normal(`${access.cwd}/${path}`) : path)
+
 /** Every directory the fake disk knows: the listed ones, and those its files lie in. */
 const knownDirectories = (): Set<string> => {
   const all = new Set<string>()
@@ -90,7 +102,8 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
   const closes: number[] = []
   socket.addEventListener('close', (event) => closes.push(event.code))
   const handlers = HostRpcs.toLayer({
-    Read: ({ path, access }) => {
+    Read: ({ path: given, access }) => {
+      const path = onPlace(access, given)
       hostFileCalls.push({ rpc: 'Read', path, access })
       if (path === '/root/secret') return Effect.fail(new HostError({ message: 'permission denied', code: 'EACCES' }))
       const bytes = hostDisk.get(path)
@@ -101,7 +114,8 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
         return Effect.succeed({ path, size: bytes.length, text: null, base64: btoa(String.fromCharCode(...bytes)) })
       }
     },
-    Write: ({ path, text, base64, access }) => {
+    Write: ({ path: given, text, base64, access }) => {
+      const path = onPlace(access, given)
       hostFileCalls.push({ rpc: 'Write', path, access })
       return readOnly(access, path) ?? Effect.sync(() => {
       const bytes = base64 === undefined ? new TextEncoder().encode(text ?? '') : Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
@@ -156,7 +170,8 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
         .flatMap(([file, bytes]) => new TextDecoder().decode(bytes).split('\n').flatMap((line, index) => (regex.test(line) ? [{ path: file, line: index + 1, text: line }] : [])))
       return { matches: matches.slice(0, GREP_MAX_MATCHES), truncated: matches.length > GREP_MAX_MATCHES }
     }),
-    Delete: ({ path, access }) => {
+    Delete: ({ path: given, access }) => {
+      const path = onPlace(access, given)
       hostFileCalls.push({ rpc: 'Delete', path, access })
       const denied = readOnly(access, path)
       if (denied !== undefined) return denied
@@ -172,7 +187,7 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       if (linked !== undefined) return Effect.fail(new HostError({ message: `No command runs and no file is changed under this grant on this computer: ${linked} is a symbolic link on the way to ${linked}, and the sandbox would let you change what it points at.`, code: 'SANDBOX_DENIED' }))
       const scripted = hostCommands.map((answer) => answer(command, access)).find((answer) => answer !== undefined)
       const sandbox = scripted?.sandbox ?? (access.mode === 'full' ? { mode: access.mode, denied: false } : { mode: access.mode, denied: false, enforcement: options.sandbox === 'partial' ? 'partial' as const : 'full' as const })
-      const where = cwd ?? `/home/anna/mr-robot/${access.robot}`
+      const where = cwd === undefined ? access.cwd ?? `/home/anna/mr-robot/${access.robot}` : onPlace(access, cwd)
       const held = heldCommands.has(command)
       const stdout = scripted?.stdout ?? `ran: ${command}`
       const record: FakeJob = { ref: job, command, cwd: where, state: held ? 'running' : 'completed', exitCode: held ? null : scripted?.exitCode ?? 0, signal: null, out: held ? '' : stdout, err: held ? '' : scripted?.stderr ?? '', startedAt: Date.now(), finishedAt: held ? null : Date.now(), awaited: !background }
@@ -228,6 +243,13 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       return { path: full, kind, link: linkedRoots.has(full) ? full : null, repository }
     }),
     WorkspaceClose: ({ robot }) => Effect.sync(() => { workspaceCloses.push(robot) }),
+    WorkingDirectory: ({ cd, access }) => {
+      const target = cd.startsWith('/') || cd.startsWith('~') || access.cwd === undefined ? expanded(cd) : normal(`${access.cwd}/${cd}`)
+      if (!knownDirectories().has(target)) return Effect.fail(new HostError({ message: `${target} does not exist`, code: 'ENOENT' }))
+      const repository = access.workspace?.repository
+      if (repository === undefined || (target !== repository && !target.startsWith(`${repository}/`))) return Effect.fail(new HostError({ message: `${target} is outside the repository ${repository}; the current directory stays within it`, code: 'OUTSIDE_REPOSITORY' }))
+      return Effect.succeed({ path: target })
+    },
   })
   let current = socket
   /** The server of the current connection: interrupted when it drops, as the app's link does, so that a waiting Run call ends. */

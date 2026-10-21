@@ -120,7 +120,7 @@ export function* yearSpans(shape: YearShape, position: LogPosition): Generator<S
       push('step/start', { turn, step: 1 })
       push('user/message', message, { surfaceOp: 'append' })
       const readId = `call-${id(next)}`
-      const readArgs = JSON.stringify({ on: 'workspace', file_path: 'notes/plan.md' })
+      const readArgs = JSON.stringify({ on: 'files', file_path: 'notes/plan.md' })
       push('assistant/message', { turn, step: 1, message: { role: 'assistant', content: [{ type: 'tool-call', id: readId, name: 'read', arguments: readArgs }], source: MODEL, id: id(next) }, usage: { inputTokens: 100, outputTokens: 10 }, stream: toolCallStream(time, readId, 'read', readArgs) }, { surfaceOp: 'append' })
       const readCall = push('tool/call', { turn, step: 1, callId: readId, name: 'read', arguments: readArgs })
       push('tool/result', { turn, step: 1, message: { role: 'tool', source: { kind: 'tool', callId: readId }, toolCallId: readId, content: [{ type: 'text', text: file }], isError: false, id: id(next) } }, { sourceEventSeqs: [readCall], surfaceOp: 'append' })

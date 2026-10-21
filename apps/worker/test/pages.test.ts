@@ -32,7 +32,7 @@ const PLAN = '# Trip plan\n\nFly on Friday, back on Sunday.\n'
 const SITE = '<!doctype html><html><head><title>Budget &amp; costs</title></head><body><h1>Budget</h1><p>We spend less in November.</p><script>document.body.dataset.ok = "1"</script></body></html>'
 
 async function write(id: string, path: string, content: string): Promise<void> {
-  scripts.set(id, [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: path, content } }] }, { text: '' }])
+  scripts.set(id, [{ calls: [{ name: 'write', args: { on: 'files', file_path: path, content } }] }, { text: '' }])
   await api(ANNA, `/api/robots/${id}/messages`, { body: { text: `write ${path}` } })
   await settle(id)
 }

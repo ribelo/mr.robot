@@ -88,5 +88,6 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
     ListDirectory: ({ path }) => Effect.tryPromise({ try: () => disk.listDirectory(path), catch: fail }),
     Stat: ({ path }) => Effect.tryPromise({ try: () => disk.stat(path), catch: fail }),
     WorkspaceClose: ({ robot }) => Effect.tryPromise({ try: () => shell.sessions.close(robot), catch: fail }),
+    WorkingDirectory: ({ cd, access }) => Effect.tryPromise({ try: () => disk.workingDirectory(access, cd), catch: fail }),
   })
 }

@@ -3,9 +3,9 @@
  * program of the app's own, so file tools work the same on every OS and do not depend on a shell. Relative paths start in the Robot's directory; reads are as wide as the OS user;
  * every change runs in the sandbox under the grant's mode and roots (file-change.ts), after a first check of the path (access.ts).
  */
-import { lstat, readdir, readFile, stat } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, LIST_DIRECTORY_MAX, LISTING_MAX_FILES, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative } from 'node:path'
+import { globBase, globToRegExp, GREP_MAX_FILE_BYTES, GREP_MAX_LINE, GREP_MAX_MATCHES, isSkippedDirectory, LIST_DIRECTORY_MAX, LISTING_MAX_FILES, OUTSIDE_REPOSITORY, type HostAccess, type TargetFile } from '@mr-robot/host-protocol'
 import { assertMayRemove, assertMayWrite, ensureRobotDirectory, expandPath, linkOnTheWay, resolvedPath } from './access.ts'
 import type { HostDownloads } from './copy.ts'
 import { errorCode } from './error-code.ts'
@@ -62,10 +62,32 @@ export class HostDisk {
     this.home = changes.home
   }
 
-  /** A path of a call as the app resolves it; a call that carries the Robot's Workspace opens its session (cw-p4bm). */
+  /**
+   * A path of a call as the app resolves it: a relative one starts in the Robot's current directory when the call names its Workspace
+   * (access.cwd), else in the Robot's directory. A call that carries the Robot's Workspace opens its session (cw-p4bm).
+   */
   private async full(access: HostAccess, path: string): Promise<string> {
     await this.changes.sessions.touch(access.robot, access.workspace)
-    return expandPath(this.home, await ensureRobotDirectory(this.home, access), path)
+    const directory = await ensureRobotDirectory(this.home, access)
+    return expandPath(this.home, access.cwd ?? directory, path)
+  }
+
+  /**
+   * The Robot's next current directory in its Workspace (cw-llvx): the directory `cd` names from the current one, with its links resolved,
+   * inside the Workspace's repository.
+   */
+  async workingDirectory(access: HostAccess, cd: string): Promise<{ path: string }> {
+    const workspace = access.workspace
+    if (workspace === undefined) throw failure('This call names no Workspace: the Robot has none on this computer.', 'ENOENT')
+    const target = await this.full(access, cd)
+    const info = await stat(target).catch(() => undefined)
+    if (info === undefined) throw failure(`${target} does not exist`, 'ENOENT')
+    if (!info.isDirectory()) throw failure(`${target} is not a directory`, 'ENOTDIR')
+    const real = await realpath(target)
+    const repository = await realpath(workspace.repository)
+    const from = relative(repository, real)
+    if (from.startsWith('..') || isAbsolute(from)) throw failure(`${target} is outside the repository ${workspace.repository}; the current directory stays within it`, OUTSIDE_REPOSITORY)
+    return { path: real }
   }
 
   /**

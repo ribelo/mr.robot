@@ -7,7 +7,7 @@
  * Refusals are tagged errors (errors.ts) thrown from here; the tool boundary words them.
  */
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
-import type { GrantLevel, HostView } from '@mr-robot/protocol'
+import type { GrantLevel, HostView, WorkspaceSetting } from '@mr-robot/protocol'
 import type { UploadPart } from '@mr-robot/host-protocol'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
@@ -21,10 +21,12 @@ import { lookUpHost } from './host-names.ts'
 import type { JobId } from './job-id.ts'
 import type { Transfers } from './transfers.ts'
 import { Jobs, type JobEntry, type JobPlace, type JobOutputView, type KillView, type RunResult } from './jobs.ts'
-import { BOX_PLACE, parseOn, placeName, refuseOwned, WORKSPACE_PLACE, type JobsPlace, type Place, type PlaceFacet, type Reach } from './place.ts'
+import { BOX_PLACE, FILES_PLACE, parseOn, placeName, refuseOwned, WORKSPACE_ALIAS_NOTICE, WORKSPACE_PLACE, type JobsPlace, type Place, type PlaceFacet, type Reach } from './place.ts'
 
 /** One Host as the Robot reaches it: the Host RPCs, each failing as a Host call fails (offline, refused, an OS error). */
 export interface HostLink extends HostFileLink {
+  /** The Robot's next current directory in its Workspace there (v1.21, cw-llvx), checked by the app. */
+  workingDirectory(cd: string): Promise<{ readonly path: string }>
   /** The size of a file on the Host, so that the Worker can plan an upload. */
   copySize(path: string): Promise<{ readonly path: string; readonly size: number }>
   /** The Host app puts the parts to R2 over the presigned URLs. */
@@ -48,8 +50,17 @@ export interface PlacesDeps {
   hostLevel(hostId: string, facet: PlaceFacet): GrantLevel
   /** The Hosts the Robot's owner reaches. */
   hosts(): Promise<readonly HostView[]>
+  /** The Robot's Workspace (v1.21, cw-gx04); undefined when it has none. */
+  workspaceSetting(): WorkspaceSetting | undefined
+  /**
+   * The current directory in the Workspace of the agent that makes a call (cw-llvx, cw-4nkx): the Robot's own, kept by the platform, or a
+   * Subagent's, kept in memory and first the Robot's.
+   */
+  currentDirectory(exec: ToolRunContext): string
+  setCurrentDirectory(exec: ToolRunContext, path: string): void
   readonly box: BoxAccess
-  link(host: HostView, reach: Reach): HostLink
+  /** One Host; `cwd` when the calls name the Robot's Workspace there. */
+  link(host: HostView, reach: Reach, cwd?: string): HostLink
   /** The jobs of a place; `reach` makes a Host command run without the sandbox when the owner approved that. */
   jobPlace(place: JobsPlace, reach: Reach): JobPlace
   /**
@@ -164,17 +175,58 @@ export class Places {
    * While in setup the Robot reaches its Workspace and nothing else.
    * @throws NoGrant, UnknownPlace, AmbiguousPlace or WrongPlace.
    */
-  private async resolve(on: string, facet: PlaceFacet, tool: string): Promise<Granted> {
+  private async resolve(on: string, facet: PlaceFacet, tool: string, exec: ToolRunContext): Promise<Granted> {
     const name = parseOn(on, tool)
-    if (name === WORKSPACE_PLACE) {
-      if (facet === 'shell') throw new WrongPlace({ on: name, message: `on "workspace": the Workspace holds files, it runs no commands. Run on "box" or on one of your owner's computers.` })
+    if (name === FILES_PLACE || (name === WORKSPACE_PLACE && this.aliased())) {
+      if (facet === 'shell') throw new WrongPlace({ on: name, message: name === FILES_PLACE ? `on "files": your Files hold files, they run no commands. Run on "box" or on one of your owner's computers.` : `on "workspace": you have no Workspace, and your Files (on "files") run no commands. Run on "box" or on one of your owner's computers.` })
       const level = this.deps.inSetup() ? 'allow' : this.deps.workspaceLevel()
-      return granted({ kind: 'workspace' }, { kind: 'tool', name: 'files' }, level, () => noGrant(name, 'your Workspace files', 'the tool group "files"'))
+      return granted({ kind: 'files' }, { kind: 'tool', name: 'files' }, level, () => noGrant(name, 'your Files', 'the tool group "files"'))
     }
-    if (this.deps.inSetup()) throw new NoGrant({ on: name, what: 'any place but your Workspace', grant: 'none while in setup', message: `on "${name}": while you are being set up you reach only your Workspace (on "workspace").` })
+    if (this.deps.inSetup()) throw new NoGrant({ on: name, what: 'any place but your Files', grant: 'none while in setup', message: `on "${name}": while you are being set up you reach only your Files (on "files").` })
+    if (name === WORKSPACE_PLACE) return this.workspacePlace(facet, exec)
     if (name === BOX_PLACE) return granted({ kind: 'box' }, { kind: 'tool', name: 'box' }, this.deps.boxLevel(), () => noGrant(name, 'your Box', 'the tool group "box"'))
     const host = await this.hostNamed(name)
     return granted({ kind: 'host', host }, { kind: 'host', name: hostFacetKey(host.id, facet) }, this.deps.hostLevel(host.id, facet), () => noGrant(name, `the ${facet} of ${host.name}`, `the grant "${host.name} · ${facet}"`))
+  }
+
+  /** Whether "workspace" is the old name of "files" for this Robot: it has no Workspace, or it is in setup (cw-shlm). */
+  private aliased(): boolean {
+    return this.deps.inSetup() || this.deps.workspaceSetting() === undefined
+  }
+
+  /** The notice a call's result carries when it named "workspace" and went to the Files (cw-shlm); undefined otherwise. */
+  aliasNotice(...ons: readonly unknown[]): string | undefined {
+    return ons.some((on) => typeof on === 'string' && on.trim() === WORKSPACE_PLACE) && this.aliased() ? WORKSPACE_ALIAS_NOTICE : undefined
+  }
+
+  /**
+   * The Robot's Workspace as a place (cw-6xs7): its Host, under the Host's facet grant, with the current directory of the agent that calls.
+   * @throws NoGrant when the Host is not among those the owner reaches now, or the Robot holds no grant on the facet there.
+   */
+  private async workspacePlace(facet: PlaceFacet, exec: ToolRunContext): Promise<Granted> {
+    const setting = this.deps.workspaceSetting()
+    if (setting === undefined) throw new WrongPlace({ on: WORKSPACE_PLACE, message: 'on "workspace": you have no Workspace.' })
+    const found = lookUpHost(await this.deps.hosts(), setting.hostId)
+    if (found.kind !== 'found') throw new NoGrant({ on: WORKSPACE_PLACE, what: `your Workspace's computer ${setting.host}`, grant: `the grant "${setting.host} · ${facet}"`, message: `on "workspace": your Workspace is on ${setting.host}, which is not among the computers your owner reaches now (unpaired, or no longer shared).` })
+    const host = found.host
+    return granted({ kind: 'host', host, workspace: { cwd: this.deps.currentDirectory(exec) } }, { kind: 'host', name: hostFacetKey(host.id, facet) }, this.deps.hostLevel(host.id, facet), () => noGrant(WORKSPACE_PLACE, `the ${facet} of ${host.name}, where your Workspace is`, `the grant "${host.name} · ${facet}"`))
+  }
+
+  /**
+   * The Robot's current directory in its Workspace, or a move to another one within the repository (cw-llvx): the app checks the directory,
+   * and the platform keeps it for the agent that called (the Robot across Turns, a Subagent for its run). It needs the Workspace's files
+   * facet and changes nothing on the computer, so it never waits for the owner.
+   */
+  async workingDirectory(cd: string | undefined, exec: ToolRunContext): Promise<{ readonly cwd: string; readonly root: string; readonly repository: string; readonly host: string }> {
+    const target = await this.workspacePlace('files', exec)
+    const setting = this.deps.workspaceSetting()!
+    const place = target.place
+    if (place.kind !== 'host' || place.workspace === undefined) throw new WrongPlace({ on: WORKSPACE_PLACE, message: 'working_directory: you have no Workspace.' })
+    const answer = { root: setting.root, repository: setting.repository, host: place.host.name }
+    if (cd === undefined || cd.trim() === '') return { cwd: place.workspace.cwd, ...answer }
+    const moved = await this.deps.link(place.host, 'granted', place.workspace.cwd).workingDirectory(cd.trim())
+    this.deps.setCurrentDirectory(exec, moved.path)
+    return { cwd: moved.path, ...answer }
   }
 
   /**
@@ -197,10 +249,10 @@ export class Places {
   }
 
   /** The place a call to run or a job tool names. */
-  private async shellPlace(on: string, tool: string): Promise<Granted<JobsPlace>> {
-    const reached = await this.resolve(on, 'shell', tool)
+  private async shellPlace(on: string, tool: string, exec: ToolRunContext): Promise<Granted<JobsPlace>> {
+    const reached = await this.resolve(on, 'shell', tool, exec)
     const place = reached.place
-    if (place.kind === 'workspace') throw new WrongPlace({ on, message: `${tool}: the Workspace runs no commands` })
+    if (place.kind === 'files') throw new WrongPlace({ on, message: `${tool}: your Files run no commands` })
     return { ...reached, place }
   }
 
@@ -247,7 +299,7 @@ export class Places {
   }
 
   private filesOf(place: Place, reach: Reach): PlaceFiles {
-    return place.kind === 'workspace' ? this.workspaceFiles : place.kind === 'box' ? new BoxFiles(this.deps.box) : new HostFiles(this.deps.link(place.host, reach))
+    return place.kind === 'files' ? this.workspaceFiles : place.kind === 'box' ? new BoxFiles(this.deps.box) : new HostFiles(this.deps.link(place.host, reach, place.workspace?.cwd))
   }
 
   /**
@@ -255,8 +307,8 @@ export class Places {
    * without the sandbox, once), waits for the owner: the answer is the waiting result, and the approved call comes back here and runs.
    */
   async withFiles<A>(on: string, call: PlaceCall, action: (files: PlaceFiles) => Promise<A>): Promise<A | WaitingResult> {
-    const target = await this.resolve(on, 'files', call.tool)
-    const unconfined = this.unconfined(call, target, `${call.tool}: escalate lifts the sandbox of a computer. ${target.place.kind === 'box' ? 'Your Box has none to lift: it is yours.' : 'The Workspace has none to lift.'}`)
+    const target = await this.resolve(on, 'files', call.tool, call.exec)
+    const unconfined = this.unconfined(call, target, `${call.tool}: escalate lifts the sandbox of a computer. ${target.place.kind === 'box' ? 'Your Box has none to lift: it is yours.' : 'Your Files have none to lift.'}`)
     const waiting = this.waiting(call, [target], unconfined)
     if (waiting !== undefined) return waiting
     return action(this.filesOf(target.place, unconfined === undefined ? 'granted' : 'escalated'))
@@ -265,7 +317,7 @@ export class Places {
   // ---------------------------------------------------------------- run and jobs
 
   async run(input: RunInput, call: PlaceCall): Promise<RunResult | WaitingResult> {
-    const target = await this.shellPlace(input.on, 'run')
+    const target = await this.shellPlace(input.on, 'run', call.exec)
     const place = target.place
     const cwd = input.cwd === undefined ? undefined : place.kind === 'box' ? boxPath(input.cwd) : input.cwd
     const unconfined = this.unconfined(call, target, 'run: escalate lifts the sandbox of a computer. Your Box has none to lift: it is yours.')
@@ -278,7 +330,7 @@ export class Places {
   private async jobWaiting(id: JobId, call: PlaceCall): Promise<WaitingResult | undefined> {
     const stored = this.deps.jobs.placeOfJob(id)
     if (stored === undefined) return undefined
-    return this.waiting(call, [await this.shellPlace(hostIdOfPlace(stored) ?? BOX_PLACE, call.tool)])
+    return this.waiting(call, [await this.shellPlace(hostIdOfPlace(stored) ?? BOX_PLACE, call.tool, call.exec)])
   }
 
   jobList(): JobEntry[] {
@@ -305,15 +357,15 @@ export class Places {
    */
   async copy(from: CopyEnd, to: CopyEnd, call: PlaceCall): Promise<CopyResult | WaitingResult> {
     const started = Date.now()
-    const sourceEnd = await this.resolve(from.on, 'files', 'copy')
-    const targetEnd = await this.resolve(to.on, 'files', 'copy')
+    const sourceEnd = await this.resolve(from.on, 'files', 'copy', call.exec)
+    const targetEnd = await this.resolve(to.on, 'files', 'copy', call.exec)
     const unconfined = this.unconfined(call, targetEnd, 'copy: escalate lifts the sandbox of the computer a file is written to, and the destination is not a computer.')
     const waiting = this.waiting(call, [sourceEnd, targetEnd], unconfined)
     if (waiting !== undefined) return waiting
     const reach: Reach = unconfined === undefined ? 'granted' : 'escalated'
     const source = sourceEnd.place
     const target = targetEnd.place
-    const links = [source, target].flatMap((place) => place.kind === 'host' ? [this.deps.link(place.host, 'granted')] : [])
+    const links = [source, target].flatMap((place) => place.kind === 'host' ? [this.deps.link(place.host, 'granted', place.workspace?.cwd)] : [])
     const detail = `${from.path} → ${to.path}`
     try {
       const done = await this.transfer(source, target, from.path, to.path, reach)
@@ -327,11 +379,11 @@ export class Places {
   }
 
   private async transfer(source: Place, target: Place, fromPath: string, toPath: string, reach: Reach): Promise<Moved> {
-    if (source.kind === 'workspace' && target.kind === 'workspace') return this.workspaceToWorkspace(fromPath, toPath)
-    if (source.kind === 'host' && target.kind === 'workspace') return this.hostToWorkspace(this.deps.link(source.host, 'granted'), fromPath, toPath)
-    if (source.kind === 'workspace' && target.kind === 'host') return this.workspaceToHost(this.deps.link(target.host, reach), fromPath, toPath)
-    if (source.kind === 'workspace' && target.kind === 'box') return this.workspaceToBox(fromPath, toPath)
-    if (source.kind === 'box' && target.kind === 'workspace') return this.boxToWorkspace(fromPath, toPath)
+    if (source.kind === 'files' && target.kind === 'files') return this.workspaceToWorkspace(fromPath, toPath)
+    if (source.kind === 'host' && target.kind === 'files') return this.hostToWorkspace(this.deps.link(source.host, 'granted', source.workspace?.cwd), fromPath, toPath)
+    if (source.kind === 'files' && target.kind === 'host') return this.workspaceToHost(this.deps.link(target.host, reach, target.workspace?.cwd), fromPath, toPath)
+    if (source.kind === 'files' && target.kind === 'box') return this.workspaceToBox(fromPath, toPath)
+    if (source.kind === 'box' && target.kind === 'files') return this.boxToWorkspace(fromPath, toPath)
     return this.staged(source, target, fromPath, toPath, reach)
   }
 
@@ -340,8 +392,8 @@ export class Places {
     const directory = stagingDirectory()
     const parked = `${directory}/file`
     try {
-      const first = await this.transfer(source, { kind: 'workspace' }, fromPath, parked, 'granted')
-      const second = await this.transfer({ kind: 'workspace' }, target, parked, toPath, reach)
+      const first = await this.transfer(source, { kind: 'files' }, fromPath, parked, 'granted')
+      const second = await this.transfer({ kind: 'files' }, target, parked, toPath, reach)
       return { from: first.from, to: second.to, bytes: second.bytes }
     } finally {
       await this.deps.transfers.removeStaged(directory).catch((error: unknown) => console.warn('staged copy not removed', error))

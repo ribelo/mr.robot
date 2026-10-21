@@ -127,11 +127,11 @@ describe.each(MODES)('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f,
 
   it('idle compaction runs one memory step, then compacts; the next Turn starts from the summary with a fresh memory baseline', async () => {
     const id = await staff({ idleCompactionFloorTokens: 0 })
-    await say(id, 'I like green tea.', { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'memory/2026-10-21.md', content: '- Anna said she likes green tea.\n' } }] }, { text: 'Noted.' })
+    await say(id, 'I like green tea.', { calls: [{ name: 'write', args: { on: 'files', file_path: 'memory/2026-10-21.md', content: '- Anna said she likes green tea.\n' } }] }, { text: 'Noted.' })
     scripts.set(id, [
       // The snapshot (v1.20) comes first: nothing to add.
       { text: '' },
-      { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'MEMORY.md', content: '# MEMORY.md\n- Anna likes green tea.\n' } }] },
+      { calls: [{ name: 'write', args: { on: 'files', file_path: 'MEMORY.md', content: '# MEMORY.md\n- Anna likes green tea.\n' } }] },
       { text: '' },
       { text: 'SUMMARY: Anna said she likes green tea; it is in MEMORY.md.' },
     ])

@@ -45,7 +45,7 @@ async function turn(as: string, id: string, text: string, script: StubReply[]): 
   await settle(id)
 }
 
-const call = (name: string, args: Record<string, unknown>) => ({ name, args: { on: 'workspace', ...args } })
+const call = (name: string, args: Record<string, unknown>) => ({ name, args: { on: 'files', ...args } })
 const lastResults = (id: string) => requests.get(id)!.at(-1)!.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 /** The tool results of the last Turn (since its message), joined: one per call directly, one per program in code mode. */
 const turnResults = (id: string, message: string) => {
@@ -99,7 +99,7 @@ describe.each(MODES)('people pages (dm-wtn9, dm-s0gy, dm-p7l1, dm-ii3r), %s', (_
   it('the owner deletes and restores a page; two Robots writing two pages at once both land in INDEX.md (v1.20.1)', async () => {
     const seller = await staff(ANNA, 'Seller')
     const buyer = await staff(ANNA, 'Buyer')
-    const page = (name: string) => ({ calls: [call('write', { on: 'workspace', file_path: `memory/people/${name}.md`, content: `# ${name}\n\nRole: customer\n\n## Facts\n- 2026-10-21 Met.\n` })] })
+    const page = (name: string) => ({ calls: [call('write', { on: 'files', file_path: `memory/people/${name}.md`, content: `# ${name}\n\nRole: customer\n\n## Facts\n- 2026-10-21 Met.\n` })] })
     scripts.set(seller, [page('jan-kowalski'), { say: 'Noted.' }])
     scripts.set(buyer, [page('ewa-nowak'), { say: 'Noted.' }])
     await Promise.all([api(ANNA, `/api/robots/${seller}/messages`, { body: { text: 'Jan' } }), api(ANNA, `/api/robots/${buyer}/messages`, { body: { text: 'Ewa' } })])

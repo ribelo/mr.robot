@@ -2,11 +2,12 @@ import { Loading } from './States.tsx'
 import { ConfirmByName } from './ConfirmByName.tsx'
 import { CLEAR_GOES, CLEAR_STAYS, START_OVER_GOES, START_OVER_STAYS } from './danger-words.ts'
 import { useState, useEffect } from 'react'
-import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, DEFAULT_HOST_GRANT_ACCESS, type HostGrantAccess, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend } from '@mr-robot/protocol'
+import { effectiveSpendLimit, spendLimitText, capabilityItems, GRANT_LEVELS, hostHeading, hostsOf, type CapabilityField, type CapabilityItem, type GrantField, type GrantLevel, type GrantLevels, DEFAULT_HOST_GRANT_ACCESS, type HostGrantAccess, type RobotPanel, type SettingsCatalog, type SettingsPatch, type BrowserBackend, type WorkspaceChoice } from '@mr-robot/protocol'
 import { ChainEditor } from './ChainEditor.tsx'
 import { ReviewerSetting } from './ReviewerSetting.tsx'
 import { SubagentModels } from './SubagentModels.tsx'
 import { badRoots, HostAccessEditor } from './HostAccessEditor.tsx'
+import { WorkspacePicker } from './WorkspacePicker.tsx'
 import { SaveButton, type SaveOutcome } from './SaveButton.tsx'
 import { parseRobotSpendLimit, SpendLimitChoice, spendLimitDraft } from './SpendLimitChoice.tsx'
 import * as Option from 'effect/Option'
@@ -39,6 +40,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
   const name = panel.summary.identity.name
   const [draft, setDraft] = useState(settings)
   const [limitDraft, setLimitDraft] = useState(spendLimitDraft(settings.spendLimit))
+  /** The Workspace the next save sends (v1.21): undefined keeps it, null removes it. */
+  const [workspace, setWorkspace] = useState<WorkspaceChoice | null | undefined>(undefined)
   const spendLimit = parseRobotSpendLimit(limitDraft)
   const model = catalog.models.find((option) => option.provider === draft.model.provider && option.model === draft.model.model)
   const maxBudget = model?.contextWindow ?? 1_000_000
@@ -81,6 +84,7 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
       sharing: draft.sharing,
       notifications: draft.notifications,
       spendLimit: spendLimit.value,
+      ...(workspace === undefined ? {} : { workspace }),
     })
   }
   const mrRobot = panel.summary.kind === 'mr-robot'
@@ -175,6 +179,8 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           </div>
         </section>
       ))}
+      <WorkspacePicker robotId={panel.summary.id} current={settings.workspace ?? null} choice={workspace} onChoose={setWorkspace}
+        hosts={hostsOf(hostItems.filter((entry) => entry.field === 'hosts' && entry.facet === 'files' && entry.level !== 'deny'))} />
       <h2>Logins</h2>
       {catalog.secrets.length === 0 ? <div className="muted">No logins yet: add them under your name → Logins.</div> : (
         <div className="check-grid">

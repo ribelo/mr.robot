@@ -150,8 +150,8 @@ describe('a call to a place at ask waits for the owner, however the tools were r
       { name: 'write', args: { on: 'box', file_path: 'in-setup.txt', content: 'x', reason: 'Note it' } },
     ])
     const [desked, boxed] = toolResults(body.id).slice(-2)
-    expect(desked).toContain('while you are being set up you reach only your Workspace')
-    expect(boxed).toContain('while you are being set up you reach only your Workspace')
+    expect(desked).toContain('while you are being set up you reach only your Files')
+    expect(boxed).toContain('while you are being set up you reach only your Files')
     expect(hostDisk.has('/home/anna/in-setup.txt')).toBe(false)
     expect(await toolCallAsks(ANNA, body.id)).toHaveLength(0)
   })

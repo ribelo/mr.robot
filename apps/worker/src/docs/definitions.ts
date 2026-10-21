@@ -15,7 +15,7 @@ The platform writes tasks.yaml and grants.yaml and reads them with a strict sche
 
 ## Save as definition
 
-The owner saves a Robot as a definition from its settings. The platform copies the files to definition-draft/<slug>/ in the Robot's Workspace. Then the Robot gets one bounded step: take out of the copies everything about its owner and write README.md. Change nothing else, and do not reply. The platform writes the two YAML files from the Robot's Tasks and Grants, and the definition enters the Space's library. A definition the Space admin saves is in the Marketplace at once; another Member's stays his until the admin publishes it.
+The owner saves a Robot as a definition from its settings. The platform copies the files to definition-draft/<slug>/ in the Robot's Files. Then the Robot gets one bounded step: take out of the copies everything about its owner and write README.md. Change nothing else, and do not reply. The platform writes the two YAML files from the Robot's Tasks and Grants, and the definition enters the Space's library. A definition the Space admin saves is in the Marketplace at once; another Member's stays his until the admin publishes it.
 
 ## The library repository
 

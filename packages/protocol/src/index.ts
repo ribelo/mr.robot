@@ -400,6 +400,28 @@ export const isHostRoot = (root: string): boolean => /^(~([\\/].*)?|\/.*|[A-Za-z
 
 /** The access of every Host facet of a Robot, by facet item name ("<hostId>:files"); a facet it does not list has the default. */
 export const HostAccessByFacet = Schema.Record(Schema.String, HostGrantAccess)
+
+/**
+ * A Robot's Workspace (v1.21, cw-gx04, GLOSSARY: Workspace): a Host (its id, and its name when the setting was saved), a root directory
+ * there, and the repository root above it that DSH would find (the nearest .git ancestor, which may be the root). The worktree is the
+ * checkout the Robot made in it (ticket 05). None by default.
+ */
+export const WorkspaceSetting = Schema.Struct({
+  hostId: Schema.String,
+  host: Schema.String,
+  root: Schema.String,
+  repository: Schema.String,
+  worktree: Schema.optional(Schema.String),
+})
+export type WorkspaceSetting = typeof WorkspaceSetting.Type
+
+/** The Workspace the owner (or Mr. Robot) chooses: a Host by id and a directory there; the Robot checks it on the Host before keeping it. */
+export const WorkspaceChoice = Schema.Struct({ host: Schema.String, root: Schema.String })
+export type WorkspaceChoice = typeof WorkspaceChoice.Type
+
+/** Where a Robot works, as the Fleet shows it (cw-hiwf): the Host and the root of its Workspace. */
+export const WorkspacePlace = Schema.Struct({ hostId: Schema.String, host: Schema.String, root: Schema.String })
+export type WorkspacePlace = typeof WorkspacePlace.Type
 export type HostAccessByFacet = typeof HostAccessByFacet.Type
 
 /** A Host: a computer running the Mr. Robot app, paired to a Member (v1.2, hs-ro43). */
@@ -557,6 +579,8 @@ export const RobotSettings = Schema.Struct({
   subagentModels: Schema.Array(SubagentModel),
   /** v1.16 (ob-wh59): the mode and write roots of its Host files and shell grants. Absent: every facet has the default. */
   hostAccess: Schema.optional(HostAccessByFacet),
+  /** v1.21 (cw-gx04): the Robot's Workspace on a Host; null or absent: none. */
+  workspace: Schema.optional(Schema.NullOr(WorkspaceSetting)),
 })
 export type RobotSettings = typeof RobotSettings.Type
 
@@ -593,6 +617,8 @@ export const DeputySettingsPatch = Schema.Struct({
   dreaming: Schema.optional(Schema.NullOr(Schema.Boolean)),
   dreamModel: Schema.optional(Schema.NullOr(ModelChoice)),
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
+  /** The chief places his staff (v1.21, cw-g89b): a Workspace on a Host the Robot holds the files facet on; null removes it. */
+  workspace: Schema.optional(Schema.NullOr(WorkspaceChoice)),
 })
 export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
 
@@ -623,6 +649,8 @@ export const SettingsPatch = Schema.Struct({
   subagentModels: Schema.optional(Schema.Array(SubagentModel)),
   /** Replaces the whole map of Host facet access. */
   hostAccess: Schema.optional(HostAccessByFacet),
+  /** v1.21 (cw-gx04): set the Workspace (checked on the Host first) or remove it with null. */
+  workspace: Schema.optional(Schema.NullOr(WorkspaceChoice)),
 })
 export type SettingsPatch = typeof SettingsPatch.Type
 
@@ -689,6 +717,8 @@ export const RobotSummary = Schema.Struct({
   hidden: Schema.optional(Schema.Boolean),
   /** The person's own group this Robot is in (ux-wxbm); absent: ungrouped. */
   groupId: Schema.optional(Schema.String),
+  /** Where it works (v1.21, cw-hiwf): its Workspace's Host and root; absent or null: no Workspace. */
+  workspace: Schema.optional(Schema.NullOr(WorkspacePlace)),
 })
 export type RobotSummary = typeof RobotSummary.Type
 

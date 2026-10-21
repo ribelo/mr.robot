@@ -14,6 +14,7 @@ import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import { wakeupMessage } from '../agent/sources.ts'
 import { stepRan, type PlatformStepHost } from '../agent/platform-step.ts'
 import type { RobotStore } from '../robot/store.ts'
+import { WORKSPACE } from '../robot/workspace-setting.ts'
 
 export const SNAPSHOT_RECORD = 'plugin:mr-robot/snapshot'
 export const SNAPSHOT_STEPS = 3
@@ -46,10 +47,17 @@ export function setMemoryMark(store: RobotStore, sessionId: string, seq: number)
   store.set(MEMORY_MARK, { sessionId, seq })
 }
 
-/** A file tool's call is refused on any place but the Workspace. */
-export function workspaceOnly(_name: string, args: Readonly<Record<string, unknown>>): string | undefined {
-  return args['on'] === undefined || args['on'] === 'workspace' ? undefined : 'a memory step writes only on the Workspace (on: "workspace")'
+/**
+ * Whether a call's `on` names the Robot's Files: "files", or "workspace" from a Robot without a Workspace (the old name, cw-shlm). A
+ * Robot with a Workspace means its Host by "workspace", which a memory step or a dream does not touch.
+ */
+export function namesFiles(on: unknown, hasWorkspace: boolean): boolean {
+  return on === undefined || on === 'files' || (on === 'workspace' && !hasWorkspace)
 }
+
+/** A file tool's call is refused on any place but the Files. */
+export const filesOnly = (hasWorkspace: () => boolean) => (_name: string, args: Readonly<Record<string, unknown>>): string | undefined =>
+  namesFiles(args['on'], hasWorkspace()) ? undefined : 'a memory step writes only on your Files (on: "files")'
 
 export interface SnapshotHost {
   readonly store: RobotStore
@@ -80,7 +88,7 @@ export class TurnSnapshot {
       running.boundaries += 1
       if (running.boundaries === 1) {
         // The steer is claimed by the step that starts now: the snapshot's steps begin, and its fence with them.
-        running.token = host.step.fence.open('the snapshot', MEMORY_STEP_TOOLS, workspaceOnly)
+        running.token = host.step.fence.open('the snapshot', MEMORY_STEP_TOOLS, filesOnly(() => host.store.get(WORKSPACE) !== undefined))
         host.step.writeAs({ kind: 'snapshot' })
         return true
       }

@@ -76,7 +76,7 @@ describe('say is the Robot\'s voice (gb-s81e, gb-6c8d, gb-wma6, gb-25jb)', () =>
     const id = await activeRobot({ codeMode: true })
     const program = [
       "await tools.say({ text: 'Starting.' })",
-      "const text = await tools.read({ on: 'workspace', file_path: 'SOUL.md' })",
+      "const text = await tools.read({ on: 'files', file_path: 'SOUL.md' })",
       "await tools.say({ text: 'Read ' + String(text).length + ' characters.' })",
       "return 'done'",
     ].join('\n')
@@ -94,7 +94,7 @@ describe('say is the Robot\'s voice (gb-s81e, gb-6c8d, gb-wma6, gb-25jb)', () =>
     const id = await activeRobot({ grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } })
     const screen = await testRobot(id).saveScreenForTest()
     await owner(id, 'show me', [
-      { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'out/note.txt', content: 'hello report' } }] },
+      { calls: [{ name: 'write', args: { on: 'files', file_path: 'out/note.txt', content: 'hello report' } }] },
       { calls: [sayCall('The note and the page.', { attachments: ['out/note.txt', `screen:${screen}`] })] },
       { calls: [sayCall('Another.', { attachments: ['out/missing.txt'] }), sayCall('Wrong id.', { attachments: ['screen:nope.png'] }), sayCall('Platform file.', { attachments: ['docs/robots.md'] })] },
       { text: '' },

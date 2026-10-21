@@ -98,13 +98,13 @@ describe('Save as definition (v1.18-review #7, #15; v1.20-review #2)', () => {
     await testRobot(body.id).activateForTest()
     return body.id
   }
-  const write = (path: string, content: string) => ({ name: 'write', args: { on: 'workspace', file_path: path, content } })
+  const write = (path: string, content: string) => ({ name: 'write', args: { on: 'files', file_path: path, content } })
 
   it('stages tasks.yaml and README for the scrub, in code mode, and refuses a write outside the draft', async () => {
     const id = await staff()
     await api(ANNA, '/api/tasks', { body: { title: 'Call Anna Kowalska', instructions: 'Ring Anna Kowalska at Mokotowska 1.', assignee: { kind: 'robot', robotId: id }, timing: { kind: 'recurring', schedule: { kind: 'weekly', time: '09:00', weekdays: [1] } } } })
     scripts.set(id, [
-      { calls: [{ name: 'read', args: { on: 'workspace', file_path: 'definition-draft/caller/tasks.yaml' } }, write('MEMORY.md', 'taken')] },
+      { calls: [{ name: 'read', args: { on: 'files', file_path: 'definition-draft/caller/tasks.yaml' } }, write('MEMORY.md', 'taken')] },
       (request) => {
         const seen = JSON.stringify(request.messages)
         expect(seen).toContain('Ring Anna Kowalska')
@@ -123,7 +123,7 @@ describe('Save as definition (v1.18-review #7, #15; v1.20-review #2)', () => {
 
   it('saves nothing when the scrub is cut at its step limit', async () => {
     const id = await staff()
-    scripts.set(id, Array.from({ length: 10 }, (): StubReply => ({ calls: [{ name: 'read', args: { on: 'workspace', file_path: 'SOUL.md' } }] })))
+    scripts.set(id, Array.from({ length: 10 }, (): StubReply => ({ calls: [{ name: 'read', args: { on: 'files', file_path: 'SOUL.md' } }] })))
     const refused = await api<{ error: string }>(ANNA, `/api/robots/${id}/definition`, { body: { slug: 'unfinished' } })
     expect(refused.status).toBe(409)
     expect((await env.FILES.list({ prefix: 'definitions/unfinished/' })).objects).toEqual([])

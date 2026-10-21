@@ -121,7 +121,7 @@ describe('a Subagent (ao-8s1d, ao-sbc9, ao-3umf, ao-w9lq)', () => {
   it('send_message steers a running Subagent and interrupt_agent stops it (ao-nc31)', async () => {
     const id = await delegating()
     const wait = gate()
-    scripts.set(sub(id), [{ gate: wait.promise, then: { calls: [{ name: 'glob', args: { on: 'workspace', pattern: '**' } }] } }, { text: 'Checked A and B.' }])
+    scripts.set(sub(id), [{ gate: wait.promise, then: { calls: [{ name: 'glob', args: { on: 'files', pattern: '**' } }] } }, { text: 'Checked A and B.' }])
     await say(id, 'go', [{ calls: [delegate('Check A')] }, { text: 'Started.' }])
     const [child] = await list(id)
     await say(id, 'also B', [{ calls: [{ name: 'send_message', args: { agent_id: child!.id, message: 'Also check B.' } }] }, { text: 'Told it.' }])
@@ -198,7 +198,7 @@ describe('cascades, cost and masking (ao-qy77, ao-3pl8, ao-xl6g, ao-2fgp, ao-6bo
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { models: [{ provider: 'stub', model: 'stub', label: 'Stub', contextWindow: 128000, price: { input: 4000, output: 4000 } }], robotSpendLimit: { kind: 'usd', amount: 2 } } })
     const id = await delegating()
     const hold = gate()
-    scripts.set(sub(id), [{ calls: [{ name: 'glob', args: { on: 'workspace', pattern: '**' } }], inputTokens: 600 } as never, { calls: [{ name: 'glob', args: { on: 'workspace', pattern: '**' } }] }, { gate: hold.promise, then: { text: 'Never reached.' } }])
+    scripts.set(sub(id), [{ calls: [{ name: 'glob', args: { on: 'files', pattern: '**' } }], inputTokens: 600 } as never, { calls: [{ name: 'glob', args: { on: 'files', pattern: '**' } }] }, { gate: hold.promise, then: { text: 'Never reached.' } }])
     await say(id, 'go', [{ calls: [delegate('Expensive read')] }, { text: 'Started.' }])
     await until(async () => expect((await list(id))[0]!.status).toBe('interrupted'))
     hold.open()
@@ -229,7 +229,7 @@ describe('cascades, cost and masking (ao-qy77, ao-3pl8, ao-xl6g, ao-2fgp, ao-6bo
     // Auto review checks the Subagent's calls with the Robot's setting.
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { autoReview: true } })
     const wait = gate()
-    scripts.set(sub(id), [{ gate: wait.promise, then: { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'notes/x.md', content: 'x' } }] } }, { text: 'Wrote it.' }])
+    scripts.set(sub(id), [{ gate: wait.promise, then: { calls: [{ name: 'write', args: { on: 'files', file_path: 'notes/x.md', content: 'x' } }] } }, { text: 'Wrote it.' }])
     // The Robot's own call is reviewed first.
     await say(id, 'note it', [{ calls: [delegate('Write a note')] }, { text: '{"risk":"low","decision":"allow"}' }, { text: 'Started.' }])
     // The reviewer runs on the Robot's model; then the report wakes the Robot.

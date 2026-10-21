@@ -63,7 +63,7 @@ import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
 import { SPACE_ID, type Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
 import * as Tasks from './tasks.ts'
-import type { LastWakeup, MissionView, RobotTurn, SubagentLine, TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
+import type { LastWakeup, MissionView, RobotTurn, SubagentLine, TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView, WorkspacePlace } from '@mr-robot/protocol'
 import { legacySpaceSpendLimit } from '../platform/spend-limit-migration.ts'
 
 export const DEFAULT_MODEL: ModelChoice = { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }
@@ -110,6 +110,8 @@ export interface RegistryEntry {
   readonly lastWakeup: LastWakeup | null
   /** Its running Subagents (ao-2fgp): a line each on the Robot's row, never a row of their own. */
   readonly subagents?: readonly SubagentLine[]
+  /** Its Workspace's Host and root (v1.21, cw-hiwf); null or absent: none. */
+  readonly workspace?: WorkspacePlace | null
 }
 
 export type SignIn =
@@ -119,7 +121,7 @@ export type SignIn =
 type MemberSql = { id: string; email: string; name: string; role: MemberRole; status: MemberStatus; created_at: number; avatar: string | null }
 type RobotSql = {
   id: string; owner_id: string; kind: 'mr-robot' | 'robot'; identity: string; sharing: Sharing; status: RobotStatus
-  fleet_state: FleetState; last_line: string; last_at: number; turn: string | null; last_wakeup: string | null; subagents?: string | null
+  fleet_state: FleetState; last_line: string; last_at: number; turn: string | null; last_wakeup: string | null; subagents?: string | null; workspace?: string | null
 }
 
 /** The Space's reach beyond its SQLite: the other Durable Objects, R2, Workers AI and the secret vault. */
@@ -466,15 +468,16 @@ const robotChanged = (changed: RegistryEntry) => Effect.gen(function* () {
   const sql = yield* Sql
   const before = yield* entry(changed.id)
   yield* sql.run(
-    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at, accounts, turn, last_wakeup, subagents, routines_migrated)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    `INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at, accounts, turn, last_wakeup, subagents, workspace, routines_migrated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT (id) DO UPDATE SET identity = excluded.identity, sharing = excluded.sharing, status = excluded.status,
        fleet_state = excluded.fleet_state, last_line = excluded.last_line, last_at = excluded.last_at, accounts = excluded.accounts,
-       turn = excluded.turn, last_wakeup = excluded.last_wakeup, subagents = excluded.subagents`,
+       turn = excluded.turn, last_wakeup = excluded.last_wakeup, subagents = excluded.subagents, workspace = excluded.workspace`,
     changed.id, changed.ownerId, changed.kind, JSON.stringify(changed.identity), changed.sharing, changed.status,
     changed.fleetState, changed.lastLine, changed.lastAt, JSON.stringify(changed.accounts ?? []),
     changed.turn === null ? null : JSON.stringify(changed.turn), changed.lastWakeup === null ? null : JSON.stringify(changed.lastWakeup),
     (changed.subagents ?? []).length === 0 ? null : JSON.stringify(changed.subagents),
+    changed.workspace == null ? null : JSON.stringify(changed.workspace),
   )
   const reach = (value: RegistryEntry | undefined) => value === undefined ? 'none' : `${value.sharing}:${value.status === 'deleted'}`
   if (changed.kind === 'robot' && reach(before) !== reach(changed)) yield* syncMrRobots
@@ -1383,6 +1386,8 @@ export class Space extends DurableObject<Env> {
     try { sql.exec('ALTER TABLE robot ADD COLUMN turn TEXT') } catch { /* added before */ }
     try { sql.exec('ALTER TABLE robot ADD COLUMN last_wakeup TEXT') } catch { /* added before */ }
     try { sql.exec('ALTER TABLE robot ADD COLUMN subagents TEXT') } catch { /* added before */ }
+    // v1.21 (cw-hiwf): the Robot's Workspace (Host and root) as it reports it; NULL: none.
+    try { sql.exec('ALTER TABLE robot ADD COLUMN workspace TEXT') } catch { /* added before */ }
     // v1.13 ticket 05: whether the Robot's Routines are Tasks yet; every Robot registered before has them still.
     try { sql.exec('ALTER TABLE robot ADD COLUMN routines_migrated INTEGER NOT NULL DEFAULT 0') } catch { /* added before */ }
     for (const statement of Tasks.TASK_SCHEMA) sql.exec(statement)
@@ -2192,5 +2197,6 @@ function entryFromSql(row: RobotSql): RegistryEntry {
     turn: row.turn === null ? null : JSON.parse(row.turn) as RobotTurn,
     lastWakeup: row.last_wakeup === null ? null : JSON.parse(row.last_wakeup) as LastWakeup,
     ...(row.subagents == null ? {} : { subagents: JSON.parse(row.subagents) as SubagentLine[] }),
+    workspace: row.workspace == null ? null : JSON.parse(row.workspace) as WorkspacePlace,
   }
 }

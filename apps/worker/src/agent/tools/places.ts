@@ -1,8 +1,9 @@
 /**
- * The execution surface (v1.16 ticket 01): run, read, write, edit, glob, grep, delete_file, copy, job_list, job_output and job_kill.
- * Every call names its place with a mandatory `on`: workspace (the Workspace in R2; files only), box (the Robot's Box) or the name of
- * one of its owner's computers (a Host). Nothing defaults, and copy names both ends (ob-5fjs, ob-ff4g, ob-9afl). The tools hold no
- * place logic: places/places.ts checks the grants and dispatches.
+ * The execution surface (v1.16 ticket 01, v1.21): run, read, write, edit, glob, grep, delete_file, copy, job_list, job_output, job_kill and
+ * working_directory. Every call names its place with a mandatory `on`: files (the Robot's Files in R2; files only), workspace (its
+ * Workspace: a Host and a directory there), box (the Robot's Box) or the name of one of its owner's computers (a Host). Nothing defaults,
+ * and copy names both ends (ob-5fjs, ob-ff4g, ob-9afl). "workspace" from a Robot without a Workspace goes to its Files for one release, and
+ * the result says so (cw-shlm). The tools hold no place logic: places/places.ts checks the grants and dispatches.
  */
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { GREP_MAX_MATCHES, LISTING_MAX_FILES, RUN_MAX_WAIT_SECONDS } from '@mr-robot/host-protocol'
@@ -25,6 +26,17 @@ export interface PlacesHost {
   jobList(): JobEntry[]
   jobOutput(id: JobId, wait: boolean, timeoutMs: number, call: PlaceCall): Promise<JobOutputView | WaitingResult>
   jobKill(id: JobId, call: PlaceCall): Promise<KillView | WaitingResult>
+  /** The notice of a call that named "workspace" and went to the Files (cw-shlm), or undefined. */
+  aliasNotice(...ons: readonly unknown[]): string | undefined
+  /** The current directory in the Workspace, or a move within its repository (cw-llvx). */
+  workingDirectory(cd: string | undefined, exec: ToolRunContext): Promise<{ readonly cwd: string; readonly root: string; readonly repository: string; readonly host: string }>
+}
+
+/** A result with the alias notice (cw-shlm): a field of an object, a line after a text; a waiting result goes as it is. */
+function noticed<A>(result: A, notice: string | undefined): A | (A & { notice: string }) | string {
+  if (notice === undefined || isWaitingResult(result)) return result
+  if (typeof result === 'string') return `${result}\n\n[${notice}]`
+  return typeof result === 'object' && result !== null && !Array.isArray(result) ? { ...result, notice } : result
 }
 
 /**
@@ -57,10 +69,13 @@ const REASON_PARAMETER = { type: 'string', description: 'With escalate: why this
 
 /** The places the Robot holds a grant on now, to describe them to the model; each call still checks its grant. */
 export interface PlacesReach {
-  readonly workspace: boolean
+  /** The files group: the Robot's Files in R2. */
+  readonly files: boolean
   readonly box: boolean
   /** Host names, per facet. */
   readonly hosts: { readonly files: readonly string[]; readonly shell: readonly string[] }
+  /** The Robot's Workspace (v1.21): the name of its Host and the facets the Robot holds there; absent when it has none. */
+  readonly workspace?: { readonly host: string; readonly files: boolean; readonly shell: boolean }
 }
 
 export const RUN_DEFAULT_TIMEOUT = 120
@@ -71,22 +86,23 @@ const list = (names: readonly string[]): string => names.join(', ')
 
 function filePlaces(reach: PlacesReach): string {
   const places = [
-    ...(reach.workspace ? ['"workspace" (your Workspace)'] : []),
+    ...(reach.files ? ['"files" (your Files)'] : []),
+    ...(reach.workspace?.files === true ? [`"workspace" (your Workspace on ${reach.workspace.host}, from your current directory there)`] : []),
     ...(reach.box ? ['"box" (your Box)'] : []),
     ...(reach.hosts.files.length > 0 ? [`one of your owner's computers by name (${list(reach.hosts.files)})`] : []),
   ]
   return `Where: ${places.join(', ')}. There is no default: name the place on every call.`
 }
 
-const filePlace = (reach: PlacesReach) => ({ type: 'string', description: `workspace, box or a computer's name. ${filePlaces(reach)}` })
+const filePlace = (reach: PlacesReach) => ({ type: 'string', description: `files, workspace, box or a computer's name. ${filePlaces(reach)}` })
 
-/** A path on the place: the Workspace and the Box root at /workspace (the Box's is not the Workspace's); a computer takes an absolute path, ~/ for its home directory, or a path relative to your own directory there (~/mr-robot/<you>/). */
-const PATH_RULES = 'Paths: on workspace, relative or under /workspace; on box, relative to /workspace on the Box or under it (the Box disk is scratch except box/); on a computer, absolute, ~/ for its home directory, or relative to your own directory there (~/mr-robot/<you>/, made on first use); reads reach everything your owner\'s user can read, writes only what your grant lets you change. Your owner\'s files, the docs and the platform skills are in your Workspace only.'
+/** A path on the place: the Files and the Box root at /workspace (the Box's is not the Files'); a computer takes an absolute path, ~/ for its home directory, or a path relative to your own directory there (~/mr-robot/<you>/); the Workspace a path relative to the current directory. */
+const PATH_RULES = 'Paths: on files, relative or under /workspace; on workspace, absolute, ~/ for the home directory, or relative to your current directory there (working_directory); on box, relative to /workspace on the Box or under it (the Box disk is scratch except box/); on a computer, absolute, ~/ for its home directory, or relative to your own directory there (~/mr-robot/<you>/, made on first use); reads reach everything your owner\'s user can read, writes only what your grant lets you change. Your owner\'s files, the docs and the platform skills are in your Files only.'
 
 function end(value: unknown, which: 'from' | 'to'): CopyEnd {
   const on = value !== null && typeof value === 'object' && 'on' in value ? value.on : undefined
   const path = value !== null && typeof value === 'object' && 'path' in value ? value.path : undefined
-  if (typeof on !== 'string' || on.trim() === '') throw new Error(`copy: ${which}.on is required: workspace, box or the name of one of your owner's computers.`)
+  if (typeof on !== 'string' || on.trim() === '') throw new Error(`copy: ${which}.on is required: files, workspace, box or the name of one of your owner's computers.`)
   if (typeof path !== 'string' || path === '') throw new Error(`copy: ${which}.path is required and must not be empty.`)
   return { on, path }
 }
@@ -94,13 +110,13 @@ function end(value: unknown, which: 'from' | 'to'): CopyEnd {
 const endSchema = (text: string) => ({
   type: 'object',
   description: text,
-  properties: { on: { type: 'string', description: 'workspace, box or a computer\'s name' }, path: { type: 'string', description: 'The file\'s path on that place' } },
+  properties: { on: { type: 'string', description: 'files, workspace, box or a computer\'s name' }, path: { type: 'string', description: 'The file\'s path on that place' } },
   required: ['on', 'path'],
 })
 
 export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinition[] {
-  const anyFiles = reach.workspace || reach.box || reach.hosts.files.length > 0
-  const anyShell = reach.box || reach.hosts.shell.length > 0
+  const anyFiles = reach.files || reach.box || reach.hosts.files.length > 0 || reach.workspace?.files === true
+  const anyShell = reach.box || reach.hosts.shell.length > 0 || reach.workspace?.shell === true
   const tools: ToolDefinition[] = []
   if (anyFiles) {
     tools.push(
@@ -114,10 +130,10 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         concurrencySafe: true,
         execute: (args, exec) => guarded('read', async () => {
           const { on, file_path, offset, limit } = args
-          return host.withFiles(on, callOf('read', args, exec), async (files) => {
+          return noticed(await host.withFiles(on, callOf('read', args, exec), async (files) => {
             const content = await files.readFile(file_path)
             return 'text' in content ? readWindow(content.path, content.text, offset, limit) : { path: content.path, size: content.size, encoding: 'base64', base64: content.base64 }
-          })
+          }), host.aliasNotice(on))
         }),
       }),
       tool<{ on: string; file_path: string; content: string; encoding?: 'text' | 'base64'; escalate?: boolean; reason?: string }>({
@@ -138,7 +154,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         execute: (args, exec) => guarded('write', async () => {
           const { on, file_path, content, encoding } = args
           const done = await host.withFiles(on, callOf('write', args, exec), (files) => files.writeFile(file_path, content, encoding ?? 'text'))
-          return isWaitingResult(done) ? done : { on, written: done.path, bytes: done.bytes }
+          return isWaitingResult(done) ? done : noticed({ on, written: done.path, bytes: done.bytes }, host.aliasNotice(on))
         }),
       }),
       tool<{ on: string; file_path: string; old_string: string; new_string: string; replace_all?: boolean; escalate?: boolean; reason?: string }>({
@@ -164,7 +180,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
             if (!('text' in content)) throw new Error(`${content.path} is not a text file, so it cannot be edited`)
             return files.writeFile(file_path, replaceText(content.text, old_string, new_string, replace_all === true), 'text')
           })
-          return isWaitingResult(done) ? done : { on, edited: done.path }
+          return isWaitingResult(done) ? done : noticed({ on, edited: done.path }, host.aliasNotice(on))
         }),
       }),
       tool<{ on: string; path: string; escalate?: boolean; reason?: string }>({
@@ -173,7 +189,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         parameters: { properties: { on: filePlace(reach), path: { type: 'string', description: 'The file to delete' }, escalate: ESCALATE_PARAMETER, reason: REASON_PARAMETER }, required: ['on', 'path'] },
         execute: (args, exec) => guarded('delete_file', async () => {
           const done = await host.withFiles(args.on, callOf('delete_file', args, exec), (files) => files.removeFile(args.path))
-          return isWaitingResult(done) ? done : { deleted: done.path }
+          return isWaitingResult(done) ? done : noticed({ deleted: done.path }, host.aliasNotice(args.on))
         }),
       }),
       tool<{ on: string; pattern: string }>({
@@ -181,7 +197,7 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         description: `List the files matching a glob (* within a segment, ** across segments, ?). Returns { paths, truncated }: the paths (empty when none match), and truncated true when the place stopped listing after ${LISTING_MAX_FILES} files, so some matches may be missing; then narrow the pattern. On a Box or a computer the paths are those the place prints, .git, node_modules and .cache are skipped, and a pattern starts at the directory before its first wildcard. ${filePlaces(reach)}`,
         parameters: { properties: { on: filePlace(reach), pattern: { type: 'string', description: 'The pattern to match' } }, required: ['on', 'pattern'] },
         concurrencySafe: true,
-        execute: (args, exec) => guarded('glob', async () => host.withFiles(args.on, callOf('glob', args, exec), (files) => files.glob(args.pattern))),
+        execute: (args, exec) => guarded('glob', async () => noticed(await host.withFiles(args.on, callOf('glob', args, exec), (files) => files.glob(args.pattern)), host.aliasNotice(args.on))),
       }),
       tool<{ on: string; pattern: string; glob?: string; ignore_case?: boolean; path?: string }>({
         name: 'grep',
@@ -199,28 +215,32 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         concurrencySafe: true,
         execute: (args, exec) => guarded('grep', async () => {
           const { on, pattern, glob, ignore_case, path } = args
-          return host.withFiles(on, callOf('grep', args, exec), (files) => files.grep({ pattern, ignoreCase: ignore_case === true, ...(glob === undefined ? {} : { glob }), ...(path === undefined ? {} : { path }) }))
+          return noticed(await host.withFiles(on, callOf('grep', args, exec), (files) => files.grep({ pattern, ignoreCase: ignore_case === true, ...(glob === undefined ? {} : { glob }), ...(path === undefined ? {} : { path }) })), host.aliasNotice(on))
         }),
       }),
       tool<{ from: CopyEnd; to: CopyEnd; escalate?: boolean; reason?: string }>({
         name: 'copy',
-        description: `Copy one file from one place to another, as it is (binary too); the content does not pass through you, so use this, not read and write, for reports, datasets, images and anything large. Both ends name their place; copy overwrites the target. There is no size limit: a file goes straight between R2 and the computer or the Box. Between two computers, or the Box and a computer, the file is parked in your Workspace under tmp/ and deleted when the copy ends. A file copied into your Workspace under box/ is on your Box at its next boot. ${filePlaces(reach)} Returns both paths, the size and the time. ${PATH_RULES}`,
+        description: `Copy one file from one place to another, as it is (binary too); the content does not pass through you, so use this, not read and write, for reports, datasets, images and anything large. Both ends name their place; copy overwrites the target. There is no size limit: a file goes straight between R2 and the computer or the Box. Between two computers, or the Box and a computer, the file is parked in your Files under tmp/ and deleted when the copy ends. A file copied into your Files under box/ is on your Box at its next boot. ${filePlaces(reach)} Returns both paths, the size and the time. ${PATH_RULES}`,
         parameters: { properties: { from: endSchema('The file to copy'), to: endSchema('Where the copy goes'), escalate: ESCALATE_PARAMETER, reason: REASON_PARAMETER }, required: ['from', 'to'] },
-        execute: (args, exec) => guarded('copy', async () => host.copy(end(args.from, 'from'), end(args.to, 'to'), callOf('copy', args, exec))),
+        execute: (args, exec) => guarded('copy', async () => {
+          const from = end(args.from, 'from')
+          const to = end(args.to, 'to')
+          return noticed(await host.copy(from, to, callOf('copy', args, exec)), host.aliasNotice(from.on, to.on))
+        }),
       }),
     )
   }
   if (anyShell) {
-    const where = [...(reach.box ? ['"box" (your Box, in /workspace)'] : []), ...(reach.hosts.shell.length > 0 ? [`one of your owner's computers by name (${list(reach.hosts.shell)}), as your owner's user in the shell its entry in the Hosts line of your runtime section names (bash, or pwsh on Windows), starting in your own directory there; the sandbox lets a command change only your directory and the roots your grant lists (or nothing, or everything, by the mode of your grant)`] : [])].join(', ')
+    const where = [...(reach.box ? ['"box" (your Box, in /workspace)'] : []), ...(reach.workspace?.shell === true ? [`"workspace" (your Workspace on ${reach.workspace.host}, starting in your current directory there)`] : []), ...(reach.hosts.shell.length > 0 ? [`one of your owner's computers by name (${list(reach.hosts.shell)}), as your owner's user in the shell its entry in the Hosts line of your runtime section names (bash, or pwsh on Windows), starting in your own directory there; the sandbox lets a command change only your directory and the roots your grant lists (or nothing, or everything, by the mode of your grant)`] : [])].join(', ')
     tools.push(
       tool<{ on: string; command: string; cwd?: string; timeout_seconds?: number; run_in_background?: boolean; escalate?: boolean; reason?: string }>({
         name: 'run',
-        description: `Run a shell command: bash on the Box, and on a computer the shell the Hosts line of your runtime section names for it. Where: ${where}. There is no default: name the place on every call; the Workspace runs no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A job on a computer lives as long as the Mr. Robot app there runs: if the app restarts or the computer stays away for five minutes, the job is lost and you are woken as failed. When the sandbox denies a write, the result says which path and how to ask for the wider reach: run the same command again with escalate and a reason; your owner is asked once, and the call runs without the sandbox only if they approve.`,
+        description: `Run a shell command: bash on the Box, and on a computer the shell the Hosts line of your runtime section names for it. Where: ${where}. There is no default: name the place on every call; your Files run no commands. It waits up to timeout_seconds (default ${RUN_DEFAULT_TIMEOUT}, at most ${RUN_MAX_TIMEOUT}) and returns { kind: "foreground", stdout, stderr, exitCode } when the command ended in time. A command that is still going then is not killed: it goes on as a job, and you get { kind: "promoted", jobId, stdout, stderr } with what it printed so far. With run_in_background the job starts at once and you get its jobId. A job that ends wakes you with its exit code and the end of its output, so you can end your Turn while it runs; look at it with job_output, list jobs with job_list, stop one with job_kill. The Box boots on the first command and stays up while a job runs. A job on a computer lives as long as the Mr. Robot app there runs: if the app restarts or the computer stays away for five minutes, the job is lost and you are woken as failed. When the sandbox denies a write, the result says which path and how to ask for the wider reach: run the same command again with escalate and a reason; your owner is asked once, and the call runs without the sandbox only if they approve.`,
         parameters: {
           properties: {
             on: { type: 'string', description: `box or a computer's name. Where: ${where}.` },
             command: { type: 'string', description: 'The shell command line' },
-            cwd: { type: 'string', description: 'The directory to run in (default: /workspace on the Box, your own directory on a computer)' },
+            cwd: { type: 'string', description: 'The directory to run in (default: /workspace on the Box, your current directory on workspace, your own directory on a computer)' },
             timeout_seconds: { type: 'integer', description: `How long to wait before the command goes on as a job, at most ${RUN_MAX_TIMEOUT}` },
             run_in_background: { type: 'boolean', description: 'Start it as a job at once and do not wait; for a server, a watcher or a long script. false when left out' },
             escalate: { type: 'boolean', description: 'Only after the sandbox denied this command: ask your owner to let it run once without the sandbox. Needs reason. The call does not run now; you are woken with its result or the answer. Computers only' },
@@ -260,6 +280,15 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
         execute: (args, exec) => guarded('job_kill', async () => host.jobKill(jobOf(args.job_id), callOf('job_kill', args, exec))),
       }),
     )
+  }
+  if (reach.workspace?.files === true) {
+    tools.push(tool<{ cd?: string }>({
+      name: 'working_directory',
+      description: `Your current directory in your Workspace on ${reach.workspace.host}: where a relative path and a command on "workspace" start. Without cd it tells you the directory, the Workspace's root and its repository. With cd (absolute, ~/..., or relative to the current directory) it moves you within the repository; the platform keeps the directory for your next Turns. A Subagent has its own, starting in yours.`,
+      parameters: { properties: { cd: { type: 'string', description: 'The directory to move to; leave it out to read where you are' } } },
+      concurrencySafe: false,
+      execute: (args, exec) => guarded('working_directory', async () => host.workingDirectory(args.cd, exec)),
+    }))
   }
   return tools
 }

@@ -55,6 +55,11 @@ export const HostAccess = Schema.Struct({
   roots: Schema.Array(Schema.String),
   /** The Robot's Workspace when it is on this Host; absent otherwise (and from a Worker before v1.21). */
   workspace: Schema.optional(WorkspaceAccess),
+  /**
+   * The Robot's current directory in its Workspace, when the call names the Workspace (on "workspace", v1.21, cw-6xs7): where a relative
+   * path and a command start instead of the Robot's directory. Absent for a call that names the Host itself.
+   */
+  cwd: Schema.optional(Schema.String),
 })
 export type HostAccess = typeof HostAccess.Type
 
@@ -305,10 +310,24 @@ export const WorkspaceClose = Rpc.make('WorkspaceClose', {
   error: HostError,
 })
 
-/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later. */
-export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose']
+/** The code of the HostError WorkingDirectory fails with for a directory outside the Workspace's repository. */
+export const OUTSIDE_REPOSITORY = 'OUTSIDE_REPOSITORY'
 
-export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose) {}
+/**
+ * Change the Robot's current directory in its Workspace (v1.21, cw-llvx): `cd` is absolute, ~/..., or relative to the current directory
+ * (access.cwd). The answer is the new directory, its links resolved; a path that is no directory fails with ENOENT or ENOTDIR, and one
+ * outside the repository of access.workspace with OUTSIDE_REPOSITORY. The Worker keeps the directory; the app keeps nothing.
+ */
+export const WorkingDirectory = Rpc.make('WorkingDirectory', {
+  payload: { cd: Schema.String, access: HostAccess },
+  success: Schema.Struct({ path: Schema.String }),
+  error: HostError,
+})
+
+/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
+export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory']
+
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory) {}
 
 /** The sandbox state of a Host, as its heartbeat reports it. */
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])

@@ -255,7 +255,7 @@ export class Jobs {
     }
     const where = this.placeOf(current)
     if (current.spill !== null && !(await where.alive())) {
-      return { jobId: id, status: current.status, exitCode: current.exitCode, stdout: '', stderr: '', note: `${where.subject} has stopped. The whole output is in ${current.spill}; read it with read on "workspace".` }
+      return { jobId: id, status: current.status, exitCode: current.exitCode, stdout: '', stderr: '', note: `${where.subject} has stopped. The whole output is in ${current.spill}; read it with read on "files".` }
     }
     const runner = where.runner()
     let out: { text: string; bytes: number }
@@ -265,7 +265,7 @@ export class Jobs {
       err = await this.readFrom(runner, id, 'err', current.errOffset)
     } catch (error) {
       // A Host drops the jobs it ended after a while, and forgets all of them when its app restarts; the log is what is left.
-      if (current.status !== 'running' && current.spill !== null) return { jobId: id, status: current.status, exitCode: current.exitCode, stdout: '', stderr: '', note: `The job has ended and ${where.label} no longer holds it. The whole output is in ${current.spill}; read it with read on "workspace".` }
+      if (current.status !== 'running' && current.spill !== null) return { jobId: id, status: current.status, exitCode: current.exitCode, stdout: '', stderr: '', note: `The job has ended and ${where.label} no longer holds it. The whole output is in ${current.spill}; read it with read on "files".` }
       throw error
     }
     this.store.setJobOffsets(id, current.outOffset + out.bytes, current.errOffset + err.bytes)

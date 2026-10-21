@@ -348,13 +348,13 @@ describe('escalate on the tools that change a computer (Sa1)', () => {
     expect(hostDisk.has('/etc/gone')).toBe(false)
 
     await env.FILES.put(`robots/${id}/out/report.txt`, 'the report')
-    await calls(id, [{ name: 'copy', args: { from: { on: 'workspace', path: 'out/report.txt' }, to: { on: 'Desk', path: '/etc/report.txt' }, escalate: true, reason: 'Publish the report' } }])
+    await calls(id, [{ name: 'copy', args: { from: { on: 'files', path: 'out/report.txt' }, to: { on: 'Desk', path: '/etc/report.txt' }, escalate: true, reason: 'Publish the report' } }])
     const ask = await approveOpen(id)
     expect(ask.purpose).toBe('copy without the sandbox: Publish the report')
     expect(new TextDecoder().decode(hostDisk.get('/etc/report.txt'))).toBe('the report')
     expect(hostFileCalls.filter((call) => call.rpc === 'Download').map((call) => call.access.mode)).toEqual(['full'])
     // A copy to the Workspace has no computer to write on.
-    const [toWorkspace] = await calls(id, [{ name: 'copy', args: { from: { on: 'Desk', path: '/etc/motd' }, to: { on: 'workspace', path: 'x.txt' }, escalate: true, reason: 'No' } }])
+    const [toWorkspace] = await calls(id, [{ name: 'copy', args: { from: { on: 'Desk', path: '/etc/motd' }, to: { on: 'files', path: 'x.txt' }, escalate: true, reason: 'No' } }])
     expect(toWorkspace).toContain('the destination is not a computer')
   })
 

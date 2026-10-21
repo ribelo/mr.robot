@@ -27,21 +27,22 @@ export interface HostCaller {
   rearm(): Promise<void>
 }
 
-/** One Host as the Robot's places reach it. */
-export function hostLink(caller: HostCaller, host: HostView, reach: Reach): HostLink {
+/** One Host as the Robot's places reach it; `cwd` when the calls name the Robot's Workspace there (v1.21, cw-6xs7). */
+export function hostLink(caller: HostCaller, host: HostView, reach: Reach, cwd?: string): HostLink {
   const { robotId } = caller
   const owner = () => caller.owner(host.id)
   const call = <A>(action: () => Promise<HostCallReply<A>>): Promise<A> => caller.call(host.name, action)
   return {
     name: host.name,
-    read: (path) => call(async () => (await owner()).hostRead(host.id, robotId, path)),
-    write: (path, content, encoding) => call(async () => (await owner()).hostWrite(host.id, robotId, encoding === 'base64' ? { path, base64: content } : { path, text: content }, reach)),
-    glob: (pattern) => call(async () => (await owner()).hostGlob(host.id, robotId, pattern)),
-    grep: (input) => call(async () => (await owner()).hostGrep(host.id, robotId, input)),
-    remove: (path) => call(async () => (await owner()).hostDelete(host.id, robotId, path, reach)),
-    copySize: (path) => call(async () => (await owner()).hostCopySize(host.id, robotId, path)),
-    upload: (input) => call(async () => (await owner()).hostUpload(host.id, robotId, input)),
-    download: (input) => call(async () => (await owner()).hostDownload(host.id, robotId, input, reach)),
+    read: (path) => call(async () => (await owner()).hostRead(host.id, robotId, path, cwd)),
+    write: (path, content, encoding) => call(async () => (await owner()).hostWrite(host.id, robotId, encoding === 'base64' ? { path, base64: content } : { path, text: content }, reach, cwd)),
+    glob: (pattern) => call(async () => (await owner()).hostGlob(host.id, robotId, pattern, cwd)),
+    grep: (input) => call(async () => (await owner()).hostGrep(host.id, robotId, input, cwd)),
+    remove: (path) => call(async () => (await owner()).hostDelete(host.id, robotId, path, reach, cwd)),
+    copySize: (path) => call(async () => (await owner()).hostCopySize(host.id, robotId, path, cwd)),
+    upload: (input) => call(async () => (await owner()).hostUpload(host.id, robotId, input, cwd)),
+    download: (input) => call(async () => (await owner()).hostDownload(host.id, robotId, input, reach, cwd)),
+    workingDirectory: (cd) => call(async () => (await owner()).hostWorkingDirectory(host.id, robotId, cd, cwd ?? '')),
     recordCopy: async (detail, outcome) => (await owner()).recordHostCopy(host.id, robotId, detail, outcome),
   }
 }
@@ -51,12 +52,12 @@ export function hostLink(caller: HostCaller, host: HostView, reach: Reach): Host
  * place is always "up"; a Host that is gone or has restarted is told by its Member (hostJobsLost), a job the Host no longer knows is gone when
  * the alarm asks, and so is a job on a Host this Robot can no longer reach (shared no more, or the grant lowered).
  */
-export function hostJobPlace(caller: HostCaller, host: { readonly id: string; readonly name: string }, reach: Reach): JobPlace {
+export function hostJobPlace(caller: HostCaller, host: { readonly id: string; readonly name: string }, reach: Reach, cwd?: string): JobPlace {
   const { robotId } = caller
   const owner = () => caller.owner(host.id)
   const call = <A>(action: () => Promise<HostCallReply<A>>): Promise<A> => caller.call(host.name, action)
   const link: HostJobLink = {
-    start: ({ job, command, cwd, timeoutMs, background }) => call(async () => (await owner()).hostRun(host.id, robotId, { command, ...(cwd === undefined ? {} : { cwd }), timeoutMs, background, job }, reach)),
+    start: ({ job, command, cwd: given, timeoutMs, background }) => call(async () => (await owner()).hostRun(host.id, robotId, { command, ...(given === undefined ? {} : { cwd: given }), timeoutMs, background, job }, reach, cwd)),
     // The alarm asks for the state of every running job: the Host's own failure comes back (HostAccessLost, HostOffline), so that a Host
     // that is away is told from one the Robot lost access to.
     list: async () => answerOf(await (await owner()).hostJobList(host.id, robotId)),

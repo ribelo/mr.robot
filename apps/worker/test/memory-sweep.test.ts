@@ -48,7 +48,7 @@ async function idleMoment(id: string): Promise<void> {
   await settle(id)
 }
 
-const write = (path: string, content: string) => ({ name: 'write', args: { on: 'workspace', file_path: path, content } })
+const write = (path: string, content: string) => ({ name: 'write', args: { on: 'files', file_path: path, content } })
 const compacted = async (id: string) => (await env.ROBOT.getByName(id).trajectory()).some((event) => event.type === 'user/message' && event.data.includes('compact-checkpoint'))
 
 describe.each(MODES)('the memory sweep, %s (rm-glmd, rm-5org, rm-hhxa)', (_mode, code) => {

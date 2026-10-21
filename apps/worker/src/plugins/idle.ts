@@ -16,7 +16,8 @@ import { IDLE_MEMORY_STEPS, idlePlan, idleSettings, memorySweepNote, type IdleSt
 import type { RobotConfig, RobotStore } from '../robot/store.ts'
 import type { WorkspaceEntry } from '../workspace/workspace.ts'
 import type { FileAuthor } from '../workspace/file-history.ts'
-import { eventsSinceMark, MEMORY_STEP_TOOLS, setMemoryMark, SNAPSHOT_NOTE, SNAPSHOT_RECORD, SNAPSHOT_STEPS, workspaceOnly } from './snapshot.ts'
+import { eventsSinceMark, filesOnly, MEMORY_STEP_TOOLS, setMemoryMark, SNAPSHOT_NOTE, SNAPSHOT_RECORD, SNAPSHOT_STEPS } from './snapshot.ts'
+import { WORKSPACE } from '../robot/workspace-setting.ts'
 
 /** The kv key of the idle plan: the moments left for warming or idle compaction. */
 export const IDLE_PLAN = 'idle-plan'
@@ -135,7 +136,7 @@ async function idleSequence(host: IdleHost, floor: boolean): Promise<void> {
       instruction: wakeupMessage({ sender: { kind: 'platform' }, text: SNAPSHOT_NOTE, summary: 'Idle: snapshot before compaction', woke: { at: started, timeZone: config.timeZone } }),
       steps: SNAPSHOT_STEPS,
       tools: MEMORY_STEP_TOOLS,
-      args: workspaceOnly,
+      args: filesOnly(() => store.get(WORKSPACE) !== undefined),
       author: { kind: 'snapshot' },
       usage: 'memory',
       record: async () => ({ type: SNAPSHOT_RECORD, data: { paths: await writtenBy('snapshot', started) } }),
@@ -152,7 +153,7 @@ async function idleSequence(host: IdleHost, floor: boolean): Promise<void> {
       instruction: wakeupMessage({ sender: { kind: 'platform' }, text: memorySweepNote(notes), summary: 'Idle: memory sweep before compaction', woke: { at: started, timeZone: config.timeZone } }),
       steps: IDLE_MEMORY_STEPS,
       tools: MEMORY_STEP_TOOLS,
-      args: workspaceOnly,
+      args: filesOnly(() => store.get(WORKSPACE) !== undefined),
       author: { kind: 'sweep' },
       usage: 'memory',
       record: async () => ({ type: SWEEP_RECORD, data: { notes, changed: await writtenBy('sweep', started) } }),

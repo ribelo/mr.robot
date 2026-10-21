@@ -116,3 +116,22 @@ describe('the Workspace sessions (cw-p4bm)', () => {
     expect(closed.slice(2).sort()).toEqual(['one', 'two'])
   })
 })
+
+describe('the current directory in the Workspace (v1.21 ticket 02, cw-6xs7, cw-llvx)', () => {
+  it('starts relative paths and commands there, and moves only within the repository, links resolved', async () => {
+    const repo = join(home, 'cwd-repo')
+    await mkdir(join(repo, '.git'), { recursive: true })
+    await mkdir(join(repo, 'app'), { recursive: true })
+    await mkdir(join(home, 'elsewhere'), { recursive: true })
+    await writeFile(join(repo, 'app', 'main.ts'), 'export {}')
+    const workspace = { root: repo, repository: repo }
+    const at = (cwd: string) => access({ workspace, cwd })
+    expect((await call('Read', { path: 'main.ts', access: at(join(repo, 'app')) })).text).toBe('export {}')
+    expect((await stdout('pwd', { workspace, cwd: join(repo, 'app') })).trim()).toBe(join(repo, 'app'))
+    expect(await call('WorkingDirectory', { cd: 'app', access: at(repo) })).toEqual({ path: join(repo, 'app') })
+    expect(await call('WorkingDirectory', { cd: '..', access: at(join(repo, 'app')) })).toEqual({ path: repo })
+    expect((await failure('WorkingDirectory', { cd: '../elsewhere', access: at(repo) })).code).toBe('OUTSIDE_REPOSITORY')
+    expect((await failure('WorkingDirectory', { cd: 'app/main.ts', access: at(repo) })).code).toBe('ENOTDIR')
+    expect((await failure('WorkingDirectory', { cd: 'gone', access: at(repo) })).code).toBe('ENOENT')
+  })
+})

@@ -77,6 +77,15 @@ export type HostRunAnswer = RunOutcome | { readonly kind: 'unanswered'; readonly
 /** A call that was sent and not answered: the connection ended or the time was up. `offline` when the Host is offline now. */
 type Sent<A> = { readonly kind: 'answered'; readonly value: A } | { readonly kind: 'cut'; readonly message: string; readonly offline: boolean }
 
+/**
+ * Where a call acts beyond its grant (v1.21): `cwd` is the Robot's current directory when the call names its Workspace (it needs an app of
+ * HOST_PROTOCOL_VERSION), `protocol` the protocol the call itself needs.
+ */
+export interface CallWhere {
+  readonly cwd?: string
+  readonly protocol?: number
+}
+
 export class HostRefused extends Error {
   override readonly name = 'Invalid'
   readonly status = 403
@@ -365,12 +374,12 @@ export class HostHub {
    * absence of the app loses it, also when the answer never comes (deep review P11): the app keeps such a command as a job. A command that
    * ended within its call, or that the call never ran, is forgotten again.
    */
-  async runCommand(id: string, robotId: string, jobId: string, call: (client: Client, access: HostAccess) => Effect.Effect<RunOutcome, unknown>, timeoutMs: number, log: { action: string; detail: string }, reach: Reach): Promise<HostRunAnswer> {
+  async runCommand(id: string, robotId: string, jobId: string, call: (client: Client, access: HostAccess) => Effect.Effect<RunOutcome, unknown>, timeoutMs: number, log: { action: string; detail: string }, reach: Reach, where: CallWhere = {}): Promise<HostRunAnswer> {
     this.trackJob(id, robotId, jobId)
     const record = (outcome: string, exitCode: number | null) => this.record({ hostId: id, robotId, ...log, outcome, exitCode })
     let sent: Sent<RunOutcome>
     try {
-      sent = await this.send(id, robotId, 'shell', call, timeoutMs, reach)
+      sent = await this.send(id, robotId, 'shell', call, timeoutMs, reach, where)
     } catch (error) {
       this.forgetJob(id, robotId, jobId)
       record(error instanceof Error ? error.message : String(error), null)
@@ -447,9 +456,9 @@ export class HostHub {
       .map((row) => ({ robotId: row.robot_id, robotName: row.robot_name, action: row.action, detail: row.detail, outcome: row.outcome, exitCode: row.exit_code, at: row.at }))
   }
 
-  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string }, reach: Reach = 'granted', protocol = 1): Promise<A> {
+  async run<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 120_000, log?: { action: string; detail: string }, reach: Reach = 'granted', where: CallWhere = {}): Promise<A> {
     try {
-      const sent = await this.send(id, robotId, grant, call, timeoutMs, reach, protocol)
+      const sent = await this.send(id, robotId, grant, call, timeoutMs, reach, where)
       if (sent.kind === 'cut') throw sent.offline ? new HostOffline({ message: sent.message }) : new HostCallFailed({ message: sent.message })
       if (log !== undefined) this.record({ hostId: id, robotId, action: log.action, detail: log.detail, outcome: 'done', exitCode: null })
       return sent.value
@@ -463,12 +472,14 @@ export class HostHub {
    * Send one call: its answer, or `cut` when it was sent and no answer came. It fails before sending (no access, offline, no sandbox) and
    * when the app refused the call (HostError).
    */
-  private async send<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs: number, reach: Reach, protocol = 1): Promise<Sent<A>> {
+  private async send<A>(id: string, robotId: string, grant: HostGrant, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs: number, reach: Reach, where: CallWhere = {}): Promise<Sent<A>> {
     const { row, access: granted } = await this.authorize(id, robotId, grant)
-    // A call of a newer protocol than the app speaks is not sent: the app would not know it (cw-jn59).
+    // A call of a newer protocol than the app speaks is not sent: the app would not know it (cw-jn59). A call on the Workspace is one.
+    const protocol = Math.max(where.protocol ?? 1, where.cwd === undefined ? 1 : HOST_PROTOCOL_VERSION)
     if (protocol > this.protocolOf(row)) throw new HostOutdated({ message: HOST_OUTDATED(row.name) })
     // An escalated call is one the owner approved to run without the sandbox, once (ob-ifak); it never changes the grant.
-    const access: HostAccess = reach === 'escalated' ? { ...granted, mode: 'full' } : granted
+    const reached: HostAccess = reach === 'escalated' ? { ...granted, mode: 'full' } : granted
+    const access: HostAccess = where.cwd === undefined ? reached : { ...reached, cwd: where.cwd }
     if (grant !== 'browser' && access.mode !== 'full') {
       const sandbox = this.sandboxOf(row)
       // An app from before v1.16 ignores the access of a call, so a confined call to it would run unconfined: it is refused, not sent.
@@ -501,8 +512,23 @@ export class HostHub {
    * A Workspace call (v1.21): one of the RPCs that need an app of HOST_PROTOCOL_VERSION, under the files facet; refused with
    * HOST_OUTDATED when the app is older.
    */
-  workspaceRun<A>(id: string, robotId: string, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 60_000, log?: { action: string; detail: string }): Promise<A> {
-    return this.run(id, robotId, 'files', call, timeoutMs, log, 'granted', HOST_PROTOCOL_VERSION)
+  workspaceRun<A>(id: string, robotId: string, call: (client: Client, access: HostAccess) => Effect.Effect<A, unknown>, timeoutMs = 60_000, log?: { action: string; detail: string }, cwd?: string): Promise<A> {
+    return this.run(id, robotId, 'files', call, timeoutMs, log, 'granted', { protocol: HOST_PROTOCOL_VERSION, ...(cwd === undefined ? {} : { cwd }) })
+  }
+
+  /**
+   * Close a Robot's Workspace session on a Host (cw-p4bm), without its grant: the Robot may be gone. Nothing is sent to an app that is
+   * offline or older than the protocol; a failure is logged, since the app also replaces the session on its own.
+   */
+  async closeWorkspace(id: string, robotDirectory: string): Promise<void> {
+    const row = this.row(id)
+    if (row === undefined || row.online !== 1 || this.protocolOf(row) < HOST_PROTOCOL_VERSION) return
+    try {
+      const client = await this.client(id)
+      await Effect.runPromise(client.WorkspaceClose({ robot: robotDirectory }).pipe(Effect.timeout(15_000)))
+    } catch (error) {
+      console.warn('workspace session not closed', error)
+    }
   }
 
   /** What the last heartbeat said about the sandbox; undefined for an app from before v1.16, which does not say. */

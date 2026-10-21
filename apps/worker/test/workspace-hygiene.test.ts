@@ -114,7 +114,7 @@ describe('Clear history and Start over (sk-8won)', () => {
     const id = await activeRobot()
     await api(ANNA, `/api/robots/${id}/file?path=MEMORY.md`, { method: 'PUT', body: { content: '# MEMORY.md\nPays on the 10th.' } })
     await say(id, 'set up', [
-      { calls: [{ name: 'write', args: { on: 'workspace', file_path: 'out/report.md', content: 'quarterly' } }, { name: 'task_create', args: { title: 'Taxes', instructions: 'Check taxes.', assignee: 'self', timing: { kind: 'recurring', daily: { time: '09:00' } } } }] },
+      { calls: [{ name: 'write', args: { on: 'files', file_path: 'out/report.md', content: 'quarterly' } }, { name: 'task_create', args: { title: 'Taxes', instructions: 'Check taxes.', assignee: 'self', timing: { kind: 'recurring', daily: { time: '09:00' } } } }] },
       { text: 'Done.' },
     ])
     await testRobot(id).saveScreenForTest()

@@ -5,7 +5,7 @@ Spec: ../mr-robot-v1.21.md. Needs v1.20 merged. Frontier at the start: 01. Then 
 | # | Ticket | Blocked by | Status |
 |---|---|---|---|
 | 01 | [Host groundwork: environment, policy from grants, protocol version, Workspace session](01-host-groundwork.md) | — | done |
-| 02 | [Words and the Workspace setting](02-words-and-workspace.md) | 01 | ready-for-agent |
+| 02 | [Words and the Workspace setting](02-words-and-workspace.md) | 01 | done |
 | 03 | [File tools on a Host: hash, line endings, idempotent writes, limits](03-file-tools-hardening.md) | 01 | ready-for-agent |
 | 04 | [Instructions and skills from the Host](04-host-instructions-skills.md) | 02, 03 | ready-for-agent |
 | 05 | [Worktrees](05-worktrees.md) | 04 | ready-for-agent |

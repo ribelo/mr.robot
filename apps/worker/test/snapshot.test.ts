@@ -44,7 +44,7 @@ async function turn(id: string, text: string, script: StubReply[]): Promise<void
   await settle(id)
 }
 
-const write = (path: string, content: string, on = 'workspace') => ({ name: 'write', args: { on, file_path: path, content } })
+const write = (path: string, content: string, on = 'files') => ({ name: 'write', args: { on, file_path: path, content } })
 const allEvents = async (id: string) => {
   const live = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body
   const older = await Promise.all(live.chapters.filter((chapter) => chapter.ordinal !== live.chapter).map(async (chapter) => (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory?chapter=${chapter.ordinal}`)).body.events))
@@ -58,9 +58,9 @@ describe.each(MODES)('the snapshot in a Turn, %s (dm-kg1p, dm-77dg, dm-r6km, dm-
   it('runs three steps with the Workspace file tools only before a mid-Turn compaction, then the compaction and the Turn go on', async () => {
     const id = await staff({ contextBudget: 8000 })
     await turn(id, 'Find me a flat.', [
-      { text: 'Apartment on Mokotowska, 1 200 000 PLN. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'workspace', file_path: 'SOUL.md' } }] },
+      { text: 'Apartment on Mokotowska, 1 200 000 PLN. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'files', file_path: 'SOUL.md' } }] },
       // The step at the boundary is the Turn's own: the instruction reaches the model at the next one.
-      { calls: [{ name: 'read', args: { on: 'workspace', file_path: 'AGENTS.md' } }] },
+      { calls: [{ name: 'read', args: { on: 'files', file_path: 'AGENTS.md' } }] },
       // The snapshot's three steps: a note, a refused say and a refused Box write, then MEMORY.md.
       { calls: [write('memory/2026-10-21.md', '- In flight: the flat search; Mokotowska at 1.2 M PLN found.\n')] },
       { calls: [{ name: 'say', args: { text: 'Hello?' } }, write('notes.md', 'x', 'box')] },
@@ -77,7 +77,7 @@ describe.each(MODES)('the snapshot in a Turn, %s (dm-kg1p, dm-77dg, dm-r6km, dm-
     // The fence: say and a write on the Box were refused while the snapshot ran.
     const refusals = JSON.stringify(seen[steered + 2]!.messages.filter((message) => message.role === 'tool'))
     expect(refusals).toContain('say is not available during the snapshot')
-    expect(refusals).toContain('a memory step writes only on the Workspace')
+    expect(refusals).toContain('a memory step writes only on your Files')
     // After it the fence is gone: the Turn's say runs.
     const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
     expect(items.some((item) => item.kind === 'reply' && item.text === 'Found one on Mokotowska.')).toBe(true)
@@ -104,8 +104,8 @@ describe.each(MODES)('the snapshot hands the Turn back, %s (v1.20.1)', (_mode, c
   it('a Turn that ends inside its snapshot says through the safety net, and the compaction follows the snapshot', async () => {
     const id = await staff({ contextBudget: 8000 })
     await turn(id, 'Find me a flat.', [
-      { text: 'Apartment on Mokotowska, 1 200 000 PLN. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'workspace', file_path: 'SOUL.md' } }] },
-      { calls: [{ name: 'read', args: { on: 'workspace', file_path: 'AGENTS.md' } }] },
+      { text: 'Apartment on Mokotowska, 1 200 000 PLN. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'files', file_path: 'SOUL.md' } }] },
+      { calls: [{ name: 'read', args: { on: 'files', file_path: 'AGENTS.md' } }] },
       // The snapshot's first step: the note, then the model ends the Turn.
       { calls: [write('memory/2026-10-21.md', '- In flight: the flat search.\n')] },
       { text: 'Noted the search.' },

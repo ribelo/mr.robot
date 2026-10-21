@@ -155,12 +155,12 @@ describe('read-only, and not in the Space library (gb-n6by, gb-8wx5)', () => {
   it('are files under docs/skills/ that every Robot reads and none changes', async () => {
     const id = await robotWith({ tools: { files: 'allow' } })
     scripts.set(id, [{ calls: [
-      { name: 'read', args: { on: 'workspace', file_path: 'docs/skills/asking/SKILL.md' } },
-      { name: 'glob', args: { on: 'workspace', pattern: 'docs/skills/**' } },
-      { name: 'write', args: { on: 'workspace', file_path: 'docs/skills/asking/SKILL.md', content: 'mine' } },
-      { name: 'edit', args: { on: 'workspace', file_path: 'docs/skills/asking/SKILL.md', old_string: '# Asking', new_string: '# Mine' } },
-      { name: 'delete_file', args: { on: 'workspace', path: 'docs/skills/tasks-cadence/SKILL.md' } },
-      { name: 'write', args: { on: 'workspace', file_path: 'docs/skills/mine/SKILL.md', content: 'x' } },
+      { name: 'read', args: { on: 'files', file_path: 'docs/skills/asking/SKILL.md' } },
+      { name: 'glob', args: { on: 'files', pattern: 'docs/skills/**' } },
+      { name: 'write', args: { on: 'files', file_path: 'docs/skills/asking/SKILL.md', content: 'mine' } },
+      { name: 'edit', args: { on: 'files', file_path: 'docs/skills/asking/SKILL.md', old_string: '# Asking', new_string: '# Mine' } },
+      { name: 'delete_file', args: { on: 'files', path: 'docs/skills/tasks-cadence/SKILL.md' } },
+      { name: 'write', args: { on: 'files', file_path: 'docs/skills/mine/SKILL.md', content: 'x' } },
     ] }, { text: '' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'try' } })
     await settle(id)
@@ -215,7 +215,7 @@ describe('the texts (gb-vmmx, gb-58ad, gb-ej8r)', () => {
 
   it('box has the three layers, big files with copy and ws, setup.sh and the caches, jobs and the image list (ob-vw9d)', () => {
     const box = text('box')
-    for (const point of ['Three layers', 'The Workspace is in R2', 'box/ in the Workspace is small', 'scratch', 'Keep a big file in the Workspace, never in box/', 'copy with from set to the Workspace', 'ws get inbox/video.mp4', 'ws put', 'box/setup.sh', 'box/.cache/', 'run_in_background', 'spill/jobs/<id>.log', 'job_kill', 'Read box.md']) expect(box, point).toContain(point)
+    for (const point of ['Three layers', 'Your Files are in R2', 'box/ in the Files is small', 'scratch', 'Keep a big file in the Files, never in box/', 'copy with from set to the Files', 'ws get inbox/video.mp4', 'ws put', 'box/setup.sh', 'box/.cache/', 'run_in_background', 'spill/jobs/<id>.log', 'job_kill', 'Read box.md']) expect(box, point).toContain(point)
   })
 
   it('hosts has when a Host is right, the directory, modes and the denial path, jobs, offline Hosts and the shared-Host rule (ob-ivby)', () => {

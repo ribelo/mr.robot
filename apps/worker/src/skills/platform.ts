@@ -114,7 +114,7 @@ Call request_credential. Do not ask your owner for a password in the Conversatio
   skill('pages', 'When to write a Page, and how to keep one current.', 'files', `
 # Pages
 
-A Page is a file under pages/ in your Workspace: Markdown (.md) or HTML (.html). Your owner reads it in a reading view, prints it to PDF and can share it with a link. You cannot share a Page; only your owner can.
+A Page is a file under pages/ in your Files: Markdown (.md) or HTML (.html). Your owner reads it in a reading view, prints it to PDF and can share it with a link. You cannot share a Page; only your owner can.
 
 ## When a Page beats a message
 
@@ -135,12 +135,12 @@ Everything else is a message with say.
 - Give it a title: a front matter line title: ..., or the first heading "# ...". Rename in the app rewrites that title in the file.
 - Start with the answer or the summary. Then sections with "##" headings: the reading view makes a table of contents from them.
 - Use tables, lists, TeX math ($...$) and Mermaid diagrams (a fence with the language mermaid).
-- Show an image of your Workspace with a path relative to the Page (![Plan](img/plan.png)) or from the Workspace root (/attachments/...).
+- Show an image of your Files with a path relative to the Page (![Plan](img/plan.png)) or from the Files root (/attachments/...).
 - Put the date of the facts in the Page. Say where they came from.
 
 ## Markdown first, HTML when layout needs it
 
-Write HTML only when Markdown cannot hold the layout: a styled table, a timeline, a page with inline script. An HTML Page runs in a sandbox: it loads nothing from the internet (no remote scripts, styles, fonts or images), so put styles and script inline. It cannot show images from your Workspace either, only data: URLs in the file: when a Page needs Workspace images, write it in Markdown. Give it a <title>.
+Write HTML only when Markdown cannot hold the layout: a styled table, a timeline, a page with inline script. An HTML Page runs in a sandbox: it loads nothing from the internet (no remote scripts, styles, fonts or images), so put styles and script inline. It cannot show images from your Files either, only data: URLs in the file: when a Page needs Files images, write it in Markdown. Give it a <title>.
 
 ## Keep a Page current
 
@@ -273,14 +273,14 @@ Read this before you use the Box for more than one short command: a script, a bi
 
 ## Three layers
 
-- The Workspace is in R2. It keeps what must last: results, data, notes. Nothing else lasts.
-- The folder box/ in the Workspace is small. The Box gets a copy of it at every boot, and the files you changed under /workspace/box go back to it when your Turn ends or the Box stops. A file over 20 MB does not go back.
-- The rest of the Box disk is scratch. It is empty after the Box stops. Copy a result that you need again to the Workspace before your Turn ends.
+- Your Files are in R2. They keep what must last: results, data, notes. Nothing else lasts.
+- The folder box/ in the Files is small. The Box gets a copy of it at every boot, and the files you changed under /workspace/box go back to it when your Turn ends or the Box stops. A file over 20 MB does not go back.
+- The rest of the Box disk is scratch. It is empty after the Box stops. Copy a result that you need again to the Files before your Turn ends.
 
 ## Big files
 
-- Keep a big file in the Workspace, never in box/. Every boot copies all of box/, so a big file there makes each boot slower.
-- Fetch the file where you need it. To move it, call copy with from set to the Workspace and to set to the Box. In a command, run \`ws get inbox/video.mp4\` and the file comes from R2 straight to the disk.
+- Keep a big file in the Files, never in box/. Every boot copies all of box/, so a big file there makes each boot slower.
+- Fetch the file where you need it. To move it, call copy with from set to the Files and to set to the Box. In a command, run \`ws get inbox/video.mp4\` and the file comes from R2 straight to the disk.
 - Send a result back the same way: copy, or \`ws put out.mp4 results/out.mp4\` at the end of the script. Use ws when a script needs a file in the middle of a run. Use copy when you only move a file.
 - Neither has a size limit, and the file does not pass through you. Never read a big file and write it again.
 - ws needs the files group at allow. When your files are at ask, ws is refused, because a script cannot wait for your owner. Use copy then: it asks.
@@ -289,7 +289,7 @@ Read this before you use the Box for more than one short command: a script, a bi
 
 - Read box.md before you install anything. It lists the tools and versions in the image and what the image lacks, so you do not guess or probe.
 - For a package that the image lacks, write box/setup.sh (pip3 install, npm install). It runs at every boot, so keep it short and safe to run twice.
-- The uv and Bun caches are in /workspace/box/.cache/. Before the Box stops, they go to the Workspace as one file, box/.cache.tar.zst, so a second boot does not download the same packages again. To start with empty caches, delete that file.
+- The uv and Bun caches are in /workspace/box/.cache/. Before the Box stops, they go to the Files as one file, box/.cache.tar.zst, so a second boot does not download the same packages again. To start with empty caches, delete that file.
 
 ## Jobs
 

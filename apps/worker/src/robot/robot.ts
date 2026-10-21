@@ -68,7 +68,8 @@ import { PLATFORM_SECTIONS, platformPrompt, setupPrompt } from '../agent/platfor
 import { prependedIdentity, providerAdapter, type CredentialSource } from '../agent/providers.ts'
 import { chainOf, clock, failureKind, modelOf, WORKERS_AI_OFF } from './chain.ts'
 import type { CredentialSave } from '@mr-robot/protocol'
-import type { ChainEntry, GrantLevel, SpaceSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource } from '@mr-robot/protocol'
+import type { ChainEntry, GrantLevel, SpaceSpendLimit, HostAccessByFacet, ProviderView, SubagentView, ThinkingEffort, UsageSource, WorkspaceChoice, WorkspaceSetting } from '@mr-robot/protocol'
+import { checkRoot, sameWorkspace, WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace } from './workspace-setting.ts'
 import { capabilitiesView, capabilityItems, emptyGrants, overlayGrants, usableLevel, usableNames, type CapabilitiesView, type CapabilityItem, type RobotOwner, type SettingsCatalog } from '@mr-robot/protocol'
 import { readStoredEvents, storedHeader, storedLength, storeSession } from '../agent/session-log.ts'
 import { joinedMessage, wakeupMessage, type AskAnswerLabel, type HelpAnswerWake, type JoinedPart, type TaskRunBy, type ThreadWake } from '../agent/sources.ts'
@@ -184,7 +185,7 @@ import { RobotMemory } from './robot-memory.ts'
 import { platformStep, StepFence, stepRan, type PlatformStepHost } from '../agent/platform-step.ts'
 import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
 import { CHIEF_DREAM_TOOLS, DREAMED_AT, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote } from '../plugins/dream.ts'
-import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
+import { filesOnly, MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, type MemoryRange } from '../plugins/snapshot.ts'
 import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
 import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
 import { boxIdleDuty } from '../plugins/places.ts'
@@ -477,6 +478,9 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await this.releaseComposition().catch(() => undefined)
     await this.closeBrowser().catch(() => undefined)
     if (this.store.config() !== undefined && this.boxState().state !== 'off') await this.boxBackend().stop().catch(() => undefined)
+    // Its Workspace session on the Host closes (cw-p4bm): the language servers there serve nobody now.
+    const workspace = this.store.config() === undefined ? undefined : this.store.get<WorkspaceSetting>(WORKSPACE)
+    if (workspace !== undefined) await this.closeWorkspaceSession(workspace)
     for (const socket of this.ctx.getWebSockets()) {
       try { socket.close(1000, 'robot deleted') } catch { /* closing */ }
     }
@@ -800,7 +804,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     let dreamToken: symbol | undefined
     let dreamCut = false
     if (dream) {
-      dreamToken = this.fence.open('the dream', this.store.requireConfig().kind === 'mr-robot' ? CHIEF_DREAM_TOOLS : DREAM_TOOLS, dreamArgsCheck())
+      dreamToken = this.fence.open('the dream', this.store.requireConfig().kind === 'mr-robot' ? CHIEF_DREAM_TOOLS : DREAM_TOOLS, dreamArgsCheck(() => this.store.get(WORKSPACE) !== undefined))
       this.writer = { kind: 'dream' }
       let steps = 0
       // Exactly DREAM_STEPS model steps: cancelled at the start of the one after (v1.20.1).
@@ -1090,9 +1094,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       boxLevel: () => this.groupLevel('box'),
       hostLevel: (hostId, facet) => this.store.levelOf('host', hostFacetKey(hostId, facet)),
       hosts: () => this.space().hostsFor(this.store.requireConfig().ownerId),
+      workspaceSetting: () => this.store.get<WorkspaceSetting>(WORKSPACE),
+      currentDirectory: (exec) => this.currentDirectory(exec),
+      setCurrentDirectory: (exec, path) => this.setCurrentDirectory(exec, path),
       box: { boot: () => this.bootBox(), touch: () => this.touchBox() },
-      link: (host, reach) => hostLink(this.hostCaller(), host, reach),
-      jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach),
+      link: (host, reach, cwd) => hostLink(this.hostCaller(), host, reach, cwd),
+      jobPlace: (place, reach) => place.kind === 'box' ? this.boxJobPlace() : hostJobPlace(this.hostCaller(), place.host, reach, place.workspace?.cwd),
       asks: {
         approval: (callId) => {
           const hosts = this.approvedCalls.get(callId)
@@ -1105,6 +1112,26 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       permits: this.wsPermits,
     })
     return this.placeService
+  }
+
+  /** The current directories of the Robot's Subagents in its Workspace, by their session (cw-4nkx): their own, first the Robot's. */
+  private readonly subagentDirectories = new Map<string, string>()
+
+  /**
+   * The current directory in the Workspace of the agent that calls (cw-llvx, cw-4nkx): the Robot's own is kept by the platform and is the
+   * root until it moves; a Subagent starts in the Robot's and keeps its own in memory.
+   */
+  private currentDirectory(exec: ToolRunContext): string {
+    const own = this.store.get<string>(WORKSPACE_CWD) ?? this.store.get<WorkspaceSetting>(WORKSPACE)?.root ?? ''
+    const session = exec.agent?.session.id
+    if (session === undefined || String(session) === this.store.requireConfig().liveSessionId) return own
+    return this.subagentDirectories.get(String(session)) ?? own
+  }
+
+  private setCurrentDirectory(exec: ToolRunContext, path: string): void {
+    const session = exec.agent?.session.id
+    if (session === undefined || String(session) === this.store.requireConfig().liveSessionId) this.store.set(WORKSPACE_CWD, path)
+    else this.subagentDirectories.set(String(session), path)
   }
 
   /** Whether the Robot's tools reach its Workspace: it holds the files group, or it is in setup, which opens the Workspace to write its persona files (S1). */
@@ -2197,7 +2224,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   protected mounts(config: RobotConfig): Mount[] {
     const mounts: Mount[] = [mount(Credentials, { source: this.credentials() })]
     if (config.status === 'setup') {
-      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(PlacesCapability, { host: this.places(), reach: { workspace: true, box: false, hosts: { files: [], shell: [] } } satisfies PlacesReach }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
+      return [...mounts, mount(ConversationPlugin, { host: undefined }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(Setup, { host: this }), mount(PlacesCapability, { host: this.places(), reach: { files: true, box: false, hosts: { files: [], shell: [] } } satisfies PlacesReach }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: false })]
     }
     mounts.push(mount(ConversationPlugin, { host: this }), mount(Say, { host: this }), mount(IdentityTools, { host: this }), mount(GrantProposals, { host: this }), mount(Ask, { host: this }), mount(Memory, { host: this.memoryHost(config), maxBytes: MEMORY_BYTES, tools: true }))
     // Items at allow or ask are registered, deny items are not (sk-746n); the tools of ask items are wrapped by the ask gate (sk-hx8j).
@@ -2240,8 +2267,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       return split?.facet === facet ? [this.knownHosts.find((host) => host.id === split.hostId)?.name ?? split.hostId] : []
     })
     // One capability for the Workspace, the Box and the Hosts: its tools exist when the Robot holds any of them (v1.16 ticket 01).
-    const reach: PlacesReach = { workspace: granted.has('files'), box: granted.has('box'), hosts: { files: names('files'), shell: names('shell') } }
-    if (reach.workspace || reach.box || reach.hosts.files.length > 0 || reach.hosts.shell.length > 0) mounts.push(mount(PlacesCapability, { host: this.places(), reach }, gate(items.places)))
+    // The Workspace (v1.21, cw-6xs7): a place on its Host under that Host's facets.
+    const setting = this.store.get<WorkspaceSetting>(WORKSPACE)
+    const workspaceFacet = (facet: 'files' | 'shell') => setting !== undefined && hostGrants.includes(hostFacetKey(setting.hostId, facet))
+    const workspace = setting === undefined ? undefined : { host: this.knownHosts.find((host) => host.id === setting.hostId)?.name ?? setting.host, files: workspaceFacet('files'), shell: workspaceFacet('shell') }
+    const reach: PlacesReach = { files: granted.has('files'), box: granted.has('box'), hosts: { files: names('files'), shell: names('shell') }, ...(workspace === undefined ? {} : { workspace }) }
+    if (reach.files || reach.box || reach.hosts.files.length > 0 || reach.hosts.shell.length > 0) mounts.push(mount(PlacesCapability, { host: this.places(), reach }, gate(items.places)))
     for (const [kind, plugin] of Object.entries(this.connectorPlugins()) as Array<[ConnectorKind, ConnectorPlugin]>) {
       if (!connectorOn(this.pluginsOn, kind)) continue
       const accounts = this.grantedConnections(kind)
@@ -2272,7 +2303,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const placeItem = async (on: unknown, facet: 'files' | 'shell'): Promise<GrantItem[]> => {
       if (typeof on !== 'string') return []
       const name = on.trim()
-      if (name === 'workspace') return facet === 'files' ? [tool('files')] : []
+      const workspace = this.store.get<WorkspaceSetting>(WORKSPACE)
+      // "workspace" is the Workspace's Host when the Robot has one (v1.21, cw-6xs7), else the old name of the Files (cw-shlm).
+      if (name === 'workspace' && workspace !== undefined && this.store.config()?.status !== 'setup') return [{ kind: 'host', name: hostFacetKey(workspace.hostId, facet) }]
+      if (name === 'files' || name === 'workspace') return facet === 'files' ? [tool('files')] : []
       if (name === 'box') return [tool('box')]
       try {
         return [{ kind: 'host', name: hostFacetKey((await this.places().hostNamed(name)).id, facet) }]
@@ -2313,7 +2347,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       places: (name) => {
         if (name === 'run') return onItems('shell')
         if (name === 'job_output' || name === 'job_kill') return jobItems
-        if (name === 'job_list') return NO_ITEMS
+        // working_directory changes nothing on the computer; the places check the Workspace's files facet themselves.
+        if (name === 'job_list' || name === 'working_directory') return NO_ITEMS
         if (name === 'copy') return { possible: everywhere('files'), used: async (args) => [...(await placeItem(copyEnd(args['from']), 'files')), ...(await placeItem(copyEnd(args['to']), 'files'))], asksAtExecution: true }
         return onItems('files')
       },
@@ -2423,7 +2458,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const granted = usableLevel(this.store.hostLevel(facet))
     // The mode and roots of the facet, and the Robot's directory on the Host (v1.16 ticket 02): the Host app enforces them.
     const { mode, roots } = hostAccessOf(this.store.get<HostAccessByFacet>(HOST_ACCESS), facet)
-    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.store.hostDirectory(), mode, roots } }
+    // The Workspace on this Host (v1.21, cw-o4fr): the app adds its roots to the write roots of every call there.
+    const workspace = this.store.get<WorkspaceSetting>(WORKSPACE)
+    const onHere = workspace?.hostId === hostId ? { workspace: { root: workspace.root, repository: workspace.repository, ...(workspace.worktree === undefined ? {} : { worktree: workspace.worktree }) } } : {}
+    return { ownerId: config.ownerId, name: config.identity.name, granted, mrRobot: config.kind === 'mr-robot', access: { robot: this.store.hostDirectory(), mode, roots, ...onHere } }
   }
 
   /**
@@ -3019,8 +3057,47 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
 
   /** Advanced settings (robot-vqtw): every change takes effect on the next Turn. */
-  updateSettings(patch: SettingsPatch, by?: string): Promise<RobotSettings> {
-    return this.program(Programs.updateSettings(patch, by))
+  /**
+   * Advanced settings, and the deputy's changes. A Workspace in the patch is checked on its Host first (cw-gx04); the session of the one it
+   * replaces is closed there (cw-p4bm).
+   */
+  async updateSettings(patch: SettingsPatch, by?: string): Promise<RobotSettings> {
+    const before = this.store.get<WorkspaceSetting>(WORKSPACE)
+    const workspace = patch.workspace === undefined ? undefined : await this.checkedWorkspace(patch.workspace)
+    const settings = await this.program(Programs.updateSettings(patch, by, workspace))
+    if (workspace?.kind === 'kept' && before !== undefined && !sameWorkspace(before, workspace.setting)) this.ctx.waitUntil(this.closeWorkspaceSession(before))
+    return settings
+  }
+
+  /**
+   * A chosen Workspace, checked (cw-gx04): a computer the owner reaches, on which the Robot holds the files facet, and a directory there
+   * the Host finds in a git repository, reached through no link.
+   */
+  private async checkedWorkspace(choice: WorkspaceChoice | null): Promise<CheckedWorkspace> {
+    if (choice === null) return { kind: 'kept', setting: null }
+    const config = this.store.requireConfig()
+    const host = (await this.space().hostsFor(config.ownerId)).find((candidate) => candidate.id === choice.host)
+    if (host === undefined) return { kind: 'refused', message: `There is no computer ${choice.host} that ${this.owner().name} reaches.` }
+    if (!usableLevel(this.store.hostLevel(hostFacetKey(host.id, 'files')))) return { kind: 'refused', message: `${config.identity.name} holds no files grant on ${host.name}: grant it first, then choose the Workspace.` }
+    const root = choice.root.trim()
+    if (root === '') return { kind: 'refused', message: 'Choose a directory for the Workspace.' }
+    try {
+      const facts = answerOf(await (await this.hostOwnerStub(host.id)).hostStat(host.id, config.id, root))
+      return checkRoot({ host: host.id, root }, host.name, facts)
+    } catch (error) {
+      if (isHostCallError(error)) return { kind: 'refused', message: error.message }
+      throw error
+    }
+  }
+
+  /** Close the Robot's Workspace session on its Host (cw-p4bm); a Host that is gone or offline has none to close. */
+  private async closeWorkspaceSession(setting: WorkspaceSetting): Promise<void> {
+    try {
+      const owner = await this.space().hostOwner(setting.hostId)
+      if (owner !== null) await this.env.MEMBER.getByName(owner).hostWorkspaceClose(setting.hostId, this.store.hostDirectory())
+    } catch (error) {
+      console.warn('workspace session not closed', error)
+    }
   }
 
 
@@ -3895,7 +3972,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // The owner scrub: one bounded step of the Robot on its own model (rm-gv6s), as a Turn of its own, writing only under the draft (v1.20.1).
     const { agent } = await this.agent()
     const inDraft = (tool: string, args: Readonly<Record<string, unknown>>) => {
-      const refused = workspaceOnly(tool, args)
+      const refused = filesOnly(() => this.store.get(WORKSPACE) !== undefined)(tool, args)
       if (refused !== undefined) return refused
       if (tool !== 'write' && tool !== 'edit') return undefined
       const path = normalizePath(String(args['file_path'] ?? args['path'] ?? '').replace(/^\/workspace\//, ''))

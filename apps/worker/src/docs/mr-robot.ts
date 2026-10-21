@@ -12,7 +12,7 @@ Read members.md for the profile, the nickname, avatars and the Robot list with i
 
 ## Robots
 
-A Robot has one endless Conversation, its own Workspace files, its own Grants and its own browser. Its work is kept as Tasks at the Space, beside the Tasks of people. Read tasks.md. The owner decides what a Robot may do. Everything is off until the owner grants it. Read grants.md.
+A Robot has one endless Conversation, its own Files, its own Grants and its own browser. Its work is kept as Tasks at the Space, beside the Tasks of people. Read tasks.md. The owner decides what a Robot may do. Everything is off until the owner grants it. Read grants.md.
 
 A Robot sleeps between Turns. A Turn is one run of the Robot. A Wake-up starts a Turn. A Wake-up is one of these:
 - a message from a Member
@@ -68,6 +68,6 @@ A Robot works in code mode by default. It writes a program that calls its tools,
 - grants.md: what a Robot may do.
 - tasks.md: Tasks, scheduled and recurring work, reminders.
 - asks-and-help.md: questions, credential requests and the chief rule.
-- memory-and-files.md: memory and the Workspace.
+- memory-and-files.md: memory and the Files.
 - connections.md, hosts.md, browser.md, providers.md.
 `

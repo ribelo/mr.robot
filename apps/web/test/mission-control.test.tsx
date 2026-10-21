@@ -17,7 +17,7 @@ const shopper = robot('r-1', 'Shopper', {
   turn: { wakeup: { kind: 'task', from: 'schedule' }, task: { id: 't-1', title: 'Shopping' }, activity: 'browser_open', since: now - 12 * 60_000 },
 })
 let view: MissionView = {
-  fleet: [shopper, robot('r-2', 'Accountant', { lastWakeup: { wakeup: { kind: 'member', from: 'Anna' }, task: null }, lastLine: 'Invoices sent.' })],
+  fleet: [shopper, robot('r-2', 'Accountant', { lastWakeup: { wakeup: { kind: 'member', from: 'Anna' }, task: null }, lastLine: 'Invoices sent.', workspace: { hostId: 'h-desk', host: 'Desk', root: '/home/anna/books' } })],
   fleetNext: null,
   tasks: [
     task('t-1', 'Shopping', { assignee: { kind: 'robot', robotId: 'r-1' } }),
@@ -89,6 +89,15 @@ describe('Mission Control (v1.13 ticket 06)', () => {
     expect(within(row).getByText('12 min')).toBeTruthy()
     const idle = within(fleet).getByText('Accountant').closest('[role="row"]') as HTMLElement
     expect(within(idle).getByText('message · Anna')).toBeTruthy()
+  })
+
+  it('shows where each Robot works: its Workspace\'s Host and root, or nothing (v1.21, cw-hiwf)', async () => {
+    const fleet = await mission()
+    expect(within(fleet).getByText('Workspace')).toBeTruthy()
+    const coder = within(fleet).getByText('Accountant').closest('[role="row"]') as HTMLElement
+    expect(within(coder).getByText('Desk: /home/anna/books')).toBeTruthy()
+    const shopperRow = within(fleet).getByText('Shopper').closest('[role="row"]') as HTMLElement
+    expect(shopperRow.textContent).not.toContain('Desk:')
   })
 
   it('groups the Tasks by doer, then by time when asked, and remembers it; the state filter asks the server (mc-m5ee, mc-m6ff)', async () => {

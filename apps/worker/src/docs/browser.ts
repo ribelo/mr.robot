@@ -42,5 +42,5 @@ Prepare a cart or an order and stop before payment. Bank 2FA stays with the owne
 
 ## Screenshots
 
-Screenshots are not Workspace files. The platform keeps them for 7 days. The Conversation shows them.
+Screenshots are not Files. The platform keeps them for 7 days. The Conversation shows them.
 `

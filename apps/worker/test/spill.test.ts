@@ -45,7 +45,7 @@ const spilledPath = (seen: string) => /\/workspace\/(spill\/[^\s"\\)]+\.txt)/.ex
 describe('oversized tool results spill to the Workspace (ao-hf02, ao-5lzl, ao-antj)', () => {
   it('a result over the budget reaches the model as head, tail and a Workspace path that read and grep open', async () => {
     const id = await robot(32_000)
-    await say(id, 'find the rows', [{ calls: [{ name: 'grep', args: { on: 'workspace', pattern: '^row', glob: 'data/*' } }] }, { text: 'Found them.' }])
+    await say(id, 'find the rows', [{ calls: [{ name: 'grep', args: { on: 'files', pattern: '^row', glob: 'data/*' } }] }, { text: 'Found them.' }])
     const seen = lastToolResult(id)
     expect(seen).toContain('row 0001')
     expect(seen).toContain('row 0200')
@@ -59,7 +59,7 @@ describe('oversized tool results spill to the Workspace (ao-hf02, ao-5lzl, ao-an
     const whole = await env.FILES.get(`robots/${id}/${path}`)
     expect(await whole!.text()).toContain('row 0100')
     await say(id, 'look at the middle', [
-      { calls: [{ name: 'read', args: { on: 'workspace', file_path: `/workspace/${path}`, offset: 1, limit: 400 } }, { name: 'grep', args: { on: 'workspace', pattern: 'row 0100', glob: 'spill/**' } }] },
+      { calls: [{ name: 'read', args: { on: 'files', file_path: `/workspace/${path}`, offset: 1, limit: 400 } }, { name: 'grep', args: { on: 'files', pattern: 'row 0100', glob: 'spill/**' } }] },
       { text: 'Row 100 is there.' },
     ])
     const after = lastToolResult(id)
@@ -74,7 +74,7 @@ describe('oversized tool results spill to the Workspace (ao-hf02, ao-5lzl, ao-an
   it('a Robot with a small context budget spills a result that a large budget keeps inline', async () => {
     const small = await robot(32_000)
     const large = await robot(200_000)
-    for (const id of [small, large]) await say(id, 'find the rows', [{ calls: [{ name: 'grep', args: { on: 'workspace', pattern: '^row', glob: 'data/*' } }] }, { text: 'Found them.' }])
+    for (const id of [small, large]) await say(id, 'find the rows', [{ calls: [{ name: 'grep', args: { on: 'files', pattern: '^row', glob: 'data/*' } }] }, { text: 'Found them.' }])
     expect(spilledPath(lastToolResult(small))).toBeDefined()
     expect(spilledPath(lastToolResult(large))).toBeUndefined()
     expect(lastToolResult(large)).toContain('row 0100')

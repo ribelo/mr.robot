@@ -12,7 +12,7 @@ Once a night, a Robot with dreaming on looks back at its day. This is the contra
 
 - The dream is a Turn with the cause dream, at most 12 model steps.
 - It runs on the Robot's dream model, else the Space's dream model, else the Robot's own model.
-- Its tools: read, write, edit, glob and grep on the Workspace, memory_search, conversation_search, task_list, propose_skill, propose_member_file_edit, and ask once. Every other tool is refused, say too. Nobody watches; do not greet.
+- Its tools: read, write, edit, glob and grep on the Files, memory_search, conversation_search, task_list, propose_skill, propose_member_file_edit, and ask once. Every other tool is refused, say too. Nobody watches; do not greet.
 - Its writes are versions by "the dream". Its cost is memory's.
 
 ## Its inputs

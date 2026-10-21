@@ -47,7 +47,7 @@ describe('Rewind into a cold chapter (v1.19-review #1, #6)', () => {
   it("names the tools used since the point, the Subagent's included, from R2", async () => {
     const id = await robot()
     await turn(id, 'Start here.', [{ say: 'Ready.' }])
-    scripts.set(`${id}:sub`, [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'notes/from-child.md', content: 'x' } }] }, { text: 'REPORT: wrote.' }])
+    scripts.set(`${id}:sub`, [{ calls: [{ name: 'write', args: { on: 'files', file_path: 'notes/from-child.md', content: 'x' } }] }, { text: 'REPORT: wrote.' }])
     await turn(id, 'Delegate.', [{ calls: [{ name: 'subagent', args: { description: 'Write', prompt: 'Write a note' } }] }, { text: 'Started.' }, { say: 'Done.' }])
     const first = (await api<Trajectory>(ANNA, `/api/robots/${id}/trajectory`)).body
     const point = first.events.find((event) => event.type === 'user/message' && event.data.includes('Start here.'))!.seq

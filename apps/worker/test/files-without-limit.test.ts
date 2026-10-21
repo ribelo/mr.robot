@@ -215,10 +215,10 @@ describe('copy over presigned links (ob-d3rt, ob-qshq, ob-fgyk, ob-qr7v, ob-7hp3
     const bytes = binary(12 * MIB + 7)
     hostDisk.set('/home/anna/video.bin', bytes)
     const [up, down] = await calls(id, [
-      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/video.bin' }, to: { on: 'workspace', path: 'inbox/video.bin' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'inbox/video.bin' }, to: { on: 'Desk', path: '/home/anna/back/video.bin' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/video.bin' }, to: { on: 'files', path: 'inbox/video.bin' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'inbox/video.bin' }, to: { on: 'Desk', path: '/home/anna/back/video.bin' } } },
     ])
-    expect(json(up)).toEqual({ from: { on: 'Desk', path: '/home/anna/video.bin' }, to: { on: 'workspace', path: '/workspace/inbox/video.bin' }, bytes: bytes.length, ms: expect.any(Number), took: expect.stringMatching(/^12\.0 MB in /) })
+    expect(json(up)).toEqual({ from: { on: 'Desk', path: '/home/anna/video.bin' }, to: { on: 'files', path: '/workspace/inbox/video.bin' }, bytes: bytes.length, ms: expect.any(Number), took: expect.stringMatching(/^12\.0 MB in /) })
     expect(sameBytes(await workspaceBytes(id, 'inbox/video.bin'), bytes)).toBe(true)
     expect(json(down)).toMatchObject({ to: { on: 'Desk', path: '/home/anna/back/video.bin' }, bytes: bytes.length })
     expect(sameBytes(hostDisk.get('/home/anna/back/video.bin'), bytes)).toBe(true)
@@ -239,11 +239,11 @@ describe('copy over presigned links (ob-d3rt, ob-qshq, ob-fgyk, ob-qr7v, ob-7hp3
     const id = await robotWith({ tools: { files: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
     hostDisk.set('/home/anna/a.bin', binary(1000))
     r2Faults.next = 2
-    const [retried] = await calls(id, [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/a.bin' }, to: { on: 'workspace', path: 'a.bin' } } }])
+    const [retried] = await calls(id, [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/a.bin' }, to: { on: 'files', path: 'a.bin' } } }])
     expect(json(retried)).toMatchObject({ bytes: 1000 })
     expect(sameBytes(await workspaceBytes(id, 'a.bin'), binary(1000))).toBe(true)
     r2Faults.next = 100
-    const [refused] = await calls(id, [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/a.bin' }, to: { on: 'workspace', path: 'b.bin' } } }])
+    const [refused] = await calls(id, [{ name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/a.bin' }, to: { on: 'files', path: 'b.bin' } } }])
     expect(refused).toContain('failed after 4 attempts')
     expect(await workspaceBytes(id, 'b.bin')).toBeNull()
   })
@@ -296,17 +296,17 @@ describe('copy over presigned links (ob-d3rt, ob-qshq, ob-fgyk, ob-qr7v, ob-7hp3
     const bytes = binary(11 * MIB + 5)
     await env.FILES.put(`robots/${id}/inbox/model.bin`, bytes)
     const [toBox, back] = await calls(id, [
-      { name: 'copy', args: { from: { on: 'workspace', path: 'inbox/model.bin' }, to: { on: 'box', path: 'models/model.bin' } } },
-      { name: 'copy', args: { from: { on: 'box', path: 'models/model.bin' }, to: { on: 'workspace', path: 'out/model-copy.bin' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'inbox/model.bin' }, to: { on: 'box', path: 'models/model.bin' } } },
+      { name: 'copy', args: { from: { on: 'box', path: 'models/model.bin' }, to: { on: 'files', path: 'out/model-copy.bin' } } },
     ])
-    expect(json(toBox)).toMatchObject({ from: { on: 'workspace', path: '/workspace/inbox/model.bin' }, to: { on: 'box', path: '/workspace/models/model.bin' }, bytes: bytes.length, took: expect.stringMatching(/^11\.0 MB in /) })
+    expect(json(toBox)).toMatchObject({ from: { on: 'files', path: '/workspace/inbox/model.bin' }, to: { on: 'box', path: '/workspace/models/model.bin' }, bytes: bytes.length, took: expect.stringMatching(/^11\.0 MB in /) })
     expect(sameBytes(boxBytes(id, '/workspace/models/model.bin'), bytes)).toBe(true)
     expect(json(back)).toMatchObject({ bytes: bytes.length })
     expect(sameBytes(await workspaceBytes(id, 'out/model-copy.bin'), bytes)).toBe(true)
     // ws did it: the Box ran ws commands, and R2 saw ranged reads and part uploads.
     expect(boxLog.get(id)!.filter((entry) => entry.includes(': ws '))).toEqual([expect.stringContaining("ws get 'inbox/model.bin' '/workspace/models/model.bin'"), expect.stringContaining("ws put '/workspace/models/model.bin' 'out/model-copy.bin'")])
     // A failed ws is the copy's failure, with ws's words.
-    const [missing] = await calls(id, [{ name: 'copy', args: { from: { on: 'workspace', path: 'inbox/none.bin' }, to: { on: 'box', path: 'x' } } }])
+    const [missing] = await calls(id, [{ name: 'copy', args: { from: { on: 'files', path: 'inbox/none.bin' }, to: { on: 'box', path: 'x' } } }])
     expect(missing).toContain('no file "inbox/none.bin" in your Workspace')
   })
 })
@@ -333,7 +333,7 @@ describe('the Box\'s door applies the Workspace rules of the tools (D1)', () => 
     expect(atAsk.status).toBe(403)
     expect(atAsk.body['error']).toContain('at ask')
     // The copy tool asks the owner itself; once approved, ws may move that one file and nothing else.
-    const [waiting] = await calls(asking, [{ name: 'copy', args: { from: { on: 'workspace', path: 'data.bin' }, to: { on: 'box', path: 'in/data.bin' }, reason: 'Work on it' } }])
+    const [waiting] = await calls(asking, [{ name: 'copy', args: { from: { on: 'files', path: 'data.bin' }, to: { on: 'box', path: 'in/data.bin' }, reason: 'Work on it' } }])
     expect(waiting).toContain('waiting for your owner')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${asking}/conversation`)).body
     const ask = conversation.items.flatMap((item) => (item.kind === 'proposal' && item.proposal.kind === 'tool-call' && item.proposal.status === 'open' ? [item.proposal] : []))[0]!
@@ -398,7 +398,7 @@ describe('a copy\'s permit at the Box\'s door (deep review P4)', () => {
       seen['permit other'] = await scriptAsks(network, token, { op: 'get', path: 'other.bin' }, permit)
       seen['permit ls'] = await scriptAsks(network, token, { op: 'ls', path: '' }, permit)
     })
-    const [waiting] = await calls(id, [{ name: 'copy', args: { from: { on: 'workspace', path: 'data.bin' }, to: { on: 'box', path: 'in/data.bin' }, reason: 'Work on it' } }])
+    const [waiting] = await calls(id, [{ name: 'copy', args: { from: { on: 'files', path: 'data.bin' }, to: { on: 'box', path: 'in/data.bin' }, reason: 'Work on it' } }])
     expect(waiting).toContain('waiting for your owner')
     await approveAsk(id)
     expect(sameBytes(boxBytes(id, '/workspace/in/data.bin'), binary(1000))).toBe(true)

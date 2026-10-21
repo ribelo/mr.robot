@@ -90,8 +90,8 @@ describe('Save as definition (rm-gv6s, rm-gxp7, rm-77oh)', () => {
 
     scripts.set(id, [
       { calls: [
-        { name: 'write', args: { on: 'workspace', file_path: 'definition-draft/bookkeeper/MEMORY.md', content: '# MEMORY.md\n\n## Facts\n- Invoices are due on the 10th.\n\n## Preferences\n\n## Commitments\n' } },
-        { name: 'write', args: { on: 'workspace', file_path: 'definition-draft/bookkeeper/README.md', content: '# Bookkeeper\n\nCollects the invoices every week and files them.\n\nThe interview will ask:\n- where the invoices arrive\n' } },
+        { name: 'write', args: { on: 'files', file_path: 'definition-draft/bookkeeper/MEMORY.md', content: '# MEMORY.md\n\n## Facts\n- Invoices are due on the 10th.\n\n## Preferences\n\n## Commitments\n' } },
+        { name: 'write', args: { on: 'files', file_path: 'definition-draft/bookkeeper/README.md', content: '# Bookkeeper\n\nCollects the invoices every week and files them.\n\nThe interview will ask:\n- where the invoices arrive\n' } },
       ] },
       { text: '' },
     ])

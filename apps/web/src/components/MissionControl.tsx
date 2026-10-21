@@ -171,7 +171,7 @@ function MissionTables({ view, prefs, wholeSpace, onOpenTask, onForm, onMoreFlee
   const titles = useMemo(() => new Map(view.tasks.map((task) => [task.id, task.title])), [view.tasks])
   const moreFleet = useCallback(() => { if (view.fleetNext !== null) onMoreFleet() }, [view.fleetNext, onMoreFleet])
   const moreTasks = useCallback(() => { if (view.tasksNext !== null) onMoreTasks() }, [view.tasksNext, onMoreTasks])
-  const fleetColumns = `22px minmax(110px, 1.3fr) 108px minmax(110px, 1.2fr) minmax(100px, 1.2fr) minmax(80px, 0.9fr) 56px minmax(140px, 2.2fr)${wholeSpace ? ' minmax(80px, 0.8fr)' : ''} 76px`
+  const fleetColumns = `22px minmax(110px, 1.3fr) 108px minmax(110px, 1.2fr) minmax(100px, 1.2fr) minmax(80px, 0.9fr) 56px minmax(120px, 1.2fr) minmax(140px, 2fr)${wholeSpace ? ' minmax(80px, 0.8fr)' : ''} 76px`
   const taskColumns = '84px minmax(160px, 2.4fr) minmax(90px, 1fr) minmax(130px, 1.5fr) minmax(130px, 1.8fr) 46px 30px'
   return (
     <>
@@ -183,7 +183,7 @@ function MissionTables({ view, prefs, wholeSpace, onOpenTask, onForm, onMoreFlee
           rowKey={(robot) => robot.id}
           rowHeight={ROW_HEIGHT}
           columns={fleetColumns}
-          header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Last line</span>{wholeSpace ? <span>Owner</span> : null}<span /></>}
+          header={<><span /><span>Robot</span><span>State</span><span>Woke by</span><span>Task</span><span>Tool</span><span>Since</span><span>Workspace</span><span>Last line</span>{wholeSpace ? <span>Owner</span> : null}<span /></>}
           renderRow={(robot) => <FleetCells robot={robot} now={now} wholeSpace={wholeSpace}
             onInterrupt={() => void command((api) => api.interrupt(robot.id), [keys.robots, keys.tasks, keys.robot(robot.id)])}
             onInterruptSubagent={(childId) => void command((api) => api.interruptSubagent(robot.id, childId), [keys.robots, keys.robot(robot.id)])} />}
@@ -259,6 +259,8 @@ function FleetCells({ robot, now, wholeSpace, onInterrupt, onInterruptSubagent }
       <span className={robot.turn === null ? 'muted' : ''}>{cause?.task?.title ?? (robot.turn === null ? '' : 'no task')}</span>
       <span>{robot.turn?.activity ?? ''}</span>
       <span>{robot.turn === null ? '' : sinceText(robot.turn.since, now)}</span>
+      {/* Where it works (v1.21, cw-hiwf): its Workspace's Host and root, or nothing. */}
+      <span className="muted" title={robot.workspace == null ? undefined : `${robot.workspace.host}: ${robot.workspace.root}`}>{robot.workspace == null ? '' : `${robot.workspace.host}: ${robot.workspace.root}`}</span>
       <span className="muted">{robot.lastLine}</span>
       {wholeSpace ? <span className="muted">{robot.ownerName}</span> : null}
       <span>{robot.turn === null ? null : <button type="button" className="link danger" onClick={(event) => { event.stopPropagation(); onInterrupt() }}>Interrupt</button>}</span>

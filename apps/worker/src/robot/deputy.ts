@@ -231,6 +231,8 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
     ...(patch.requiresHosts === undefined ? {} : { requiresHosts: patch.requiresHosts }),
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.subagentModels === undefined ? {} : { subagentModels: patch.subagentModels }),
+    // The chief places his staff (v1.21, cw-g89b): checked on the Host by the Robot, as the owner's choice is.
+    ...(patch.workspace === undefined ? {} : { workspace: patch.workspace }),
     ...(patch.notifications === undefined ? {} : { notifications: {
       enabled: patch.notifications.enabled ?? shown.notifications.enabled,
       members: shown.notifications.members,

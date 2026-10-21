@@ -175,7 +175,7 @@ describe('the core of every Robot (sk-yw30, sk-nitq, sk-d9dk, sk-9sju, sk-9mvx, 
     const text = sections.find((section) => section.name === 'Platform')!.text
     expect(text).toContain('## Messages while you work')
     expect(text).toContain('call task_focus again with the new Task, or none, and the reason in one line')
-    expect(text).toContain('the path of the whole result under spill/ in your Workspace')
+    expect(text).toContain('the path of the whole result under spill/ in your Files')
     expect(text).toContain('Auto review is on')
     expect(sections.map((section) => section.name)).toEqual(expect.arrayContaining(['mr-robot:subagents', 'mr-robot:places']))
     expect(sections.find((section) => section.name === 'mr-robot:subagents')!.text).toContain('Models you may give them: stub/stub')

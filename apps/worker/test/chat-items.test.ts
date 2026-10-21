@@ -43,7 +43,7 @@ async function turn(id: string, text: string, script: StubReply[]): Promise<void
 async function history(id: string, turns: number): Promise<void> {
   for (let index = 0; index < turns; index += 1) {
     await turn(id, `Message ${index}`, index % 3 === 0
-      ? [{ calls: [{ name: 'react', args: { emoji: '👍' } }, { name: 'glob', args: { on: 'workspace', pattern: '*.md' } }] }, { say: `Reply ${index}` }]
+      ? [{ calls: [{ name: 'react', args: { emoji: '👍' } }, { name: 'glob', args: { on: 'files', pattern: '*.md' } }] }, { say: `Reply ${index}` }]
       : index % 3 === 1 ? [{ calls: [{ name: 'task_create', args: { title: `Task ${index}`, instructions: 'Do it.', assignee: 'self', timing: { kind: 'unscheduled' } } }] }, { say: `Reply ${index}` }]
         : [{ say: `Reply ${index}` }])
   }

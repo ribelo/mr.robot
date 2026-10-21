@@ -16,7 +16,8 @@ import { formatCursor, parseCursor, type ChatCursor } from './chat-items.ts'
 import { chainAccounts, chainOf } from './chain.ts'
 import type { RobotConfig, RobotStore, Wakeup } from './store.ts'
 import type { Chapter } from './chapters.ts'
-import type { BoxView, LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause } from '@mr-robot/protocol'
+import type { BoxView, LastWakeup, RobotTurn, SubagentLine, SubagentView, WakeupCause, WorkspaceSetting } from '@mr-robot/protocol'
+import { WORKSPACE, workspacePlace } from './workspace-setting.ts'
 import { SubagentStore } from './subagent-store.ts'
 import { PAGE_TITLES } from '../pages/page.ts'
 
@@ -538,6 +539,7 @@ export const report = Effect.gen(function* () {
     turn: yield* runningTurn,
     lastWakeup: store.get<LastWakeup>(LAST_WAKEUP) ?? null,
     subagents: yield* subagentLines,
+    workspace: workspacePlace(store.get<WorkspaceSetting>(WORKSPACE)),
   }
   yield* Effect.promise(() => platform.env.SPACE.getByName(SPACE_ID).robotChanged(entry))
 })

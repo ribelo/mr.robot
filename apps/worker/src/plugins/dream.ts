@@ -16,6 +16,7 @@
  */
 import type { Duty } from '../robot/duties.ts'
 import type { RobotStore } from '../robot/store.ts'
+import { namesFiles } from './snapshot.ts'
 
 export const DREAM_STEPS = 12
 export const DREAM_SECTION_LINES = 30
@@ -63,7 +64,7 @@ export function dreamNote(owner: string, date: string, evidence: DreamEvidence, 
 }
 
 /** One question for the morning, carrying dismiss_on_move_on (dm-s11z). */
-export function dreamArgsCheck(): (tool: string, args: Readonly<Record<string, unknown>>) => string | undefined {
+export function dreamArgsCheck(hasWorkspace: () => boolean): (tool: string, args: Readonly<Record<string, unknown>>) => string | undefined {
   let asked = false
   return (tool, args) => {
     if (tool === 'ask') {
@@ -72,7 +73,7 @@ export function dreamArgsCheck(): (tool: string, args: Readonly<Record<string, u
       asked = true
       return undefined
     }
-    return args['on'] === undefined || args['on'] === 'workspace' ? undefined : 'a dream works only on the Workspace (on: "workspace")'
+    return namesFiles(args['on'], hasWorkspace()) ? undefined : 'a dream works only on your Files (on: "files")'
   }
 }
 

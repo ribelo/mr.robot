@@ -12,10 +12,10 @@ A Host is offline when its heartbeat stops. The Hosts line in the runtime sectio
 
 A Host offers three facets, each a separate grant item:
 - browser: the Host browser, which is Chrome on that computer. It needs a graphical session. Read browser.md.
-- files: read, write, edit, glob, grep, delete_file and copy with on set to the name of the Host. copy moves a file of any size between the Host and your Workspace or another Host.
+- files: read, write, edit, glob, grep, delete_file and copy with on set to the name of the Host. copy moves a file of any size between the Host and your Files or another Host.
 - shell: run with on set to the name of the Host. It runs a command in bash (pwsh on Windows) under the sandbox of the app. A long command goes on as a job, as on the Box (read box.md). A job is lost if the app restarts, the Host is away for more than five minutes (a reconnect of the same app keeps it), or you lose access to the Host.
 
-Every tool takes a mandatory \`on\`: "workspace", "box" or the name of a Host. There is no default. A call to a Host without your facet, or to an unknown name, is refused and names the grant. A new Robot gets deny on all Hosts; Mr. Robot gets every facet his owner reaches, files and shell at ask.
+Every tool takes a mandatory \`on\`: "files", "workspace", "box" or the name of a Host. There is no default. A call to a Host without your facet, or to an unknown name, is refused and names the grant. A new Robot gets deny on all Hosts; Mr. Robot gets every facet his owner reaches, files and shell at ask.
 
 ## Your directory, modes and the sandbox
 

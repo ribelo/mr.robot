@@ -60,11 +60,11 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
     hostDisk.set('notes/z.md', text('one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nbeta again\n'))
     const results = await calls(id, [
       // The Workspace
-      { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'alpha\nbeta\n' } },
-      { name: 'read', args: { on: 'workspace', file_path: 'notes/a.md' } },
-      { name: 'edit', args: { on: 'workspace', file_path: 'notes/a.md', old_string: 'beta', new_string: 'gamma' } },
-      { name: 'glob', args: { on: 'workspace', pattern: 'notes/**' } },
-      { name: 'grep', args: { on: 'workspace', pattern: 'gamma' } },
+      { name: 'write', args: { on: 'files', file_path: 'notes/a.md', content: 'alpha\nbeta\n' } },
+      { name: 'read', args: { on: 'files', file_path: 'notes/a.md' } },
+      { name: 'edit', args: { on: 'files', file_path: 'notes/a.md', old_string: 'beta', new_string: 'gamma' } },
+      { name: 'glob', args: { on: 'files', pattern: 'notes/**' } },
+      { name: 'grep', args: { on: 'files', pattern: 'gamma' } },
       // The Box
       { name: 'write', args: { on: 'box', file_path: 'work/b.txt', content: 'one\ntwo\n' } },
       { name: 'read', args: { on: 'box', file_path: '/workspace/work/b.txt' } },
@@ -82,16 +82,16 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
       { name: 'run', args: { on: 'Desk', command: 'uptime' } },
       { name: 'delete_file', args: { on: 'Desk', path: '/home/anna/h.txt' } },
       // The Workspace to a Host and back, to the Box and back, inside the Workspace
-      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/a.md' }, to: { on: 'Desk', path: '/home/anna/copy.md' } } },
-      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/copy.md' }, to: { on: 'workspace', path: 'inbox/copy.md' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/a.md' }, to: { on: 'box', path: 'box/in.md' } } },
-      { name: 'copy', args: { from: { on: 'box', path: 'box/in.md' }, to: { on: 'workspace', path: 'inbox/from-box.md' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/a.md' }, to: { on: 'workspace', path: 'notes/b.md' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'notes/a.md' }, to: { on: 'Desk', path: '/home/anna/copy.md' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/copy.md' }, to: { on: 'files', path: 'inbox/copy.md' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'notes/a.md' }, to: { on: 'box', path: 'box/in.md' } } },
+      { name: 'copy', args: { from: { on: 'box', path: 'box/in.md' }, to: { on: 'files', path: 'inbox/from-box.md' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'notes/a.md' }, to: { on: 'files', path: 'notes/b.md' } } },
     ])
     const [wWrite, wRead, wEdit, wGlob, wGrep, bWrite, bRead, bEdit, bGlob, bGrep, bRun, bDelete, hWrite, hRead, hEdit, hGlob, hGrep, hRun, hDelete, c1, c2, c3, c4, c5] = results
-    expect(json(wWrite)).toMatchObject({ on: 'workspace', written: '/workspace/notes/a.md', bytes: 11 })
+    expect(json(wWrite)).toMatchObject({ on: 'files', written: '/workspace/notes/a.md', bytes: 11 })
     expect(wRead).toContain('2: beta')
-    expect(json(wEdit)).toMatchObject({ on: 'workspace', edited: '/workspace/notes/a.md' })
+    expect(json(wEdit)).toMatchObject({ on: 'files', edited: '/workspace/notes/a.md' })
     expect(JSON.parse(wGlob!)).toEqual({ paths: ['notes/a.md'], truncated: false })
     expect(JSON.parse(wGrep!)).toEqual({ matches: [{ path: 'notes/a.md', line: 2, text: 'gamma' }], truncated: false })
     expect(json(bWrite)).toMatchObject({ on: 'box', written: '/workspace/work/b.txt', bytes: 8 })
@@ -110,13 +110,13 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
     expect(json(hRun)).toMatchObject({ kind: 'foreground', stdout: 'ran: uptime', exitCode: 0 })
     expect(json(hDelete)).toEqual({ deleted: '/home/anna/h.txt' })
     expect(hostDisk.has('/home/anna/h.txt')).toBe(false)
-    expect(json(c1)).toMatchObject({ from: { on: 'workspace', path: '/workspace/notes/a.md' }, to: { on: 'Desk', path: '/home/anna/copy.md' }, bytes: 12 })
+    expect(json(c1)).toMatchObject({ from: { on: 'files', path: '/workspace/notes/a.md' }, to: { on: 'Desk', path: '/home/anna/copy.md' }, bytes: 12 })
     expect(new TextDecoder().decode(hostDisk.get('/home/anna/copy.md'))).toBe('alpha\ngamma\n')
-    expect(json(c2)).toMatchObject({ to: { on: 'workspace', path: '/workspace/inbox/copy.md' }, bytes: 12 })
+    expect(json(c2)).toMatchObject({ to: { on: 'files', path: '/workspace/inbox/copy.md' }, bytes: 12 })
     expect(await workspaceText(id, 'inbox/copy.md')).toBe('alpha\ngamma\n')
     expect(json(c3)).toMatchObject({ to: { on: 'box', path: '/workspace/box/in.md' } })
     expect(new TextDecoder().decode(boxDisks.get(id)!.get('/workspace/box/in.md')!.bytes)).toBe('alpha\ngamma\n')
-    expect(json(c4)).toMatchObject({ to: { on: 'workspace', path: '/workspace/inbox/from-box.md' } })
+    expect(json(c4)).toMatchObject({ to: { on: 'files', path: '/workspace/inbox/from-box.md' } })
     expect(await workspaceText(id, 'inbox/from-box.md')).toBe('alpha\ngamma\n')
     expect(json(c5)).toMatchObject({ bytes: 12 })
     expect(await workspaceText(id, 'notes/b.md')).toBe('alpha\ngamma\n')
@@ -137,8 +137,8 @@ describe('each tool on each place (ob-5fjs, ob-ff4g, ob-9afl)', () => {
 
   it('does not run commands on the Workspace', async () => {
     const id = await robotWith({ tools: { files: 'allow', box: 'allow' } })
-    const [run] = await calls(id, [{ name: 'run', args: { on: 'workspace', command: 'ls' } }])
-    expect(run).toContain('the Workspace holds files, it runs no commands')
+    const [run] = await calls(id, [{ name: 'run', args: { on: 'files', command: 'ls' } }])
+    expect(run).toContain('your Files hold files, they run no commands')
   })
 })
 
@@ -152,8 +152,8 @@ describe('glob and grep say when they stopped early (deep review P15)', () => {
     for (let index = 0; index <= 20_000; index++) hostDisk.set(`tree/${index}.txt`, new Uint8Array())
     hostDisk.set('logs/hits.txt', new TextEncoder().encode('hit\n'.repeat(201)))
     const results = await calls(id, [
-      { name: 'grep', args: { on: 'workspace', pattern: 'needle', glob: 'even/*' } },
-      { name: 'grep', args: { on: 'workspace', pattern: 'needle', glob: 'over/*' } },
+      { name: 'grep', args: { on: 'files', pattern: 'needle', glob: 'even/*' } },
+      { name: 'grep', args: { on: 'files', pattern: 'needle', glob: 'over/*' } },
       { name: 'write', args: { on: 'box', file_path: 'proj/exact.txt', content: 'hit\n'.repeat(200) } },
       { name: 'write', args: { on: 'box', file_path: 'logs/hits.txt', content: 'hit\n'.repeat(201) } },
       { name: 'write', args: { on: 'box', file_path: 'proj/.cache/uv/hit.txt', content: 'hit\n' } },
@@ -188,14 +188,14 @@ describe('the grants gate the places (ob-dyg4, ob-qnf7)', () => {
     // The Box, and the files of Desk: no files group, no Desk shell.
     const id = await robotWith({ tools: { box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
     const results = await calls(id, [
-      { name: 'read', args: { on: 'workspace', file_path: 'SOUL.md' } },
+      { name: 'read', args: { on: 'files', file_path: 'SOUL.md' } },
       { name: 'run', args: { on: 'Desk', command: 'id' } },
       { name: 'read', args: { on: 'Laptop', file_path: '/etc/hostname' } },
       { name: 'read', args: { on: 'Nowhere', file_path: '/etc/hostname' } },
-      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'workspace', path: 'x' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: '/home/anna/x' }, to: { on: 'files', path: 'x' } } },
       { name: 'read', args: { on: 'Desk', file_path: '/etc/hostname' } },
     ])
-    expect(results[0]).toContain('you hold no grant on your Workspace files (the tool group "files")')
+    expect(results[0]).toContain('you hold no grant on your Files (the tool group "files")')
     expect(results[1]).toContain('the grant "Desk · shell"')
     expect(results[2]).toContain('the grant "Laptop · files"')
     expect(results[3]).toContain('there is no such place')
@@ -221,7 +221,7 @@ describe('the grants gate the places (ob-dyg4, ob-qnf7)', () => {
     const desk = await fakeHost()
     const id = await robotWith({ tools: { files: 'allow', box: 'ask' }, hosts: { [`${desk.hostId}:shell`]: 'allow' } })
     const [workspace, box, host] = await calls(id, [
-      { name: 'write', args: { on: 'workspace', file_path: 'a.md', content: 'x' } },
+      { name: 'write', args: { on: 'files', file_path: 'a.md', content: 'x' } },
       { name: 'run', args: { on: 'box', command: 'ls', reason: 'List the Box' } },
       { name: 'run', args: { on: 'Desk', command: 'uptime', reason: 'Check it' } },
     ])
@@ -237,8 +237,8 @@ describe('only the Workspace reaches the owned files (ob-pfcu)', () => {
     const desk = await fakeHost()
     const id = await robotWith({ tools: { files: 'allow', box: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
     const results = await calls(id, [
-      { name: 'read', args: { on: 'workspace', file_path: 'USER.md' } },
-      { name: 'read', args: { on: 'workspace', file_path: 'docs/box.md' } },
+      { name: 'read', args: { on: 'files', file_path: 'USER.md' } },
+      { name: 'read', args: { on: 'files', file_path: 'docs/box.md' } },
       { name: 'read', args: { on: 'box', file_path: 'USER.md' } },
       { name: 'read', args: { on: 'box', file_path: '/workspace/docs/box.md' } },
       { name: 'write', args: { on: 'box', file_path: 'docs/skills/asking/SKILL.md', content: 'x' } },
@@ -248,11 +248,11 @@ describe('only the Workspace reaches the owned files (ob-pfcu)', () => {
       { name: 'write', args: { on: 'box', file_path: 'docs/mine.md', content: 'mine' } },
       { name: 'read', args: { on: 'Desk', file_path: '/docs/box.md' } },
       // And the Workspace refuses to change them.
-      { name: 'write', args: { on: 'workspace', file_path: 'docs/box.md', content: 'mine' } },
+      { name: 'write', args: { on: 'files', file_path: 'docs/box.md', content: 'mine' } },
     ])
     expect(results[0]).toContain('<path>/workspace/USER.md</path>')
     expect(results[1]).toContain('# The Box')
-    for (const refused of results.slice(2, 7)) expect(refused).toContain('reachable only with on "workspace"')
+    for (const refused of results.slice(2, 7)) expect(refused).toContain('reachable only with on "files"')
     expect(json(results[7])).toMatchObject({ on: 'box', written: '/workspace/docs/mine.md' })
     expect(results[8]).toContain('1: hello')
     expect(results[9]).toContain('docs/')
@@ -324,7 +324,7 @@ describe('the upgrade from v1.15 (deep review P18)', () => {
     const id = await robotWith({ tools: { box: 'ask', files: 'ask' } })
     const [old, kept] = await testRobot(id).legacyToolAsksForTest([
       { tool: 'box_run', arguments: { command: 'rm -rf build' }, reason: 'Clean the build' },
-      { tool: 'write', arguments: { on: 'workspace', file_path: 'notes/a.md', content: 'milk' }, reason: 'Keep the list' },
+      { tool: 'write', arguments: { on: 'files', file_path: 'notes/a.md', content: 'milk' }, reason: 'Keep the list' },
     ])
     const items = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items
     const asks = items.flatMap((item) => (item.kind === 'proposal' ? [item.proposal] : []))
@@ -368,10 +368,10 @@ describe('a Robot in setup reaches its Workspace (S1)', () => {
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
     const [written, outside] = await calls(body.id, [
-      { name: 'write', args: { on: 'workspace', file_path: 'SOUL.md', content: 'I am calm.' } },
+      { name: 'write', args: { on: 'files', file_path: 'SOUL.md', content: 'I am calm.' } },
       { name: 'run', args: { on: 'box', command: 'ls' } },
     ])
-    expect(json(written)).toMatchObject({ on: 'workspace', written: '/workspace/SOUL.md', bytes: 10 })
+    expect(json(written)).toMatchObject({ on: 'files', written: '/workspace/SOUL.md', bytes: 10 })
     expect(await workspaceText(body.id, 'SOUL.md')).toBe('I am calm.')
     // Setup opens the Workspace and nothing else.
     expect(outside).toBeDefined()
@@ -385,16 +385,16 @@ describe('copy keeps the owned paths in the Workspace (S5)', () => {
     const id = await robotWith({ tools: { files: 'allow' }, hosts: { [`${desk.hostId}:files`]: 'allow' } })
     hostDisk.set('USER.md', new TextEncoder().encode('not the owner\'s file'))
     const results = await calls(id, [
-      { name: 'copy', args: { from: { on: 'Desk', path: 'USER.md' }, to: { on: 'workspace', path: 'inbox/user.md' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'notes/none.md' }, to: { on: 'Desk', path: 'docs/box.md' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'docs/box.md' }, to: { on: 'Desk', path: '/home/anna/box.md' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'USER.md' }, to: { on: 'Desk', path: '/home/anna/user.md' } } },
-      { name: 'copy', args: { from: { on: 'workspace', path: 'docs/none.md' }, to: { on: 'Desk', path: '/home/anna/none.md' } } },
+      { name: 'copy', args: { from: { on: 'Desk', path: 'USER.md' }, to: { on: 'files', path: 'inbox/user.md' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'notes/none.md' }, to: { on: 'Desk', path: 'docs/box.md' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'docs/box.md' }, to: { on: 'Desk', path: '/home/anna/box.md' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'USER.md' }, to: { on: 'Desk', path: '/home/anna/user.md' } } },
+      { name: 'copy', args: { from: { on: 'files', path: 'docs/none.md' }, to: { on: 'Desk', path: '/home/anna/none.md' } } },
     ])
-    expect(results[0]).toContain('reachable only with on "workspace"')
+    expect(results[0]).toContain('reachable only with on "files"')
     expect(await workspaceText(id, 'inbox/user.md')).toBeNull()
-    expect(results[1]).toContain('reachable only with on "workspace"')
-    expect(json(results[2])).toMatchObject({ from: { on: 'workspace', path: '/workspace/docs/box.md' }, to: { on: 'Desk', path: '/home/anna/box.md' } })
+    expect(results[1]).toContain('reachable only with on "files"')
+    expect(json(results[2])).toMatchObject({ from: { on: 'files', path: '/workspace/docs/box.md' }, to: { on: 'Desk', path: '/home/anna/box.md' } })
     expect(new TextDecoder().decode(hostDisk.get('/home/anna/box.md'))).toContain('# The Box')
     expect(json(results[3])).toMatchObject({ to: { on: 'Desk', path: '/home/anna/user.md' } })
     expect(hostDisk.has('/home/anna/user.md')).toBe(true)

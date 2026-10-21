@@ -6,7 +6,7 @@
 import * as Schema from 'effect/Schema'
 import { hostPartDeadlineMs, RUN_MAX_WAIT_SECONDS, type UploadPart } from '@mr-robot/host-protocol'
 import type { Reach } from '../places/host-facet.ts'
-import { HostHub, jobRef, type HostEntry, type HostAction, type HostRunAnswer } from './hosts.ts'
+import { HostHub, jobRef, type CallWhere, type HostEntry, type HostAction, type HostRunAnswer } from './hosts.ts'
 import { replyOf, type HostCallReply } from './host-call.ts'
 import { GoogleConsents } from './google-consent.ts'
 import { CONNECTOR_PLUGINS } from '../connectors/registry.ts'
@@ -39,6 +39,9 @@ import { authorLabel, authorOf, FileHistory, memberHistoryBase, versionView, typ
 /** The render limits of Page PDFs (v1.17 review): a leaked share link cannot run up the bill. */
 export const PDF_RENDERS_PER_TOKEN_HOUR = 5
 export const PDF_RENDERS_PER_MEMBER_DAY = 50
+/** A call on the Robot's Workspace carries its current directory there (v1.21); any other call none. */
+const at = (cwd: string | undefined): CallWhere => (cwd === undefined ? {} : { cwd })
+
 const HOUR_MS = 3_600_000
 const DAY_MS = 24 * HOUR_MS
 
@@ -1144,15 +1147,16 @@ export class Member extends DurableObject<Env> {
   unpairHost(id: string): Promise<void> { return this.hosts.unpair(id) }
 
   // A Robot's calls on a Host answer with a HostCallReply: an expected failure crosses to the Robot as an encoded tagged value (deep review P16).
-  hostRead(id: string, robotId: string, path: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Read({ path, access }), undefined, { action: 'read', detail: path })) }
-  hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }, reach: Reach = 'granted') { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Write({ ...input, access }), undefined, { action: reach === 'escalated' ? 'write (escalated)' : 'write', detail: input.path }, reach)) }
+  // `cwd` (v1.21): the call names the Robot's Workspace, and a relative path starts in its current directory there (cw-6xs7).
+  hostRead(id: string, robotId: string, path: string, cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Read({ path, access }), undefined, { action: 'read', detail: path }, 'granted', at(cwd))) }
+  hostWrite(id: string, robotId: string, input: { path: string; text?: string; base64?: string }, reach: Reach = 'granted', cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Write({ ...input, access }), undefined, { action: reach === 'escalated' ? 'write (escalated)' : 'write', detail: input.path }, reach, at(cwd))) }
   /** One piece of a copy, under the Host's file Grant; the copy as a whole is logged once (recordHostCopy). */
-  hostCopySize(id: string, robotId: string, path: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.CopyStat({ path, access }), 60_000)) }
+  hostCopySize(id: string, robotId: string, path: string, cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.CopyStat({ path, access }), 60_000, undefined, 'granted', at(cwd))) }
   // The Member DO only coordinates a copy: the bytes go between the Host app and R2 (v1.16 ticket 06). A call carries one part, and has
   // that part's deadline (deep review P12); when it runs out, the app is told to stop and stops its requests and writes.
-  hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Upload({ ...input, access }), hostPartDeadlineMs(input.parts.reduce((sum, part) => sum + part.length, 0)))) }
+  hostUpload(id: string, robotId: string, input: { path: string; size: number; parts: readonly UploadPart[] }, cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Upload({ ...input, access }), hostPartDeadlineMs(input.parts.reduce((sum, part) => sum + part.length, 0)), undefined, 'granted', at(cwd))) }
   /** One window of a download, bytes `from` to `until`, into the part file of the copy `copy`; the Host app puts the file in place when the window reaches the end. */
-  hostDownload(id: string, robotId: string, input: { copy: string; path: string; url: string; size: number; partBytes: number; from: number; until: number }, reach: Reach = 'granted') { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Download({ ...input, access }), hostPartDeadlineMs(input.until - input.from), undefined, reach)) }
+  hostDownload(id: string, robotId: string, input: { copy: string; path: string; url: string; size: number; partBytes: number; from: number; until: number }, reach: Reach = 'granted', cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Download({ ...input, access }), hostPartDeadlineMs(input.until - input.from), undefined, reach, at(cwd))) }
   recordHostCopy(id: string, robotId: string, detail: string, outcome: string): void { this.hosts.recordCopy({ hostId: id, robotId, detail, outcome }) }
   /**
    * A command under the shell grant's mode and roots, run by the app as a job (v1.16 ticket 03): the call waits up to `timeoutMs` and
@@ -1160,21 +1164,28 @@ export class Member extends DurableObject<Env> {
    * app may hold it as a job (HostRunAnswer). `job` is the Robot's name for it.
    * An escalated `reach` is a call its owner approved to run without the sandbox, once (ob-ifak).
    */
-  hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; background: boolean; job: string }, reach: Reach = 'granted'): Promise<HostCallReply<HostRunAnswer>> {
+  hostRun(id: string, robotId: string, input: { command: string; cwd?: string; timeoutMs?: number; background: boolean; job: string }, reach: Reach = 'granted', workspaceCwd?: string): Promise<HostCallReply<HostRunAnswer>> {
     const { job, ...payload } = input
     const wait = input.background ? 60_000 : Math.min(input.timeoutMs ?? 120_000, RUN_MAX_WAIT_SECONDS * 1000) + 10_000
-    return replyOf(this.hosts.runCommand(id, robotId, job, (client, access) => client.Run({ ...payload, job: jobRef(robotId, job), access }), wait, { action: reach === 'escalated' ? 'run (escalated)' : 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})` }, reach))
+    return replyOf(this.hosts.runCommand(id, robotId, job, (client, access) => client.Run({ ...payload, job: jobRef(robotId, job), access }), wait, { action: reach === 'escalated' ? 'run (escalated)' : 'run', detail: input.cwd === undefined ? input.command : `${input.command}  (in ${input.cwd})` }, reach, at(workspaceCwd)))
   }
   hostJobList(id: string, robotId: string) { return replyOf(this.hosts.jobList(id, robotId)) }
   hostJobOutput(id: string, robotId: string, job: string, stream: 'out' | 'err', offset: number) { return replyOf(this.hosts.jobOutput(id, robotId, job, stream, offset)) }
   hostJobKill(id: string, robotId: string, job: string) { return replyOf(this.hosts.jobKill(id, robotId, job)) }
   /** List, search and delete under the files grant, done by the app in Node (v1.16 ticket 02); a delete is a write and obeys the mode and roots. */
-  hostGlob(id: string, robotId: string, pattern: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Glob({ pattern, access }), 60_000, { action: 'glob', detail: pattern })) }
-  hostGrep(id: string, robotId: string, input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Grep({ ...input, access }), 60_000, { action: 'grep', detail: input.pattern })) }
+  hostGlob(id: string, robotId: string, pattern: string, cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Glob({ pattern, access }), 60_000, { action: 'glob', detail: pattern }, 'granted', at(cwd))) }
+  hostGrep(id: string, robotId: string, input: { pattern: string; ignoreCase: boolean; glob?: string; path?: string }, cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Grep({ ...input, access }), 60_000, { action: 'grep', detail: input.pattern }, 'granted', at(cwd))) }
   /** The Workspace picker (v1.21, cw-gx04): the directories in a directory of the Host, and what a path is there. Reads under the files facet. */
   hostListDirectory(id: string, robotId: string, path: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.ListDirectory({ path, access }))) }
   hostStat(id: string, robotId: string, path: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.Stat({ path, access }))) }
-  hostDelete(id: string, robotId: string, path: string, reach: Reach = 'granted') { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Delete({ path, access }), 60_000, { action: reach === 'escalated' ? 'delete (escalated)' : 'delete', detail: path }, reach)) }
+  hostDelete(id: string, robotId: string, path: string, reach: Reach = 'granted', cwd?: string) { return replyOf(this.hosts.run(id, robotId, 'files', (client, access) => client.Delete({ path, access }), 60_000, { action: reach === 'escalated' ? 'delete (escalated)' : 'delete', detail: path }, reach, at(cwd))) }
+  /** The Robot moves within its Workspace (v1.21, cw-llvx): the app checks the directory; the Robot keeps it. */
+  hostWorkingDirectory(id: string, robotId: string, cd: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.WorkingDirectory({ cd, access }), 30_000, { action: 'cd', detail: cd }, cwd)) }
+  /**
+   * The Robot's Workspace on this Host closes (v1.21, cw-p4bm): its setting changed or it was deleted. Sent to an app that is online and
+   * new enough; nothing else to do when it is not (the app replaces the session when it sees another Workspace, and closes all on quit).
+   */
+  hostWorkspaceClose(id: string, robotDirectory: string): Promise<void> { return this.hosts.closeWorkspace(id, robotDirectory) }
   hostActions(id: string): HostAction[] { return this.hosts.actions(id) }
   hostBrowserOpen(id: string, robotId: string, robotName: string): Promise<HostCallReply<string>> { return replyOf(this.hosts.openBrowser(id, robotId, robotName)) }
   hostBrowserClose(id: string, robotId: string, session: string): Promise<void> { return this.hosts.closeBrowser(id, robotId, session) }

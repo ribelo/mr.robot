@@ -347,7 +347,9 @@ export class HostShell implements FileChanges {
     await this.recheck()
     if (this.problem !== undefined) throw new Error(this.problem)
     const { directory, policy } = await this.place(input.access)
-    const cwd = input.cwd === undefined ? directory : expandPath(this.home, directory, input.cwd)
+    // On the Workspace a command starts in the Robot's current directory there (cw-6xs7), else in the Robot's directory.
+    const base = input.access.cwd ?? directory
+    const cwd = input.cwd === undefined ? base : expandPath(this.home, base, input.cwd)
     if (!(await stat(cwd).then((info) => info.isDirectory(), () => false))) throw Object.assign(new Error(`${cwd} is not a directory on this computer`), { code: 'ENOENT' })
     const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
     let started: ShellExecution

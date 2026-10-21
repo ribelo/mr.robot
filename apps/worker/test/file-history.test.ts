@@ -42,7 +42,7 @@ describe('file history of a Robot (rm-d68k, rm-7jo4)', () => {
   it('keeps each version with who wrote it, reads one, and restores it as a new version the Robot hears about', async () => {
     const id = await robot()
     await save(id, '# MEMORY.md\nOwner wrote one.')
-    await turn(id, 'note it', [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'MEMORY.md', content: '# MEMORY.md\nThe Robot wrote two.' } }] }, { say: 'Noted.' }])
+    await turn(id, 'note it', [{ calls: [{ name: 'write', args: { on: 'files', file_path: 'MEMORY.md', content: '# MEMORY.md\nThe Robot wrote two.' } }] }, { say: 'Noted.' }])
     await save(id, '# MEMORY.md\nOwner wrote three.')
 
     const listed = await history(id)

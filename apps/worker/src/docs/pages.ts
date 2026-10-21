@@ -1,6 +1,6 @@
 export const PAGES = `# Pages
 
-A Page is a document that a Robot writes for its owner. It is a file under pages/ in the Robot's Workspace, in Markdown (.md) or HTML (.html). The file is the state: the reading view, the PDF and a share link all read the file. The Files view, the file tools, Rewind and Start over work on Pages like on any other file.
+A Page is a document that a Robot writes for its owner. It is a file under pages/ in the Robot's Files, in Markdown (.md) or HTML (.html). The file is the state: the reading view, the PDF and a share link all read the file. The Files view, the file tools, Rewind and Start over work on Pages like on any other file.
 
 ## The title
 
@@ -17,15 +17,15 @@ The Robot writes the file with the file tools. Then it calls say with the path i
 
 The address is #/r/<robot>/pages/<path>.
 
-- A Markdown Page shows its title, a table of contents from its "##" and "###" headings, and the text with tables, TeX math (KaTeX), Mermaid diagrams and images from the Workspace.
+- A Markdown Page shows its title, a table of contents from its "##" and "###" headings, and the text with tables, TeX math (KaTeX), Mermaid diagrams and images from the Files.
 - An HTML Page runs in a frame without the app's origin. It can run its own inline script. It cannot reach the app, its cookies or its API, and it loads nothing from the internet. Links open in a new tab. Source shows the HTML.
-- An HTML Page cannot show images from the Workspace; only images written into the file as data: URLs. A Page that needs Workspace images is Markdown.
+- An HTML Page cannot show images from the Files; only images written into the file as data: URLs. A Page that needs Files images is Markdown.
 - Rename (the owner only) changes the title.
 - PDF prints the Page through Browser Rendering and downloads it.
 
 ## PDF and its limits
 
-Browser Rendering prints a Page at most once per version of its content: the file and the Workspace images it shows. Every later PDF of the same version, from the app or from a share link, is the kept copy and costs nothing. The rendered HTML of a Page is kept the same way.
+Browser Rendering prints a Page at most once per version of its content: the file and the Files images it shows. Every later PDF of the same version, from the app or from a share link, is the kept copy and costs nothing. The rendered HTML of a Page is kept the same way.
 
 - A share link prints at most 5 new PDFs in an hour.
 - All Pages of one Member print at most 50 new PDFs in a day, the owner's own included.

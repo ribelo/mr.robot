@@ -48,9 +48,9 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
   it('delete_file on a missing file fails instead of reporting a deletion (ts-6z2k)', async () => {
     const id = await robotWith({ tools: ['files'] })
     const [missing, existing, deleted] = await say(id, [
-      { name: 'delete_file', args: { on: 'workspace', path: 'notes/nope.md' } },
-      { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'a' } },
-      { name: 'delete_file', args: { on: 'workspace', path: 'notes/a.md' } },
+      { name: 'delete_file', args: { on: 'files', path: 'notes/nope.md' } },
+      { name: 'write', args: { on: 'files', file_path: 'notes/a.md', content: 'a' } },
+      { name: 'delete_file', args: { on: 'files', path: 'notes/a.md' } },
     ])
     expect(missing).toContain('No file "notes/nope.md" in your Workspace')
     expect(missing).not.toContain('"deleted"')
@@ -61,10 +61,10 @@ describe('input validation before any call (ts-6z2k, ts-lnox, ts-nivs, ts-yf1d)'
   it('glob and grep return their lists with a truncated flag (ts-uy4d, deep review P15)', async () => {
     const id = await robotWith({ tools: ['files'] })
     const results = await say(id, [
-      { name: 'write', args: { on: 'workspace', file_path: 'notes/a.md', content: 'alpha\nbeta' } },
-      { name: 'glob', args: { on: 'workspace', pattern: 'notes/**' } },
-      { name: 'grep', args: { on: 'workspace', pattern: 'beta' } },
-      { name: 'glob', args: { on: 'workspace', pattern: 'nothing/**' } },
+      { name: 'write', args: { on: 'files', file_path: 'notes/a.md', content: 'alpha\nbeta' } },
+      { name: 'glob', args: { on: 'files', pattern: 'notes/**' } },
+      { name: 'grep', args: { on: 'files', pattern: 'beta' } },
+      { name: 'glob', args: { on: 'files', pattern: 'nothing/**' } },
     ])
     expect(JSON.parse(results[1]!)).toEqual({ paths: ['notes/a.md'], truncated: false })
     expect(JSON.parse(results[2]!)).toEqual({ matches: [{ path: 'notes/a.md', line: 2, text: 'beta' }], truncated: false })

@@ -8,8 +8,9 @@ import { IDLE_PLAN } from '../plugins/idle.ts'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import type { DirectoryEntry } from '../agent/tools/messaging.ts'
-import type { HostAccessByFacet, NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch } from '@mr-robot/protocol'
+import type { HostAccessByFacet, NotificationKind, ProposalView, ReviewView, RobotSettings, SettingsPatch, WorkspaceSetting } from '@mr-robot/protocol'
 import { HOST_ACCESS, parseHostAccess } from './host-access.ts'
+import { WORKSPACE, WORKSPACE_CWD, type CheckedWorkspace } from './workspace-setting.ts'
 import type { MemberFileName } from '../member/member.ts'
 import { currentMonth } from '../space/space.ts'
 import { SPACE_ID, type Env } from '../env.ts'
@@ -412,6 +413,7 @@ export const settingsWith = (defaults: SpaceDefaults) => Effect.gen(function* ()
     spaceDreamModel: defaults.defaultDreamModel,
     subagentModels: store.grantPayload<{ allowedModels?: Array<{ provider: string; model: string }> }>('tool', 'subagents')?.allowedModels ?? [],
     hostAccess: store.get<HostAccessByFacet>(HOST_ACCESS) ?? {},
+    workspace: store.get<WorkspaceSetting>(WORKSPACE) ?? null,
   } as RobotSettings
 })
 
@@ -495,10 +497,16 @@ function changeNotes(by: string, before: RobotConfig, after: RobotConfig): strin
   return notes
 }
 
-export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(function* () {
+/**
+ * `workspace` is the Workspace of the patch as the Robot checked it on the Host (Robot.updateSettings): kept or refused; absent when the
+ * patch does not name one.
+ */
+export const updateSettings = (patch: SettingsPatch, by?: string, workspace?: CheckedWorkspace) => Effect.gen(function* () {
   const store = yield* RobotState
   const platform = yield* RobotPlatform
   const before = yield* config
+  if (workspace?.kind === 'refused') return yield* invalid(workspace.message)
+  const workspaceBefore = store.get<WorkspaceSetting>(WORKSPACE)
   // The chain is the model setting (v1.10): a plain model change edits its active entry.
   const active = Math.min(store.get<number>('chain-active') ?? 0, chainOf(before).length - 1)
   const chain = patch.chain !== undefined ? [...patch.chain] : patch.model !== undefined ? withModel(chainOf(before), active, patch.model) : undefined
@@ -514,6 +522,12 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
   store.transaction(() => {
     if (chain !== undefined) store.set('chain-active', nextActive)
     if (patch.grants !== undefined) store.setGrants(grantSetFrom(patch.grants))
+    // A new Workspace starts the Robot at its root (cw-llvx); none removes both.
+    if (workspace?.kind === 'kept') {
+      if (workspace.setting === null) store.delete(WORKSPACE)
+      else store.set(WORKSPACE, workspace.setting)
+      store.delete(WORKSPACE_CWD)
+    }
     if (hostAccess !== undefined && Result.isSuccess(hostAccess)) {
       store.set(HOST_ACCESS, hostAccess.success)
       // A mode and roots for a facet that is not usable are not kept.
@@ -548,7 +562,11 @@ export const updateSettings = (patch: SettingsPatch, by?: string) => Effect.gen(
   })
   if (by !== undefined) {
     const after = yield* config
-    const notes = [...changeNotes(by, before, after), ...(patch.subagentModels === undefined ? [] : [`${by} set the Subagent models to ${patch.subagentModels.length === 0 ? 'none' : patch.subagentModels.map((entry) => `${entry.model} (${entry.provider})`).join(', ')}.`])]
+    const notes = [
+      ...changeNotes(by, before, after),
+      ...(patch.subagentModels === undefined ? [] : [`${by} set the Subagent models to ${patch.subagentModels.length === 0 ? 'none' : patch.subagentModels.map((entry) => `${entry.model} (${entry.provider})`).join(', ')}.`]),
+      ...(workspace?.kind !== 'kept' || JSON.stringify(workspaceBefore ?? null) === JSON.stringify(workspace.setting) ? [] : [workspace.setting === null ? `${by} removed the Workspace.` : `${by} set the Workspace to ${workspace.setting.root} on ${workspace.setting.host}.`]),
+    ]
     for (const text of notes) store.addNotice(after.liveSessionId, storedLength(store.sql, after.liveSessionId), text, Date.now())
   }
   yield* platform.changed()

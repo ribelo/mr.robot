@@ -43,7 +43,7 @@ async function turn(id: string, text: string, script: StubReply[]): Promise<void
   await settle(id)
 }
 
-const write = (path: string, content: string) => ({ name: 'write', args: { on: 'workspace', file_path: path, content } })
+const write = (path: string, content: string) => ({ name: 'write', args: { on: 'files', file_path: path, content } })
 const results = (request: GenerateOptions) => request.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 type Match = { path: string; scope: string; lines: string; date: string | null; snippet: string }
 

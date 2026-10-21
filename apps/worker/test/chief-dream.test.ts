@@ -51,9 +51,9 @@ describe.each(MODES)('Mr. Robot\'s dream (dm-pt5b, dm-w15l, dm-kkgy), %s', (_mod
     await api(ANNA, `/api/robots/${seller}/settings`, { method: 'PATCH', body: { codeMode, identity: { name: 'Seller', title: '', description: 'Sells.', avatarColor: '#8b5cf6' }, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
     await testRobot(seller).activateForTest()
     await turn(seller, 'Anna moved', [{ calls: [
-      call('write', { on: 'workspace', file_path: 'memory/2026-10-21.md', content: '- Anna said her new address is Mokotowska 5, Warsaw.\n' }),
-      call('write', { on: 'workspace', file_path: 'memory/people/jan-kowalski.md', content: '# Jan Kowalski\n\nRole: customer\n\n## Facts\n- 2026-10-20 Wants a garage.\n' }),
-      call('write', { on: 'workspace', file_path: 'memory/people/jan-k.md', content: '# Jan K.\n\nRole: customer\n\n## Facts\n- 2026-10-21 Paid the deposit.\n' }),
+      call('write', { on: 'files', file_path: 'memory/2026-10-21.md', content: '- Anna said her new address is Mokotowska 5, Warsaw.\n' }),
+      call('write', { on: 'files', file_path: 'memory/people/jan-kowalski.md', content: '# Jan Kowalski\n\nRole: customer\n\n## Facts\n- 2026-10-20 Wants a garage.\n' }),
+      call('write', { on: 'files', file_path: 'memory/people/jan-k.md', content: '# Jan K.\n\nRole: customer\n\n## Facts\n- 2026-10-21 Paid the deposit.\n' }),
     ] }, { say: 'Noted.' }])
 
     const chief = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
@@ -64,8 +64,8 @@ describe.each(MODES)('Mr. Robot\'s dream (dm-pt5b, dm-w15l, dm-kkgy), %s', (_mod
       { calls: [call('propose_member_file_edit', { file: 'memory/world.md', content: '# world.md\n\n- Address: Mokotowska 5, Warsaw.\n', purpose: 'Your new address, from Seller\'s note.' })] },
       { calls: [call('robot_file_write', { robot_id: seller, path: 'MEMORY.md', content: 'taken over' }), call('memory_write_shared', { file: 'USER.md', content: 'x' })] },
       { calls: [
-        call('write', { on: 'workspace', file_path: 'memory/people/jan-kowalski.md', content: '# Jan Kowalski\n\nRole: customer\n\n## Facts\n- 2026-10-20 Wants a garage.\n- 2026-10-21 Paid the deposit.\n' }),
-        call('delete_file', { on: 'workspace', path: 'memory/people/jan-k.md' }),
+        call('write', { on: 'files', file_path: 'memory/people/jan-kowalski.md', content: '# Jan Kowalski\n\nRole: customer\n\n## Facts\n- 2026-10-20 Wants a garage.\n- 2026-10-21 Paid the deposit.\n' }),
+        call('delete_file', { on: 'files', path: 'memory/people/jan-k.md' }),
       ] },
       { text: '' },
     ])
@@ -94,7 +94,7 @@ describe.each(MODES)('Mr. Robot\'s dream (dm-pt5b, dm-w15l, dm-kkgy), %s', (_mod
     expect((await api(ANNA, `/api/robots/${seller}/file?path=memory/people/jan-k.md`)).status).toBe(404)
 
     // Another Robot cannot delete a page.
-    await turn(seller, 'delete', [{ calls: [call('delete_file', { on: 'workspace', path: 'memory/people/jan-kowalski.md' })] }, { say: 'No.' }])
+    await turn(seller, 'delete', [{ calls: [call('delete_file', { on: 'files', path: 'memory/people/jan-kowalski.md' })] }, { say: 'No.' }])
     expect(toolTexts(requests.get(seller)!.at(-1)!).join('')).toContain('only your owner deletes it, or Mr. Robot')
   }, 60_000)
 })

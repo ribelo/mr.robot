@@ -50,7 +50,7 @@ async function dreamHour(id: string): Promise<void> {
   await settle(id)
 }
 
-const write = (path: string, content: string) => ({ name: 'write', args: { on: 'workspace', file_path: path, content } })
+const write = (path: string, content: string) => ({ name: 'write', args: { on: 'files', file_path: path, content } })
 const userText = (request: GenerateOptions) => JSON.stringify(request.messages.filter((message) => message.role === 'user'))
 const toolTexts = (request: GenerateOptions) => request.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 const dreamDate = (request: GenerateOptions) => /dreams\/(\d{4}-\d{2}-\d{2})\.md/.exec(userText(request))![1]!
@@ -146,7 +146,7 @@ describe.each(MODES)('the dream, %s (dm-hx44, dm-ox7j, dm-pzxk, dm-alok, dm-4ybd
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { contextBudget: 8000 } })
     const before = requests.get(id)!.length
     scripts.set(id, [
-      { text: 'Looking back over a long day. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'workspace', file_path: 'MEMORY.md' } }] },
+      { text: 'Looking back over a long day. '.repeat(700), inputTokens: 7900, calls: [{ name: 'read', args: { on: 'files', file_path: 'MEMORY.md' } }] },
       ...Array.from({ length: 3 }, (): StubReply => (request) => (request.purpose === 'compaction' ? { text: 'SUMMARY: a dream.' } : { calls: [{ name: 'say', args: { text: 'Good morning!' } }] })),
       (request) => (request.purpose === 'compaction' ? { text: 'SUMMARY: a dream.' } : { calls: [write(`dreams/${dreamDate(requests.get(id)!.slice(before)[0]!)}.md`, '# Dream\n')] }),
       { text: '' },

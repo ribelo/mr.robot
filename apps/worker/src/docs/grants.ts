@@ -9,7 +9,7 @@ A grant item is one of these:
 - a skill
 - a recipient Robot (a Robot it may message)
 - a Connection, with a separate item for Connection write. The item names its plugin and account, for example "Google · anna@example.com". Read connections.md.
-- a Host facet: browser, files or shell. The Advanced settings show the facets under one heading per Host with its state, online or offline. A files or shell facet also has a mode and write roots there. Read hosts.md.
+- a Host facet: browser, files or shell. The Advanced settings show the facets per Host with its state. A files or shell facet also has a mode and write roots there. Read hosts.md.
 - a login
 
 Two tool groups belong to Mr. Robot only: robots and deputy.
@@ -17,7 +17,7 @@ Two tool groups belong to Mr. Robot only: robots and deputy.
 ## One grant for each place
 
 The tools run, read, write, edit, glob, grep, delete_file and copy take a mandatory \`on\`. Each call is checked against the grant of its place:
-- on "workspace": the files group.
+- on "files": the files group; on "workspace": the facets of the Workspace's Host.
 - on "box": the box group, which covers the Box and its jobs. Read box.md.
 - on the name of a Host: the files facet of that Host for the file tools and for each end of copy, the shell facet for run.
 A call to a place without the grant is refused and names the grant. The job tools follow the place of the job.

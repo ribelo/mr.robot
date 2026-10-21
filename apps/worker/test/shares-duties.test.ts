@@ -57,7 +57,7 @@ describe('shared Pages follow their owner (cross-review #3, #12)', () => {
 describe('duties and the dream hour (cross-review #4, #5; v1.20-review #4, #8)', () => {
   it('a duty due while the Robot is busy re-arms a retry later, never in the past', async () => {
     const id = await robot(ANNA)
-    await turn(ANNA, id, 'note', [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'memory/2026-10-21.md', content: '- a note\n' } }] }, { say: 'Noted.' }])
+    await turn(ANNA, id, 'note', [{ calls: [{ name: 'write', args: { on: 'files', file_path: 'memory/2026-10-21.md', content: '- a note\n' } }] }, { say: 'Noted.' }])
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
     scripts.set(id, [{ gate, then: { say: 'Done.' } }])
@@ -86,7 +86,7 @@ describe('duties and the dream hour (cross-review #4, #5; v1.20-review #4, #8)',
     const dreamer = { provider: 'stub', model: 'dreamer', label: 'Dreamer', contextWindow: 128_000, price: { input: 1_000, output: 1_000 } }
     await api(ANNA, '/api/admin/settings', { method: 'PATCH', body: { models: [dreamer], defaultDreamModel: { provider: 'stub', model: 'dreamer', effort: 'off' } } })
     const id = await robot(ANNA)
-    await turn(ANNA, id, 'note', [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'memory/2026-10-21.md', content: '- a note\n' } }] }, { say: 'Noted.' }])
+    await turn(ANNA, id, 'note', [{ calls: [{ name: 'write', args: { on: 'files', file_path: 'memory/2026-10-21.md', content: '- a note\n' } }] }, { say: 'Noted.' }])
     expect((await testRobot(id).costBySourceForTest())['robot'] ?? 0).toBe(0)
     scripts.set(id, [{ text: '' }])
     await testRobot(id).dreamNowForTest()

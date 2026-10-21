@@ -48,7 +48,7 @@ describe('conversation: streaming and Work details (v1.3 ticket 03)', () => {
 
   it('returns tool calls with arguments and results only when details are asked for; the setting is per Member (pl-6eir)', async () => {
     const id = await robotWith(['files'])
-    scripts.set(id, [{ calls: [{ name: 'write', args: { on: 'workspace', file_path: 'notes.md', content: 'hello' } }] }, { text: 'Written.' }])
+    scripts.set(id, [{ calls: [{ name: 'write', args: { on: 'files', file_path: 'notes.md', content: 'hello' } }] }, { text: 'Written.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'write it' } })
     await settle(id)
     const compact = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.find((item) => item.kind === 'activity')
