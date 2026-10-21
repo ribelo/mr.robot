@@ -21,6 +21,7 @@ import { THREAD_PAUSE_AT, timeLabel, type AskAnswerLabel } from '../agent/source
 import type { Identity, ModelChoice, RobotStatus, Sharing } from '@mr-robot/protocol'
 import { Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { chapterSeed } from '../agent/chapter-seed.ts'
+import { coldChapter } from './cold-chapters.ts'
 import { readStoredEvents, storedHeader, storedLength, storeSession } from '../agent/session-log.ts'
 import type { RewindView } from '@mr-robot/protocol'
 import type { Sender, Attachment } from '@mr-robot/protocol'
@@ -112,6 +113,27 @@ const config = Effect.gen(function* () {
   if (value === undefined) return yield* notFound('robot is not initialised')
   return value
 })
+
+/**
+ * The events of a chapter's session or of a Subagent's, from R2 when the chapter is cold (v1.19, ec-aly5): cold is slower to open,
+ * never gone.
+ */
+export const logOf = (sessionId: string) => Effect.gen(function* () {
+  const store = yield* RobotState
+  const platform = yield* RobotPlatform
+  const owner = store.chapters.get(sessionId) !== undefined ? sessionId : new SubagentStore(store.sql).get(sessionId)?.parentSession
+  const chapter = owner === undefined ? undefined : store.chapters.get(owner)
+  const cold = chapter === undefined ? undefined : yield* Effect.promise(() => coldChapter(platform.env.FILES, (store.config()?.id ?? ''), chapter))
+  if (cold === undefined) return readStoredEvents(store.sql, sessionId)
+  return [...(sessionId === cold.sessionId ? cold.events : cold.subagents[sessionId] ?? [])]
+})
+
+/** Whether a session's events are in R2: its chapter (or the chapter its Subagent ran in) is cold. */
+export function isCold(store: RobotStore, sessionId: string): boolean {
+  const owner = store.chapters.get(sessionId) !== undefined ? sessionId : new SubagentStore(store.sql).get(sessionId)?.parentSession
+  const state = owner === undefined ? undefined : store.chapters.get(owner)?.state
+  return state?.kind === 'closed' && state.cold
+}
 
 // ------------------------------------------------------------------ wake-ups and lifecycle (robot-qo06)
 
@@ -941,7 +963,7 @@ export const rewind = (atSeq: number, ordinal?: number) => Effect.gen(function* 
   const target = ordinal === undefined ? store.chapters.get(current.liveSessionId) : store.chapters.byOrdinal(ordinal)
   if (target === undefined) return yield* notFound(`no chapter ${ordinal ?? ''} in this Conversation`)
   if (target.state.kind === 'closed' && target.state.superseded) return yield* conflict('that chapter was superseded by a Rewind; it can be read, not rewound to')
-  const events = readStoredEvents(store.sql, target.sessionId)
+  const events = yield* logOf(target.sessionId)
   if (!Number.isInteger(atSeq) || atSeq < target.firstSeq || atSeq >= events.length) return yield* invalid(`no event ${atSeq} of its own in this chapter`)
   const header = storedHeader(store.sql, target.sessionId)
   if (header === undefined) return yield* notFound('that chapter has no log')
@@ -995,7 +1017,7 @@ export const rewindBeforeTurn = (turn: number, ordinal?: number) => Effect.gen(f
   const live = (yield* config).liveSessionId
   const chapter = ordinal === undefined ? store.chapters.get(live) : store.chapters.byOrdinal(ordinal)
   if (chapter === undefined) return yield* notFound(`no chapter ${ordinal ?? ''} in this Conversation`)
-  const events = readStoredEvents(store.sql, chapter.sessionId)
+  const events = yield* logOf(chapter.sessionId)
   // The chapter's own Turns: its seed carries a closed Turn of the chapter before.
   const first = chapter.firstSeq
   const start = events.findIndex((event) => event.seq >= first && event.type === 'turn/start' && (event.data as { turn?: number }).turn === turn)

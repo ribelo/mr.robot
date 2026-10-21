@@ -10,7 +10,7 @@ import { readStoredEvents } from '../agent/session-log.ts'
 import { HOME_ID } from '../env.ts'
 import { currentMonth, type RegistryEntry } from '../home/home.ts'
 import { invalid, notFound } from '../platform/durable.ts'
-import { homeDefaults, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
+import { homeDefaults, isCold, logOf, proposalView, RobotPlatform, RobotState, settingsWith } from './programs.ts'
 import { projectChat, resolveItem, type ResolveInput, type StoredRow } from './projection.ts'
 import { formatCursor, parseCursor, type ChatCursor } from './chat-items.ts'
 import { chainAccounts, chainOf } from './chain.ts'
@@ -312,10 +312,11 @@ export const trajectoryAround = (itemId: string, before: number, after: number) 
   if (found === undefined) return yield* notFound(`no item "${itemId}" in this Conversation`)
   const centre = found.seq
   const reach = (count: number) => Math.min(Math.max(Math.trunc(count), 0), TRAJECTORY_REACH)
-  const rows = store.sql.exec<{ event: string }>(
-    'SELECT event FROM session_event WHERE session_id = ? AND seq BETWEEN ? AND ? ORDER BY seq',
-    found.sessionId, Math.max(0, centre - reach(before)), centre + reach(after),
-  ).toArray()
+  const from = Math.max(0, centre - reach(before))
+  const to = centre + reach(after)
+  const rows = isCold(store, found.sessionId)
+    ? (yield* logOf(found.sessionId)).filter((event) => event.seq >= from && event.seq <= to).map((event) => ({ event: JSON.stringify(event) }))
+    : store.sql.exec<{ event: string }>('SELECT event FROM session_event WHERE session_id = ? AND seq BETWEEN ? AND ? ORDER BY seq', found.sessionId, from, to).toArray()
   const events: TrajectoryEvent[] = []
   let used = 0
   let truncated = false
@@ -349,9 +350,8 @@ export const searchConversation = (query: string, page: number) => Effect.gen(fu
 })
 
 const trajectoryEvents = (sessionId: string) => Effect.gen(function* () {
-  const store = yield* RobotState
   const mask = yield* (yield* RobotPlatform).masker()
-  return readStoredEvents(store.sql, sessionId).map((event): TrajectoryEvent => ({
+  return (yield* logOf(sessionId)).map((event): TrajectoryEvent => ({
     seq: event.seq,
     type: event.type,
     time: event.time,
@@ -396,7 +396,11 @@ const eventsPage = (sessionId: string, input: { before?: number; after?: number;
   const store = yield* RobotState
   const mask = yield* (yield* RobotPlatform).masker()
   const limit = Math.min(Math.max(input.limit ?? 400, 1), 2000)
-  const rows = input.after !== undefined
+  // A cold chapter's log is one object: it is paged in memory (ec-aly5).
+  const cold = isCold(store, sessionId) ? (yield* logOf(sessionId)).map((event) => ({ seq: event.seq, event: JSON.stringify(event) })) : undefined
+  const rows = cold !== undefined
+    ? (input.after !== undefined ? cold.filter((row) => row.seq > input.after!).slice(0, limit) : cold.filter((row) => row.seq < (input.before ?? Number.MAX_SAFE_INTEGER)).slice(-limit))
+    : input.after !== undefined
     ? store.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?', sessionId, input.after, limit).toArray()
     : store.sql.exec<{ seq: number; event: string }>('SELECT seq, event FROM session_event WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?', sessionId, input.before ?? Number.MAX_SAFE_INTEGER, limit).toArray().reverse()
   const first = rows[0]?.seq
@@ -425,7 +429,7 @@ export const subagentConversation = (childId: string) => Effect.gen(function* ()
   const current = yield* config
   const row = yield* childOf(childId)
   const mask = yield* (yield* RobotPlatform).masker()
-  const events = readStoredEvents(store.sql, row.id)
+  const events = yield* logOf(row.id)
   // A Subagent has no say: its assistant text is what it says (its report).
   const items = projectChat({ events, assistantRepliesBefore: Number.POSITIVE_INFINITY, notices: [], avatarSeed: current.identity.avatarSeed, proposal: () => undefined }).map((item) => maskItem(item, mask))
   const working = row.status === 'running'

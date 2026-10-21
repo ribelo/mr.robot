@@ -9,6 +9,7 @@ import type { ObjectStore } from '../src/workspace/object-store.ts'
 import app from '../src/index.ts'
 import { QUIET_DUE } from '../src/robot/programs.ts'
 import { CHAPTER_COMPACTED } from '../src/robot/robot.ts'
+import { moveColdChapters } from '../src/robot/cold-chapters.ts'
 import type { Chapter } from '../src/robot/chapters.ts'
 import { currentMonth } from '../src/home/home.ts'
 import type { BoxBackend } from '../src/box/backend.ts'
@@ -180,7 +181,10 @@ export class Robot extends ProductionRobot {
       if ((span += 1) === shape.spans) break
       this.store.set(CHAPTER_COMPACTED, live)
       await this.rollChapter()
+      // The chapter lived the year's days, not the test's seconds.
+      this.store.sql.exec('UPDATE chapter SET closed_at = ? WHERE session_id = ?', batch.at(-1)!.time, live)
       live = this.store.requireConfig().liveSessionId
+      this.store.sql.exec('UPDATE chapter SET opened_at = ? WHERE session_id = ?', batch.at(-1)!.time, live)
       Object.assign(position, at(live, position.turn))
     }
     return { events, bytes, ms: Date.now() - started, chapters: this.store.chapters.all().length }
@@ -214,6 +218,18 @@ export class Robot extends ProductionRobot {
     this.store.sql.exec('INSERT INTO session_log (id, header, inherited, length) VALUES (?, ?, ?, 0)', id, JSON.stringify({ ...header, id, createdAt: Date.now(), isSeeded: true, parentSession: live }), atSeq + 1)
     this.store.sql.exec('INSERT INTO rewind (id, at_seq, archived_session_id, live_session_id, created_at, undone_at) VALUES (?, ?, ?, ?, ?, ?)', `rw-${id}`, atSeq, live, id, Date.now(), Date.now() + 1)
     return id
+  }
+
+  /** One tidy pass of cold chapters at a moment the test picks (v1.19 ticket 06); how many moved. */
+  async tidyChaptersForTest(now: number, limit?: number): Promise<number> {
+    return moveColdChapters(this.store, this.env.FILES, this.store.requireConfig().id, now, limit)
+  }
+
+  /** How many events of a session the Durable Object holds. */
+  async storedEventsForTest(sessionId?: string): Promise<number> {
+    return sessionId === undefined
+      ? this.store.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM session_event').one().count
+      : this.store.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM session_event WHERE session_id = ?', sessionId).one().count
   }
 
   /** The chapter a Subagent belongs to: its parent session. */

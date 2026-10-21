@@ -23,6 +23,7 @@ import { CACHE_WARM, warmable } from '../providers/anthropic.ts'
 import { IDLE_MEMORY_NOTE, IDLE_MEMORY_STEPS, idlePlan, idleSettings, type IdleStep } from './idle.ts'
 import { buildForkSeed, Session, SessionId, SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { chapterSeed } from '../agent/chapter-seed.ts'
+import { deleteColdChapters, moveColdChapters } from './cold-chapters.ts'
 import type {
   HostView,
   WorkspaceFileContent,
@@ -317,6 +318,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     await clearWorkspace(this.env.FILES, robotId)
     await deleteScreenshots(this.env.FILES, robotId)
     await deletePageCache(this.env.FILES, robotId)
+    // Its cold chapters go with it (v1.19, ec-cgsl).
+    await deleteColdChapters(this.env.FILES, robotId)
     await this.ctx.storage.deleteAlarm()
     await this.ctx.storage.deleteAll()
     this.store.prepare()
@@ -346,6 +349,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     // Answered Asks go with the history; open ones are still decisions the owner owes.
     sql.exec("DELETE FROM proposal WHERE status != 'open'")
     this.store.search.clear()
+    // The cold chapters are the history too (v1.19, ec-cgsl); their ordinals start again.
+    await deleteColdChapters(this.env.FILES, this.store.requireConfig().id)
     for (const key of ['memory-baseline', 'memory-changes', 'failed-wakeup', 'takeover', 'screen', CHAPTER_COMPACTED]) this.store.delete(key)
     const next = this.store.updateConfig(() => ({ liveSessionId: `s-${crypto.randomUUID()}` }))
     this.store.openChapter(next.liveSessionId, null, 0, Date.now())
@@ -2677,6 +2682,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const robotId = this.store.requireConfig().id
     await sweepSpill(this.env.FILES, robotId, now)
     await sweepStaged(this.env.FILES, robotId, now)
+    // Chapters outside the retention window go to R2 (v1.19, ec-4qsf).
+    await moveColdChapters(this.store, this.env.FILES, robotId, now)
     this.store.set('spill-sweep-next', now + SPILL_SWEEP_EVERY_MS)
   }
 

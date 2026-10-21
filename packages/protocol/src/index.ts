@@ -1295,6 +1295,8 @@ export const ChapterView = Schema.Struct({
   superseded: Schema.Boolean,
   turns: Schema.Number,
   firstSeq: Schema.Number,
+  /** Its events are kept in R2 (v1.19, ec-4qsf): its Trajectory opens a little slower. */
+  cold: Schema.optional(Schema.Boolean),
 })
 export type ChapterView = typeof ChapterView.Type
 

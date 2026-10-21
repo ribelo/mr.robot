@@ -18,6 +18,8 @@ export type ChapterState =
     readonly by: ChapterClose
     /** Off the Conversation's chain: a Rewind went back to before it. */
     readonly superseded: boolean
+    /** Its events are in R2, one object (v1.19 ticket 06, ec-4qsf); its chat items stay here. */
+    readonly cold: boolean
   }
 
 export interface Chapter {
@@ -45,12 +47,13 @@ export const CHAPTER_SCHEMA = `CREATE TABLE IF NOT EXISTS chapter (
   closed_at INTEGER,
   closed_by TEXT,
   superseded INTEGER NOT NULL DEFAULT 0,
-  turns INTEGER
+  turns INTEGER,
+  cold INTEGER NOT NULL DEFAULT 0
 ) WITHOUT ROWID`
 
 type Row = {
   session_id: string; ordinal: number; parent_session: string | null; parent_seq: number | null; first_seq: number; cut: number | null
-  opened_at: number; closed_at: number | null; closed_by: ChapterClose | null; superseded: number; turns: number | null
+  opened_at: number; closed_at: number | null; closed_by: ChapterClose | null; superseded: number; turns: number | null; cold: number
 }
 
 const fromSql = (row: Row): Chapter => ({
@@ -60,7 +63,7 @@ const fromSql = (row: Row): Chapter => ({
   firstSeq: row.first_seq,
   cut: row.cut,
   openedAt: row.opened_at,
-  state: row.closed_at === null || row.closed_by === null ? { kind: 'live' } : { kind: 'closed', at: row.closed_at, by: row.closed_by, superseded: row.superseded === 1 },
+  state: row.closed_at === null || row.closed_by === null ? { kind: 'live' } : { kind: 'closed', at: row.closed_at, by: row.closed_by, superseded: row.superseded === 1, cold: row.cold === 1 },
 })
 
 export class ChapterStore {
@@ -143,9 +146,25 @@ export class ChapterStore {
       }
       return {
         ordinal: row.ordinal, sessionId: row.session_id, openedAt: row.opened_at, closedAt: row.closed_at, closedBy: row.closed_by,
-        superseded: row.superseded === 1, turns, firstSeq: row.first_seq,
+        superseded: row.superseded === 1, turns, firstSeq: row.first_seq, cold: row.cold === 1,
       }
     })
+  }
+
+  /**
+   * The closed chapters outside the retention window (ec-2rdv), oldest first: not among the last `keep` chapters and closed before
+   * `before`. A chapter inside either stays: whichever keeps more.
+   */
+  outsideWindow(keep: number, before: number, limit: number): Chapter[] {
+    return this.sql.exec<Row>(
+      'SELECT * FROM chapter WHERE cold = 0 AND closed_at IS NOT NULL AND closed_at < ? AND ordinal <= (SELECT MAX(ordinal) FROM chapter) - ? ORDER BY ordinal LIMIT ?',
+      before, keep, limit,
+    ).toArray().map(fromSql)
+  }
+
+  /** Its events went to R2; its Turns are counted first, since its log is gone from here. */
+  markCold(sessionId: string, turns: number): void {
+    this.sql.exec('UPDATE chapter SET cold = 1, turns = COALESCE(turns, ?) WHERE session_id = ?', turns, sessionId)
   }
 
   clear(): void {

@@ -88,6 +88,11 @@ beforeAll(async () => {
   const now = Date.now()
   const seeded = await testRobot(id).seedYearForTest({ spans: SPANS, turnsPerSpan: TURNS_PER_SPAN, from: now - 365 * DAY, to: now - DAY, owner: { memberId: me.id, name: me.name }, early: 'zeppelin', late: 'quokka' })
   numbers.push(`seeded                   ${seeded.ms} ms: ${seeded.events} events, ${(seeded.bytes / 1e6).toFixed(1)} MB, ${SPANS} spans, ${seeded.chapters} chapters`)
+  // The tidy passes of the year: the chapters outside the window are in R2 (ticket 06).
+  const tidied = Date.now()
+  let cold = 0
+  for (let moved = -1; moved !== 0;) cold += moved = await testRobot(id).tidyChaptersForTest(Date.now(), 50)
+  numbers.push(`cold                     ${Date.now() - tidied} ms: ${cold} chapters to R2, ${await testRobot(id).storedEventsForTest()} events left in the Durable Object`)
   // The Robot sleeps: its memory is gone, the year is in its storage.
   await testRobot(id).restartForTest().catch(() => undefined)
 }, 600_000)
@@ -121,7 +126,7 @@ describe('a year of a busy Robot (ec-2lts, ec-o5pz)', () => {
   }, 300_000)
 
   it('opens the Trajectory reading one span, the live one or an old one (ec-elhb)', async () => {
-    for (const [name, query] of [['trajectory', ''], ['trajectory chapter 200', '?chapter=200']] as const) {
+    for (const [name, query] of [['trajectory', ''], ['trajectory chapter 200 (cold)', '?chapter=200'], ['trajectory chapter 380', '?chapter=380']] as const) {
       const run = await measured(() => api<{ events: unknown[]; chapters: unknown[] }>(ANNA, `/api/robots/${id}/trajectory${query}`))
       report(name, run, run.value.status === 200 ? `${run.value.body.events.length} events, ${run.value.body.chapters.length} chapters listed` : `status ${run.value.status}`)
       expect(run.value.status).toBe(200)
