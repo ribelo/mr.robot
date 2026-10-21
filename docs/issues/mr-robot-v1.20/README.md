@@ -8,7 +8,7 @@ Spec: ../mr-robot-v1.20.md. Needs v1.18 (sweep, file history) and v1.19 (chapter
 | 01 | [The bounded-step helper and the snapshot plugin](01-snapshot.md) | 00 | done |
 | 02 | [Warming, then closing](02-warming-then-closing.md) | 01 | done |
 | 03 | [memory_search and the end of note injection](03-memory-search.md) | 00 | done |
-| 04 | [People pages](04-people-pages.md) | 03 | ready-for-agent |
+| 04 | [People pages](04-people-pages.md) | 03 | done |
 | 05 | [Dreaming](05-dreaming.md) | 01, 02, 03 | ready-for-agent |
 | 06 | [Mr. Robot as steward](06-chief-steward.md) | 04, 05 | ready-for-agent |
 | 07 | [Glossary and docs](07-glossary-docs.md) | 01, 02, 03, 04, 05, 06 | ready-for-agent |

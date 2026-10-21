@@ -178,6 +178,7 @@ import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import { Duties } from './duties.ts'
 import { nextRun } from './schedule.ts'
+import { isPeoplePage, isPeoplePath, PEOPLE_INDEX, PEOPLE_TEMPLATE_PATH } from '../member/people.ts'
 import { INDEX_BATCH, isIndexedRobotPath, MemoryIndex, versionOf as memoryVersion, type MemoryMatch } from './memory-index.ts'
 import { platformStep, StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
 import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
@@ -2640,7 +2641,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const paths = new Set(present.map((entry) => entry.path))
     for (const path of known.keys()) if (!paths.has(path)) index.remove('robot', path)
     const [member, space] = await Promise.all([
-      this.env.MEMBER.getByName(config.ownerId).files().catch(() => undefined),
+      Promise.all([this.env.MEMBER.getByName(config.ownerId).files(), this.env.MEMBER.getByName(config.ownerId).peoplePages()]).then(([files, people]) => ({ ...files, ...people })).catch(() => undefined),
       this.space().spaceMemory().catch(() => undefined),
     ])
     const shared: Array<['member' | 'space', Record<string, string> | undefined]> = [['member', member as Record<string, string> | undefined], ['space', space === undefined ? undefined : { 'SPACE.md': space }]]
@@ -2662,6 +2663,24 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   run<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
     return Effect.runPromise(effect)
+  }
+
+  /** The owner's people pages (v1.20 ticket 04): mounted at memory/people/, written by this Robot directly, under its name. */
+  peopleFile(path: string): Promise<string | undefined> {
+    return this.env.MEMBER.getByName(this.store.requireConfig().ownerId).peopleFile(path)
+  }
+
+  async peoplePaths(): Promise<string[]> {
+    const pages = await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).peoplePages().catch(() => ({}))
+    return [...new Set([PEOPLE_TEMPLATE_PATH, PEOPLE_INDEX, ...Object.keys(pages)])].sort()
+  }
+
+  async writePeoplePage(path: string, content: string): Promise<void> {
+    const config = this.store.requireConfig()
+    // A memory step writes as itself; otherwise the page names this Robot.
+    const author: FileAuthor = this.writer.kind === 'robot' ? { kind: 'robot', name: config.identity.name } : this.writer
+    await this.env.MEMBER.getByName(config.ownerId).writePeoplePage(path, content, author)
+    this.memoryIndex.index('member', path, content, memoryVersion(content))
   }
 
   memberFile(name: MemberFileName): Promise<string> {
@@ -3547,11 +3566,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     const stored = (await this.run(this.workspace.list(''))).filter((entry) => !isDocsPath(entry.path))
     // The product docs come from the Worker bundle, never from R2 (v1.11 ticket 02).
     const bundled = ALL_DOCS.map((entry) => ({ path: entry.path, size: new TextEncoder().encode(entry.text).length, uploaded: 0, etag: '' }))
-    const entries = [...stored, ...bundled]
+    // The owner's people pages, under Member files (v1.20, dm-ii3r).
+    const people = await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).peoplePages().catch(() => ({} as Record<string, string>))
+    const mounted = Object.entries(people).map(([path, text]) => ({ path, size: new TextEncoder().encode(text).length, uploaded: 0, etag: '' }))
+    const entries = [...stored.filter((entry) => !entry.path.startsWith('memory/people/')), ...bundled, ...mounted]
     const order = (path: string) => { const index = (PERSONA_FILES as readonly string[]).indexOf(path); return index === -1 ? PERSONA_FILES.length : index }
     const group = (path: string): WorkspaceFileView['group'] =>
       (PERSONA_FILES as readonly string[]).includes(path) ? 'persona'
         : isDocsPath(path) ? 'docs'
+        : path.startsWith('memory/people/') ? 'member'
         : /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(path) ? 'daily'
           : path.startsWith('skills/') ? 'skills'
             : pageFormat(path) !== undefined ? 'pages'
@@ -3683,6 +3706,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   }
 
   async fileContent(path: string): Promise<WorkspaceFileContent> {
+    if (isPeoplePath(path)) {
+      const text = await this.peopleFile(path)
+      if (text === undefined) throw Object.assign(new Error(`no file "${path}"`), { name: 'NotFound', status: 404 })
+      const page = isPeoplePage(path)
+      return { path, size: new TextEncoder().encode(text).length, text, readOnly: !page, note: page ? 'A people page of your memory: your Robots write it, and you can correct it.' : 'Kept by the platform.' }
+    }
     if (isDocsPath(path)) {
       const bundled = productDoc(path)
       if (bundled === undefined) throw Object.assign(new Error(`no file "${path}"`), { name: 'NotFound', status: 404 })
@@ -3703,6 +3732,12 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   /** The owner saved a file; the Robot hears about it at its next Turn (rb-xwks). */
   async saveFile(path: string, content: string, by?: string): Promise<WorkspaceFileContent> {
+    if (isPeoplePath(path)) {
+      if (!isPeoplePage(path)) throw Object.assign(new Error(`${path} is kept by the platform`), { name: 'Invalid', status: 400 })
+      await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).writePeoplePage(path, content, { kind: 'person', name: by ?? this.owner().name })
+      this.memoryIndex.index('member', path, content, memoryVersion(content))
+      return this.fileContent(path)
+    }
     if (isDocsPath(path)) throw Object.assign(new Error(docsReadOnlyMessage(path)), { name: 'Invalid', status: 400 })
     const current = await this.run(this.workspace.stat(path))
     if (current !== undefined && current.size > MAX_EDITABLE_BYTES) throw Object.assign(new Error('this file is too large to edit here'), { name: 'Invalid', status: 400 })
@@ -3792,6 +3827,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** A persona or memory file's history (v1.18, rm-7jo4): who wrote it now, and its kept versions. */
   async fileHistory(path: string): Promise<FileHistoryView> {
     const normalized = normalizePath(path)
+    // A people page's history is the owner's (v1.20): who of his Robots, or he, wrote each version.
+    if (normalized !== undefined && isPeoplePage(normalized)) return this.env.MEMBER.getByName(this.store.requireConfig().ownerId).memberFileHistory(normalized)
     if (normalized === undefined || !isTrackedFile(normalized)) throw Object.assign(new Error(`${path} has no history: only persona and memory files keep versions`), { name: 'Invalid', status: 400 })
     const object = await this.env.FILES.head(`${workspacePrefix(this.store.requireConfig().id)}${normalized}`)
     const current = object === null ? null : authorOf(object.customMetadata, object.uploaded.getTime())
@@ -3801,6 +3838,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** One kept version of a persona or memory file. */
   async fileVersion(path: string, version: string): Promise<FileVersionContent> {
     const normalized = normalizePath(path) ?? ''
+    if (isPeoplePage(normalized)) {
+      const kept = await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).memberFileVersion(normalized, version)
+      if (kept === null) throw Object.assign(new Error(`no version ${version} of ${path}`), { name: 'NotFound', status: 404 })
+      return kept
+    }
     const found = isTrackedFile(normalized) ? await this.workspace.history.read(normalized, version) : undefined
     if (found === undefined) throw Object.assign(new Error(`no version ${version} of ${path}`), { name: 'NotFound', status: 404 })
     return { version: versionView(found.version), text: found.text }

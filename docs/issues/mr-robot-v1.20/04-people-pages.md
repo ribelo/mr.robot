@@ -4,8 +4,21 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Workerd test: two Robots write one page with authors in history; INDEX.md; search; another Member's Robot refused
-- [ ] Component test: pages under Member files
-- [ ] The memory skill names the rules
+- [x] Workerd test: two Robots write one page with authors in history; INDEX.md; search; another Member's Robot refused
+- [x] Component test: pages under Member files
+- [x] The memory skill names the rules
+
+## Closing note
+
+apps/worker/test/people-pages.test.ts: Seller reads the template and writes a page, Bookkeeper edits it; the history names Bookkeeper now and Seller before; INDEX.md lists the page with its role and day; glob lists it; INDEX.md cannot be written and a page cannot be deleted by a Robot; memory_search finds the page in the member scope; the Files view lists the pages under Member files; the owner's correction from the Files view is his in the history; Ben's Robot does not see Anna's page. apps/web/test/people-files.test.tsx: the group in the Files view.
+
+Decisions:
+- The pages are Member files, stored in the Member Durable Object's member_file table under their path (member/people.ts), so their history is the Member's file history. They are not in the memory message (only the three fixed Member files are).
+- The write exception is enforced by path in the Workspace file backend (places/files.ts): under memory/people/ a Robot writes only memory/people/<slug>.md (lowercase letters, digits, dashes), and the write goes to the owner's Member DO, not to R2. INDEX.md and _template.md are read-only; a Robot cannot delete a page (the owner can correct it). The template is served by the platform, not stored.
+- FileAuthor robot got an optional name, so a page's history says which Robot wrote it; a memory step (snapshot, sweep) writes a page under its own author.
+- INDEX.md is made again on every page write: one line per page with the name from its first heading, the role from its first "Role:" line and the day it was last touched.
+- Search: a page written by a Robot is indexed at once in that Robot; the other Robots of the owner find it at their next catch-up (the Member files are compared by content).
+- Files view: a new group member ("Member files: people pages"); the owner can edit a page there (stored with his name); its history comes from the Member.
+- Space-scope pages are out of scope, as the spec says: a Robot reaches only its owner's Member DO.

@@ -295,8 +295,8 @@ export const WorkspaceFileView = Schema.Struct({
   path: Schema.String,
   size: Schema.Number,
   updatedAt: Schema.Number,
-  /** persona and memory files pinned first, then daily notes, local skills, Pages (v1.17), screenshots, the rest. */
-  group: Schema.Literals(['persona', 'daily', 'skills', 'pages', 'screens', 'docs', 'spill', 'other']),
+  /** persona and memory files pinned first, then daily notes, the owner's people pages (member, v1.20), local skills, Pages (v1.17), screenshots, the rest. */
+  group: Schema.Literals(['persona', 'daily', 'member', 'skills', 'pages', 'screens', 'docs', 'spill', 'other']),
 })
 export type WorkspaceFileView = typeof WorkspaceFileView.Type
 

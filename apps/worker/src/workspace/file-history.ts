@@ -7,7 +7,8 @@ import * as Schema from 'effect/Schema'
 
 /** Who wrote a version. */
 export const FileAuthor = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('robot') }),
+  /** A Robot; named when the file is not its own (a people page of its owner, v1.20). */
+  Schema.Struct({ kind: Schema.Literal('robot'), name: Schema.optional(Schema.String) }),
   /** A person: the owner in the app, or a Member whose file it is. */
   Schema.Struct({ kind: Schema.Literal('person'), name: Schema.String }),
   /** Mr. Robot, as his owner's deputy or writing a shared file. */
@@ -28,7 +29,7 @@ export type FileAuthor = typeof FileAuthor.Type
 /** How a change note and the history name the author. */
 export function authorLabel(author: FileAuthor): string {
   switch (author.kind) {
-    case 'robot': return 'the Robot'
+    case 'robot': return author.name ?? 'the Robot'
     case 'person': return author.name
     case 'chief': return author.name
     case 'sweep': return 'the memory sweep'

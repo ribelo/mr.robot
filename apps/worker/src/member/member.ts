@@ -31,6 +31,7 @@ import { SPACE_ID, type Env } from '../env.ts'
 import { makeVault, type VaultError, type VaultShape } from '../platform/vault.ts'
 import { finishPasted, pollDevice, refreshTokens, startFlow, type FlowStart, type OAuthClients, type OAuthTokens, type PendingFlow } from '../providers/oauth.ts'
 import { MEMBER_FILES } from '../workspace/templates.ts'
+import { isPeoplePage, isPeoplePath, PEOPLE_INDEX, PEOPLE_TEMPLATE, PEOPLE_TEMPLATE_PATH, peopleIndex } from './people.ts'
 import { mintShareToken, sharedPagePath, shareTokenHash } from '../pages/share-token.ts'
 import type { FileHistoryView, FileVersionContent, SharedPageView } from '@mr-robot/protocol'
 import { authorLabel, authorOf, FileHistory, memberHistoryBase, versionView, type FileAuthor } from '../workspace/file-history.ts'
@@ -822,19 +823,52 @@ export class Member extends DurableObject<Env> {
     const memberId = (await this.run(profile)).id
     await this.env.SPACE.getByName(SPACE_ID).memoryChanged(memberId, name, by, exceptRobot ?? null).catch((error: unknown) => console.warn('memory change not delivered', error))
   }
+  /** The people pages and INDEX.md, by path (v1.20 ticket 04). */
+  peoplePages(): Promise<Record<string, string>> {
+    const rows = this.ctx.storage.sql.exec<{ name: string; content: string }>("SELECT name, content FROM member_file WHERE name LIKE 'memory/people/%'").toArray()
+    return Promise.resolve(Object.fromEntries(rows.map((row) => [row.name, row.content])))
+  }
+
+  /** One file under memory/people/: a page, INDEX.md, or the template; undefined when there is none. */
+  peopleFile(path: string): Promise<string | undefined> {
+    if (path === PEOPLE_TEMPLATE_PATH) return Promise.resolve(PEOPLE_TEMPLATE)
+    if (!isPeoplePath(path)) return Promise.resolve(undefined)
+    const row = this.ctx.storage.sql.exec<{ content: string }>('SELECT content FROM member_file WHERE name = ?', path).toArray()[0]
+    if (row === undefined && path === PEOPLE_INDEX) return Promise.resolve(peopleIndex([]))
+    return Promise.resolve(row?.content)
+  }
+
+  /**
+   * A people page written by one of the Member's Robots or by the Member (dm-s0gy): the version it replaces is kept with its author, and
+   * INDEX.md is made again (dm-p7l1).
+   */
+  async writePeoplePage(path: string, content: string, author: FileAuthor): Promise<void> {
+    if (!isPeoplePage(path)) throw Object.assign(new Error(`${path}: a people page is memory/people/<name>.md, with lowercase letters, digits and dashes`), { name: 'Invalid', status: 400 })
+    const sql = this.ctx.storage.sql
+    const previous = sql.exec<{ content: string; author: string | null; updated_at: number }>('SELECT content, author, updated_at FROM member_file WHERE name = ?', path).toArray()[0]
+    if (previous !== undefined) {
+      const was = authorOf(previous.author === null ? undefined : { by: previous.author, at: String(previous.updated_at) }, previous.updated_at)
+      await this.fileHistory().keep(path, { body: previous.content, by: was.by, at: was.at }, Date.now())
+    }
+    const now = Date.now()
+    sql.exec('INSERT INTO member_file (name, content, updated_at, author) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at, author = excluded.author', path, content, now, JSON.stringify(author))
+    const pages = sql.exec<{ name: string; content: string; updated_at: number }>("SELECT name, content, updated_at FROM member_file WHERE name LIKE 'memory/people/%' AND name != ?", PEOPLE_INDEX).toArray()
+    sql.exec('INSERT INTO member_file (name, content, updated_at, author) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at, author = excluded.author', PEOPLE_INDEX, peopleIndex(pages.map((page) => ({ path: page.name, content: page.content, updatedAt: page.updated_at }))), now, JSON.stringify({ kind: 'platform' }))
+  }
+
   private fileHistory(): FileHistory {
     const id = this.ctx.storage.sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = 'profile'").toArray()[0]
     return new FileHistory(this.env.FILES, memberHistoryBase(id === undefined ? 'unknown' : (JSON.parse(id.v) as { id: string }).id))
   }
 
   /** A Member file's history (v1.18, rm-7jo4). */
-  async memberFileHistory(name: MemberFileName): Promise<FileHistoryView> {
+  async memberFileHistory(name: MemberFileName | string): Promise<FileHistoryView> {
     const row = this.ctx.storage.sql.exec<{ author: string | null; updated_at: number }>('SELECT author, updated_at FROM member_file WHERE name = ?', name).toArray()[0]
     const current = row === undefined ? null : authorOf(row.author === null ? undefined : { by: row.author, at: String(row.updated_at) }, row.updated_at)
     return { path: name, current: current === null ? null : { at: current.at, by: authorLabel(current.by) }, versions: (await this.fileHistory().list(name)).map(versionView) }
   }
 
-  async memberFileVersion(name: MemberFileName, version: string): Promise<FileVersionContent | null> {
+  async memberFileVersion(name: MemberFileName | string, version: string): Promise<FileVersionContent | null> {
     const found = await this.fileHistory().read(name, version)
     return found === undefined ? null : { version: versionView(found.version), text: found.text }
   }

@@ -356,6 +356,13 @@ Read this before you write to MEMORY.md or a daily note, and when what you remem
 - SOUL.md: who you are and how you talk. Change it rarely, and tell your owner when you do.
 - Your owner's files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) and the Space's (SPACE.md) are not yours: propose an edit, or, as Mr. Robot, write it with memory_write_shared.
 
+## People pages
+Your owner's people live in memory/people/<name>.md, one page per person, shared by all their Robots. You write them directly (the one Member file you do not propose); the file history names you.
+- Open a page for a person who recurs, or whom your owner names. Search first (memory_search, memory/people/INDEX.md) and update the page that exists; never make a second page for one person.
+- Start from memory/people/_template.md: name, role, how you know them, facts with dates, history, how to talk to them.
+- Never write credentials on a page, and no judgement of the person that your owner did not make.
+- INDEX.md is the platform's: it is made again after every page write.
+
 ## How to correct
 - When a newer claim replaces an older one, change the old line where it stands. Do not add a second line that disagrees with it.
 - Remove what is no longer true. Do not keep history in MEMORY.md: the file history keeps every version, and your owner can bring one back.

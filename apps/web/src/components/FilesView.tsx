@@ -19,6 +19,7 @@ export function isPagePath(path: string): boolean {
 const GROUPS: ReadonlyArray<readonly [WorkspaceFileView['group'], string]> = [
   ['persona', 'Persona and memory'],
   ['daily', 'Daily notes'],
+  ['member', 'Member files: people pages'],
   ['skills', 'Skills'],
   ['pages', 'Pages'],
   ['other', 'Other files'],

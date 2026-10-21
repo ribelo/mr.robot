@@ -23,5 +23,9 @@ export interface WorkspaceHost {
   readonly workspace: WorkspaceShape
   /** The owner's Member file, mounted read-only (robot-mj7v). */
   memberFile(name: MemberFileName): Promise<string>
+  /** The owner's people pages (v1.20): one file's text, undefined when there is none; every path; a write as this Robot. */
+  peopleFile(path: string): Promise<string | undefined>
+  peoplePaths(): Promise<string[]>
+  writePeoplePage(path: string, content: string): Promise<void>
   run<A, E>(effect: Effect.Effect<A, E>): Promise<A>
 }

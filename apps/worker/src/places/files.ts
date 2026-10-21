@@ -5,6 +5,7 @@
  */
 import { ALL_DOCS, docsReadOnlyMessage, isDocsPath, productDoc } from '../docs/index.ts'
 import { MEMBER_FILE_NAMES, type MemberFileName } from '../member/member.ts'
+import { isPeoplePage, isPeoplePath } from '../member/people.ts'
 import type { BoxBackend } from '../box/backend.ts'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { normalizePath } from '../workspace/workspace.ts'
@@ -86,6 +87,7 @@ const DOCS_PATHS = ALL_DOCS.map((entry) => entry.path)
 const stored = <T extends { path: string }>(entries: readonly T[]): T[] => entries.filter((entry) => !isDocsPath(entry.path))
 
 const memberName = (key: string): MemberFileName | undefined => MEMBER_FILE_NAMES.find((name) => name === key)
+const PEOPLE_READ_ONLY = (path: string) => `${path} is kept by the platform and read-only. Write a page as memory/people/<name>.md: your owner's Robots write people pages directly.`
 
 /** The key of a path in the Workspace: relative, or under /workspace. @throws BadPath when the path is not a file path inside the Workspace. */
 export function workspaceKey(path: string): string {
@@ -101,6 +103,8 @@ export function writableWorkspaceKey(path: string): string {
   const member = memberName(key)
   if (member !== undefined) throw new ReadOnlyPath({ path: key, message: READ_ONLY_MEMBER(member) })
   if (isDocsPath(key)) throw new ReadOnlyPath({ path: key, message: docsReadOnlyMessage(key) })
+  // Under memory/people/ only a page is written, and to the owner's Member files, not to R2 (v1.20, dm-s0gy).
+  if (key.startsWith('memory/people/') && !isPeoplePage(key)) throw new ReadOnlyPath({ path: key, message: PEOPLE_READ_ONLY(key) })
   return key
 }
 
@@ -108,6 +112,11 @@ export function writableWorkspaceKey(path: string): string {
 export async function ownedBytes(host: WorkspaceHost, key: string): Promise<Uint8Array | undefined> {
   const member = memberName(key)
   if (member !== undefined) return new TextEncoder().encode(await host.memberFile(member))
+  if (isPeoplePath(key)) {
+    const text = await host.peopleFile(key)
+    if (text === undefined) throw new MissingFile({ place: 'your Workspace', path: key, message: `${WORKSPACE_ROOT}/${key} does not exist` })
+    return new TextEncoder().encode(text)
+  }
   if (!isDocsPath(key)) return undefined
   const doc = productDoc(key)
   if (doc === undefined) throw new MissingFile({ place: 'your Workspace', path: key, message: `${WORKSPACE_ROOT}/${key} does not exist` })
@@ -141,6 +150,11 @@ export class WorkspaceFiles implements PlaceFiles {
     const display = `${WORKSPACE_ROOT}/${key}`
     const member = memberName(key)
     if (member !== undefined) return { path: display, text: await this.host.memberFile(member) }
+    if (isPeoplePath(key)) {
+      const text = await this.host.peopleFile(key)
+      if (text === undefined) throw new MissingFile({ place: this.label, path: display, message: `${display} does not exist. Make the page with write; memory/people/_template.md is its shape.` })
+      return { path: display, text }
+    }
     if (isDocsPath(key)) {
       const doc = productDoc(key)
       if (doc === undefined) throw new MissingFile({ place: this.label, path: display, message: `${display} does not exist` })
@@ -156,6 +170,11 @@ export class WorkspaceFiles implements PlaceFiles {
 
   async writeFile(path: string, content: string, encoding: 'text' | 'base64'): Promise<{ path: string; bytes: number }> {
     const key = writableWorkspaceKey(path)
+    if (isPeoplePage(key)) {
+      if (encoding !== 'text') throw new BadCall({ tool: 'write', message: 'a people page is text' })
+      await this.host.writePeoplePage(key, content)
+      return { path: `${WORKSPACE_ROOT}/${key}`, bytes: new TextEncoder().encode(content).length }
+    }
     const body = encoding === 'base64' ? bytesOfBase64(content) : content
     await this.host.run(this.host.workspace.write(key, body))
     return { path: `${WORKSPACE_ROOT}/${key}`, bytes: typeof body === 'string' ? new TextEncoder().encode(body).length : body.length }
@@ -163,6 +182,7 @@ export class WorkspaceFiles implements PlaceFiles {
 
   async removeFile(path: string): Promise<{ path: string }> {
     const key = writableWorkspaceKey(path)
+    if (isPeoplePage(key)) throw new ReadOnlyPath({ path: key, message: `${key} is your owner's people page: correct it with write; only your owner deletes it.` })
     if ((await this.host.run(this.host.workspace.stat(key))) === undefined) throw new MissingFile({ place: this.label, path: key, message: `No file "${key}" in your Workspace; nothing was deleted.` })
     await this.host.run(this.host.workspace.remove(key))
     return { path: key }
@@ -171,7 +191,7 @@ export class WorkspaceFiles implements PlaceFiles {
   /** The paths of the Workspace a search or a listing sees: the owner's files, the docs and the objects of R2 (not the docs the bucket might hold). */
   private async visible(maxBytes?: number): Promise<string[]> {
     const entries = await this.host.run(this.host.workspace.list())
-    return [...MEMBER_FILE_NAMES, ...DOCS_PATHS, ...stored(entries).filter((entry) => maxBytes === undefined || entry.size <= maxBytes).map((entry) => entry.path)]
+    return [...MEMBER_FILE_NAMES, ...(await this.host.peoplePaths()), ...DOCS_PATHS, ...stored(entries).filter((entry) => !entry.path.startsWith('memory/people/')).filter((entry) => maxBytes === undefined || entry.size <= maxBytes).map((entry) => entry.path)]
   }
 
   /** Every stored path is listed: never truncated. */
