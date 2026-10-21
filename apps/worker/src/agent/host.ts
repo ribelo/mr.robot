@@ -27,5 +27,7 @@ export interface WorkspaceHost {
   peopleFile(path: string): Promise<string | undefined>
   peoplePaths(): Promise<string[]>
   writePeoplePage(path: string, content: string): Promise<void>
+  /** Only Mr. Robot's succeeds (merging two pages of one person); others throw with the reason. */
+  removePeoplePage(path: string): Promise<void>
   run<A, E>(effect: Effect.Effect<A, E>): Promise<A>
 }

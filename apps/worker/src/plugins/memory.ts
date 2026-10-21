@@ -32,7 +32,7 @@ export interface MemoryHost {
 
 /** Mr. Robot writes owner and Space files directly; other Robots ask the owner to approve an edit. */
 export type SharedFiles =
-  | { readonly kind: 'mr-robot'; write(file: SharedFile, content: string): Promise<void> }
+  | { readonly kind: 'mr-robot'; write(file: SharedFile, content: string): Promise<void>; propose(kind: 'member-file', purpose: string, payload: Record<string, unknown>): { id: string } }
   | { readonly kind: 'robot'; propose(kind: 'member-file', purpose: string, payload: Record<string, unknown>): { id: string } }
 
 /** What the memory header says about shared files: only the tool this Robot has (none while tools are off). */
@@ -72,7 +72,7 @@ function memoryTools(config: MemoryConfig) {
   const search = searchTool(config.host)
   if (shared.kind === 'mr-robot') {
     const write = shared.write.bind(shared)
-    return [search, tool<{ file: SharedFile; content: string }>({
+    return [search, proposeTool(shared), tool<{ file: SharedFile; content: string }>({
       name: 'memory_write_shared',
       description: "Write the complete new version of one of your owner's shared memory files (USER.md, PROACTIVE_PREFERENCES.md, memory/world.md) or the Space's SPACE.md. Every Robot that reads it is told it changed.",
       parameters: { properties: { file: { type: 'string', enum: [...SHARED_FILES], description: 'Which shared memory file to write' }, content: { type: 'string', description: 'The complete new file' } }, required: ['file', 'content'] },
@@ -84,7 +84,12 @@ function memoryTools(config: MemoryConfig) {
       },
     })]
   }
-  return [search, tool<{ file: SharedFile; content: string; purpose: string }>({
+  return [search, proposeTool(shared)]
+}
+
+/** propose_member_file_edit: every Robot proposes; Mr. Robot too, which his dream does (v1.20, dm-pt5b). */
+function proposeTool(shared: SharedFiles) {
+  return tool<{ file: SharedFile; content: string; purpose: string }>({
     name: 'propose_member_file_edit',
     description: "Propose a new full version of a shared memory file: your owner's USER.md, PROACTIVE_PREFERENCES.md or memory/world.md, or the Space's SPACE.md, with what you learned. Your owner approves or rejects it.",
     parameters: {
@@ -101,7 +106,7 @@ function memoryTools(config: MemoryConfig) {
       const proposal = shared.propose('member-file', purpose, { file: { name: file, content } })
       return { proposalId: proposal.id, status: 'waiting for your owner' }
     },
-  })]
+  })
 }
 
 const base = capability<MemoryConfig>({

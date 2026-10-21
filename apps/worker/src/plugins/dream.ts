@@ -24,6 +24,8 @@ export const DREAM_AT = 'dream-at'
 export const DREAMED_AT = 'dreamed-at'
 
 export const DREAM_TOOLS: ReadonlySet<string> = new Set(['read', 'write', 'edit', 'glob', 'grep', 'memory_search', 'conversation_search', 'task_list', 'propose_skill', 'propose_member_file_edit', 'ask'])
+/** Mr. Robot's dream (dm-pt5b, dm-w15l, dm-kkgy): also his deputy reads of his owner's Robots, never their writes, and delete_file to merge two people pages. */
+export const CHIEF_DREAM_TOOLS: ReadonlySet<string> = new Set([...DREAM_TOOLS, 'robot_files', 'robot_file_read', 'delete_file'])
 
 /** What the day left behind for the dream to read. */
 export interface DreamEvidence {
@@ -54,7 +56,7 @@ export function dreamNote(owner: string, date: string, evidence: DreamEvidence, 
     `2. In AGENTS.md, the section "## How to act for ${owner}": rewrite it from what you learned, at most ${DREAM_SECTION_LINES} lines.`,
     '3. When the evidence calls for it: propose_skill for work that recurs, or propose_member_file_edit for what your owner\'s files should say.',
     'Rules: write only your own files; propose the rest. At most one question for the morning, with ask and dismiss_on_move_on true, and only if PROACTIVE_PREFERENCES.md allows it. Then end.',
-    ...(chief ? ['', 'You are the chief: also read the daily notes of your owner\'s Robots with robot_files and robot_file_read, and tend memory/people/: merge two pages of one person into one, keep INDEX.md true. Write only your own files and the people pages; propose changes to your owner\'s other files. No memory moves between Robots.'] : []),
+    ...(chief ? ['', 'You are the chief: the notes above include your owner\'s Robots\'; read them with robot_file_read. Propose with propose_member_file_edit what they show about your owner. Tend memory/people/: when two pages are one person, write the merged page and delete the other with delete_file. Write only your own files and the people pages. No memory moves between Robots: never copy a Robot\'s knowledge of its job into another.'] : []),
   ].join('\n')
 }
 

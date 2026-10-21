@@ -182,7 +182,11 @@ export class WorkspaceFiles implements PlaceFiles {
 
   async removeFile(path: string): Promise<{ path: string }> {
     const key = writableWorkspaceKey(path)
-    if (isPeoplePage(key)) throw new ReadOnlyPath({ path: key, message: `${key} is your owner's people page: correct it with write; only your owner deletes it.` })
+    if (isPeoplePage(key)) {
+      if ((await this.host.peopleFile(key)) === undefined) throw new MissingFile({ place: this.label, path: key, message: `No people page "${key}"; nothing was deleted.` })
+      await this.host.removePeoplePage(key).catch((error: unknown) => { throw new ReadOnlyPath({ path: key, message: error instanceof Error ? error.message : String(error) }) })
+      return { path: key }
+    }
     if ((await this.host.run(this.host.workspace.stat(key))) === undefined) throw new MissingFile({ place: this.label, path: key, message: `No file "${key}" in your Workspace; nothing was deleted.` })
     await this.host.run(this.host.workspace.remove(key))
     return { path: key }

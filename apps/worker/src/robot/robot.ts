@@ -182,7 +182,7 @@ import { isPeoplePage, isPeoplePath, PEOPLE_INDEX, PEOPLE_TEMPLATE_PATH } from '
 import { INDEX_BATCH, isIndexedRobotPath, MemoryIndex, versionOf as memoryVersion, type MemoryMatch } from './memory-index.ts'
 import { platformStep, StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
 import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
-import { cutSection, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote, type DreamEvidence } from '../plugins/dream.ts'
+import { CHIEF_DREAM_TOOLS, cutSection, DREAM_STEPS, DREAM_TOOLS, dreamArgsCheck, dreamDuty, dreamNote, type DreamEvidence } from '../plugins/dream.ts'
 import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
 import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
 import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
@@ -778,7 +778,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     }
     let stopDream = () => {}
     if (dream) {
-      this.fence.open('the dream', this.store.requireConfig().kind === 'mr-robot' ? new Set([...DREAM_TOOLS, 'robot_files', 'robot_file_read', 'robot_file_write']) : DREAM_TOOLS, dreamArgsCheck())
+      this.fence.open('the dream', this.store.requireConfig().kind === 'mr-robot' ? CHIEF_DREAM_TOOLS : DREAM_TOOLS, dreamArgsCheck())
       this.writer = { kind: 'dream' }
       let steps = 0
       stopDream = ctx.on('session/event', (session, event) => {
@@ -2657,7 +2657,13 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   /** What the day left (dm-pzxk): daily notes changed, chapters closed, Attempts failed or skipped, Asks dismissed or rejected, since `since`. */
   private async dreamEvidence(since: number): Promise<DreamEvidence> {
     const config = this.store.requireConfig()
-    const notes = (await this.run(this.workspace.list('memory'))).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > since).map((entry) => entry.path).sort()
+    const own = (await this.run(this.workspace.list('memory'))).filter((entry) => /^memory\/\d{4}-\d{2}-\d{2}\.md$/.test(entry.path) && entry.uploaded > since).map((entry) => entry.path).sort()
+    // Mr. Robot's dream also reads his owner's Robots' daily notes, through his deputy reads (dm-pt5b).
+    const theirs = config.kind !== 'mr-robot' ? [] : (await Promise.all((await this.space().reachable(config.ownerId).catch(() => [])).filter((robot) => robot.ownerId === config.ownerId && robot.id !== config.id && robot.kind === 'robot').map(async (robot) => {
+      const files = await this.env.ROBOT.getByName(robot.id).files().catch(() => [])
+      return files.filter((file) => file.group === 'daily' && file.updatedAt > since).map((file) => `${robot.identity.name} (${robot.id}): ${file.path}`)
+    }))).flat()
+    const notes = [...own, ...theirs]
     const chapters = this.store.chapters.all().flatMap((chapter) => (chapter.state.kind === 'closed' && chapter.state.at > since ? [{ ordinal: chapter.ordinal, closedBy: chapter.state.by }] : []))
     const caller = { kind: 'robot' as const, robotId: config.id, ownerId: config.ownerId, actor: { kind: 'robot' as const, robotId: config.id, name: config.identity.name, avatarColor: config.identity.avatarColor, avatarSeed: config.identity.avatarSeed } }
     const tasks = await this.space().listTasks(caller, { state: 'all', assignee: { kind: 'robot', robotId: config.id } }).catch(() => ({ tasks: [] as TaskView[] }))
@@ -2742,6 +2748,14 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
   async peoplePaths(): Promise<string[]> {
     const pages = await this.env.MEMBER.getByName(this.store.requireConfig().ownerId).peoplePages().catch(() => ({}))
     return [...new Set([PEOPLE_TEMPLATE_PATH, PEOPLE_INDEX, ...Object.keys(pages)])].sort()
+  }
+
+  /** Only Mr. Robot deletes a people page: merging two pages of one person (v1.20, dm-kkgy). */
+  async removePeoplePage(path: string): Promise<void> {
+    const config = this.store.requireConfig()
+    if (config.kind !== 'mr-robot') throw new Error(`${path} is your owner's people page: correct it with write; only your owner deletes it, or Mr. Robot when he merges two pages of one person.`)
+    await this.env.MEMBER.getByName(config.ownerId).removePeoplePage(path)
+    this.memoryIndex.remove('member', path)
   }
 
   async writePeoplePage(path: string, content: string): Promise<void> {
@@ -4078,7 +4092,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       needsBaseline: (sessionId) => this.needsBaseline(sessionId),
       memoryDelivered: (sessionId, baseline) => this.memoryDelivered(sessionId, baseline),
       shared: config.kind === 'mr-robot'
-        ? { kind: 'mr-robot', write: (file: SharedFile, content: string) => this.writeShared(file, content) }
+        ? { kind: 'mr-robot', write: (file: SharedFile, content: string) => this.writeShared(file, content), propose: (kind, purpose, payload) => this.propose(kind, purpose, payload) }
         : { kind: 'robot', propose: (kind, purpose, payload) => this.propose(kind, purpose, payload) },
       search: (query, limit) => this.memorySearch(query, limit),
     }

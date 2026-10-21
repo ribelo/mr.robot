@@ -842,6 +842,25 @@ export class Member extends DurableObject<Env> {
    * A people page written by one of the Member's Robots or by the Member (dm-s0gy): the version it replaces is kept with its author, and
    * INDEX.md is made again (dm-p7l1).
    */
+  /** A people page merged into another (Mr. Robot's tidy, dm-kkgy): its last version is kept, and INDEX.md is made again. */
+  async removePeoplePage(path: string): Promise<void> {
+    if (!isPeoplePage(path)) throw Object.assign(new Error(`${path} is not a people page`), { name: 'Invalid', status: 400 })
+    const sql = this.ctx.storage.sql
+    const previous = sql.exec<{ content: string; author: string | null; updated_at: number }>('SELECT content, author, updated_at FROM member_file WHERE name = ?', path).toArray()[0]
+    if (previous === undefined) return
+    const was = authorOf(previous.author === null ? undefined : { by: previous.author, at: String(previous.updated_at) }, previous.updated_at)
+    await this.fileHistory().keep(path, { body: previous.content, by: was.by, at: was.at }, Date.now())
+    sql.exec('DELETE FROM member_file WHERE name = ?', path)
+    this.reindexPeople()
+  }
+
+  /** INDEX.md made again from the pages (dm-p7l1). */
+  private reindexPeople(): void {
+    const sql = this.ctx.storage.sql
+    const pages = sql.exec<{ name: string; content: string; updated_at: number }>("SELECT name, content, updated_at FROM member_file WHERE name LIKE 'memory/people/%' AND name != ?", PEOPLE_INDEX).toArray()
+    sql.exec('INSERT INTO member_file (name, content, updated_at, author) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at, author = excluded.author', PEOPLE_INDEX, peopleIndex(pages.map((page) => ({ path: page.name, content: page.content, updatedAt: page.updated_at }))), Date.now(), JSON.stringify({ kind: 'platform' }))
+  }
+
   async writePeoplePage(path: string, content: string, author: FileAuthor): Promise<void> {
     if (!isPeoplePage(path)) throw Object.assign(new Error(`${path}: a people page is memory/people/<name>.md, with lowercase letters, digits and dashes`), { name: 'Invalid', status: 400 })
     const sql = this.ctx.storage.sql
@@ -852,8 +871,7 @@ export class Member extends DurableObject<Env> {
     }
     const now = Date.now()
     sql.exec('INSERT INTO member_file (name, content, updated_at, author) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at, author = excluded.author', path, content, now, JSON.stringify(author))
-    const pages = sql.exec<{ name: string; content: string; updated_at: number }>("SELECT name, content, updated_at FROM member_file WHERE name LIKE 'memory/people/%' AND name != ?", PEOPLE_INDEX).toArray()
-    sql.exec('INSERT INTO member_file (name, content, updated_at, author) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at, author = excluded.author', PEOPLE_INDEX, peopleIndex(pages.map((page) => ({ path: page.name, content: page.content, updatedAt: page.updated_at }))), now, JSON.stringify({ kind: 'platform' }))
+    this.reindexPeople()
   }
 
   private fileHistory(): FileHistory {
