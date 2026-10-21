@@ -2457,8 +2457,8 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
         if (name === 'job_output' || name === 'job_kill') return jobItems
         // working_directory changes nothing on the computer; the places check the Workspace's files facet themselves.
         if (name === 'job_list' || name === 'working_directory') return NO_ITEMS
-        // A worktree is made on the Workspace's Host under its files facet.
-        if (name === 'create_worktree') {
+        // A worktree is made, and a language server asked, on the Workspace's Host under its files facet.
+        if (name === 'create_worktree' || name === 'lsp') {
           const workspace = this.store.get<WorkspaceSetting>(WORKSPACE)
           return { possible: hostFacets('files'), used: async () => (workspace === undefined ? [] : [{ kind: 'host', name: hostFacetKey(workspace.hostId, 'files') }]), asksAtExecution: true }
         }

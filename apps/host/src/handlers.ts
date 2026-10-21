@@ -4,6 +4,7 @@
  */
 import * as Effect from 'effect/Effect'
 import { downloadFile, HostError, HostRpcs, uploadFile, type CopyIo, type HostAccess } from '@mr-robot/host-protocol'
+import { resolve } from 'node:path'
 import { workspaceContext } from './workspace-context.ts'
 import WebSocket from 'ws'
 import type { HostChrome } from './chrome.ts'
@@ -103,6 +104,16 @@ export function hostHandlers(shell: HostShell, downloads: HostDownloads, chrome:
     WorkspaceOpen: ({ access, skillsDigest }) => Effect.tryPromise({ try: () => context(access, null, skillsDigest), catch: fail }),
     WorkspaceState: ({ access, known, skillsDigest }) => Effect.tryPromise({ try: () => context(access, known, skillsDigest), catch: fail }),
     CreateWorktree: ({ access }) => Effect.tryPromise({ try: () => shell.createWorktree(access), catch: fail }),
+    // Language servers (ticket 06): the Workspace's session owns them; the root is the worktree when there is one.
+    Lsp: ({ operation, file, line, character, access }) => Effect.tryPromise({
+      try: async (signal) => {
+        const workspace = access.workspace
+        const session = await shell.sessions.touch(access.robot, workspace)
+        if (workspace === undefined || session === undefined) throw Object.assign(new Error('lsp works in a Workspace only.'), { code: 'ENOENT' })
+        return shell.languageServers.query(session, workspace.worktree ?? workspace.root, { operation, file: resolve(where(access), file), line, character }, signal)
+      },
+      catch: fail,
+    }),
     SkillLoad: ({ name, access }) => Effect.tryPromise({
       try: async () => {
         const loaded = await shell.skills.load(where(access), name)

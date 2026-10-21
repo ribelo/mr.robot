@@ -68,6 +68,8 @@ const normal = (path: string): string => {
 /** A path of a call as the app resolves it: on the Workspace a relative path starts in the Robot's current directory (access.cwd); otherwise as given. */
 const onPlace = (access: HostAccess, path: string): string => (access.cwd !== undefined && !path.startsWith('/') && !path.startsWith('~') ? normal(`${access.cwd}/${path}`) : path)
 
+/** The language-server queries the fake app answered (zero-based positions, as the protocol carries them). */
+export const lspCalls: Array<{ operation: string; file: string; line: number; character: number; cwd: string | undefined }> = []
 /** The worktrees the fake app made. */
 export const worktreesMade: string[] = []
 /** The directories a read or write in a Workspace touched, per Robot directory name, as the app's sessions keep them. */
@@ -341,6 +343,13 @@ export async function fakeHost(name = 'Desk', options: { sandbox?: Sandbox; plat
       worktreesMade.push(path)
       return Effect.succeed({ path, branch: access.robot, baseCommit: 'c0ffee0000000000000000000000000000000000', repositoryRoot: workspace.repository })
     },
+    // A language server, as DSH's lsp-stdio answers (the app's tests run a real one): a location in the file asked about, or hover text.
+    Lsp: ({ operation, file, line, character, access }) => {
+      lspCalls.push({ operation, file, line, character, cwd: access.cwd })
+      const path = file.startsWith('/') ? file : `${access.cwd ?? ''}/${file}`
+      if (operation === 'hover') return Effect.succeed({ kind: 'hover' as const, hover: { contents: 'function greet(name: string): string' } })
+      return Effect.succeed({ kind: 'locations' as const, locations: [{ uri: `file://${path}`, range: { start: { line, character }, end: { line, character: character + 5 } } }], resolvedWorkspaceUri: `file://${access.workspace?.root ?? ''}` })
+    },
     SkillLoad: ({ name, access }) => {
       const repository = access.workspace?.repository ?? ''
       for (const path of [`${repository}/.agents/skills/${name}/SKILL.md`, `${FAKE_HOME}/.agents/skills/${name}/SKILL.md`]) {
@@ -461,6 +470,7 @@ export async function closeHosts(): Promise<void> {
   workspaceTouched.clear()
   contextCalls.length = 0
   worktreesMade.length = 0
+  lspCalls.length = 0
   cut.nextWrite = false
   hostJobCalls.length = 0
   for (const socket of open.splice(0)) {

@@ -44,6 +44,7 @@ export function hostLink(caller: HostCaller, host: HostView, reach: Reach, cwd?:
     download: (input) => call(async () => (await owner()).hostDownload(host.id, robotId, input, reach, cwd)),
     workingDirectory: (cd) => call(async () => (await owner()).hostWorkingDirectory(host.id, robotId, cd, cwd ?? '')),
     createWorktree: () => call(async () => (await owner()).hostCreateWorktree(host.id, robotId, cwd ?? '')),
+    lsp: (input) => call(async () => (await owner()).hostLsp(host.id, robotId, input, cwd ?? '')),
     recordCopy: async (detail, outcome) => (await owner()).recordHostCopy(host.id, robotId, detail, outcome),
   }
 }

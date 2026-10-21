@@ -271,7 +271,7 @@ void app.whenReady().then(() => {
   if (config.autostart) applyAutostart(true)
   changed()
   // The Landlock launcher ships beside the bundle (build.mjs); DSH would look for it in node_modules.
-  void HostShell.start({ landlockLauncher: join(__dirname, 'landlock-run'), environment: config.environment }).then((started) => {
+  void HostShell.start({ landlockLauncher: join(__dirname, 'landlock-run'), environment: config.environment, configDirectory: app.getPath('userData') }).then((started) => {
     hostShell = started
     connect()
     changed()

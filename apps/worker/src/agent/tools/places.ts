@@ -13,7 +13,8 @@ import { readWindow, replaceInStyle } from '../../places/file-ops.ts'
 import { WORKSPACE_GREP_MAX_FILES, type PlaceFiles } from '../../places/files.ts'
 import { parseJobId, type JobId } from '../../places/job-id.ts'
 import type { JobEntry, JobOutputView, KillView, RunResult } from '../../places/jobs.ts'
-import type { CopyEnd, CopyResult, PlaceCall, RunInput } from '../../places/places.ts'
+import type { CopyEnd, CopyResult, LspView, PlaceCall, RunInput } from '../../places/places.ts'
+import type { LspOperation } from '@mr-robot/host-protocol'
 import { isTransferFailure } from '../../places/transfers.ts'
 import { tool } from './define.ts'
 
@@ -28,6 +29,8 @@ export interface PlacesHost {
   jobKill(id: JobId, call: PlaceCall): Promise<KillView | WaitingResult>
   /** The notice of a call that named "workspace" and went to the Files (cw-shlm), or undefined. */
   aliasNotice(...ons: readonly unknown[]): string | undefined
+  /** A language-server query on the Workspace (cw-lx4f). */
+  lsp(on: string, input: { operation: LspOperation; file: string; line: number; character: number }, call: PlaceCall): Promise<LspView | WaitingResult>
   /** The Robot's worktree in its Workspace (cw-11je). */
   createWorktree(call: PlaceCall): Promise<{ readonly path: string; readonly branch: string; readonly baseCommit: string; readonly repositoryRoot: string } | WaitingResult>
   /** The current directory in the Workspace, or a move within its repository (cw-llvx). */
@@ -290,6 +293,22 @@ export function placesTools(host: PlacesHost, reach: PlacesReach): ToolDefinitio
       parameters: { properties: { cd: { type: 'string', description: 'The directory to move to; leave it out to read where you are' } } },
       concurrencySafe: false,
       execute: (args, exec) => guarded('working_directory', async () => host.workingDirectory(args.cd, exec)),
+    }), tool<{ on: string; operation: LspOperation; file_path: string; line: number; character: number; reason?: string }>({
+      name: 'lsp',
+      description: `Ask the language server of your Workspace on ${reach.workspace.host} about code: goToDefinition, findReferences (the declaration included), goToImplementation, or hover (the type and docs at a position). on must be "workspace". The file is relative to your current directory or absolute; line and character count from 1, as read shows lines. Returns locations (path from the repository root, line, character, endLine, endCharacter) or the hover text. The servers start on the first query (the first one can take a while) and are the ones installed on that computer.`,
+      parameters: {
+        properties: {
+          on: { type: 'string', description: 'workspace: language servers run only in your Workspace' },
+          operation: { type: 'string', enum: ['goToDefinition', 'findReferences', 'goToImplementation', 'hover'], description: 'What to ask' },
+          file_path: { type: 'string', description: 'The source file the position is in' },
+          line: { type: 'integer', description: 'The line, from 1' },
+          character: { type: 'integer', description: 'The character in the line, from 1' },
+          reason: REASON_PARAMETER,
+        },
+        required: ['on', 'operation', 'file_path', 'line', 'character'],
+      },
+      concurrencySafe: true,
+      execute: (args, exec) => guarded('lsp', async () => host.lsp(args.on, { operation: args.operation, file: args.file_path, line: args.line, character: args.character }, callOf('lsp', args, exec))),
     }), tool<{ reason?: string }>({
       name: 'create_worktree',
       description: `Make your own Git worktree in your Workspace on ${reach.workspace.host}, so that you work in a checkout of your own while other Robots share the repository: a branch named after you and its checkout under <repository>/.agents/worktrees/, from the current commit of your current directory's checkout. Your current directory moves there, and from then on you may change only that checkout and the repository's .git, not the main working tree. It holds committed content only: no untracked or ignored files, no submodules, no fetch, and no installed dependencies; install what the repository needs there yourself. One worktree per Robot; a Subagent cannot make one. Returns path, branch, baseCommit and repositoryRoot.`,

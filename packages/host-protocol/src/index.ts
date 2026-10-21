@@ -435,10 +435,34 @@ export const CreateWorktree = Rpc.make('CreateWorktree', {
   error: HostError,
 })
 
-/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
-export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory', 'WorkspaceOpen', 'WorkspaceState', 'SkillLoad', 'CreateWorktree']
+/** The four queries of DSH's lsp seam (v1.21 ticket 06, cw-lx4f). */
+export const LspOperation = Schema.Literals(['goToDefinition', 'findReferences', 'goToImplementation', 'hover'])
+export type LspOperation = typeof LspOperation.Type
 
-export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory, WorkspaceOpen, WorkspaceState, SkillLoad, CreateWorktree) {}
+const LspPosition = Schema.Struct({ line: Schema.Number, character: Schema.Number })
+const LspRange = Schema.Struct({ start: LspPosition, end: LspPosition })
+
+/** DSH's normalized answer: locations (zero-based UTF-16 ranges, file: URIs) or hover text. */
+export const LspAnswer = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('locations'), locations: Schema.Array(Schema.Struct({ uri: Schema.String, range: LspRange })), resolvedWorkspaceUri: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('hover'), hover: Schema.NullOr(Schema.Struct({ contents: Schema.String, range: Schema.optional(LspRange) })) }),
+])
+export type LspAnswer = typeof LspAnswer.Type
+
+/**
+ * A language-server query in the Robot's Workspace (cw-lx4f): the file (relative to the current directory), a zero-based position. The
+ * app's servers for this Workspace start on the first query with the Workspace's root (its worktree when it has one) as the workspace.
+ */
+export const Lsp = Rpc.make('Lsp', {
+  payload: { operation: LspOperation, file: Schema.String, line: Schema.Number, character: Schema.Number, access: HostAccess },
+  success: LspAnswer,
+  error: HostError,
+})
+
+/** The RPCs that need an app of HOST_PROTOCOL_VERSION or later; every call on "workspace" (one that carries access.cwd) needs it too. */
+export const WORKSPACE_RPCS: readonly string[] = ['ListDirectory', 'Stat', 'WorkspaceClose', 'WorkingDirectory', 'WorkspaceOpen', 'WorkspaceState', 'SkillLoad', 'CreateWorktree', 'Lsp']
+
+export class HostRpcs extends RpcGroup.make(Read, Write, CopyStat, Upload, Download, Glob, Grep, Delete, Run, JobList, JobOutput, JobKill, BrowserOpen, BrowserClose, ListDirectory, Stat, WorkspaceClose, WorkingDirectory, WorkspaceOpen, WorkspaceState, SkillLoad, CreateWorktree, Lsp) {}
 
 /** The sandbox state of a Host, as its heartbeat reports it. */
 export const Sandbox = Schema.Literals(['full', 'partial', 'none'])

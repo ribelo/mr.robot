@@ -8,7 +8,7 @@
  */
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { GrantLevel, HostView, WorkspaceSetting } from '@mr-robot/protocol'
-import type { UploadPart } from '@mr-robot/host-protocol'
+import type { LspAnswer, LspOperation, UploadPart } from '@mr-robot/host-protocol'
 import type { WorkspaceHost } from '../agent/host.ts'
 import { waitingResult, type GrantItem, type ToolCallRequest, type WaitingResult } from '../agent/ask-gate.ts'
 import type { BoxBackend } from '../box/backend.ts'
@@ -27,6 +27,8 @@ import { BOX_PLACE, FILES_PLACE, parseOn, placeName, refuseOwned, WORKSPACE_ALIA
 export interface HostLink extends HostFileLink {
   /** The Robot's next current directory in its Workspace there (v1.21, cw-llvx), checked by the app. */
   workingDirectory(cd: string): Promise<{ readonly path: string }>
+  /** A language-server query in the Workspace there (v1.21, cw-lx4f), zero-based. */
+  lsp(input: { operation: LspOperation; file: string; line: number; character: number }): Promise<LspAnswer>
   /** The Robot's worktree in its Workspace there (v1.21, cw-11je), made by the app. */
   createWorktree(): Promise<{ readonly path: string; readonly branch: string; readonly baseCommit: string; readonly repositoryRoot: string }>
   /** The size of a file on the Host, so that the Worker can plan an upload. */
@@ -144,6 +146,28 @@ interface Granted<P extends Place = Place> {
   readonly level: 'allow' | 'ask'
 }
 
+/** One location as the lsp tool answers it: a path from the repository root (absolute outside it) and one-based positions. */
+export interface LspLocationView {
+  readonly path: string
+  readonly line: number
+  readonly character: number
+  readonly endLine: number
+  readonly endCharacter: number
+}
+
+/** What the lsp tool answers (cw-xxqw): locations, or hover text (null for none). */
+export type LspView = { readonly kind: 'locations'; readonly locations: readonly LspLocationView[] } | { readonly kind: 'hover'; readonly contents: string | null }
+
+/** DSH's answer as the Robot reads it: file: URIs to paths from the repository, zero-based positions to one-based. */
+export function lspView(answer: LspAnswer, repository: string): LspView {
+  if (answer.kind === 'hover') return { kind: 'hover', contents: answer.hover?.contents ?? null }
+  const pathOf = (uri: string): string => {
+    const path = uri.startsWith('file://') ? decodeURIComponent(uri.slice('file://'.length)) : uri
+    return repository !== '' && path.startsWith(`${repository}/`) ? path.slice(repository.length + 1) : path
+  }
+  return { kind: 'locations', locations: answer.locations.map((location) => ({ path: pathOf(location.uri), line: location.range.start.line + 1, character: location.range.start.character + 1, endLine: location.range.end.line + 1, endCharacter: location.range.end.character + 1 })) }
+}
+
 /** How many read hashes an agent keeps (cw-jko0). */
 const READ_HASHES_KEPT = 500
 
@@ -238,6 +262,22 @@ export class Places {
     const moved = await this.deps.link(place.host, 'granted', place.workspace.cwd).workingDirectory(cd.trim())
     this.deps.setCurrentDirectory(exec, moved.path)
     return { cwd: moved.path, ...answer }
+  }
+
+  /**
+   * A language-server query (cw-lx4f): on the Workspace only, under its Host's files facet; the file is from the current directory and
+   * the position one-based, as the tool takes it. Locations come back with their paths from the repository root.
+   */
+  async lsp(on: string, input: { operation: LspOperation; file: string; line: number; character: number }, call: PlaceCall): Promise<LspView | WaitingResult> {
+    if (parseOn(on, 'lsp') !== WORKSPACE_PLACE || this.aliased()) throw new WrongPlace({ on, message: `lsp: language servers work on your Workspace only (on "workspace")${this.aliased() ? ', and you have none' : ''}.` })
+    if (!Number.isInteger(input.line) || input.line < 1 || !Number.isInteger(input.character) || input.character < 1) throw new BadCall({ tool: 'lsp', message: 'lsp: line and character count from 1.' })
+    const target = await this.workspacePlace('files', call.exec)
+    const place = target.place
+    if (place.kind !== 'host' || place.workspace === undefined) throw new WrongPlace({ on, message: 'lsp: you have no Workspace.' })
+    const waiting = this.waiting(call, [target])
+    if (waiting !== undefined) return waiting
+    const answer = await this.deps.link(place.host, 'granted', place.workspace.cwd).lsp({ ...input, line: input.line - 1, character: input.character - 1 })
+    return lspView(answer, this.deps.workspaceSetting()?.repository ?? '')
   }
 
   /**

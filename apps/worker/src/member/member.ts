@@ -4,7 +4,7 @@
  * Member's private secrets, Provider credentials, push subscriptions and usage.
  */
 import * as Schema from 'effect/Schema'
-import { hostPartDeadlineMs, RUN_MAX_WAIT_SECONDS, type UploadPart } from '@mr-robot/host-protocol'
+import { hostPartDeadlineMs, RUN_MAX_WAIT_SECONDS, type LspOperation, type UploadPart } from '@mr-robot/host-protocol'
 import type { Reach } from '../places/host-facet.ts'
 import { HostHub, jobRef, type CallWhere, type HostEntry, type HostAction, type HostRunAnswer } from './hosts.ts'
 import { replyOf, type HostCallReply } from './host-call.ts'
@@ -1190,6 +1190,8 @@ export class Member extends DurableObject<Env> {
   }
   /** The Robot's worktree (v1.21 ticket 05, cw-11je), made by the app with DSH's runtime from the checkout of its current directory. */
   hostCreateWorktree(id: string, robotId: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.CreateWorktree({ access }), 120_000, { action: 'create worktree', detail: cwd }, cwd)) }
+  /** A language-server query in the Robot's Workspace (v1.21 ticket 06, cw-lx4f): zero-based position, file from the current directory. */
+  hostLsp(id: string, robotId: string, input: { operation: LspOperation; file: string; line: number; character: number }, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.Lsp({ ...input, access }), 120_000, undefined, cwd)) }
   /** The body of a Host skill (cw-s2rt). */
   hostSkillLoad(id: string, robotId: string, name: string, cwd: string) { return replyOf(this.hosts.workspaceRun(id, robotId, (client, access) => client.SkillLoad({ name, access }), 30_000, { action: 'skill', detail: name }, cwd)) }
   /** The Robot moves within its Workspace (v1.21, cw-llvx): the app checks the directory; the Robot keeps it. */

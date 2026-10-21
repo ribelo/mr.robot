@@ -30,6 +30,7 @@ import { WorkspaceSessions } from './workspace-session.ts'
 import { RecentWrites } from './files.ts'
 import { HostSkills } from './workspace-context.ts'
 import { createWorktree, mountWorktrees } from './worktrees.ts'
+import { configuredServers, HostLanguageServers, LSP_IDLE_MS, mountableServers } from './lsp.ts'
 
 /** The most a command runs, and how long it runs when the call names no time (as v1.2 ran them). */
 const MAX_TIMEOUT_MS = RUN_MAX_WAIT_SECONDS * 1000
@@ -215,6 +216,8 @@ export class HostShell implements FileChanges {
   readonly jobs: HostJobs
   /** The Workspace sessions of this run of the app, one per Robot whose Workspace is here; they outlive the connection too. */
   readonly sessions = new WorkspaceSessions()
+  /** The language servers of the Workspaces here (ticket 06); set when the shell starts. */
+  languageServers!: HostLanguageServers
   /** The answers of the recent writes that named an id (cw-6b3r); they outlive the connection too. */
   readonly recentWrites = new RecentWrites()
   /** Why no command can run on this computer (Windows without PowerShell 7); undefined when they do. Looked at again by recheck(). */
@@ -257,6 +260,10 @@ export class HostShell implements FileChanges {
     readonly environment?: EnvironmentConfig
     /** How the login environment is captured: the login shell (environment.ts), or a test's own. */
     readonly capture?: () => Promise<Record<string, string> | undefined>
+    /** The app's config directory, where lsp.yaml is (ticket 06); none: the default servers. */
+    readonly configDirectory?: string
+    /** How long a Robot's language servers live without a query. */
+    readonly lspIdleMs?: number
   } = {}): Promise<HostShell> {
     const home = options.home ?? homedir()
     const kind: Shell = process.platform === 'win32' ? 'pwsh' : 'bash'
@@ -288,6 +295,8 @@ export class HostShell implements FileChanges {
     await mkdir(probeRoot).catch((error: unknown) => { if (errorCode(error) !== 'EEXIST') throw error })
     const sandbox = await probeSandbox(ctx, kind, probeRoot, env)
     const shell = new HostShell(ctx, home, env, await HostSkills.start(home), environment, capture, sandbox, kind, await sandboxWritable(ctx, probeRoot))
+    // The language servers read lsp.yaml again when a Workspace's servers start, with the login PATH as it is then.
+    shell.languageServers = new HostLanguageServers(() => mountableServers(configuredServers(options.configDirectory), (command) => (isAbsolute(command) ? command : onPath(command, shell.env?.['PATH'])), shell.env?.['PATH']), home, options.lspIdleMs ?? LSP_IDLE_MS)
     await shell.recheck()
     return shell
   }
@@ -423,6 +432,7 @@ export class HostShell implements FileChanges {
   /** The app quits: the Workspace sessions close, then DSH's layer (its jobs and processes) goes. */
   async dispose(): Promise<void> {
     await this.sessions.closeAll()
+    await this.languageServers.dispose()
     await this.skills.dispose()
     await this.ctx.fiber.dispose()
   }

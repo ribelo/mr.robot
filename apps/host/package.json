@@ -22,6 +22,8 @@
     "@deepseek-ai/dsh-jobs": "0.2.1-rc.2",
     "@deepseek-ai/dsh-jobs-local": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-lsp": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-lsp-stdio": "0.2.1-rc.2",
     "@deepseek-ai/dsh-pwsh-local": "0.2.1-rc.2",
     "@deepseek-ai/dsh-pwsh-sandbox": "0.2.1-rc.2",
     "@deepseek-ai/dsh-sandbox": "0.2.1-rc.2",
@@ -34,7 +36,8 @@
     "@deepseek-ai/dsh-subprocess-local": "0.2.1-rc.2",
     "@mr-robot/host-protocol": "workspace:*",
     "effect": "4.0.1",
-    "ws": "8.18.3"
+    "ws": "8.18.3",
+    "yaml": "2.8.1"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
