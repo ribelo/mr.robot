@@ -32,7 +32,10 @@ export const stepRequests = new Map<string, GenerateOptions[]>()
  * the skill catalog is a reminder in every context, after the Wake-up of the first Turn.
  */
 export function wakeOf(request: GenerateOptions): GenerateOptions['messages'][number] | undefined {
-  return request.messages.filter((message) => message.role === 'user' && !JSON.stringify(message).includes('<available_skills>')).at(-1)
+  // The baselines the platform adds after a Wake-up (the memory, the Workspace instructions) are not the Wake-up; a memory change note
+  // is read with it, as a test of a change expects.
+  const context = (message: unknown) => { const source = (message as { source?: { memory?: unknown; workspaceInstructions?: unknown } }).source; return source?.memory === 'baseline' || source?.workspaceInstructions !== undefined }
+  return request.messages.filter((message) => message.role === 'user' && !JSON.stringify(message).includes('<available_skills>') && !context(message)).at(-1)
 }
 
 function isSafetyNetStep(options: GenerateOptions): boolean {

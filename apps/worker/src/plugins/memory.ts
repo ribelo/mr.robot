@@ -116,7 +116,7 @@ const base = capability<MemoryConfig>({
 })
 
 type PreStepDecision = { kind: string; messages: readonly UserMessage[] }
-type PreStep = (input: { agent: { session: string }; messages: readonly UserMessage[]; step: number }, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>
+type PreStep = (input: { agent: { session: { id: unknown } }; messages: readonly UserMessage[]; step: number }, next: () => Promise<PreStepDecision>) => Promise<PreStepDecision>
 
 export const Memory = {
   ...base,
@@ -128,7 +128,8 @@ export const Memory = {
       // A rejected step, or an empty first step that only owns a no-step turn, carries nothing.
       if (decision.kind === 'reject' || (step === 1 && decision.messages.length === 0)) return decision
       if (decision.messages.some(isMemory)) return decision
-      const sessionId = String(agent.session)
+      // The session's id, not the Session object (v1.21 side fix): each session, a new chapter's or a Subagent's, has its own baseline.
+      const sessionId = String(agent.session.id)
       const baseline = config.host.needsBaseline(sessionId)
       const changes = config.host.memoryChanges()
       if (!baseline && changes.length === 0) return decision

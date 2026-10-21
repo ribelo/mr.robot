@@ -121,6 +121,23 @@ describe('a compaction closes the live chapter and opens the next (ec-7oq8, ec-s
     expect(JSON.stringify(changed.messages.filter((message) => message.role === 'user').at(-1))).toContain('changed: MEMORY.md by your owner')
   })
 
+  it('decides the memory baseline per session: a seeded chapter gets no second one, a Subagent gets its own (v1.21 side fix)', async () => {
+    const id = await robot()
+    await compacted(id)
+    // The new chapter's first request carries the baseline once, from its seed or its first step; the next Turn adds none.
+    await turn(id, 'third', [{ say: 'Third.' }])
+    await turn(id, 'fourth', [{ say: 'Fourth.' }])
+    expect(userText(chatRequests(id).at(-1)!).split('Your memory and persona files as of now').length - 1).toBe(1)
+    // A Subagent's session is its own: it gets the baseline at its first step, and the Robot's next step does not get another.
+    scripts.set(`${id}:sub`, [{ text: 'REPORT: done.' }])
+    await turn(id, 'delegate', [{ calls: [{ name: 'subagent', args: { description: 'Look', prompt: 'Look around' } }] }, { text: 'Started.' }, { say: 'Got it.' }])
+    const child = requests.get(`${id}:sub`)?.[0]
+    expect(child).toBeDefined()
+    expect(userText(child!).split('Your memory and persona files as of now').length - 1).toBe(1)
+    await turn(id, 'fifth', [{ say: 'Fifth.' }])
+    expect(userText(chatRequests(id).at(-1)!).split('Your memory and persona files as of now').length - 1).toBe(1)
+  })
+
   it('keeps a Subagent in the chapter it ran in (ec-h8ib)', async () => {
     const id = await robot()
     scripts.set(`${id}:sub`, [{ text: 'REPORT: read both pages.' }])

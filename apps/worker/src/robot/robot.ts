@@ -1567,7 +1567,10 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.store.openChapter(next, { sessionId: from, seq: events.length - 1 }, seed.inheritedEventCount, now, seed.events.length)
       // The new chapter's seed is not an event to snapshot (v1.20).
       setMemoryMark(this.store, next, seed.events.length)
+      // The seed carries what the model saw: a memory baseline and Workspace instructions it held go on into the new chapter.
       if (this.store.get<string>('memory-baseline') === from) this.store.set('memory-baseline', next)
+      const chain = this.store.get<ChainState>(WORKSPACE_CHAIN)
+      if (chain?.sessionId === from) this.store.set(WORKSPACE_CHAIN, { ...chain, sessionId: next })
       this.store.delete(CHAPTER_COMPACTED)
       this.store.updateConfig(() => ({ liveSessionId: next }), false)
     })
@@ -2220,8 +2223,11 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       fence: this.fence,
       beforeCompaction: (agent) => this.turnSnapshot.beforeCompaction(agent),
       onCompacted: (sessionId) => {
+        // The Workspace instructions went with the compacted context too; the next step brings the whole chain.
+        this.subagentChains.delete(sessionId)
         if (sessionId.startsWith('sa-')) return this.store.delete(`memory-baseline:${sessionId}`)
         this.store.delete('memory-baseline')
+        if (this.store.get<ChainState>(WORKSPACE_CHAIN)?.sessionId === sessionId) this.store.delete(WORKSPACE_CHAIN)
         if (sessionId === this.store.requireConfig().liveSessionId) this.store.set(CHAPTER_COMPACTED, sessionId)
         this.turnSnapshot.compacted()
       },
