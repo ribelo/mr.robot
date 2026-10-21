@@ -559,6 +559,14 @@ export class Robot extends ProductionRobot {
   }
 
   /** The next idle moment is now, and the alarm with it. */
+  /** The dream hour is now (v1.20 ticket 02), and the alarm with it. */
+  async dreamHourForTest(): Promise<number | undefined> {
+    const planned = this.store.get<number>('dream-close-at')
+    this.store.set('dream-close-at', Date.now() - 1)
+    await this.ctx.storage.setAlarm(Date.now() + 60_000)
+    return planned
+  }
+
   /** An idle compaction is planned and due now. */
   async planIdleForTest(): Promise<void> {
     this.store.set('idle-plan', [{ at: Date.now() - 1, action: 'compact' }])
@@ -605,6 +613,12 @@ export class Robot extends ProductionRobot {
 
   async alarmForTest(): Promise<number | null> {
     return this.ctx.storage.getAlarm()
+  }
+
+  /** Dreaming off, so no dream hour (v1.20): a test about other moments of the alarm reads them alone. */
+  async noDreamHourForTest(): Promise<void> {
+    this.store.updateConfig(() => ({ dreaming: false }), false)
+    await this.rearm()
   }
 
   /** A restart of this Robot alone: its isolate's memory is gone, and other Durable Objects go on (the call itself fails). */

@@ -54,8 +54,8 @@ const events = (id: string) => env.ROBOT.getByName(id).trajectory()
 const compacted = async (id: string) => (await events(id)).some((event) => event.type === 'user/message' && JSON.stringify(event.data).includes('compact-checkpoint'))
 
 describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', () => {
-  it('defaults: Mr. Robot warms and does not compact; another Robot compacts and does not warm; the floor is 20 000', async () => {
-    expect(await settings(await mrRobot())).toMatchObject({ cacheWarming: true, idleCompaction: false, idleCompactionFloorTokens: 20_000 })
+  it('defaults: Mr. Robot warms and compacts after the warmings (v1.20); another Robot compacts and does not warm; the floor is 20 000', async () => {
+    expect(await settings(await mrRobot())).toMatchObject({ cacheWarming: true, idleCompaction: true, idleCompactionFloorTokens: 20_000 })
     expect(await settings(await staff())).toMatchObject({ cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20_000 })
   })
 
@@ -87,8 +87,9 @@ describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', 
     const start = Date.now()
     await say(id, 'what is on today?', { say: 'Your dentist at 3.' })
     const plan = await testRobot(id).idlePlanForTest()
-    expect(plan.map((step) => step.action)).toEqual(['warm', 'warm', 'warm'])
-    expect(plan.map((step) => Math.round((step.at - start) / MINUTE))).toEqual([54, 108, 162])
+    // Then closing (v1.20, dm-2ilu): the fourth moment is the idle compaction.
+    expect(plan.map((step) => step.action)).toEqual(['warm', 'warm', 'warm', 'compact'])
+    expect(plan.map((step) => Math.round((step.at - start) / MINUTE))).toEqual([54, 108, 162, 216])
     const last = requests.get(id)!.at(-1)!
     const turnsBefore = (await events(id)).filter((event) => event.type === 'turn/start').length
     for (let index = 0; index < 3; index += 1) {
@@ -100,15 +101,15 @@ describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', 
       expect(JSON.stringify(warm.messages)).toBe(JSON.stringify(last.messages))
       expect(JSON.stringify(warm.tools)).toBe(JSON.stringify(last.tools))
     }
-    expect(await testRobot(id).idlePlanForTest()).toEqual([])
+    expect((await testRobot(id).idlePlanForTest()).map((step) => step.action)).toEqual(['compact'])
     // Warming is not a Turn: nothing is added to the log.
     expect((await events(id)).filter((event) => event.type === 'turn/start')).toHaveLength(turnsBefore)
   })
 
-  it('a Provider without a known cache window gets no warming request (ao-c3er)', async () => {
+  it('a Provider without a known cache window gets no warming request (ao-c3er); the compaction comes at 54', async () => {
     const id = await mrRobot()
     await say(id, 'hi', { text: 'Hello.' })
-    expect(await testRobot(id).idlePlanForTest()).toEqual([])
+    expect((await testRobot(id).idlePlanForTest()).map((step) => step.action)).toEqual(['compact'])
   })
 
   it('idle compaction runs one memory step, then compacts; the next Turn starts from the summary with a fresh memory baseline', async () => {

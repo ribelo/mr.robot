@@ -79,6 +79,7 @@ describe('The Space fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', 
 
   it('a Task assigned to nobody wakes nobody, and assigning it to a Robot plans that Robot (mc-s5ee)', async () => {
     const id = await activeRobot()
+    await testRobot(id).noDreamHourForTest()
     const task = await create({ title: 'Someday', assignee: { kind: 'nobody' }, timing: { kind: 'scheduled', at: Date.now() + 3_600_000 } })
     expect(await testRobot(id).alarmForTest()).toBeNull()
     await api(ANNA, `/api/tasks/${task.id}/assign`, { body: { assignee: { kind: 'robot', robotId: id } } })

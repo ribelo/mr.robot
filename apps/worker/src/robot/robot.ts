@@ -177,8 +177,9 @@ import * as Layer from 'effect/Layer'
 import { DurableRuntime } from '../platform/durable.ts'
 import * as Programs from './programs.ts'
 import { Duties } from './duties.ts'
+import { nextRun } from './schedule.ts'
 import { platformStep, StepFence, type PlatformStepHost } from '../agent/platform-step.ts'
-import { idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
+import { DREAM_TIME, dreamCloseDuty, idleDuty, planIdle, type IdleHost } from '../plugins/idle.ts'
 import { MEMORY_RANGES, MEMORY_STEP_TOOLS, setMemoryMark, TurnSnapshot, workspaceOnly, type MemoryRange } from '../plugins/snapshot.ts'
 import { autoReviewer, type ReviewHost } from '../plugins/auto-review.ts'
 import { quietSteerDuty, safetyNet, type VoiceHost } from '../plugins/say.ts'
@@ -307,6 +308,15 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       stopBox: async () => { await this.stopBox() },
     }, BOX_IDLE_MS, JOB_CHECK_MS))
     this.duties.register(idleDuty(this.idleHost()))
+    this.duties.register(dreamCloseDuty({
+      ...this.idleHost(),
+      nextDreamHour: (after) => nextRun({ kind: 'daily', time: DREAM_TIME }, store.requireConfig().timeZone, after, after) ?? after + 86_400_000,
+      eventsSinceCompaction: () => {
+        const live = store.requireConfig().liveSessionId
+        const first = store.chapters.get(live)?.firstSeq ?? 0
+        return storedLength(this.ctx.storage.sql, live) > first + 1
+      },
+    }))
   }
 
   /** What a platform step needs of this Robot (platform-step.ts). */
@@ -3295,7 +3305,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
 
   // ---------------------------------------------------------------- alarm
 
-  private rearm(): Promise<void> {
+  protected rearm(): Promise<void> {
     return this.program(Programs.rearm)
   }
 

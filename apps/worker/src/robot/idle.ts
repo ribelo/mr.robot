@@ -4,6 +4,8 @@
  * The moments follow the Provider's cache window (ao-c3er): on a one-hour cache the refresh delay is 54
  * minutes (90 % of the window, at most the window less 10 s), so warming comes at 54, 108 and 162 minutes
  * and idle compaction once at 54. A Provider without a known window gets no warming; compaction comes at 54.
+ * Warming, then closing (v1.20 ticket 02, dm-2ilu, dm-zyxz): after the third warming the next moment, at 216, is the idle compaction
+ * (snapshot, sweep, compaction), so an idle chapter closes within four hours, Mr. Robot's too.
  */
 import type { RobotConfig } from './store.ts'
 
@@ -17,12 +19,12 @@ export function cacheWindowOf(provider: string): number | null {
   return provider === 'anthropic' ? HOUR : null
 }
 
-/** The idle settings in effect: stored, or the default of the Robot's kind (Mr. Robot warms, other Robots compact). */
+/** The idle settings in effect: stored, or the default of the Robot's kind (Mr. Robot warms; every Robot compacts, since v1.20). */
 export function idleSettings(config: RobotConfig): { cacheWarming: boolean; idleCompaction: boolean; idleCompactionFloorTokens: number } {
   const chief = config.kind === 'mr-robot'
   return {
     cacheWarming: config.cacheWarming ?? chief,
-    idleCompaction: config.idleCompaction ?? !chief,
+    idleCompaction: config.idleCompaction ?? true,
     idleCompactionFloorTokens: config.idleCompactionFloorTokens ?? DEFAULT_IDLE_FLOOR_TOKENS,
   }
 }
@@ -32,13 +34,13 @@ export interface IdleStep {
   readonly action: 'warm' | 'compact'
 }
 
-/** The plan from the end of a Turn: warming moments, or one compaction (which ends the plan). */
+/** The plan from the end of a Turn: warming moments and then the compaction they imply, or one compaction (which ends the plan). */
 export function idlePlan(config: RobotConfig, provider: string, endedAt: number): IdleStep[] {
   const { cacheWarming, idleCompaction } = idleSettings(config)
   const window = cacheWindowOf(provider)
   const delay = window === null ? FALLBACK_DELAY : Math.max(1, Math.floor(Math.min(window * 0.9, window - 10_000)))
+  if (cacheWarming && window !== null) return [...Array.from({ length: WARMINGS }, (_, index) => ({ at: endedAt + delay * (index + 1), action: 'warm' as const })), { at: endedAt + delay * (WARMINGS + 1), action: 'compact' }]
   if (idleCompaction) return [{ at: endedAt + delay, action: 'compact' }]
-  if (cacheWarming && window !== null) return Array.from({ length: WARMINGS }, (_, index) => ({ at: endedAt + delay * (index + 1), action: 'warm' as const }))
   return []
 }
 

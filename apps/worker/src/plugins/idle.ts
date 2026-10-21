@@ -106,11 +106,11 @@ async function warmCache(host: IdleHost): Promise<void> {
  * Compact once while idle, on the warm prefix (ao-f4sp): a context below the floor is left alone (ao-z22f). First the memory sweep,
  * when a daily note changed since the last one (rm-l4t8); a Wake-up during it means the compaction does not happen now.
  */
-async function idleCompact(host: IdleHost): Promise<void> {
+async function idleCompact(host: IdleHost, floor = true): Promise<void> {
   const store = host.store
   const config = store.requireConfig()
   const { agent, ctx } = await host.agent()
-  if (ctx.tokenMeter.measure(agent.session).totalTokens < idleSettings(config).idleCompactionFloorTokens) return
+  if (floor && ctx.tokenMeter.measure(agent.session).totalTokens < idleSettings(config).idleCompactionFloorTokens) return
   // Files a memory step wrote: the Trajectory names them (rm-hhxa, dm-r6km); each is a version by that step.
   const writtenBy = async (kind: 'sweep' | 'snapshot', since: number) => {
     const changed: string[] = []
@@ -159,4 +159,33 @@ async function idleCompact(host: IdleHost): Promise<void> {
   }
   await host.rollChapter().catch((error: unknown) => console.warn('chapter not closed', error))
   await host.changed()
+}
+/** The kv key of the next dream hour of this Robot (v1.20 ticket 02). */
+export const DREAM_CLOSE_AT = 'dream-close-at'
+/** The dream hour, in the owner's time zone (the Robot follows the owner's profile). */
+export const DREAM_TIME = '03:00'
+
+/**
+ * The dream-hour close (dm-76yv): at 03:00 in the Robot's time zone a chapter with events since its last compaction is closed first,
+ * by the idle sequence (snapshot, sweep, compaction), whatever its size, so the night starts from a closed day. A Robot busy then closes
+ * at its next idle moment of that alarm, or the next night. A Robot with dreaming off has no dream hour.
+ */
+export function dreamCloseDuty(host: IdleHost & { readonly nextDreamHour: (after: number) => number; readonly eventsSinceCompaction: () => boolean }): Duty {
+  return {
+    name: 'dream-hour-close',
+    order: 95,
+    scope: 'active',
+    nextAt: (now) => (host.store.config()?.dreaming === false ? undefined : host.store.get<number>(DREAM_CLOSE_AT) ?? host.nextDreamHour(now)),
+    run: async (now) => {
+      if (host.store.config()?.dreaming === false) return
+      const due = host.store.get<number>(DREAM_CLOSE_AT)
+      if (due === undefined) return host.store.set(DREAM_CLOSE_AT, host.nextDreamHour(now))
+      if (due > now || !host.idleNow()) return
+      host.store.set(DREAM_CLOSE_AT, host.nextDreamHour(now))
+      if (!host.eventsSinceCompaction()) return
+      // The idle plan is replaced: the chapter closes now.
+      host.store.delete(IDLE_PLAN)
+      await idleCompact(host, false)
+    },
+  }
 }

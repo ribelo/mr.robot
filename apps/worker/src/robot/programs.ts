@@ -1113,7 +1113,8 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
     id: init.id, ownerId: init.ownerId, kind: init.kind, identity: init.identity, sharing: init.sharing, status: init.status,
     blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: init.kind === 'mr-robot' ? MR_ROBOT_COMPACTION : '',
     // Mr. Robot, talked to all day, keeps his cache warm; other Robots compact while idle (ao-jlr0, ao-f4sp).
-    cacheWarming: init.kind === 'mr-robot', idleCompaction: init.kind !== 'mr-robot', idleCompactionFloorTokens: DEFAULT_IDLE_FLOOR_TOKENS,
+    // Mr. Robot, talked to all day, keeps his cache warm and closes the chapter after the third warming (v1.20, dm-zyxz).
+    cacheWarming: init.kind === 'mr-robot', idleCompaction: true, idleCompactionFloorTokens: DEFAULT_IDLE_FLOOR_TOKENS,
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'space' }, timeZone: init.timeZone,
     liveSessionId: `s-${crypto.randomUUID()}`, revision: 1, createdAt: Date.now(),
   }

@@ -78,6 +78,7 @@ describe('the profile zone comes from the app (v1.11 ticket 08)', () => {
 describe('Robots follow the profile zone (sk-0vfm, sk-u3bv)', () => {
   it('moves wall-clock recurring Tasks to the new zone, leaves a Task with its own zone, and tells each Robot once', async () => {
     const id = await activeRobot()
+    await testRobot(id).noDreamHourForTest()
     await daily(id, 'Digest')
     await daily(id, 'Tokyo close', '18:30', TOKYO)
     const before = (await panel(id)).tasks

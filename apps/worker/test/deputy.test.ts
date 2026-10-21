@@ -238,6 +238,7 @@ describe('the deputy works with the Tasks of other Robots; limits and attempts (
   it('creates, edits, pauses, resumes and cancels a Task as another Robot, each shown there as a card naming Mr. Robot (cd-n9pi, mc-r4dd)', async () => {
     const chiefRobot = await chiefId()
     const accountant = await robot(ANNA, 'Accountant')
+    await testRobot(accountant).noDreamHourForTest()
     const [created] = await chief(chiefRobot, [{ name: 'task_create', args: { robot_id: accountant, title: 'Weekly digest', instructions: 'Send the digest.', assignee: 'self', timing: { kind: 'recurring', weekly: { time: '09:00', weekdays: [1] } } } }])
     const task = JSON.parse(created!) as { id: string; assignee: string; timing: { schedule: unknown; time_zone: string } }
     expect(task).toMatchObject({ assignee: 'self', timing: { kind: 'recurring', schedule: { kind: 'weekly', time: '09:00', weekdays: [1] }, time_zone: 'Europe/Warsaw', paused: false } })
