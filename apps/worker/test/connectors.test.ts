@@ -65,7 +65,7 @@ describe('plugins and their settings (cn-dbm9, cn-s1pd, cn-a1i0)', () => {
     expect(JSON.stringify(again.body)).not.toContain('GOCSPX-very-secret')
     // Saving without the secret keeps the stored one.
     await api(ANNA, '/api/admin/plugins/google/settings', { method: 'PUT', body: { values: { clientId: 'client-456' } } })
-    expect((await env.SPACE.getByName('home').pluginSettings('google')).secrets).toEqual({ clientSecret: 'GOCSPX-very-secret' })
+    expect((await env.SPACE.getByName('space').pluginSettings('google')).secrets).toEqual({ clientSecret: 'GOCSPX-very-secret' })
     expect((await api(BEN, '/api/admin/plugins/google/settings', { method: 'PUT', body: { values: { clientId: 'x' } } })).status).toBe(403)
   })
 

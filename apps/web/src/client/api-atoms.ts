@@ -105,7 +105,7 @@ export const spaceMembersAtom = query((api) => api.spaceMembers, [keys.me])
 export const memberCostsAtom = query((api) => api.memberCosts, [keys.me, keys.robots])
 /** What Mission Control shows: its filters, and how many pages of each table are loaded. */
 export interface MissionQuery {
-  readonly scope: 'mine' | 'home'
+  readonly scope: 'mine' | 'space'
   readonly state: MissionState
   readonly group: MissionGroup
   /** A name in the Fleet. */

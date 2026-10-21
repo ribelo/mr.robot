@@ -5,7 +5,7 @@
  * truncated first, content framed in <system-reminder>.
  */
 
-export type MemoryScope = 'home' | 'member' | 'robot'
+export type MemoryScope = 'space' | 'member' | 'robot'
 
 export interface MemoryFile {
   readonly scope: MemoryScope
@@ -27,7 +27,7 @@ const ROBOT_ORDER = ['AGENTS.md', 'MEMORY.md', 'SOUL.md']
 const MEMBER_ORDER = ['memory/world.md', 'PROACTIVE_PREFERENCES.md', 'USER.md']
 
 function rank(file: MemoryFile): number {
-  if (file.scope === 'home') return 0
+  if (file.scope === 'space') return 0
   if (file.scope === 'member') return 10 + Math.max(0, MEMBER_ORDER.indexOf(file.path))
   const index = ROBOT_ORDER.indexOf(file.path)
   return index === -1 ? 100 : 20 + index // daily notes and other own files: most specific
@@ -38,7 +38,7 @@ export function broadToSpecific(files: readonly MemoryFile[]): MemoryFile[] {
 }
 
 const SCOPE_NOTE: Record<MemoryScope, string> = {
-  home: 'shared by the whole Space',
+  space: 'shared by the whole Space',
   member: "your owner's, shared by all their Robots",
   robot: 'yours',
 }

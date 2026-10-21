@@ -144,7 +144,7 @@ function visibility(caller: TaskCaller): { readonly where: string; readonly bind
   return {
     where: `((t.creator_member = ? AND json_extract(t.created_by, '$.kind') = 'member')
       OR (t.assignee_kind = 'member' AND t.assignee_id = ?)
-      OR (t.assignee_kind = 'robot' AND t.assignee_id IN (SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home')))
+      OR (t.assignee_kind = 'robot' AND t.assignee_id IN (SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'space')))
       OR (t.assignee_kind = 'nobody' AND t.creator_member = ?))`,
     bindings: [member, member, member, member],
   }
@@ -277,7 +277,7 @@ const mayAssign = (ports: TaskPorts, caller: TaskCaller, assignee: TaskAssignee)
   const robot = yield* sql.first<{ owner_id: string; sharing: string }>("SELECT owner_id, sharing FROM robot WHERE id = ? AND status != 'deleted'", assignee.robotId)
   if (robot === undefined) return yield* Effect.fail(invalid('No such Robot.'))
   if (caller.kind === 'member') {
-    if (robot.owner_id !== caller.memberId && robot.sharing !== 'home') return yield* Effect.fail(invalid('You cannot reach that Robot.'))
+    if (robot.owner_id !== caller.memberId && robot.sharing !== 'space') return yield* Effect.fail(invalid('You cannot reach that Robot.'))
     return
   }
   if (robot.owner_id !== caller.ownerId) return yield* Effect.fail(invalid("A Robot gives Tasks only to its owner, its owner's Robots and itself."))

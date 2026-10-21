@@ -31,4 +31,5 @@ export interface Env {
 }
 
 /** The single Space of a deployment (v1 deploys one). */
-export const SPACE_ID = 'home'
+/** Its object name. Until v1.18 it was 'home'; that object's data moves here at the first touch (space.ts, moveFromHome). */
+export const SPACE_ID = 'space'

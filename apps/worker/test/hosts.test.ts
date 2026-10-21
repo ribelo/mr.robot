@@ -54,7 +54,7 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     const mine = (await api<HostView[]>(ANNA, '/api/hosts')).body
     expect(mine).toEqual([expect.objectContaining({ id: host.hostId, name: 'Desk', online: true, version: '0.1.0', mine: true, sharing: 'private', capabilities: { graphical: true, chrome: '/usr/bin/google-chrome', sandbox: 'full', shell: 'bash' } })])
     expect((await api<HostView[]>(BEN, '/api/hosts')).body).toEqual([])
-    await api(ANNA, `/api/hosts/${host.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/hosts/${host.hostId}`, { method: 'PATCH', body: { sharing: 'space' } })
     expect((await api<HostView[]>(BEN, '/api/hosts')).body).toEqual([expect.objectContaining({ id: host.hostId, mine: false, ownerName: expect.any(String) })])
     const admin = (await api<{ hosts: HostView[] }>(ANNA, '/api/admin')).body.hosts
     expect(admin).toEqual([expect.objectContaining({ name: 'Desk', online: true, version: '0.1.0' })])

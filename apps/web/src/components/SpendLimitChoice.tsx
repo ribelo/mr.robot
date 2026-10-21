@@ -20,7 +20,7 @@ export const parseSpaceSpendLimit = (draft: SpendLimitDraft): Option.Option<Spac
 /** A Robot's limit the draft says; none when the amount is not whole dollars of at least 1. */
 export const parseRobotSpendLimit = (draft: SpendLimitDraft): Option.Option<RobotSpendLimit> => Schema.decodeUnknownOption(RobotSpendLimit)(candidate(draft))
 
-const KIND_LABELS: Record<SpendLimitKind, string> = { home: "Space's", none: 'No limit', usd: 'Amount' }
+const KIND_LABELS: Record<SpendLimitKind, string> = { space: "Space's", none: 'No limit', usd: 'Amount' }
 
 /**
  * A monthly spend limit (ux-dbx4, ux-q8ve): a segmented choice between the kinds offered, and an amount

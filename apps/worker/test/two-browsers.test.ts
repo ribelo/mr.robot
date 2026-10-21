@@ -23,7 +23,7 @@ beforeEach(async () => {
   await api(ANNA, '/api/me')
 })
 
-const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
+const space = () => env.SPACE.getByName('space') as unknown as DurableObjectStub<TestSpace>
 
 async function robotOf(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])

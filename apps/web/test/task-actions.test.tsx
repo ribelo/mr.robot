@@ -6,7 +6,7 @@ import { MissionControl } from '../src/components/MissionControl.tsx'
 import { TaskForm } from '../src/components/TaskSheets.tsx'
 
 const now = Date.now()
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as Me
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, space: 'Space', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as Me
 const robot = (id: string, name: string, extra: Partial<RobotSummary> = {}): RobotSummary => ({ id, ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity: { name, title: '', description: '', avatarColor: '#f4a03a', avatarSeed: name }, lastLine: '', lastAt: 0, unread: false, ...extra })
 const task = (id: string, title: string, extra: Partial<TaskView> = {}): TaskView => ({
   id, title, instructions: '', createdBy: { kind: 'member', memberId: 'm-1', name: 'Anna' }, assignee: { kind: 'robot', robotId: 'r-2' }, parentId: null,

@@ -14,5 +14,5 @@ export function legacySpaceSpendLimit(stored: unknown): SpaceSpendLimit {
 
 /** A Robot's limit as stored before v1.12: a number of USD, or null (absent) for the Space's. */
 export function legacyRobotSpendLimit(stored: unknown): RobotSpendLimit {
-  return typeof stored === 'number' && Number.isFinite(stored) ? amountOf(stored) : { kind: 'home' }
+  return typeof stored === 'number' && Number.isFinite(stored) ? amountOf(stored) : { kind: 'space' }
 }

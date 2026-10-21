@@ -93,7 +93,7 @@ describe('sharing and lifecycle', () => {
     const id = await newRobot(ANNA)
     expect((await robots(BEN)).some((robot) => robot.id === id)).toBe(false)
     expect((await api(BEN, `/api/robots/${id}/conversation`)).status).toBe(404)
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { sharing: 'space' } })
     expect((await robots(BEN)).some((robot) => robot.id === id)).toBe(true)
     expect((await api(BEN, `/api/robots/${id}/conversation`)).status).toBe(200)
     expect((await api(BEN, `/api/robots/${id}/settings`, { method: 'PATCH', body: { sharing: 'private' } })).status).toBe(403)
@@ -129,7 +129,7 @@ describe('sharing and lifecycle', () => {
     const bens = await newRobot(BEN)
     const bensMrRobot = (await robots(BEN)).find((robot) => robot.kind === 'mr-robot')!
     expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [own]: 'allow' })
-    await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'space' } })
     expect((await env.ROBOT.getByName(mrRobot.id).settings()).grants.recipients).toEqual({ [own]: 'allow', [bens]: 'allow' })
     expect((await env.ROBOT.getByName(bensMrRobot.id).settings()).grants.recipients).toEqual({ [bens]: 'allow' })
 

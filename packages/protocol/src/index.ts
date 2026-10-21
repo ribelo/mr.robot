@@ -75,7 +75,8 @@ export const Me = Schema.Struct({
   ...MemberView.fields,
   /** How the person's Robots address them (ux-i8ff); absent: by their name. */
   nickname: Schema.optional(Schema.String),
-  home: Schema.String,
+  /** The Space's name. */
+  space: Schema.String,
   /** The zone the person's Robots work in: the app's zone, unless the person pinned one by hand. */
   timeZone: Schema.String,
   /** The person set the zone by hand; the app's zone no longer replaces it. */
@@ -123,7 +124,7 @@ export type RobotStatus = typeof RobotStatus.Type
 /** What the admin fleet view shows for a Robot. */
 export const FleetState = Schema.Literals(['sleeping', 'working', 'waiting for you', 'paused', 'blocked', 'setup'])
 export type FleetState = typeof FleetState.Type
-export const Sharing = Schema.Literals(['private', 'home'])
+export const Sharing = Schema.Literals(['private', 'space'])
 export type Sharing = typeof Sharing.Type
 export const ThinkingEffort = Schema.Literals(['off', 'low', 'medium', 'high', 'xhigh', 'max'])
 export type ThinkingEffort = typeof ThinkingEffort.Type
@@ -443,7 +444,7 @@ export const LoginView = Schema.Struct({
   websites: Schema.Array(Schema.String),
   notes: Schema.String,
   allowRead: Schema.Boolean,
-  scope: Schema.Literals(['member', 'home']),
+  scope: Schema.Literals(['member', 'space']),
   /** The Member may edit, reveal and delete it (their own, or a Space entry they shared). */
   mine: Schema.Boolean,
   updatedAt: Schema.Number,
@@ -485,21 +486,21 @@ const UsdSpendLimit = Schema.Struct({ kind: Schema.Literal('usd'), amount: Spend
 export const SpaceSpendLimit = Schema.Union([NoSpendLimit, UsdSpendLimit])
 export type SpaceSpendLimit = typeof SpaceSpendLimit.Type
 /** A Robot's own choice: the Space's per-Robot limit, no limit, or an amount. */
-export const RobotSpendLimit = Schema.Union([Schema.Struct({ kind: Schema.Literal('home') }), NoSpendLimit, UsdSpendLimit])
+export const RobotSpendLimit = Schema.Union([Schema.Struct({ kind: Schema.Literal('space') }), NoSpendLimit, UsdSpendLimit])
 export type RobotSpendLimit = typeof RobotSpendLimit.Type
 /** The limit that applies to a Robot or a Member, and whether it is the Space's or the Robot's own. */
-export const EffectiveSpendLimit = Schema.Struct({ limit: SpaceSpendLimit, from: Schema.Literals(['home', 'robot']) })
+export const EffectiveSpendLimit = Schema.Struct({ limit: SpaceSpendLimit, from: Schema.Literals(['space', 'robot']) })
 export type EffectiveSpendLimit = typeof EffectiveSpendLimit.Type
 
 /** The one resolution of a Robot's limit (ux-en86): the spend check, the Admin table and the settings all use it. */
 export function effectiveSpendLimit(robot: RobotSpendLimit, home: SpaceSpendLimit): EffectiveSpendLimit {
-  return robot.kind === 'home' ? { limit: home, from: 'home' } : { limit: robot, from: 'robot' }
+  return robot.kind === 'space' ? { limit: home, from: 'space' } : { limit: robot, from: 'robot' }
 }
 
 /** "$20 (Space)", "no limit (Space)", "$50", "no limit". */
 export function spendLimitText(effective: EffectiveSpendLimit): string {
   const text = effective.limit.kind === 'usd' ? `$${effective.limit.amount}` : 'no limit'
-  return effective.from === 'home' ? `${text} (Space)` : text
+  return effective.from === 'space' ? `${text} (Space)` : text
 }
 
 /** Everything the advanced settings page edits. */
@@ -587,7 +588,7 @@ export type DeputySettingsPatch = typeof DeputySettingsPatch.Type
 
 export const SettingsPatch = Schema.Struct({
   identity: Schema.optional(IdentityPatch),
-  sharing: Schema.optional(Schema.Literals(['private', 'home'])),
+  sharing: Schema.optional(Schema.Literals(['private', 'space'])),
   model: Schema.optional(ModelChoice),
   chain: Schema.optional(Schema.Array(ChainEntry)),
   contextBudget: Schema.optional(Schema.Number),
@@ -1571,8 +1572,8 @@ export const SkillView = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   /** git: imported by sync; robot: promoted from a Robot's local skill; home: written in the UI or by Mr. Robot. */
-  source: Schema.Literals(['git', 'robot', 'home']),
-  visibility: Schema.Literals(['home', 'private']),
+  source: Schema.Literals(['git', 'robot', 'space']),
+  visibility: Schema.Literals(['space', 'private']),
   ownerId: Schema.NullOr(Schema.String),
   updatedAt: Schema.Number,
   /** An imported skill changed here; later syncs leave it as it is (rb-t937). */
@@ -1586,7 +1587,7 @@ export const SkillLibraryRow = Schema.Struct({
   description: Schema.String,
   /** Whether the asking Robot holds the skill (granted, or brought by a connector it holds). */
   held: Schema.Boolean,
-  /** "git", "robot" or "home" for a library skill; "connector:<kind>" for one a connector brings. */
+  /** "git", "robot" or "space" for a library skill; "connector:<kind>" for one a connector brings. */
   source: Schema.String,
   /** Mr. Robot only: names of the Robots that hold the skill. */
   holders: Schema.optional(Schema.Array(Schema.String)),
@@ -1799,7 +1800,7 @@ export const SettingsCatalog = Schema.Struct({
   toolGroups: Schema.Array(Schema.Struct({ name: Schema.String, description: Schema.String })),
   skills: Schema.Array(Schema.Struct({ name: Schema.String, description: Schema.String })),
   robots: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
-  secrets: Schema.Array(Schema.Struct({ name: Schema.String, scope: Schema.Literals(['member', 'home']), username: Schema.optional(Schema.String), websites: Schema.optional(Schema.Array(Schema.String)) })),
+  secrets: Schema.Array(Schema.Struct({ name: Schema.String, scope: Schema.Literals(['member', 'space']), username: Schema.optional(Schema.String), websites: Schema.optional(Schema.Array(Schema.String)) })),
   models: Schema.Array(ModelOption),
   /** Models of Providers this Member has not connected; shown so the list explains itself. */
   unavailableModels: Schema.optional(Schema.Array(ModelOption)),

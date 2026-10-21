@@ -61,7 +61,7 @@ export interface SkillHost {
   /** Write a local skill; refused for a global skill's name unless this Robot may edit the library. */
   writeSkill(name: string, content: string): Promise<{ path: string; scope: 'local' | 'global' }>
   /** Propose one of the Robot's local skills for the Space library (an ask). */
-  promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }>
+  promoteSkill(name: string, visibility: 'space' | 'private'): Promise<{ proposalId: string }>
 }
 
 export interface SkillLibraryHost {
@@ -106,11 +106,11 @@ export function skillProposalTools(host: SkillHost): ToolDefinition[] {
         return host.writeSkill(name, content)
       },
     }),
-    tool<{ name: string; visibility?: 'home' | 'private' }>({
+    tool<{ name: string; visibility?: 'space' | 'private' }>({
       name: 'propose_skill',
       description: 'Propose one of your local skills for the Space library, so other Robots can be granted it. Your owner approves it first. visibility "private" keeps it to your owner\'s Robots.',
-      parameters: { properties: { name: { type: 'string', description: 'Skill name' }, visibility: { type: 'string', enum: ['home', 'private'], description: 'home (default) shares it in the Space library; private keeps it to your owner\'s Robots' } }, required: ['name'] },
-      execute: async ({ name, visibility }) => ({ ...(await host.promoteSkill(name, visibility ?? 'home')), status: 'waiting for your owner' }),
+      parameters: { properties: { name: { type: 'string', description: 'Skill name' }, visibility: { type: 'string', enum: ['space', 'private'], description: 'home (default) shares it in the Space library; private keeps it to your owner\'s Robots' } }, required: ['name'] },
+      execute: async ({ name, visibility }) => ({ ...(await host.promoteSkill(name, visibility ?? 'space')), status: 'waiting for your owner' }),
     }),
   ]
 }

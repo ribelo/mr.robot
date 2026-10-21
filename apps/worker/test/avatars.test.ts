@@ -113,7 +113,7 @@ describe('a Robot avatar seed (ux-0zm6, ux-h0s4, ux-4fgy)', () => {
     await runInDurableObject(env.ROBOT.getByName(id), async (_robot, state) => {
       state.storage.sql.exec("UPDATE robot SET v = json_remove(v, '$.identity.avatarSeed') WHERE k = 'config'")
     })
-    await runInDurableObject(env.SPACE.getByName('home'), async (_home, state) => {
+    await runInDurableObject(env.SPACE.getByName('space'), async (_home, state) => {
       state.storage.sql.exec("UPDATE robot SET identity = json_remove(identity, '$.avatarSeed') WHERE id = ?", id)
     })
     expect((await summary(id)).identity.avatarSeed).toBe(id)

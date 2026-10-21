@@ -342,7 +342,7 @@ describe('a Host the Robot can no longer reach (S6)', () => {
   it('marks its running jobs lost and wakes the Robot as failed when sharing ends', async () => {
     const BEN = 'ben@example.com'
     const desk = await fakeHost()
-    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'space' } })
     await api(ANNA, '/api/admin/members', { body: { email: BEN } })
     await api(BEN, '/api/me')
     scripts.set('*', [{ text: 'Hello.' }])

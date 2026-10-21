@@ -52,7 +52,7 @@ function AdminPage({ view }: { view: AdminView }) {
         <tbody>
           {view.fleet.map((robot) => (
             <tr key={robot.id}>
-              <td><span className="avatar-cell"><Avatar seed={robot.identity.avatarSeed} color={robot.identity.avatarColor} size={22} state={robot.fleetState} /><button type="button" className="link" onClick={() => go({ page: 'robot', id: robot.id, panel: false })}>{robot.identity.name}</button></span>{robot.sharing === 'home' ? <div className="muted">shared</div> : null}</td>
+              <td><span className="avatar-cell"><Avatar seed={robot.identity.avatarSeed} color={robot.identity.avatarColor} size={22} state={robot.fleetState} /><button type="button" className="link" onClick={() => go({ page: 'robot', id: robot.id, panel: false })}>{robot.identity.name}</button></span>{robot.sharing === 'space' ? <div className="muted">shared</div> : null}</td>
               <td>{robot.ownerName}</td>
               <td><span className={`state state-${robot.fleetState.split(' ')[0]}`}>{robot.fleetState}</span></td>
               <td>{robot.model.model}<div className="muted">{robot.model.effort}</div></td>
@@ -106,7 +106,7 @@ function AdminPage({ view }: { view: AdminView }) {
       {(view.hosts ?? []).length === 0 ? <div className="muted">No computers paired in this Space.</div> : (
         <table className="grid"><tbody>{(view.hosts ?? []).map((host) => (
           <tr key={host.id}>
-            <td><b>{host.name}</b><div className="muted">{host.ownerName} · {host.sharing === 'home' ? 'shared with the Space' : 'private'}</div></td>
+            <td><b>{host.name}</b><div className="muted">{host.ownerName} · {host.sharing === 'space' ? 'shared with the Space' : 'private'}</div></td>
             <td>{host.online ? '● online' : 'offline'}<div className="muted">last seen {host.lastSeen === null ? 'never' : new Date(host.lastSeen).toLocaleString()}</div></td>
             <td className="muted">{host.platform}{host.version === null ? '' : ` · app ${host.version}`}{host.capabilities === null ? '' : ` · ${host.capabilities.chrome === null ? 'no Chrome' : 'Chrome'}${host.capabilities.graphical ? '' : ' · no display'}`}</td>
             <td className="muted">{host.users.length === 0 ? 'not in use' : `used by ${host.users.join(', ')}`}</td>

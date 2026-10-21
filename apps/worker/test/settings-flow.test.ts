@@ -14,7 +14,7 @@ beforeEach(async () => {
 
 describe('configuring a Robot', () => {
   it('never creates a Robot on a model without a credential: refuses with nothing connected, else picks a connected one (robot-mx6s)', async () => {
-    await env.SPACE.getByName('home').updateSettings({ defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' } })
+    await env.SPACE.getByName('space').updateSettings({ defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' } })
     const refused = await api<{ error: string }>(ANNA, '/api/robots', { body: {} })
     expect(refused.status).toBe(400)
     expect(refused.body.error).toContain('Providers')

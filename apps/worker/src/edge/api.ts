@@ -128,6 +128,12 @@ const TIME_ZONE_HEADER = 'X-Time-Zone'
 
 const robot = (c: ApiContext, id: string) => c.env.ROBOT.getByName(id)
 
+/** A list of the whole Space: scope=space ('home' from a client before v1.18, for one release). */
+function wholeSpaceAsked(query: URLSearchParams): boolean {
+  const scope = query.get('scope')
+  return scope === 'space' || scope === 'home'
+}
+
 /** A definition row as a Member sees it. */
 function definitionView(row: DefinitionRow, memberId: string): DefinitionView {
   return { slug: row.slug, title: row.title, paragraph: row.paragraph, source: row.source, author: row.author, published: row.published, mine: row.ownerId === memberId, updatedAt: row.updatedAt }
@@ -142,7 +148,7 @@ function chapterParam(request: Request): number | undefined | null {
 
 /**
  * The caller of a Task route: the Member, recorded as themselves. The Space admin sees every Task with Whole Space
- * (mc-m7gg): a list asks for it with scope=home; one Task's routes follow the admin's remembered switch.
+ * (mc-m7gg): a list asks for it with scope=space; one Task's routes follow the admin's remembered switch.
  */
 /** One Task's routes reach every Task of the Space only while the admin has Whole Space on (mc-m7gg). */
 function taskCallerByPrefs(c: ApiContext): Effect.Effect<Extract<TaskCaller, { kind: 'member' }>, ApiError> {
@@ -193,7 +199,7 @@ export const api = new Router<ApiContext>()
     // The app tells its zone each time it opens; anything that is not a zone is ignored.
     const reported = parseTimeZone(c.request.headers.get(TIME_ZONE_HEADER) ?? '')
     const profile = await (reported === undefined ? member.profile() : member.detectTimeZone(reported))
-    return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), home: c.env.SPACE_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system', mission: { ...DEFAULT_MISSION_PREFS, ...profile.mission }, acceptTasksFrom: [...(profile.acceptTasksFrom ?? [])] }
+    return { ...c.member, ...(profile.nickname === undefined ? {} : { nickname: profile.nickname }), space: c.env.SPACE_NAME, timeZone: profile.timeZone, timeZonePinned: profile.timeZonePinned === true, detectedTimeZone: profile.detectedTimeZone ?? null, quietHours: profile.quietHours, vapidPublicKey: c.env.VAPID_PUBLIC_KEY, workDetails: profile.workDetails ?? 'compact', theme: profile.theme ?? 'system', mission: { ...DEFAULT_MISSION_PREFS, ...profile.mission }, acceptTasksFrom: [...(profile.acceptTasksFrom ?? [])] }
   }))
   // Every Page the Member shares (v1.17, dp-zq16).
   .on('GET', '/api/me/shared-pages', (c) => call(() => c.env.MEMBER.getByName(c.member.id).sharedPages(new URL(c.request.url).origin)))
@@ -367,7 +373,7 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/hosts/pair/:code', (c, { code }) => call(() => space(c.env).pairingView(code)))
   .on('POST', '/api/hosts/pair/:code', (c, { code }) => call(() => space(c.env).approvePairing(code, c.member.id)))
   .on('PATCH', '/api/hosts/:id', (c, { id }) => Effect.gen(function* () {
-    const { sharing } = yield* decodeBody(c.request, Schema.Struct({ sharing: Schema.Literals(['private', 'home']) }))
+    const { sharing } = yield* decodeBody(c.request, Schema.Struct({ sharing: Schema.Literals(['private', 'space']) }))
     yield* call(() => c.env.MEMBER.getByName(c.member.id).setHostSharing(id, sharing))
     return { ok: true }
   }))
@@ -848,7 +854,7 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/mission', (c) => {
     const query = new URL(c.request.url).searchParams
     const page = Number(query.get('fleetPage') ?? '1')
-    const caller = taskCaller(c, query.get('scope') === 'home')
+    const caller = taskCaller(c, wholeSpaceAsked(query))
     return call((): Promise<MissionView> => space(c.env).mission(caller, { fleetQ: query.get('fleetQ') ?? '', fleetPage: Number.isInteger(page) && page >= 1 ? page : 1, tasks: taskFilter(query) }))
   })
 
@@ -857,7 +863,7 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/members', (c) => Effect.map(call(() => space(c.env).members()), (members) => members.filter((member) => member.status === 'active')))
   .on('GET', '/api/tasks', (c) => {
     const query = new URL(c.request.url).searchParams
-    return call((): Promise<TaskPage> => space(c.env).listTasks(taskCaller(c, query.get('scope') === 'home'), taskFilter(query)))
+    return call((): Promise<TaskPage> => space(c.env).listTasks(taskCaller(c, wholeSpaceAsked(query)), taskFilter(query)))
   })
   .on('POST', '/api/tasks', (c) => Effect.gen(function* () {
     const input = yield* decodeBody(c.request, TaskInput)

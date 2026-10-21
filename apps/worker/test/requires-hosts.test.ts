@@ -8,7 +8,7 @@ import type { Space as TestSpace, Member as TestMember } from './worker.ts'
 
 const ANNA = 'anna@example.com'
 let annaId = ''
-const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
+const space = () => env.SPACE.getByName('space') as unknown as DurableObjectStub<TestSpace>
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 beforeEach(async () => {

@@ -250,7 +250,7 @@ describe('two Hosts of one name (deep review P14b)', () => {
     await api(ANNA, '/api/admin/members', { body: { email: BEN } })
     await api(BEN, '/api/me')
     const bens = await fakeHost('Desk', { owner: BEN })
-    await api(BEN, `/api/hosts/${bens.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(BEN, `/api/hosts/${bens.hostId}`, { method: 'PATCH', body: { sharing: 'space' } })
     const annas = await fakeHost('desk')
     const laptop = await fakeHost('Laptop')
     const id = await robotWith(bens, { files: 'allow' })
@@ -421,8 +421,8 @@ describe('the mode and roots of a facet are forgotten with the facet', () => {
   it('not when a shared Host is out of reach for a while: it comes back read-only', async () => {
     const BEN = 'ben@example.com'
     const desk = await fakeHost('Desk')
-    const share = (sharing: 'home' | 'private') => api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing } })
-    await share('home')
+    const share = (sharing: 'space' | 'private') => api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing } })
+    await share('space')
     await api(ANNA, '/api/admin/members', { body: { email: BEN } })
     await api(BEN, '/api/me')
     const mr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
@@ -435,7 +435,7 @@ describe('the mode and roots of a facet are forgotten with the facet', () => {
     }
     await share('private')
     await turn({ name: 'my_capabilities', args: {} })
-    await share('home')
+    await share('space')
     await turn({ name: 'run', args: { on: 'Desk', command: 'touch a' } })
     expect(hostRuns.at(-1)).toMatchObject({ command: 'touch a', access: { mode: 'read-only' } })
     expect((await env.ROBOT.getByName(mr).settings()).hostAccess).toEqual({ [facet]: { mode: 'read-only', roots: [] } })
@@ -448,7 +448,7 @@ describe("each Member's Mr. Robot on a shared Host", () => {
   it('has a directory of his own, also the one who kept the shared name', async () => {
     const BEN = 'ben@example.com'
     const desk = await fakeHost('Desk')
-    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'space' } })
     await api(ANNA, '/api/admin/members', { body: { email: BEN } })
     await api(BEN, '/api/me')
     const mrOf = async (member: string) => (await api<RobotSummary[]>(member, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id

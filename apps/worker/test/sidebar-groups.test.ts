@@ -62,7 +62,7 @@ describe('sidebar groups (ux-wxbm, ux-o7po, ux-xbvi)', () => {
 
   it("are the Member's own: another Member sees and changes only theirs (ux-oltg)", async () => {
     const shared = await newRobot(ANNA)
-    await api(ANNA, `/api/robots/${shared}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/robots/${shared}/settings`, { method: 'PATCH', body: { sharing: 'space' } })
     const annas = await createGroup(ANNA, 'Family')
     await moveTo(ANNA, shared, { kind: 'group', groupId: annas.id })
 
@@ -83,14 +83,14 @@ describe('sidebar groups (ux-wxbm, ux-o7po, ux-xbvi)', () => {
 describe('a Robot that is gone leaves its group (ux-lywk)', () => {
   it('when it is no longer shared: shared again, it comes back ungrouped', async () => {
     const bens = await newRobot(BEN)
-    await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'space' } })
     const group = await createGroup(ANNA, "Ben's")
     await moveTo(ANNA, bens, { kind: 'group', groupId: group.id })
     expect((await entry(ANNA, bens)).groupId).toBe(group.id)
 
     await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'private' } })
     expect((await robots(ANNA)).some((robot) => robot.id === bens)).toBe(false)
-    await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(BEN, `/api/robots/${bens}/settings`, { method: 'PATCH', body: { sharing: 'space' } })
     expect('groupId' in await entry(ANNA, bens)).toBe(false)
     expect(await groups(ANNA)).toEqual([group])
   })

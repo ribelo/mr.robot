@@ -111,7 +111,7 @@ const make = Effect.gen(function* () {
     updateGroup: (id: string, patch: GroupPatch) => request(RobotGroup, 'PATCH', `/api/robot-groups/${enc(id)}`, patch),
     orderGroups: (ids: readonly string[]) => request(Schema.Array(RobotGroup), 'PUT', '/api/robot-groups/order', { ids }),
     deleteGroup: (id: string) => send('DELETE', `/api/robot-groups/${enc(id)}`),
-    /** One page of Mission Control (v1.13 ticket 06), by query ("scope=home&state=open&fleetPage=2"). */
+    /** One page of Mission Control (v1.13 ticket 06), by query ("scope=space&state=open&fleetPage=2"). */
     mission: (query: string) => get(MissionView, `/api/mission?${query}`),
     /** The active Members of the Space, for a Task's doer (v1.13). */
     spaceMembers: get(Schema.Array(MemberView), '/api/members'),
@@ -196,7 +196,7 @@ const make = Effect.gen(function* () {
     hosts: get(Schema.Array(HostView), '/api/hosts'),
     pairing: (code: string) => get(HostPairing, `/api/hosts/pair/${enc(code)}`),
     approvePairing: (code: string) => request(HostPaired, 'POST', `/api/hosts/pair/${enc(code)}`, {}),
-    setHostSharing: (id: string, sharing: 'private' | 'home') => send('PATCH', `/api/hosts/${enc(id)}`, { sharing }),
+    setHostSharing: (id: string, sharing: 'private' | 'space') => send('PATCH', `/api/hosts/${enc(id)}`, { sharing }),
     unpairHost: (id: string) => send('DELETE', `/api/hosts/${enc(id)}`),
     hostActions: (id: string) => get(Schema.Array(HostAction), `/api/hosts/${enc(id)}/actions`),
 

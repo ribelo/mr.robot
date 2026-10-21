@@ -84,7 +84,7 @@ describe('invitations (ch-c2xa, ch-l4jg, ch-vrl7, ch-hikl, ch-fri7, ch-0cn1)', (
     scripts.set(anna, [{ text: 'ok' }])
     await answer(ANNA, anna, out, true, '  my calendar,\nbut not the doctor  ')
     expect((await testRobot(anna).panel(true, (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((r) => r.id === anna)!, [])).threads![0]).toMatchObject({ state: 'invited', scope: 'my calendar for Friday' })
-    expect((await env.SPACE.getByName('home').adminView((await api<{ id: string }>(ANNA, '/api/me')).body.id)).threads![0]).toMatchObject({ state: 'invited' })
+    expect((await env.SPACE.getByName('space').adminView((await api<{ id: string }>(ANNA, '/api/me')).body.id)).threads![0]).toMatchObject({ state: 'invited' })
 
     scripts.set(anna, [{ text: 'opened' }])
     scripts.set(ben, [{ text: 'opened' }])
@@ -256,7 +256,7 @@ describe('closing and the lists (ch-6g7j, ch-rlnd, ch-gckb, ch-6fcp, ch-5ngu)', 
 
   it('closes an open Thread after 7 days without a message, by the Space alarm, with a note in both Conversations (ch-gckb)', async () => {
     const id = await openThread()
-    const space = env.SPACE.getByName('home') as unknown as DurableObjectStub<import('./worker.ts').Space>
+    const space = env.SPACE.getByName('space') as unknown as DurableObjectStub<import('./worker.ts').Space>
     expect(await space.alarmForTest()).toBeGreaterThan(Date.now() + 6.9 * 24 * 3600 * 1000)
     await space.backdateThreadsForTest(8 * 24 * 3600 * 1000)
     await runDurableObjectAlarm(space)
@@ -269,7 +269,7 @@ describe('closing and the lists (ch-6g7j, ch-rlnd, ch-gckb, ch-6fcp, ch-5ngu)', 
   it('ends an invitation that has not both answers after 7 days, by the Space alarm (ch-gckb)', async () => {
     const id = await invite()
     await settle(ben)
-    const space = env.SPACE.getByName('home') as unknown as DurableObjectStub<import('./worker.ts').Space>
+    const space = env.SPACE.getByName('space') as unknown as DurableObjectStub<import('./worker.ts').Space>
     expect(await space.alarmForTest()).toBeGreaterThan(Date.now() + 6.9 * 24 * 3600 * 1000)
     await space.backdateThreadsForTest(8 * 24 * 3600 * 1000)
     await runDurableObjectAlarm(space)

@@ -122,7 +122,7 @@ describe('steer and follow-up (v1.14 ticket 03)', () => {
     const id = await activeRobot()
     const owner = await annaId()
     await env.MEMBER.getByName(owner).addConnection({ kind: 'discord-user', label: 'anna', account: 'anna', services: [], shared: false, meta: { userId: 'u-anna' }, secrets: { token: 't' } })
-    await env.SPACE.getByName('home').discordChannelChanged(id, 'ch-1')
+    await env.SPACE.getByName('space').discordChannelChanged(id, 'ch-1')
     const wait = gate()
     scripts.set(id, [
       { gate: wait.promise, then: { text: 'On it.', calls: [{ name: 'my_capabilities', args: {} }] } },
@@ -132,7 +132,7 @@ describe('steer and follow-up (v1.14 ticket 03)', () => {
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'start the work' } })
     await working(id, 1)
 
-    const discord = (authorId: string, text: string, key: string) => env.SPACE.getByName('home').discordReceived({ id: key, channelId: 'ch-1', guildId: 'g-1', authorId, authorName: authorId, text, direct: false }, owner)
+    const discord = (authorId: string, text: string, key: string) => env.SPACE.getByName('space').discordReceived({ id: key, channelId: 'ch-1', guildId: 'g-1', authorId, authorName: authorId, text, direct: false }, owner)
     await discord('u-anna', 'from my phone: hurry', 'd-1')
     await discord('u-stranger', 'hello from a stranger', 'd-2')
     await env.ROBOT.getByName(id).receive(robotMessage({ robotId: `mr-robot-${owner}`, ownerId: owner, name: 'Mr. Robot' }, 'Mr. Robot says: check the calendar too', 'deputy'))

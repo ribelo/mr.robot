@@ -101,7 +101,7 @@ describe('the update unshares person connections (ux-cop2, ux-dz8p, ux-ro7d)', (
     await turn(ANNA, annaMr.id, 'hello')
     expect(await toolsOf(ANNA, annas)).toContain('slack_read_channel')
 
-    await env.SPACE.getByName('home').unsharePersonConnections()
+    await env.SPACE.getByName('space').unsharePersonConnections()
 
     // The connection is Ben's alone now; the Discord bot stays shared.
     expect((await api<ConnectionView[]>(ANNA, '/api/connections')).body.map((connection) => connection.id)).toEqual([bot.id])
@@ -131,7 +131,7 @@ describe('the update unshares person connections (ux-cop2, ux-dz8p, ux-ro7d)', (
     expect(newUser(bens)).not.toContain(told)
 
     // Running it again changes nothing.
-    await env.SPACE.getByName('home').unsharePersonConnections()
+    await env.SPACE.getByName('space').unsharePersonConnections()
     expect(await notes(BEN)).toHaveLength(1)
 
     // Only the owner dismisses the note.
@@ -147,7 +147,7 @@ describe('the update unshares person connections (ux-cop2, ux-dz8p, ux-ro7d)', (
     await api(ANNA, `/api/robots/${annaMr.id}/settings`, { method: 'PATCH', body: { grants: { connections: { [google.id]: 'deny' } } } })
     expect((await connectionGrants(ANNA, annaMr.id))[google.id]).toBe('deny')
 
-    await env.SPACE.getByName('home').unsharePersonConnections()
+    await env.SPACE.getByName('space').unsharePersonConnections()
 
     expect(await notes(BEN)).toEqual([expect.objectContaining({ kind: 'google', label: 'Space', account: 'ben@gmail.test', robots: [] })])
     expect((await api<ConnectionView[]>(ANNA, '/api/connections')).body).toEqual([])

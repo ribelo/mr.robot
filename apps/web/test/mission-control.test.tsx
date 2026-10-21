@@ -5,7 +5,7 @@ import type { Conversation, Me, MissionView, RobotPanel, RobotSummary, TaskView 
 import { WindowedTable } from '../src/components/WindowedTable.tsx'
 
 const now = Date.now()
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as Me
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'member', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, space: 'Space', timeZone: 'Europe/Warsaw', timeZonePinned: false, detectedTimeZone: 'Europe/Warsaw', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as Me
 const identity = (name: string) => ({ name, title: '', description: '', avatarColor: '#f4a03a', avatarSeed: name })
 const robot = (id: string, name: string, extra: Partial<RobotSummary> = {}): RobotSummary => ({ id, ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity: identity(name), lastLine: '', lastAt: 0, unread: false, ...extra })
 const task = (id: string, title: string, extra: Partial<TaskView> = {}): TaskView => ({
@@ -111,7 +111,7 @@ describe('Mission Control (v1.13 ticket 06)', () => {
     cleanup()
     await mission({ ...me, role: 'admin' })
     fireEvent.click(screen.getByRole('switch', { name: 'Whole Space' }))
-    await waitFor(() => expect(calls.some((call) => call.path.startsWith('/api/mission') && call.path.includes('scope=home'))).toBe(true))
+    await waitFor(() => expect(calls.some((call) => call.path.startsWith('/api/mission') && call.path.includes('scope=space'))).toBe(true))
   })
 
   it('opens a Task row in place and a Fleet row as the Robot, marked as opened from here (mc-m8hh, mc-m9ii)', async () => {

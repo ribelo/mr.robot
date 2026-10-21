@@ -194,7 +194,7 @@ export interface NoticeRow {
   readonly card?: NoticeCard
 }
 
-const SCHEMA_VERSION = 27
+const SCHEMA_VERSION = 28
 
 /** One step of a migration: a statement, or a change SQL cannot say. */
 type MigrationStep = string | ((sql: SqlStorage) => void)
@@ -315,6 +315,12 @@ function addColumns(sql: SqlStorage, table: string, columns: readonly string[]):
 }
 
 const MIGRATIONS: Record<number, readonly MigrationStep[]> = {
+  // Home became Space (v1.18 ticket 09): the stored values say 'space'; the config's sharing and spend limit, an open skill proposal's visibility.
+  28: [
+    "UPDATE robot SET v = json_set(v, '$.sharing', 'space') WHERE k = 'config' AND json_extract(v, '$.sharing') = 'home'",
+    "UPDATE robot SET v = json_set(v, '$.spendLimit.kind', 'space') WHERE k = 'config' AND json_extract(v, '$.spendLimit.kind') = 'home'",
+    "UPDATE proposal SET payload = json_set(payload, '$.visibility', 'space') WHERE json_extract(payload, '$.visibility') = 'home'",
+  ],
   // Chapters outside the retention window keep their events in R2 (v1.19 ticket 06, ec-4qsf).
   27: [(sql) => addColumns(sql, 'chapter', ['cold INTEGER NOT NULL DEFAULT 0'])],
   // How many Turns a closed chapter holds, counted once (v1.19 ticket 04, ec-mwvo).

@@ -1083,7 +1083,7 @@ export class Member extends DurableObject<Env> {
 
   pairHost(name: string, platform: string): Promise<{ hostId: string; token: string }> { return this.hosts.pair(name, platform) }
   hostList(): HostEntry[] { return this.hosts.list() }
-  setHostSharing(id: string, sharing: 'private' | 'home'): Promise<void> { return this.hosts.setSharing(id, sharing) }
+  setHostSharing(id: string, sharing: 'private' | 'space'): Promise<void> { return this.hosts.setSharing(id, sharing) }
   unpairHost(id: string): Promise<void> { return this.hosts.unpair(id) }
 
   // A Robot's calls on a Host answer with a HostCallReply: an expected failure crosses to the Robot as an encoded tagged value (deep review P16).

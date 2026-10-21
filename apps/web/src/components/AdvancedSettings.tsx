@@ -183,11 +183,11 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
 
       <h2>Sharing and limits</h2>
       {mrRobot ? null : (
-        <label className="check"><input type="checkbox" checked={draft.sharing === 'home'} onChange={(event) => setDraft({ ...draft, sharing: event.target.checked ? 'home' : 'private' })} />
+        <label className="check"><input type="checkbox" checked={draft.sharing === 'space'} onChange={(event) => setDraft({ ...draft, sharing: event.target.checked ? 'space' : 'private' })} />
           <span>Shared with the Space<small>Other Members can talk to it and use it.</small></span>
         </label>
       )}
-      <SpendLimitChoice label="Monthly spend limit" kinds={['home', 'none', 'usd']} draft={limitDraft} valid={Option.isSome(spendLimit)} onChange={setLimitDraft}
+      <SpendLimitChoice label="Monthly spend limit" kinds={['space', 'none', 'usd']} draft={limitDraft} valid={Option.isSome(spendLimit)} onChange={setLimitDraft}
         note={Option.isSome(spendLimit) ? `In effect: ${spendLimitText(effectiveSpendLimit(spendLimit.value, settings.spaceSpendLimit))}` : undefined} />
 
       <div className="question-actions">

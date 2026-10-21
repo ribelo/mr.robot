@@ -52,8 +52,8 @@ describe('Mission Control (v1.13 ticket 06)', () => {
     expect(mine.counts).toMatchObject({ working: 1, waiting: 1 })
     expect((await mission(ANNA, '?fleetQ=rec')).fleet.map((robot) => robot.id)).toEqual([recent])
 
-    expect((await mission(ANNA, '?scope=home')).fleet.map((robot) => robot.id)).toContain(bens)
-    expect((await mission(BEN, '?scope=home')).fleet.map((robot) => robot.id)).not.toContain(busy)
+    expect((await mission(ANNA, '?scope=space')).fleet.map((robot) => robot.id)).toContain(bens)
+    expect((await mission(BEN, '?scope=space')).fleet.map((robot) => robot.id)).not.toContain(busy)
     await api(ANNA, `/api/robots/${busy}/interrupt`, { body: {} })
     await settle(busy)
   })

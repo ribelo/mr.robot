@@ -3851,7 +3851,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     return this.space().skillLibrary(config.ownerId, { id: config.id, held: this.heldSkills() }, config.kind === 'mr-robot')
   }
 
-  async promoteSkill(name: string, visibility: 'home' | 'private'): Promise<{ proposalId: string }> {
+  async promoteSkill(name: string, visibility: 'space' | 'private'): Promise<{ proposalId: string }> {
     const content = await this.run(this.workspace.readText(`skills/${name}/SKILL.md`))
     if (content === undefined) throw new Error(`You have no local skill "${name}". Write it with skill_write first.`)
     const description = skillFrontmatter(content).description
@@ -3924,7 +3924,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       this.space().spaceMemory().catch(() => ''),
     ])
     return [
-      { scope: 'home', path: 'SPACE.md', content: home },
+      { scope: 'space', path: 'SPACE.md', content: home },
       ...Object.entries(member).map(([path, content]): MemoryFile => ({ scope: 'member', path, content })),
       ...robotFiles,
     ]

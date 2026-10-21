@@ -155,7 +155,7 @@ describe('orphans (sk-44d5)', () => {
     await env.FILES.put(`robots/${orphan}/MEMORY.md`, 'left behind')
     await env.FILES.put(`robots/${orphan}/out/report.md`, 'left behind')
     await env.FILES.put(`screens/${orphan}/${screenName(Date.now())}`, png)
-    const space = env.SPACE.getByName('home')
+    const space = env.SPACE.getByName('space')
     const mr = (await api<Array<{ id: string }>>(ANNA, '/api/robots')).body[0]!.id
     await runInDurableObject(space, async (_instance, state) => {
       state.storage.sql.exec(

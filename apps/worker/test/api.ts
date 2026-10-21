@@ -6,7 +6,7 @@ export const STUB_MODEL = { provider: 'stub', model: 'stub', effort: 'off' } as 
 
 /** Use the stub model for every Robot the Space creates (call before the first sign-in). */
 export async function stubModels(): Promise<void> {
-  await env.SPACE.getByName('home').updateSettings({ defaultModel: STUB_MODEL })
+  await env.SPACE.getByName('space').updateSettings({ defaultModel: STUB_MODEL })
 }
 
 /** Call the edge API as a person (signed in through the dev identity). */

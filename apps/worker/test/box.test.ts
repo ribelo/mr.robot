@@ -155,7 +155,8 @@ describe('the Box (ao-8x0c, ao-xokp, ao-7ptt, ao-ia4z, ao-joux, ao-54j2, ao-7lcd
     const after = await panel(id)
     expect(after.box?.state).toBe('off')
     expect(after.usage.breakdown.box).toBeGreaterThan(1)
-    expect(after.summary.status).toBe('blocked')
+    // The limit check after the stop reaches the registry a moment later under load.
+    await vi.waitFor(async () => expect((await panel(id)).summary.status).toBe('blocked'), { timeout: 10_000 })
   })
 
   it('a Robot from a v1.14 deploy has its grant, cost rows, running time and computer/ folder under the new names (gb-ao8m)', async () => {

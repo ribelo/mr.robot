@@ -68,7 +68,7 @@ describe('login entries (v1.1 ticket 05)', () => {
   })
 
   it("lets another Member's Robot fill a Space entry once granted (rb-ob2g)", async () => {
-    await api(ANNA, '/api/secrets/shop', { method: 'PUT', body: { username: 'home', password: PASSWORD, websites: ['shop.test'], shared: true } })
+    await api(ANNA, '/api/secrets/shop', { method: 'PUT', body: { username: 'space', password: PASSWORD, websites: ['shop.test'], shared: true } })
     const bens = await robotOf(BEN, ['shop'])
     await say(BEN, bens, 'log in', [
       { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] },

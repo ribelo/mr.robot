@@ -672,7 +672,7 @@ const apply = (proposal: ProposalRow) => Effect.gen(function* () {
     }
     case 'skill': {
       if (proposal.skill === null) return
-      const visibility = proposal.payload['visibility'] === 'private' ? 'private' : 'home'
+      const visibility = proposal.payload['visibility'] === 'private' ? 'private' : 'space'
       yield* Effect.tryPromise({
         try: () => platform.env.SPACE.getByName(SPACE_ID).publishSkill(ownerId, proposal.skill!.name, proposal.skill!.description, String(proposal.payload['content'] ?? ''), visibility),
         catch: (error) => conflict(error instanceof Error ? error.message : String(error)),
@@ -1111,7 +1111,7 @@ export const create = (init: RobotInit) => Effect.gen(function* () {
     blockedReason: null, model: init.model, contextBudget: DEFAULT_CONTEXT_BUDGET, codeMode: true, compactionInstruction: init.kind === 'mr-robot' ? MR_ROBOT_COMPACTION : '',
     // Mr. Robot, talked to all day, keeps his cache warm; other Robots compact while idle (ao-jlr0, ao-f4sp).
     cacheWarming: init.kind === 'mr-robot', idleCompaction: init.kind !== 'mr-robot', idleCompactionFloorTokens: DEFAULT_IDLE_FLOOR_TOKENS,
-    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, timeZone: init.timeZone,
+    notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'space' }, timeZone: init.timeZone,
     liveSessionId: `s-${crypto.randomUUID()}`, revision: 1, createdAt: Date.now(),
   }
   store.transaction(() => {

@@ -39,6 +39,20 @@ import { renameHomeMemory } from '../src/space/space.ts'
 
 /** The production Space with recorded HTTP for Discord. */
 export class Space extends ProductionSpace {
+  /** The Space as v1.17 stored it in the object named 'home': one admin, HOME.md, a shared Robot row and a Space skill (v1.18 ticket 09). */
+  async seedLegacyHomeForTest(): Promise<void> {
+    const sql = this.ctx.storage.sql
+    sql.exec("INSERT INTO member (id, email, name, role, status, created_at) VALUES ('m-anna', 'anna@example.com', 'Anna', 'admin', 'active', 1)")
+    sql.exec("INSERT INTO setting (k, v) VALUES ('home-md', ?)", JSON.stringify('# HOME.md\nWater: MPWiK.'))
+    sql.exec("INSERT INTO robot (id, owner_id, kind, identity, sharing, status, fleet_state, last_line, last_at) VALUES ('r-old', 'm-anna', 'robot', ?, 'home', 'active', 'sleeping', '', 1)", JSON.stringify({ name: 'Old', title: '', description: '', avatarColor: '#f4a03a', avatarSeed: 'r-old' }))
+    sql.exec("INSERT INTO skill (name, description, source, visibility, owner_id, updated_at) VALUES ('filing', 'File an invoice', 'home', 'home', 'm-anna', 1)")
+  }
+
+  /** Whether this object gave its data to the Space under its new name. */
+  async movedForTest(): Promise<boolean> {
+    return this.ctx.storage.sql.exec("SELECT 1 FROM setting WHERE k = 'moved-to-space'").toArray().length > 0
+  }
+
   /** SPACE.md as v1.17 stored it, under the key of HOME.md; then the store opened again (v1.18 ticket 09). */
   async legacyHomeMemoryForTest(content: string): Promise<void> {
     this.ctx.storage.sql.exec("DELETE FROM setting WHERE k IN ('space-md', 'space-md-author')")
@@ -268,6 +282,13 @@ export class Robot extends ProductionRobot {
   }
 
   /** The Robot as v1.18 left it: no chapters; then the store opened again, as after the deploy (v1.19 ticket 02). */
+  /** The Robot's config as v1.17 stored it: shared with the Home, the Home's spend limit; then the store opened again (v1.18 ticket 09). */
+  async legacySpaceValuesForTest(): Promise<void> {
+    this.store.sql.exec("UPDATE robot SET v = json_set(v, '$.sharing', 'home', '$.spendLimit', json('{\"kind\":\"home\"}')) WHERE k = 'config'")
+    this.store.sql.exec('UPDATE schema_version SET version = 27')
+    this.store.prepare()
+  }
+
   async unchapterForTest(): Promise<void> {
     this.store.sql.exec('DROP TABLE chapter')
     // v1.18 had no stored chat either.

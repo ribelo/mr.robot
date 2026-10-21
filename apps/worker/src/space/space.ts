@@ -60,7 +60,7 @@ import { briefOf, fetchMarketplacePage, parseMarketplaceUrl, templateOf } from '
 import { registrableDomain } from '../platform/logins.ts'
 import type { RobotInit } from '../robot/programs.ts'
 import type { ProviderCredential, ProviderId } from '../agent/providers.ts'
-import type { Env } from '../env.ts'
+import { SPACE_ID, type Env } from '../env.ts'
 import { DEFAULT_TIME_ZONE } from '../robot/time-zone.ts'
 import * as Tasks from './tasks.ts'
 import type { LastWakeup, MissionView, RobotTurn, SubagentLine, TaskAssignee, TaskInput, TaskPage, TaskPatch, TaskView } from '@mr-robot/protocol'
@@ -223,7 +223,7 @@ const remove = (memberId: string) => Effect.gen(function* () {
   const owned = yield* sql.all<{ id: string }>('SELECT id FROM robot WHERE owner_id = ?', memberId)
   yield* Effect.forEach(owned, ({ id }) => endThreadsOf(id), { discard: true })
   yield* Effect.forEach(owned, ({ id }) => remote((env) => env.ROBOT.getByName(id).pause()), { concurrency: 'unbounded', discard: true })
-  const viewed = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home')", memberId)
+  const viewed = yield* sql.all<{ id: string }>("SELECT id FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'space')", memberId)
   yield* Effect.forEach(viewed, ({ id }) => remote((env) => env.ROBOT.getByName(id).disconnectMember(memberId)), { concurrency: 'unbounded', discard: true })
 })
 
@@ -374,7 +374,7 @@ const summary = (row: RobotSql) => Effect.gen(function* () {
 /** Robots a Member can reach: their own, and everything shared with the Space (robot-hpj1, robot-bld3). */
 const reachable = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  const rows = yield* sql.all<RobotSql>("SELECT * FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'home') ORDER BY last_at DESC", memberId)
+  const rows = yield* sql.all<RobotSql>("SELECT * FROM robot WHERE status != 'deleted' AND (owner_id = ? OR sharing = 'space') ORDER BY last_at DESC", memberId)
   return yield* Effect.forEach(rows, summary)
 })
 
@@ -387,7 +387,7 @@ export const FLEET_PAGE_SIZE = 200
  */
 const fleetPage = (memberId: string, wholeSpace: boolean, q: string, page: number) => Effect.gen(function* () {
   const sql = yield* Sql
-  const reach = wholeSpace ? '' : "AND (r.owner_id = ? OR r.sharing = 'home')"
+  const reach = wholeSpace ? '' : "AND (r.owner_id = ? OR r.sharing = 'space')"
   const words = q.trim()
   const named = words === '' ? '' : "AND json_extract(r.identity, '$.name') LIKE ? ESCAPE '\\'"
   const bindings = [...(wholeSpace ? [] : [memberId]), ...(words === '' ? [] : [`%${words.replace(/[\\%_]/g, (character) => `\\${character}`)}%`])]
@@ -437,7 +437,7 @@ const access = (memberId: string, robotId: string) => Effect.gen(function* () {
   const found = yield* entry(robotId)
   if (found === undefined || found.status === 'deleted') return null
   if (found.ownerId === memberId) return 'owner' as const
-  if (found.sharing === 'home' && (yield* member(memberId))?.status === 'active') return 'shared' as const
+  if (found.sharing === 'space' && (yield* member(memberId))?.status === 'active') return 'shared' as const
   return null
 })
 
@@ -618,7 +618,7 @@ const resetMember = (memberId: string, typed: string) => Effect.gen(function* ()
 
 // ------------------------------------------------------------------ admin view (robot-x26m, robot-1rap, robot-bvme)
 
-type SkillSql = { name: string; description: string; source: 'git' | 'robot' | 'home'; visibility: 'home' | 'private'; owner_id: string | null; updated_at: number; edited?: number }
+type SkillSql = { name: string; description: string; source: 'git' | 'robot' | 'space'; visibility: 'space' | 'private'; owner_id: string | null; updated_at: number; edited?: number }
 const skillFromSql = (row: SkillSql): SkillView => ({ name: row.name, description: row.description, source: row.source, visibility: row.visibility, ownerId: row.owner_id, updatedAt: row.updated_at, edited: row.edited === 1 })
 
 const adminView = (adminId: string) => Effect.gen(function* () {
@@ -630,7 +630,7 @@ const adminView = (adminId: string) => Effect.gen(function* () {
   const everyone = yield* members
   const memberRows = yield* Effect.forEach(everyone, (person) => Effect.gen(function* () {
     const usage = person.status === 'invited' ? { inputTokens: 0, outputTokens: 0, costUsd: 0, breakdown: costBreakdown([]) } : yield* remote((env) => env.MEMBER.getByName(person.id).usage(month))
-    return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, breakdown: usage.breakdown, limit: { limit: current.memberSpendLimit, from: 'home' as const } } }
+    return { ...person, usage: { month, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, costUsd: usage.costUsd, breakdown: usage.breakdown, limit: { limit: current.memberSpendLimit, from: 'space' as const } } }
   }), { concurrency: 'unbounded' })
   const providers = (yield* Effect.forEach(everyone.filter((person) => person.status === 'active'), (person) =>
     Effect.map(remote((env) => env.MEMBER.getByName(person.id).accounts()), (views) => views.map((view) => ({ id: view.id, provider: view.provider, label: view.label, ownerName: person.name, shared: view.shared }))), { concurrency: 'unbounded' })).flat()
@@ -668,7 +668,7 @@ const setExaKey = (key: string | null) => Effect.gen(function* () {
 
 // ------------------------------------------------------------------ Hosts (v1.2): index, sharing, pairing
 
-type HostSql = { id: string; owner_id: string; name: string; platform: string; sharing: 'private' | 'home'; online: number; last_seen: number | null; version: string | null; capabilities: string | null; users: string }
+type HostSql = { id: string; owner_id: string; name: string; platform: string; sharing: 'private' | 'space'; online: number; last_seen: number | null; version: string | null; capabilities: string | null; users: string }
 
 /** The Member DO reports each host; the Space keeps the index for sharing and the admin view. */
 const hostChanged = (entry: HostEntry | { id: string; removed: true }) => Effect.gen(function* () {
@@ -688,7 +688,7 @@ const hostChanged = (entry: HostEntry | { id: string; removed: true }) => Effect
   if (wasOnline || !entry.online) return []
   // The Host came online (v1.16 ticket 05, ob-e271): the Robots that reach it hear, so a scheduled Task that waited for it runs.
   const reaching = yield* sql.all<{ id: string }>(
-    "SELECT id FROM robot WHERE status = 'active' AND (owner_id = ? OR ? = 'home')", entry.ownerId, entry.sharing,
+    "SELECT id FROM robot WHERE status = 'active' AND (owner_id = ? OR ? = 'space')", entry.ownerId, entry.sharing,
   )
   return reaching.map((robot) => robot.id)
 })
@@ -706,7 +706,7 @@ const hostViews = (rows: readonly HostSql[], memberId: string | null) => Effect.
 /** Hosts a Member's robots can reach: their own, and those shared with the Space (hs-0eka). */
 const hostsFor = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  return yield* hostViews(yield* sql.all<HostSql>("SELECT * FROM host WHERE owner_id = ? OR sharing = 'home' ORDER BY name", memberId), memberId)
+  return yield* hostViews(yield* sql.all<HostSql>("SELECT * FROM host WHERE owner_id = ? OR sharing = 'space' ORDER BY name", memberId), memberId)
 })
 
 const allHosts = Effect.gen(function* () {
@@ -778,7 +778,7 @@ const sharedSecrets = Effect.gen(function* () {
 
 const grantableSecrets = (memberId: string) => Effect.gen(function* () {
   const own = (yield* remote((env) => env.MEMBER.getByName(memberId).logins())).map(({ name, username, websites }) => ({ name, scope: 'member' as const, username, websites }))
-  const shared = (yield* sharedSecrets).filter(({ name }) => !own.some((secret) => secret.name === name)).map(({ name, username, websites }) => ({ name, scope: 'home' as const, username, websites }))
+  const shared = (yield* sharedSecrets).filter(({ name }) => !own.some((secret) => secret.name === name)).map(({ name, username, websites }) => ({ name, scope: 'space' as const, username, websites }))
   return [...own, ...shared] as SettingsCatalog['secrets']
 })
 
@@ -806,7 +806,7 @@ const catalog = (memberId: string, robotId: string) => Effect.gen(function* () {
 /** Skills a Member can see: every Space skill, and private skills of their own Robots. */
 const skills = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
-  return (yield* sql.all<SkillSql>("SELECT * FROM skill WHERE visibility = 'home' OR owner_id = ? ORDER BY name", memberId)).map(skillFromSql)
+  return (yield* sql.all<SkillSql>("SELECT * FROM skill WHERE visibility = 'space' OR owner_id = ? ORDER BY name", memberId)).map(skillFromSql)
 })
 
 /** Which of these names a Robot of this owner may load. */
@@ -826,7 +826,7 @@ const storeSkillFiles = (name: string, files: ReadonlyArray<{ path: string; body
   await Promise.all(files.map((file) => env.FILES.put(`skills/${name}/${file.path}`, file.body)))
 })
 
-const upsertSkill = (name: string, description: string, source: 'git' | 'robot' | 'home', visibility: 'home' | 'private', ownerId: string | null) => Effect.gen(function* () {
+const upsertSkill = (name: string, description: string, source: 'git' | 'robot' | 'space', visibility: 'space' | 'private', ownerId: string | null) => Effect.gen(function* () {
   const sql = yield* Sql
   yield* sql.run(
     `INSERT INTO skill (name, description, source, visibility, owner_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -852,7 +852,7 @@ const syncSkills = Effect.gen(function* () {
   for (const skill of found) {
     if (edited.has(skill.name)) continue
     yield* storeSkillFiles(skill.name, skill.files)
-    yield* upsertSkill(skill.name, skill.description, 'git', 'home', null)
+    yield* upsertSkill(skill.name, skill.description, 'git', 'space', null)
   }
   for (const gone of previous.filter((name) => !found.some((skill) => skill.name === name) && !edited.has(name))) {
     yield* sql.run("DELETE FROM skill WHERE name = ? AND source = 'git'", gone)
@@ -863,7 +863,7 @@ const syncSkills = Effect.gen(function* () {
 })
 
 /** An approved Robot proposal enters the library (robot-jqfw). */
-const publishSkill = (ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private') => Effect.gen(function* () {
+const publishSkill = (ownerId: string, name: string, description: string, content: string, visibility: 'space' | 'private') => Effect.gen(function* () {
   const sql = yield* Sql
   const existing = yield* sql.first<{ source: string; owner_id: string | null }>('SELECT source, owner_id FROM skill WHERE name = ?', name)
   if (existing !== undefined && (existing.source === 'git' || existing.owner_id !== ownerId)) return yield* invalid(`a skill named "${name}" already exists`)
@@ -878,7 +878,7 @@ const saveSkill = (name: string, description: string, content: string, by: strin
   const existing = yield* sql.first<{ source: string; visibility: string; owner_id: string | null }>('SELECT source, visibility, owner_id FROM skill WHERE name = ?', name)
   yield* storeSkillFiles(name, [{ path: 'SKILL.md', body: new TextEncoder().encode(content) }])
   if (existing === undefined) {
-    yield* upsertSkill(name, description, 'home', 'home', by)
+    yield* upsertSkill(name, description, 'space', 'space', by)
   } else {
     yield* sql.run('UPDATE skill SET description = ?, edited = CASE WHEN source = \'git\' THEN 1 ELSE edited END, updated_at = ? WHERE name = ?', description, Date.now(), name)
   }
@@ -968,7 +968,7 @@ const revealLogin = (memberId: string, name: string) => Effect.gen(function* () 
 const secretsView = (memberId: string) => Effect.gen(function* () {
   const sql = yield* Sql
   const own = (yield* remote((env) => env.MEMBER.getByName(memberId).logins())).map((secret) => ({ ...secret, scope: 'member' as const, mine: true }))
-  const shared = (yield* sharedSecrets).map(({ ownerId, ...secret }) => ({ ...secret, scope: 'home' as const, mine: ownerId === memberId }))
+  const shared = (yield* sharedSecrets).map(({ ownerId, ...secret }) => ({ ...secret, scope: 'space' as const, mine: ownerId === memberId }))
   const robots = yield* sql.all<{ id: string; name: string }>("SELECT id, json_extract(identity, '$.name') AS name FROM robot WHERE owner_id = ? AND status != 'deleted'", memberId)
   const grants = yield* Effect.forEach(robots, (robot) => Effect.map(remote((env) => env.ROBOT.getByName(robot.id).grants()), (granted) => ({ name: robot.name, secrets: usableNames(granted.secrets) })).pipe(Effect.orElseSucceed(() => ({ name: robot.name, secrets: [] as readonly string[] }))), { concurrency: 8 })
   return [...own, ...shared].map((entry) => ({ ...entry, robots: grants.filter((robot) => robot.secrets.includes(entry.name)).map((robot) => robot.name) }))
@@ -1337,6 +1337,25 @@ export function renameHomeMemory(sql: SqlStorage): void {
   sql.exec("UPDATE OR IGNORE setting SET k = 'space-md-author' WHERE k = 'home-md-author'")
 }
 
+/** The stored values that said 'home' say 'space' (v1.18 ticket 09): a Robot's and a Host's sharing, a skill's visibility and source. */
+export function renameHomeValues(sql: SqlStorage): void {
+  sql.exec("UPDATE robot SET sharing = 'space' WHERE sharing = 'home'")
+  sql.exec("UPDATE host SET sharing = 'space' WHERE sharing = 'home'")
+  sql.exec("UPDATE skill SET visibility = 'space' WHERE visibility = 'home'")
+  sql.exec("UPDATE skill SET source = 'space' WHERE source = 'home'")
+}
+
+/** The object name the Space had until v1.18: its data moves to the object named SPACE_ID at the first touch (ticket 09). */
+export const LEGACY_SPACE_ID = 'home'
+const MOVED_TO_SPACE = 'moved-to-space'
+const MOVED_FROM_HOME = 'moved-from-home'
+
+/** Every table of an object's SQLite with its rows, for the move. */
+interface TableDump {
+  readonly name: string
+  readonly rows: ReadonlyArray<Record<string, SqlStorageValue>>
+}
+
 export class Space extends DurableObject<Env> {
   private readonly runtime: DurableRuntime<R>
 
@@ -1381,6 +1400,7 @@ export class Space extends DurableObject<Env> {
     )`)
     sql.exec('CREATE TABLE IF NOT EXISTS host_pairing (code TEXT PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL, created_at INTEGER NOT NULL, host_id TEXT, token TEXT, member_id TEXT)')
     sql.exec('CREATE TABLE IF NOT EXISTS shared_credential (provider TEXT NOT NULL, member_id TEXT NOT NULL, PRIMARY KEY (provider, member_id)) WITHOUT ROWID')
+    renameHomeValues(sql)
     // v1.1 (rb-a70a): the library starts empty with no sync source; the source set before and its skills go, once.
     if (sql.exec<{ v: string }>("SELECT v FROM setting WHERE k = 'skills-reset-v1.1'").toArray().length === 0) {
       const imported = sql.exec<{ name: string }>("SELECT name FROM skill WHERE source = 'git'").toArray().map((row) => row.name)
@@ -1398,6 +1418,10 @@ export class Space extends DurableObject<Env> {
       if (current === null || current > at) await ctx.storage.setAlarm(Math.max(at, Date.now() + 1))
     })
     this.runtime = new DurableRuntime(Layer.mergeAll(sqlLayer(ctx.storage), Layer.succeed(SpacePlatform)({ env, secrets: makeVault(env.DATA_KEY, 'secrets'), catalogTries: new Map(), threads, alarmBy })))
+    // The old object, whose data moved (v1.18 ticket 09), does nothing more.
+    if (this.moved()) return
+    // The Space under its new name takes the old object's data before it serves anything.
+    if (ctx.id.name === SPACE_ID) void ctx.blockConcurrencyWhile(() => this.moveFromHome())
     ctx.waitUntil(this.destroyOrphans().catch((error: unknown) => console.warn('orphans not destroyed', error)))
     ctx.waitUntil(this.migrateRoutines().catch((error: unknown) => console.warn('Routines not migrated', error)))
     ctx.waitUntil(this.unsharePersonConnections().catch((error: unknown) => console.warn('person connections not unshared', error)))
@@ -1712,7 +1736,7 @@ export class Space extends DurableObject<Env> {
     if (row === undefined || (!row.published && row.ownerId !== memberId)) return null
     return [...(await this.definitionLibrary.files(slug)).entries()].map(([path, body]) => ({ path, body }))
   }
-  publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'home' | 'private'): Promise<void> { return this.run(publishSkill(ownerId, name, description, content, visibility)) }
+  publishSkill(ownerId: string, name: string, description: string, content: string, visibility: 'space' | 'private'): Promise<void> { return this.run(publishSkill(ownerId, name, description, content, visibility)) }
   skillContent(memberId: string, name: string, path = 'SKILL.md'): Promise<string | null> { return this.run(skillContent(memberId, name, path)) }
   saveSkill(name: string, description: string, content: string, by: string | null): Promise<void> { return this.run(saveSkill(name, description, content, by)) }
   deleteSkill(name: string): Promise<void> { return this.run(deleteSkill(name)) }
@@ -2023,7 +2047,53 @@ export class Space extends DurableObject<Env> {
   }
 
   /** The Space's alarm keeps the Discord gateway alive: heartbeats, and reconnects after a drop or a restart. */
+  /** This object's data moved to the Space under its new name (v1.18 ticket 09). */
+  private moved(): boolean {
+    return this.ctx.storage.sql.exec("SELECT 1 FROM setting WHERE k = ?", MOVED_TO_SPACE).toArray().length > 0
+  }
+
+  /**
+   * The old object gives its data for the move, once: every table's rows. It stops its alarm and does nothing more; its rows stay as
+   * they were, for one release, in case the move must be looked into.
+   */
+  async exportForMove(): Promise<TableDump[]> {
+    const sql = this.ctx.storage.sql
+    const tables = sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()
+    const dump = tables.map(({ name }) => ({ name, rows: sql.exec<Record<string, SqlStorageValue>>(`SELECT * FROM "${name}"`).toArray() }))
+    sql.exec("INSERT OR REPLACE INTO setting (k, v) VALUES (?, '1')", MOVED_TO_SPACE)
+    await this.ctx.storage.deleteAlarm()
+    return dump
+  }
+
+  /** The Space under its new name: a fresh one takes the rows of the object named 'home' (v1.18 ticket 09), then renames their values. */
+  private async moveFromHome(): Promise<void> {
+    const sql = this.ctx.storage.sql
+    if (sql.exec('SELECT 1 FROM setting WHERE k = ?', MOVED_FROM_HOME).toArray().length > 0) return
+    if (sql.exec('SELECT 1 FROM member LIMIT 1').toArray().length === 0) {
+      const dump = await this.env.SPACE.getByName(LEGACY_SPACE_ID).exportForMove()
+      // A Space that never had a Member there (a new deployment) has nothing to move.
+      const used = dump.some((table) => table.name === 'member' && table.rows.length > 0)
+      const local = new Set(sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'").toArray().map((row) => row.name))
+      if (used) this.ctx.storage.transactionSync(() => {
+        for (const table of dump) {
+          if (!local.has(table.name) || table.name === 'setting' && table.rows.length === 0) continue
+          for (const row of table.rows) {
+            const columns = Object.keys(row)
+            sql.exec(`INSERT OR REPLACE INTO "${table.name}" (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`, ...columns.map((column) => row[column]!))
+          }
+        }
+        sql.exec("DELETE FROM setting WHERE k = ?", MOVED_TO_SPACE)
+        renameHomeMemory(sql)
+        renameHomeValues(sql)
+      })
+      // What was due in the old object is due here: the alarm looks again.
+      if (used) await this.ctx.storage.setAlarm(Date.now() + 1_000)
+    }
+    sql.exec("INSERT OR REPLACE INTO setting (k, v) VALUES (?, '1')", MOVED_FROM_HOME)
+  }
+
   override async alarm(): Promise<void> {
+    if (this.moved()) return
     await this.remindPeople().catch((error: unknown) => console.warn('reminders not sent', error))
     await this.run(lapseThreads).catch((error: unknown) => console.warn('idle Threads not closed', error))
     await this.ensureDiscordGateway()

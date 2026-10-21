@@ -25,7 +25,7 @@ const choose = (group: string, segment: string) => fireEvent.click(within(screen
 describe('Space spend limits in Admin (ux-dbx4, ux-en86)', () => {
   const view: AdminView = {
     fleet: [
-      { ...summary, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }) },
+      { ...summary, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'space' }) },
       { ...summary, id: 'r-2', identity: { ...identity, name: 'Ledger' }, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'usd', amount: 50 }, from: 'robot' }) },
       { ...summary, id: 'r-3', identity: { ...identity, name: 'Free' }, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage: usage({ limit: { kind: 'none' }, from: 'robot' }) },
     ],
@@ -97,9 +97,9 @@ describe("a Robot's spend limit in Advanced settings (ux-q8ve, ux-en86)", () => 
     settings: {
       identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
       codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants,
-      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, spaceSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
+      notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'space' }, spaceSpendLimit: { kind: 'usd', amount: 20 }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
     },
-    tasks: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'home' }), canEdit: true, takeover: null,
+    tasks: [], screen: null, usage: usage({ limit: { kind: 'usd', amount: 20 }, from: 'space' }), canEdit: true, takeover: null,
   }
   const catalog: SettingsCatalog = { toolGroups: [], skills: [], robots: [], secrets: [], models: [], workersAiEnabled: true }
 

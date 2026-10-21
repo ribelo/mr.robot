@@ -17,10 +17,10 @@ const summary = { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', s
 const usage = { month: '2026-10', inputTokens: 1000, outputTokens: 100, costUsd: 1.99, breakdown, limit: { limit: { kind: 'usd', amount: 5 }, from: 'robot' } } as const
 const panel = {
   summary,
-  settings: { identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [], contextBudget: 128000, codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants, notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'home' }, spaceSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [] },
+  settings: { identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [], contextBudget: 128000, codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: emptyGrants, notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'space' }, spaceSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [] },
   tasks: [], screen: null, usage, canEdit: true, takeover: null,
 } as unknown as RobotPanel
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as unknown as Me
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, space: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] } as unknown as Me
 const costs: MemberCosts = { month: '2026-10', breakdown, limit: { kind: 'usd', amount: 50 }, byRobot: [{ robotId: 'r-1', name: 'Sales', breakdown }] }
 
 /** The rows of a breakdown table as [label, amount]. */
@@ -50,7 +50,7 @@ describe('cost by source in the PWA (ao-zbld, ao-ef5t, ao-ypas)', () => {
     const view = {
       fleet: [{ ...summary, grants: emptyGrants, model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, usage }],
       robotsToMigrate: 0,
-      members: [{ id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, usage: { ...usage, limit: { limit: { kind: 'none' }, from: 'home' } } }],
+      members: [{ id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, usage: { ...usage, limit: { limit: { kind: 'none' }, from: 'space' } } }],
       skills: [], skillRepository: null, providers: [],
       settings: { defaultModel: { provider: 'deepseek', model: 'deepseek-flash', effort: 'off' }, workersAiEnabled: true, defaultBrowserBackend: 'browser-run', robotSpendLimit: { kind: 'none' }, memberSpendLimit: { kind: 'none' }, defaultReviewer: null, models: [] },
     } as unknown as AdminView

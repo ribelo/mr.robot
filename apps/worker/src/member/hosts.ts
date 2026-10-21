@@ -20,7 +20,7 @@ type HostRow = {
   name: string
   platform: string
   token_hash: string
-  sharing: 'private' | 'home'
+  sharing: 'private' | 'space'
   paired_at: number
   last_seen: number | null
   online: number
@@ -34,7 +34,7 @@ export interface HostEntry {
   readonly ownerId: string
   readonly name: string
   readonly platform: string
-  readonly sharing: 'private' | 'home'
+  readonly sharing: 'private' | 'space'
   readonly online: boolean
   readonly lastSeen: number | null
   readonly version: string | null
@@ -106,6 +106,8 @@ export class HostHub {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL, token_hash TEXT NOT NULL, sharing TEXT NOT NULL,
       paired_at INTEGER NOT NULL, last_seen INTEGER, online INTEGER NOT NULL DEFAULT 0, heartbeat TEXT, origin TEXT
     )`)
+    // Home became Space (v1.18 ticket 09): a Host shared before says 'space' now.
+    ctx.storage.sql.exec("UPDATE host SET sharing = 'space' WHERE sharing = 'home'")
     // The jobs Robots have on each Host, and the run of the app each started under: which Robot to tell when they are lost.
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS host_job (
       host_id TEXT NOT NULL, robot_id TEXT NOT NULL, job_id TEXT NOT NULL, instance TEXT NOT NULL, started_at INTEGER NOT NULL,
@@ -150,7 +152,7 @@ export class HostHub {
     return this.ctx.storage.sql.exec<HostRow>('SELECT * FROM host ORDER BY paired_at').toArray().map((row) => this.entry(row))
   }
 
-  async setSharing(id: string, sharing: 'private' | 'home'): Promise<void> {
+  async setSharing(id: string, sharing: 'private' | 'space'): Promise<void> {
     if (this.row(id) === undefined) throw new HostRefused('no such host')
     this.ctx.storage.sql.exec('UPDATE host SET sharing = ? WHERE id = ?', sharing, id)
     await this.report(id)
@@ -413,7 +415,7 @@ export class HostHub {
     if (row === undefined) throw new HostAccessLost({ message: 'no such host' })
     const robot = await this.env.ROBOT.getByName(robotId).hostAccess(id, grant)
     this.robotNames.set(robotId, robot.name)
-    const reaches = robot.ownerId === this.ownerId() || row.sharing === 'home'
+    const reaches = robot.ownerId === this.ownerId() || row.sharing === 'space'
     if (!reaches || !robot.granted) throw new HostAccessLost({ message: `${robot.name} has no ${grant} grant on the host "${row.name}". Ask your owner with propose_grants.` })
     if (row.online !== 1) throw new HostOffline({ message: `the host "${row.name}" is offline (last seen ${row.last_seen === null ? 'never' : new Date(row.last_seen).toISOString().slice(0, 16).replace('T', ' ')} UTC)` })
     return { row, access: robot.access }

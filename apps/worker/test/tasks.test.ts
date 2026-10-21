@@ -94,7 +94,7 @@ describe('Tasks at the Space (v1.13 ticket 01)', () => {
   it('shows a Member only the Tasks he may see; Whole Space shows the admin all (mc-r2bb, mc-m7gg)', async () => {
     const annasRobot = await newRobot(ANNA)
     const shared = await newRobot(ANNA)
-    await api(ANNA, `/api/robots/${shared}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/robots/${shared}/settings`, { method: 'PATCH', body: { sharing: 'space' } })
     await create(ANNA, { title: 'Anna alone', assignee: { kind: 'nobody' } })
     await create(ANNA, { title: 'For the private Robot', assignee: { kind: 'robot', robotId: annasRobot } })
     await create(ANNA, { title: 'For the shared Robot', assignee: { kind: 'robot', robotId: shared } })
@@ -103,13 +103,13 @@ describe('Tasks at the Space (v1.13 ticket 01)', () => {
 
     expect((await listed(BEN)).sort()).toEqual(['Ben alone', 'For Ben', 'For the shared Robot'])
     expect((await listed(ANNA)).sort()).toEqual(['Anna alone', 'For Ben', 'For the private Robot', 'For the shared Robot'])
-    expect((await listed(ANNA, '?scope=home')).length).toBe(5)
+    expect((await listed(ANNA, '?scope=space')).length).toBe(5)
     // One Task's routes follow the admin's remembered Whole Space switch (mc-m7gg).
     expect((await api(ANNA, `/api/tasks/${bens.id}`)).status).toBe(404)
     await api(ANNA, '/api/me', { method: 'PATCH', body: { mission: { wholeSpace: true } } })
     expect((await api(ANNA, `/api/tasks/${bens.id}`)).status).toBe(200)
     // Whole Space is the admin's alone; for Ben it is his own view.
-    expect((await listed(BEN, '?scope=home')).length).toBe(3)
+    expect((await listed(BEN, '?scope=space')).length).toBe(3)
     expect((await api(BEN, `/api/tasks/${forBen.id}`)).status).toBe(200)
     expect((await api(BEN, `/api/tasks/${(await create(ANNA, { title: 'Hidden', assignee: { kind: 'robot', robotId: annasRobot } })).id}`)).status).toBe(404)
     // Ben cannot give a Task to a Robot he does not reach.

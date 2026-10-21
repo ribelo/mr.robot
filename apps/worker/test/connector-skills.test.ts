@@ -53,9 +53,9 @@ describe('connector skills (v1.5 ticket 07, cn-go3s, cn-6kh9)', () => {
   })
 
   it('an admin edit of a connector skill survives the next seeding', async () => {
-    await env.SPACE.getByName('home').seedConnectorSkills()
+    await env.SPACE.getByName('space').seedConnectorSkills()
     await api(ANNA, '/api/admin/skills/mbank-notifications', { method: 'PUT', body: { description: 'Our bank, our way', content: '---\nname: mbank-notifications\ndescription: Our bank, our way\n---\nEdited.' } })
-    await env.SPACE.getByName('home').seedConnectorSkills()
+    await env.SPACE.getByName('space').seedConnectorSkills()
     const skill = (await api<{ skills: SkillView[] }>(ANNA, '/api/skills')).body.skills.find((entry) => entry.name === 'mbank-notifications')!
     expect(skill.description).toBe('Our bank, our way')
     expect((await api<{ content: string }>(ANNA, '/api/skills/mbank-notifications')).body.content).toContain('Edited.')

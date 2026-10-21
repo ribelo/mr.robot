@@ -98,7 +98,7 @@ export function MissionControl({ me }: { me: Me }) {
     setPages({ fleet: 1, tasks: 1 })
     void command((api) => api.updateMe({ mission: patch }), [keys.me])
   }
-  const wanted: MissionQuery = { scope: admin && prefs.wholeSpace ? 'home' : 'mine', state: prefs.state, group: prefs.group, fleetQ: fleetQ.trim(), q: q.trim(), fleetPages: pages.fleet, taskPages: pages.tasks }
+  const wanted: MissionQuery = { scope: admin && prefs.wholeSpace ? 'space' : 'mine', state: prefs.state, group: prefs.group, fleetQ: fleetQ.trim(), q: q.trim(), fleetPages: pages.fleet, taskPages: pages.tasks }
   const key = JSON.stringify(wanted)
   const result = useAtomValue(missionAtom(key))
   const refresh = useAtomRefresh(missionAtom(key))
@@ -141,7 +141,7 @@ export function MissionControl({ me }: { me: Me }) {
         <div className="mission-tables">
           {shown === undefined
             ? renderResult(result, { what: 'Mission Control', retry: refresh }, () => null)
-            : <MissionTables view={shown} prefs={prefs} wholeSpace={wanted.scope === 'home'} onOpenTask={setOpenTask} onForm={setForm}
+            : <MissionTables view={shown} prefs={prefs} wholeSpace={wanted.scope === 'space'} onOpenTask={setOpenTask} onForm={setForm}
               onMoreFleet={() => setPages((current) => ({ ...current, fleet: current.fleet + 1 }))}
               onMoreTasks={() => setPages((current) => ({ ...current, tasks: current.tasks + 1 }))} />}
         </div>

@@ -33,9 +33,21 @@ export function call<A>(run: () => Promise<A>): Effect.Effect<A, ApiError> {
   })
 }
 
+/**
+ * Home became Space (v1.18 ticket 09): a client from before sends 'home' where the value is now 'space' (a Robot's or a Host's
+ * sharing, a skill's visibility, a list's scope, a spend limit of kind 'home'). Mapped here for one release; remove with the alias.
+ */
+export function withSpaceValues(value: unknown, key = ''): unknown {
+  if (Array.isArray(value)) return value.map((entry) => withSpaceValues(entry, key))
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([name, entry]) => [name, key === 'spendLimit' && name === 'kind' && entry === 'home' ? 'space' : withSpaceValues(entry, name)]))
+  }
+  return value === 'home' && ['sharing', 'visibility', 'scope'].includes(key) ? 'space' : value
+}
+
 export function decodeBody<S extends Schema.Top>(request: Request, schema: S): Effect.Effect<S['Type'], ApiError, S['DecodingServices']> {
   return Effect.tryPromise({ try: () => request.json(), catch: () => badRequest('expected a JSON body') }).pipe(
-    Effect.flatMap((body) => Schema.decodeUnknownEffect(schema)(body).pipe(Effect.mapError((error) => badRequest(String(error))))),
+    Effect.flatMap((body) => Schema.decodeUnknownEffect(schema)(withSpaceValues(body)).pipe(Effect.mapError((error) => badRequest(String(error))))),
   )
 }
 

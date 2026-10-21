@@ -14,7 +14,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, home: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] }
+const me = { id: 'm-1', email: 'a@example.com', name: 'Anna', role: 'admin', status: 'active', avatar: { kind: 'initials', color: '#6c63ff' }, space: 'Space', timeZone: 'UTC', timeZonePinned: false, detectedTimeZone: 'UTC', quietHours: null, vapidPublicKey: 'x', workDetails: 'compact', theme: 'system', mission: { group: 'assignee', state: 'open', wholeSpace: false, drawer: false }, acceptTasksFrom: [] }
 const account: ProviderView = { id: 'a-1', provider: 'deepseek', label: 'DeepSeek key', kind: 'api-key', shared: false, connectedAt: 0, ownerId: 'm-1', ownerName: 'Anna', status: 'ok', note: null, until: null }
 
 interface Call { readonly method: string; readonly path: string; readonly body: string }

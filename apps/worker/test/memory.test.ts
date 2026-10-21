@@ -91,7 +91,7 @@ describe('memory as a plugin (v1.3 ticket 02)', () => {
   it('drops the broadest files first and truncates the most specific last (pl-jsdm)', () => {
     const files: MemoryFile[] = [
       { scope: 'robot', path: 'memory/2026-10-07.md', content: 'today '.repeat(100) },
-      { scope: 'home', path: 'SPACE.md', content: 'home '.repeat(400) },
+      { scope: 'space', path: 'SPACE.md', content: 'home '.repeat(400) },
       { scope: 'member', path: 'USER.md', content: 'user '.repeat(100) },
       { scope: 'robot', path: 'MEMORY.md', content: 'memory '.repeat(100) },
     ]

@@ -38,7 +38,7 @@ export function Hosts() {
             <td><b>{host.name}</b><div className="muted">{host.platform}{host.version === null ? '' : ` · app ${host.version}`}{host.capabilities === null ? '' : ` · ${host.capabilities.chrome === null ? 'no Chrome' : 'Chrome'}${host.capabilities.graphical ? '' : ', no display'}`}{host.capabilities?.sandbox === undefined ? '' : ` · ${sandboxText(host.capabilities.sandbox)}`}</div></td>
             <td>{host.online ? <span>● online</span> : <span className="muted">offline · last seen {ago(host.lastSeen)}</span>}{host.users.length > 0 ? <div className="muted">used by {host.users.join(', ')}</div> : null}</td>
             <td>{host.mine ? (
-              <select value={host.sharing} onChange={(event) => { const sharing = event.target.value === 'home' ? 'home' : 'private'; void command((api) => api.setHostSharing(host.id, sharing), [keys.hosts]) }}>
+              <select value={host.sharing} onChange={(event) => { const sharing = event.target.value === 'space' ? 'space' : 'private'; void command((api) => api.setHostSharing(host.id, sharing), [keys.hosts]) }}>
                 <option value="private">Only my robots</option>
                 <option value="home">Shared with the Space</option>
               </select>

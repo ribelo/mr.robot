@@ -123,7 +123,7 @@ describe('the deputy sees the Robots the owner reaches (v1.6 ticket 02)', () => 
     const sales = await robot(ANNA, 'Sales', ['deputy', 'robots', 'files'])
     const strangers = await robot(BEN, 'Strangers')
     const shared = await robot(BEN, 'Shared')
-    await api(BEN, `/api/robots/${shared}/settings`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(BEN, `/api/robots/${shared}/settings`, { method: 'PATCH', body: { sharing: 'space' } })
 
     expect(await env.ROBOT.getByName(sales).toolNames()).not.toContain('robot_list')
     expect(await env.ROBOT.getByName(sales).toolNames()).not.toContain('robot_conversation')
@@ -206,7 +206,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
     const refused = await chief(chiefRobot, [
       { name: 'robot_settings_set', args: { robot_id: accountant, grants: { tools: ['web'], skills: [], recipients: [], secrets: [] } } },
       { name: 'robot_settings_set', args: { robot_id: accountant, spendLimit: { kind: 'usd', amount: 500 } } },
-      { name: 'robot_settings_set', args: { robot_id: accountant, sharing: 'home' } },
+      { name: 'robot_settings_set', args: { robot_id: accountant, sharing: 'space' } },
       { name: 'robot_settings_set', args: { robot_id: accountant, hosts: [] } },
     ])
     expect(refused.every((text) => text.startsWith('Error'))).toBe(true)
@@ -214,7 +214,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
     expect(refused[1]).toContain('spend limit')
     expect(refused[2]).toContain('shared')
     const unchanged = (await panel(accountant)).settings
-    expect(unchanged).toMatchObject({ grants: before.grants, spendLimit: { kind: 'home' }, sharing: 'private' })
+    expect(unchanged).toMatchObject({ grants: before.grants, spendLimit: { kind: 'space' }, sharing: 'private' })
   })
 
   it('changes the whole identity: name, title, description and avatar colour (cd-28og, cd-2zx9)', async () => {
@@ -232,7 +232,7 @@ describe('the deputy changes files, settings and identity (v1.6 ticket 03)', () 
 })
 
 const taskCards = async (id: string) => (await chat(id)).flatMap((item) => (item.kind === 'task' ? [item] : []))
-const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
+const space = () => env.SPACE.getByName('space') as unknown as DurableObjectStub<TestSpace>
 
 describe('the deputy works with the Tasks of other Robots; limits and attempts (v1.6 ticket 04, v1.13 ticket 04)', () => {
   it('creates, edits, pauses, resumes and cancels a Task as another Robot, each shown there as a card naming Mr. Robot (cd-n9pi, mc-r4dd)', async () => {

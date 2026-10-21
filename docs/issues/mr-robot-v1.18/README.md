@@ -12,5 +12,5 @@ Spec: ../mr-robot-v1.18.md. Frontier at the start: 02 and 09 (09 once the owner 
 | 06 | [The Marketplace page](06-marketplace.md) | 05 | done |
 | 07 | [Import a Grok Bot template as a brief](07-grok-import.md) | 05 | done |
 | 08 | [Glossary and docs](08-glossary-docs.md) | 01, 02, 03, 04, 05, 06, 07, 09 | ready-for-agent |
-| 09 | [Home becomes Space](09-home-to-space.md) | — | ready-for-agent |
+| 09 | [Home becomes Space](09-home-to-space.md) | — | done |
 | 10 | [Dreaming on a small model (postponed)](10-dreaming.md) | 03 | postponed |

@@ -7,7 +7,7 @@ import type { Space as TestSpace } from './worker.ts'
 
 const ANNA = 'anna@example.com'
 const HOUR = 3_600_000
-const space = () => env.SPACE.getByName('home') as unknown as DurableObjectStub<TestSpace>
+const space = () => env.SPACE.getByName('space') as unknown as DurableObjectStub<TestSpace>
 
 beforeEach(async () => {
   await reset()

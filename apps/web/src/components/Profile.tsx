@@ -435,7 +435,7 @@ function Secrets() {
             <div className="login-main">
               <strong>{login.name}</strong>
               <span className="muted">{[login.username, login.websites.join(', ')].filter((part) => part !== '').join(' · ') || 'no username or website yet'}</span>
-              <span className="muted">{login.scope === 'home' ? 'Shared with the Space' : 'Private'}{login.allowRead ? ' · allow reading' : ''}{login.robots.length === 0 ? '' : ` · granted to ${login.robots.join(', ')}`}</span>
+              <span className="muted">{login.scope === 'space' ? 'Shared with the Space' : 'Private'}{login.allowRead ? ' · allow reading' : ''}{login.robots.length === 0 ? '' : ` · granted to ${login.robots.join(', ')}`}</span>
               {revealed[login.name] === undefined ? null : <code className="login-revealed">{revealed[login.name]}</code>}
             </div>
             {login.mine ? (
@@ -443,7 +443,7 @@ function Secrets() {
                 <button type="button" className="link" onClick={() => revealed[login.name] === undefined
                   ? void command((api) => api.revealLogin(login.name), []).then((exit) => { if (Exit.isSuccess(exit)) setRevealed({ ...revealed, [login.name]: exit.value.password }); else setError(exitFailure(exit)) })
                   : setRevealed(Object.fromEntries(Object.entries(revealed).filter(([name]) => name !== login.name)))}>{revealed[login.name] === undefined ? 'Reveal' : 'Hide'}</button>
-                <button type="button" className="link" onClick={() => setEditing({ name: login.name, username: login.username, password: '', websites: login.websites.join('\n'), notes: login.notes, allowRead: login.allowRead, shared: login.scope === 'home', existing: true })}>Edit</button>
+                <button type="button" className="link" onClick={() => setEditing({ name: login.name, username: login.username, password: '', websites: login.websites.join('\n'), notes: login.notes, allowRead: login.allowRead, shared: login.scope === 'space', existing: true })}>Edit</button>
                 <button type="button" className="link" onClick={() => void run((api) => api.deleteSecret(login.name))}>Delete</button>
               </span>
             ) : null}

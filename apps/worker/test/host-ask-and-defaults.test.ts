@@ -85,7 +85,7 @@ describe('a shared Host (S3)', () => {
   it("starts every Member's Mr. Robot at ask for files and shell, and at allow for the browser, and asks before it runs", async () => {
     const BEN = 'ben@example.com'
     const desk = await fakeHost('Desk')
-    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'space' } })
     await api(ANNA, '/api/admin/members', { body: { email: BEN } })
     await api(BEN, '/api/me')
     const bensMr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
@@ -130,7 +130,7 @@ describe('a call to a place at ask waits for the owner, however the tools were r
     await api(BEN, `/api/robots/${bensMr}/messages`, { body: { text: 'hi' } })
     await settle(bensMr)
     const desk = await fakeHost('Desk')
-    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'home' } })
+    await api(ANNA, `/api/hosts/${desk.hostId}`, { method: 'PATCH', body: { sharing: 'space' } })
     scripts.set(bensMr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'cat ~/.ssh/id_ed25519', reason: 'Read the key' } }] }, { text: 'Waiting.' }])
     await api(BEN, `/api/robots/${bensMr}/messages`, { body: { text: 'go' } })
     await settle(bensMr)

@@ -287,13 +287,13 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   it("a message in a robot's channel wakes it and the final reply goes back there as a reply to the message", async () => {
     const id = await discordRobot()
     scripts.set(id, [{ say: 'The flat on Prosta is still free.' }])
-    expect(await env.SPACE.getByName('home').discordReceived(incoming('M-in', 'any news?'), annaId)).toBe(id)
+    expect(await env.SPACE.getByName('space').discordReceived(incoming('M-in', 'any news?'), annaId)).toBe(id)
     await settle(id)
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.some((item) => item.kind === 'message' && item.text === 'any news?' && item.sender.kind === 'channel' && item.sender.channel === 'discord' && item.sender.from === 'Anna')).toBe(true)
     expect(postsTo('C-robot')).toEqual([{ content: 'The flat on Prosta is still free.', message_reference: { message_id: 'M-in', channel_id: 'C-robot', fail_if_not_exists: false } }])
     // The same Discord message twice wakes the robot once.
-    await env.SPACE.getByName('home').discordReceived(incoming('M-in', 'any news?'), annaId)
+    await env.SPACE.getByName('space').discordReceived(incoming('M-in', 'any news?'), annaId)
     await settle(id)
     expect(postsTo('C-robot')).toHaveLength(1)
   })
@@ -301,7 +301,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
   it('a Turn woken on Discord posts every say to the message it answers, and no "finished" notification', async () => {
     const id = await discordRobot()
     scripts.set(id, [{ calls: [{ name: 'say', args: { text: "I'll check the listings." } }] }, { calls: [{ name: 'say', args: { text: 'Two flats match.' } }] }, { text: '' }])
-    await env.SPACE.getByName('home').discordReceived(incoming('M-ask', 'what is new?'), annaId)
+    await env.SPACE.getByName('space').discordReceived(incoming('M-ask', 'what is new?'), annaId)
     await settle(id)
     const replies = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body.items.filter((item) => item.kind === 'reply').slice(-2)
     expect(replies.map((item) => item.kind === 'reply' ? item.text : '')).toEqual(["I'll check the listings.", 'Two flats match.'])
@@ -350,7 +350,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     expect(postsTo('C-robot')).toEqual([])
     // Replies to Discord messages still go back.
     scripts.set(id, [{ say: 'Still nothing.' }])
-    await env.SPACE.getByName('home').discordReceived(incoming('M-q', 'and now?'), annaId)
+    await env.SPACE.getByName('space').discordReceived(incoming('M-q', 'and now?'), annaId)
     await settle(id)
     expect(postsTo('C-robot')).toEqual([{ content: 'Still nothing.', message_reference: { message_id: 'M-q', channel_id: 'C-robot', fail_if_not_exists: false } }])
   })
@@ -361,7 +361,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     const long = paragraphs.join('\n\n')
     expect(long.length).toBeGreaterThan(4000)
     scripts.set(id, [{ say: long }])
-    await env.SPACE.getByName('home').discordReceived(incoming('M-long', 'tell me everything'), annaId)
+    await env.SPACE.getByName('space').discordReceived(incoming('M-long', 'tell me everything'), annaId)
     await settle(id)
     const posts = postsTo('C-robot')
     expect(posts.length).toBeGreaterThan(1)
@@ -378,10 +378,10 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     expect((await api<RobotPanel>(ANNA, `/api/robots/${mrRobot}/panel`)).body.settings.discordChannel).toBeNull()
     await api(ANNA, `/api/robots/${mrRobot}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(mrRobot, [{ say: 'Hi Anna, on it.' }])
-    expect(await env.SPACE.getByName('home').discordReceived({ id: 'M-dm', channelId: 'D-anna', guildId: null, authorId: 'U-anna', authorName: 'Anna', text: 'hello from my phone', direct: true }, annaId)).toBe(mrRobot)
+    expect(await env.SPACE.getByName('space').discordReceived({ id: 'M-dm', channelId: 'D-anna', guildId: null, authorId: 'U-anna', authorName: 'Anna', text: 'hello from my phone', direct: true }, annaId)).toBe(mrRobot)
     await settle(mrRobot)
     expect(postsTo('D-anna')).toEqual([{ content: 'Hi Anna, on it.', message_reference: { message_id: 'M-dm', channel_id: 'D-anna', fail_if_not_exists: false } }])
     // A message in a channel no robot owns wakes nobody.
-    expect(await env.SPACE.getByName('home').discordReceived({ id: 'M-x', channelId: 'C-nobody', guildId: 'G-1', authorId: 'U-anna', authorName: 'Anna', text: 'hm', direct: false }, annaId)).toBeNull()
+    expect(await env.SPACE.getByName('space').discordReceived({ id: 'M-x', channelId: 'C-nobody', guildId: 'G-1', authorId: 'U-anna', authorName: 'Anna', text: 'hm', direct: false }, annaId)).toBeNull()
   })
 })
