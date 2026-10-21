@@ -8,7 +8,7 @@ import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { HostNotification } from '@mr-robot/host-protocol'
 import type { Conversation, HostView, ProposalView, RobotPanel, RobotSummary } from '@mr-robot/protocol'
-import { api, settle, stubModels, testRobot } from './api.ts'
+import { api, settle, stubModels, testRobot, boundTools } from './api.ts'
 import { closeHosts, fakeHost, hostCommands, hostDisk, hostFileCalls, hostRuns, linkedRoots, ran } from './fake-host.ts'
 import { requests, scripts, type StubReply } from './stub-llm.ts'
 
@@ -34,7 +34,7 @@ async function robotWith(host: { hostId: string }, levels: { files?: string; she
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
   const hosts = { ...(levels.files === undefined ? {} : { [`${host.hostId}:files`]: levels.files }), ...(levels.shell === undefined ? {} : { [`${host.hostId}:shell`]: levels.shell }) }
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget: 32_000, grants: { tools, hosts }, ...(hostAccess === undefined ? {} : { hostAccess }) } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { contextBudget: 32_000, grants: { tools, hosts }, ...(hostAccess === undefined ? {} : { hostAccess }) } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
@@ -269,7 +269,7 @@ describe('two Hosts of one name (deep review P14b)', () => {
     expect(ben).toContain('"bytes": 1')
     expect(anna).toContain('the grant "desk (Anna) · files"')
     expect(hostFileCalls.map((call) => [call.rpc, call.path])).toEqual([['Write', 'b.txt']])
-    const write = requests.get(id)!.at(-1)!.tools!.find((definition) => definition.name === 'write')!
+    const write = (await boundTools(id)).find((definition) => definition.name === 'write')!
     expect(write.description).toMatch(/computers by name \((Desk \(Ben\), Laptop|Laptop, Desk \(Ben\))\)/)
   })
 })
@@ -362,7 +362,7 @@ describe('escalate on the tools that change a computer (Sa1)', () => {
     const desk = await fakeHost()
     const id = await robotWith(desk)
     await calls(id, [{ name: 'run', args: { on: 'Desk', command: 'ls' } }])
-    const run = requests.get(id)!.at(-1)!.tools!.find((definition) => definition.name === 'run')!
+    const run = (await boundTools(id)).find((definition) => definition.name === 'run')!
     expect(run.description).toContain('bash on the Box')
     expect(run.description).toContain('Hosts line of your runtime section')
     expect(run.description).toContain('pwsh on Windows')
@@ -427,7 +427,7 @@ describe('the mode and roots of a facet are forgotten with the facet', () => {
     await api(BEN, '/api/me')
     const mr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     const facet = `${desk.hostId}:shell`
-    await api(BEN, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: {}, hosts: { [facet]: 'allow' } }, hostAccess: { [facet]: { mode: 'read-only', roots: [] } } } })
+    await api(BEN, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [facet]: 'allow' } }, hostAccess: { [facet]: { mode: 'read-only', roots: [] } } } })
     const turn = async (call: Call) => {
       scripts.set(mr, [{ calls: [call] }, { text: 'Done.' }])
       await api(BEN, `/api/robots/${mr}/messages`, { body: { text: 'go' } })
@@ -454,7 +454,7 @@ describe("each Member's Mr. Robot on a shared Host", () => {
     const mrOf = async (member: string) => (await api<RobotSummary[]>(member, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     const directoryOf = async (member: string, upgraded: boolean): Promise<string> => {
       const mr = await mrOf(member)
-      await api(member, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: {}, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
+      await api(member, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts: { [`${desk.hostId}:shell`]: 'allow' } } } })
       if (upgraded) await testRobot(mr).legacyHostDirectoryForTest('mr-robot-mr-robot')
       scripts.set(mr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'pwd' } }] }, { text: 'Done.' }])
       await api(member, `/api/robots/${mr}/messages`, { body: { text: 'go' } })

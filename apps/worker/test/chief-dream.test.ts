@@ -7,20 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { Conversation, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
+import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 
-/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
-const MODES = [['code mode', true], ['direct calls', false]] as const
-let codeMode = true
-
-afterEach(() => {
-  programmed.on = false
-})
 
 beforeEach(async () => {
-  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -38,9 +30,8 @@ const call = (name: string, args: Record<string, unknown>) => ({ name, args })
 const userText = (request: GenerateOptions) => JSON.stringify(request.messages.filter((message) => message.role === 'user'))
 const toolTexts = (request: GenerateOptions) => request.messages.filter((message) => message.role === 'tool').map((message) => message.content.map((block) => ('text' in block ? block.text : '')).join(''))
 
-describe.each(MODES)('Mr. Robot\'s dream (dm-pt5b, dm-w15l, dm-kkgy), %s', (_mode, code) => {
+describe('Mr. Robot\'s dream (dm-pt5b, dm-w15l, dm-kkgy)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it("reads a Robot's note, proposes the Member-file edit, cannot write the Robot's files, and merges two pages of one person", async () => {
@@ -48,7 +39,7 @@ describe.each(MODES)('Mr. Robot\'s dream (dm-pt5b, dm-w15l, dm-kkgy), %s', (_mod
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     const seller = body.id
     await settle(seller)
-    await api(ANNA, `/api/robots/${seller}/settings`, { method: 'PATCH', body: { codeMode, identity: { name: 'Seller', title: '', description: 'Sells.', avatarColor: '#8b5cf6' }, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
+    await api(ANNA, `/api/robots/${seller}/settings`, { method: 'PATCH', body: { identity: { name: 'Seller', title: '', description: 'Sells.', avatarColor: '#8b5cf6' }, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
     await testRobot(seller).activateForTest()
     await turn(seller, 'Anna moved', [{ calls: [
       call('write', { on: 'files', file_path: 'memory/2026-10-21.md', content: '- Anna said her new address is Mokotowska 5, Warsaw.\n' }),
@@ -57,7 +48,6 @@ describe.each(MODES)('Mr. Robot\'s dream (dm-pt5b, dm-w15l, dm-kkgy), %s', (_mod
     ] }, { say: 'Noted.' }])
 
     const chief = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
-    await api(ANNA, `/api/robots/${chief}/settings`, { method: 'PATCH', body: { codeMode } })
     const before = (requests.get(chief) ?? []).length
     scripts.set(chief, [
       { calls: [call('robot_file_read', { robot_id: seller, path: 'memory/2026-10-21.md' })] },

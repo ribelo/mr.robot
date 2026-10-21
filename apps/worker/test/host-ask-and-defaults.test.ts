@@ -29,7 +29,7 @@ async function robotWith(hosts: Record<string, string>): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: {}, hosts } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: {}, hosts } } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id
@@ -90,7 +90,6 @@ describe('a shared Host (S3)', () => {
     await api(BEN, '/api/me')
     const bensMr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     expect((await env.ROBOT.getByName(bensMr).settings()).grants.hosts).toEqual({ [`${desk.hostId}:files`]: 'ask', [`${desk.hostId}:shell`]: 'ask', [`${desk.hostId}:browser`]: 'allow' })
-    await api(BEN, `/api/robots/${bensMr}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(bensMr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'uptime', reason: 'Check the load' } }] }, { calls: [{ name: 'write', args: { on: 'Desk', file_path: 'a.txt', content: 'x', reason: 'Note it' } }] }, { text: 'Waiting.' }])
     await api(BEN, `/api/robots/${bensMr}/messages`, { body: { text: 'go' } })
     await settle(bensMr)
@@ -109,7 +108,6 @@ describe('a call to a place at ask waits for the owner, however the tools were r
 
   it("asks before Mr. Robot writes on a computer his owner paired after his last Turn", async () => {
     const mr = await mrRobotOf()
-    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false } })
     await say(mr, [])
     const desk = await fakeHost('Desk')
     await say(mr, [{ name: 'write', args: { on: 'Desk', file_path: '/home/anna/paired-later.txt', content: 'x', reason: 'Note it' } }])
@@ -125,7 +123,7 @@ describe('a call to a place at ask waits for the owner, however the tools were r
     await api(BEN, '/api/me')
     const bensMr = (await api<RobotSummary[]>(BEN, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
     // The box group registers run, at allow: nothing the tool reaches is at ask when it is registered.
-    await api(BEN, `/api/robots/${bensMr}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { box: 'allow' } } } })
+    await api(BEN, `/api/robots/${bensMr}/settings`, { method: 'PATCH', body: { grants: { tools: { box: 'allow' } } } })
     scripts.set(bensMr, [{ text: 'Hello.' }])
     await api(BEN, `/api/robots/${bensMr}/messages`, { body: { text: 'hi' } })
     await settle(bensMr)
@@ -144,7 +142,7 @@ describe('a call to a place at ask waits for the owner, however the tools were r
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { box: 'ask' }, hosts: { [`${desk.hostId}:files`]: 'ask' } } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { box: 'ask' }, hosts: { [`${desk.hostId}:files`]: 'ask' } } } })
     await say(body.id, [
       { name: 'write', args: { on: 'Desk', file_path: '/home/anna/in-setup.txt', content: 'x', reason: 'Note it' } },
       { name: 'write', args: { on: 'box', file_path: 'in-setup.txt', content: 'x', reason: 'Note it' } },

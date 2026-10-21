@@ -53,7 +53,7 @@ Mr. Robot sends Web Push notifications when a Robot finishes, needs the owner, o
 
 ## Code mode
 
-A Robot works in code mode by default. It writes a program that calls its tools, and the platform runs the program. The owner can switch a Robot to direct tool calls.
+A Robot works in code mode only. It writes a program that calls its tools, and the platform runs the program.
 
 ## Limits of the product
 

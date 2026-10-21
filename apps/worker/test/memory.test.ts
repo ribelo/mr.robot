@@ -2,7 +2,7 @@ import { reset } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, RobotSummary } from '@mr-robot/protocol'
 import { renderBaseline, type MemoryFile } from '../src/agent/memory.ts'
-import { api, settle, stubModels, testRobot } from './api.ts'
+import { api, settle, stubModels, testRobot, boundTools } from './api.ts'
 import { requests, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
@@ -19,7 +19,7 @@ async function robotWith(tools: string[] = []): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools, skills: [], recipients: [], secrets: [], hosts: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools, skills: [], recipients: [], secrets: [], hosts: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -78,10 +78,9 @@ describe('memory as a plugin (v1.3 ticket 02)', () => {
     const ask = (await api<Conversation>(ANNA, `/api/robots/${other}/conversation`)).body.items.find((item) => item.kind === 'proposal')
     expect(ask?.kind === 'proposal' && ask.proposal.kind).toBe('member-file')
     expect((await api<{ content: string }>(ANNA, '/api/me/files/USER.md')).body.content).not.toContain('Likes tea.')
-    expect(JSON.stringify(requests.get(other)!.at(-1)!.tools)).not.toContain('memory_write_shared')
+    expect(JSON.stringify(await boundTools(other))).not.toContain('memory_write_shared')
 
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
-    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false } })
     await turn(mr, 'remember', [{ calls: [{ name: 'memory_write_shared', args: { file: 'USER.md', content: '# USER.md\nLikes coffee.' } }] }, { text: 'Saved.' }])
     expect((await api<{ content: string }>(ANNA, '/api/me/files/USER.md')).body.content).toContain('Likes coffee.')
     await turn(other, 'next', [{ text: 'ok' }])

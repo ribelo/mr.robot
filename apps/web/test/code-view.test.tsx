@@ -48,6 +48,17 @@ describe('the Conversation at Code (cw-sc3z)', () => {
     expect(screen.getAllByLabelText(/^Diff of /)).toHaveLength(2)
   })
 
+  it('renders the calls a program made inside its card, each with its renderer (v1.22)', () => {
+    const program: ToolCallView = { id: 'p-1', name: 'run_code', args: '{"code":"…"}', result: '[…]', error: false, inner: [{ name: 'edit', args: '{}' }, { name: 'run', args: '{}' }] }
+    const items: ChatItem[] = [{ kind: 'activity', id: 'a-1', seq: 1, at: 1, tools: ['code', 'edit', 'run'], calls: [program] }]
+    const made = [CASES[0]!, CASES[3]!].map((entry): ToolCallDetail => ({ itemId: 'a-1', ...view(entry), program: 'p-1' }))
+    const details = new Map<string, ToolCallDetail>([['p-1', { itemId: 'a-1', ...program }], ...made.map((detail) => [detail.id, detail] as const)])
+    render(<ChatView items={items} meId="m-1" working={false} canAnswer={false} workDetails="code" callDetails={details} />)
+    expect(screen.getByLabelText('Diff of workspace: src/a.ts').textContent).toContain('+ let a = 2')
+    const text = document.body.textContent ?? ''
+    for (const shown of CASES[3]!.shows) expect(text).toContain(shown)
+  })
+
   it('falls back to the plain card for another tool, and shows the clipped copy until the full call came', () => {
     const items: ChatItem[] = [
       { kind: 'activity', id: 'a-1', seq: 1, at: 1, tools: ['web_fetch'], calls: [{ id: 'c-1', name: 'web_fetch', args: '{"url":"https://example.com"}', result: 'page text', error: false, inner: [] }] },

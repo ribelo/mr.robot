@@ -18,7 +18,7 @@ describe('the chat in code mode (the default)', () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: true, grants: { tools: ['tasks'], skills: [], recipients: [], secrets: [] } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['tasks'], skills: [], recipients: [], secrets: [] } } })
     await testRobot(body.id).activateForTest()
     const program = [
       "await tools.react({ emoji: '👍' })",
@@ -40,7 +40,7 @@ describe('the chat in code mode (the default)', () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: true, grants: { tools: [], skills: [], recipients: [], secrets: [] } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: [], skills: [], recipients: [], secrets: [] } } })
     await testRobot(body.id).activateForTest()
     scripts.set(body.id, [{ calls: [{ name: 'run_code', args: { code: "async()=>{return 'ran'}", description: 'x' } }] }, { text: 'Done.' }])
     await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'go' } })

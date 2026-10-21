@@ -80,7 +80,6 @@ beforeAll(async () => {
   scripts.set('*', [{ text: 'Hello.' }])
   id = (await api<{ id: string }>(ANNA, '/api/robots', { body: {} })).body.id
   await settle(id)
-  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   await testRobot(id).activateForTest()
   scripts.set(id, [{ say: 'Ready.' }])
   await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'hello' } })

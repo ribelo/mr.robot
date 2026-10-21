@@ -32,7 +32,7 @@ export interface AdvancedSettingsProps {
 
 
 /**
- * What the Robot was given (robot-vqtw): model and effort, context budget, code mode,
+ * What the Robot was given (robot-vqtw): model and effort, context budget,
  * compaction instruction, Grants, sharing, notifications and spend limit.
  */
 export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, onDelete, onClear, onStartOver }: AdvancedSettingsProps) {
@@ -68,7 +68,6 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
     return onSave({
       chain: draft.chain,
       contextBudget: draft.contextBudget,
-      codeMode: draft.codeMode,
       browserBackend: draft.browserBackend,
       compactionInstruction: draft.compactionInstruction,
       cacheWarming: draft.cacheWarming,
@@ -104,9 +103,6 @@ export function AdvancedSettings({ panel, catalog, onSave, onPause, onResume, on
           {WORK_DETAILS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </select>
         <small className="muted">How much of this Robot's work its Conversation shows. Code shows every call in full: diffs, file fragments, commands and their output.</small>
-      </label>
-      <label className="check"><input type="checkbox" checked={draft.codeMode} onChange={(event) => setDraft({ ...draft, codeMode: event.target.checked })} />
-        <span>Code mode<small>The Robot writes one program that calls its tools; off means direct tool calls.</small></span>
       </label>
       <label>Browser
         <select aria-label="Browser backend" value={draft.browserBackend ?? ''} onChange={(event) => setDraft({ ...draft, browserBackend: event.target.value === '' ? null : (event.target.value as BrowserBackend) })}>

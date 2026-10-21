@@ -2,7 +2,7 @@ import { env, reset } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, HostView, Me, RobotSummary } from '@mr-robot/protocol'
 import { parseFrame } from '@mr-robot/host-protocol'
-import { api, settle, stubModels, testRobot } from './api.ts'
+import { api, settle, stubModels, testRobot, boundToolNames } from './api.ts'
 import { closeHosts, fakeHost, hostDisk, ran } from './fake-host.ts'
 import { requests, scripts } from './stub-llm.ts'
 import { boxDisks, boxLog } from './stub-box.ts'
@@ -27,7 +27,7 @@ async function robotWith(as: string, hosts: string[], tools: string[] = []): Pro
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(as, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools, skills: [], recipients: [], secrets: [], hosts } } })
+  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools, skills: [], recipients: [], secrets: [], hosts } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -74,7 +74,7 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
     expect(written).toContain('"bytes": 3')
     expect(denied).toContain('permission denied (EACCES)')
     // run is not offered without a shell grant; the Member DO refuses it too.
-    expect(requests.get(without)!.at(-1)!.tools!.map((definition) => definition.name)).not.toContain('run')
+    expect(await boundToolNames(without)).not.toContain('run')
     expect(await refusal(() => env.MEMBER.getByName(annaId).hostRun(host.hostId, without, { command: 'id', background: false, job: 'j-direct' }))).toMatch(/^HostAccessLost: .*no shell grant/)
     expect(ran).not.toContain('id')
     const shell = await robotWith(ANNA, [`${host.hostId}:shell`])
@@ -86,7 +86,6 @@ describe('Hosts (v1.2 tickets 01 and 02)', () => {
   it("asks the owner before Mr. Robot runs on a new host (hs-44cm, ob-2k5x); a private host refuses another Member's robot", async () => {
     const host = await fakeHost()
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
-    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false } })
     await say(ANNA, mr, [{ calls: [{ name: 'run', args: { on: 'Desk', command: 'uptime', reason: 'Check the load' } }] }, { text: 'ok' }])
     expect(toolResults(mr)[0]).toContain('waiting for your owner')
     expect(ran).not.toContain('uptime')
@@ -216,14 +215,14 @@ describe('copy between a Host and the Workspace (v1.15 ticket 09, gb-iw01, gb-mc
     const desk = await fakeHost()
     const shellOnly = await robotWith(ANNA, [`${desk.hostId}:shell`])
     await say(ANNA, shellOnly, [{ text: 'hi' }])
-    expect(requests.get(shellOnly)!.at(-1)!.tools!.map((definition) => definition.name)).not.toContain('copy')
+    expect(await boundToolNames(shellOnly)).not.toContain('copy')
     const member = env.MEMBER.getByName(annaId)
     expect(await refusal(() => member.hostCopySize(desk.hostId, shellOnly, '/home/anna/report.bin'))).toContain('has no files grant on the host "Desk"')
     expect(await refusal(() => member.hostUpload(desk.hostId, shellOnly, { path: '/home/anna/report.bin', size: 0, parts: [] }))).toContain('has no files grant on the host "Desk"')
     expect(await refusal(() => member.hostDownload(desk.hostId, shellOnly, { copy: 'c-1', path: '/tmp/x', url: 'https://r2.example/x', size: 0, partBytes: 1, from: 0, until: 0 }))).toContain('has no files grant on the host "Desk"')
     const granted = await robotWith(ANNA, [`${desk.hostId}:files`], ['files'])
     await say(ANNA, granted, [{ text: 'hi' }])
-    expect(requests.get(granted)!.at(-1)!.tools!.map((definition) => definition.name)).toContain('copy')
+    expect(await boundToolNames(granted)).toContain('copy')
   })
 
   it('a file copied into the Workspace under box/ is in the Box at its next boot (gb-mcnc)', async () => {

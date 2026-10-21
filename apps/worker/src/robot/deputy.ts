@@ -217,7 +217,6 @@ export const settingsSet = (robotId: string, input: unknown) => Effect.gen(funct
   const change: SettingsPatch = {
     ...(model === undefined ? {} : { model }),
     ...(patch.chain === undefined ? {} : { chain: patch.chain }),
-    ...(patch.codeMode === undefined ? {} : { codeMode: patch.codeMode }),
     ...(patch.contextBudget === undefined ? {} : { contextBudget: patch.contextBudget }),
     ...(patch.compactionInstruction === undefined ? {} : { compactionInstruction: patch.compactionInstruction }),
     ...(patch.discordChannel === undefined ? {} : { discordChannel: patch.discordChannel }),

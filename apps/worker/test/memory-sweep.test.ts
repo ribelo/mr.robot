@@ -6,20 +6,12 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Conversation, FileHistoryView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
+import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 
-/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
-const MODES = [['code mode', true], ['direct calls', false]] as const
-let codeMode = true
-
-afterEach(() => {
-  programmed.on = false
-})
 
 beforeEach(async () => {
-  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -31,7 +23,7 @@ async function staff(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, idleCompactionFloorTokens: 0, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { idleCompactionFloorTokens: 0, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -51,9 +43,8 @@ async function idleMoment(id: string): Promise<void> {
 const write = (path: string, content: string) => ({ name: 'write', args: { on: 'files', file_path: path, content } })
 const compacted = async (id: string) => (await env.ROBOT.getByName(id).trajectory()).some((event) => event.type === 'user/message' && event.data.includes('compact-checkpoint'))
 
-describe.each(MODES)('the memory sweep, %s (rm-glmd, rm-5org, rm-hhxa)', (_mode, code) => {
+describe('the memory sweep (rm-glmd, rm-5org, rm-hhxa)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it('reads the changed notes on the Robot\'s model before the compaction, writes as the sweep, and leaves a Trajectory entry', async () => {

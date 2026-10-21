@@ -61,7 +61,7 @@ async function robotOn(hostIds: string[], requiresHosts: boolean): Promise<strin
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, requiresHosts, grants: { tools: [], skills: [], recipients: [], secrets: [], hosts: hostIds.map((id) => `${id}:files`) } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { requiresHosts, grants: { tools: [], skills: [], recipients: [], secrets: [], hosts: hostIds.map((id) => `${id}:files`) } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -244,7 +244,7 @@ describe('A Robot that waits for its Hosts (v1.16 ticket 05)', () => {
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'Are you there?' } })
     await settle(id)
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'I am here.' })
+    expect(conversation.items.filter((item) => item.kind !== 'activity').at(-1)).toMatchObject({ kind: 'reply', text: 'I am here.' })
   })
 })
 
@@ -253,7 +253,7 @@ describe('which Hosts count, and what a parked Task does when it changed (deep P
     const desk = await pairedHost('Desk')
     const studio = await pairedHost('Studio')
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
-    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false, requiresHosts: true, grants: { hosts: { [`${desk.hostId}:files`]: 'allow' } } } })
+    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { requiresHosts: true, grants: { hosts: { [`${desk.hostId}:files`]: 'allow' } } } })
     const task = await create({ title: 'Clean the disk', assignee: { kind: 'robot', robotId: mr }, timing: { kind: 'recurring', schedule: { kind: 'interval', everyMinutes: 5 } } })
     // A Turn: he reaches both Hosts now.
     scripts.set(mr, [{ text: 'Cleaned.' }])

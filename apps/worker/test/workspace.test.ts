@@ -19,7 +19,7 @@ async function activeRobot(tools: string[]): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools, skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools, skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -100,7 +100,7 @@ describe('the Workspace (robot-scwl, robot-om9f)', () => {
     expect(toolResults(id)[0]).toContain('1: Invoice 42: 99 PLN')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
     expect(conversation.items.at(-3)).toMatchObject({ kind: 'message', text: 'what is this?', attachments: [{ name: 'invoice.txt' }] })
-    expect(conversation.items.at(-2)).toMatchObject({ kind: 'activity', tools: ['read'] })
+    expect(conversation.items.at(-2)).toMatchObject({ kind: 'activity', tools: ['code', 'read'] })
   })
 
   it('tells the owner when it changes SOUL.md (robot-h1nm)', async () => {

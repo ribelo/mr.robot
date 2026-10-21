@@ -114,7 +114,7 @@ describe('Connect Google (v1.5 ticket 02)', () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: [], skills: [], recipients: [], secrets: [], connections: [connection!.id] } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: [], skills: [], recipients: [], secrets: [], connections: [connection!.id] } } })
     await testRobot(body.id).activateForTest()
     await (env.MEMBER.getByName(annaId) as unknown as DurableObjectStub<TestMember>).expireConnectionsForTest()
     const before = connectorFixtures.calls.length

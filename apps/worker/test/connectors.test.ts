@@ -28,7 +28,7 @@ async function robotOf(as: string, grants: { tools?: string[]; connections?: str
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(as, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: grants.tools ?? [], skills: [], recipients: [], secrets: [], connections: grants.connections ?? [] } } })
+  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: grants.tools ?? [], skills: [], recipients: [], secrets: [], connections: grants.connections ?? [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -174,7 +174,6 @@ describe('connections (cn-qs78, cn-xezx, cn-bsge, cn-f6ux, cn-a1i0, cn-07jo)', (
     const gone = await addConnection(annaId, 'Gone', 'anna@gone.test', 'missing-token')
     const priv = await addConnection(annaId, 'Private', 'anna@private.test', 'token-private')
     const id = await robotOf(ANNA, { connections: [gone.id, priv.id] })
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: true } })
     const program = [
       'let caught = null',
       "try { await tools.fake_whoami({ account: 'Gone' }) } catch (error) { caught = { name: error.name, message: error.message } }",

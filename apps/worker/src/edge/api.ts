@@ -793,7 +793,8 @@ export const api = new Router<ApiContext>()
   .on('GET', '/api/robots/:id/catalog', (c, { id }) => owner(c, id).pipe(Effect.andThen(call(() => space(c.env).catalog(c.member.id, id)))))
   .on('PATCH', '/api/robots/:id/settings', (c, { id }) => Effect.gen(function* () {
     yield* owner(c, id)
-    const patch = yield* decodeBody(c.request, SettingsPatch)
+    // Strict (v1.22): a setting that no longer exists, such as codeMode, is refused rather than ignored.
+    const patch = yield* decodeBody(c.request, SettingsPatch, true)
     if (patch.model !== undefined) {
       // A Robot is never switched to a model its owner has no credential for (robot-mx6s).
       const chosen = patch.model

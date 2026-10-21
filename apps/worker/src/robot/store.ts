@@ -61,7 +61,6 @@ export interface RobotConfig {
   /** The model chain (v1.10); absent in Robots made before it: one entry on `model`. */
   readonly chain?: readonly ChainEntry[]
   readonly contextBudget: number
-  readonly codeMode: boolean
   /** Absent in Robots created before the setting existed: off. */
   readonly wakeOnScreenNotifications?: boolean
   /** Absent or null: the Space default backend. */

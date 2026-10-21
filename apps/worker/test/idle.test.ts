@@ -6,21 +6,13 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RobotSettings, RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { programmed, requests, scriptedProviders, scripts } from './stub-llm.ts'
+import { requests, scriptedProviders, scripts } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const MINUTE = 60_000
 
-/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
-const MODES = [['code mode', true], ['direct calls', false]] as const
-let codeMode = true
-
-afterEach(() => {
-  programmed.on = false
-})
 
 beforeEach(async () => {
-  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -35,7 +27,7 @@ async function staff(settings: Record<string, unknown> = {}): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] }, ...settings } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['files'], skills: [], recipients: [], secrets: [] }, ...settings } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -62,9 +54,8 @@ const settings = async (id: string) => (await api<{ settings: RobotSettings }>(A
 const events = (id: string) => env.ROBOT.getByName(id).trajectory()
 const compacted = async (id: string) => (await events(id)).some((event) => event.type === 'user/message' && JSON.stringify(event.data).includes('compact-checkpoint'))
 
-describe.each(MODES)('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er), %s', (_mode, code) => {
+describe('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f, ao-c3er)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it('defaults: Mr. Robot warms and compacts after the warmings (v1.20); another Robot compacts and does not warm; the floor is 20 000', async () => {
@@ -96,7 +87,7 @@ describe.each(MODES)('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f,
   it('warming replays the last request for one token at 54, 108 and 162 minutes on a one-hour cache', async () => {
     scriptedProviders.add('anthropic')
     const id = await mrRobot()
-    await env.ROBOT.getByName(id).updateSettings({ model: { provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'off' }, codeMode })
+    await env.ROBOT.getByName(id).updateSettings({ model: { provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'off' } })
     const start = Date.now()
     await say(id, 'what is on today?', { say: 'Your dentist at 3.' })
     const plan = await testRobot(id).idlePlanForTest()
@@ -163,7 +154,6 @@ describe.each(MODES)('idle plugins (ao-jlr0, ao-f4sp, ao-8hi8, ao-7bq9, ao-z22f,
     expect(await settings(id)).toMatchObject({ cacheWarming: true, idleCompaction: false, idleCompactionFloorTokens: 5000 })
 
     const chief = await mrRobot()
-    await env.ROBOT.getByName(chief).updateSettings({ codeMode })
     await say(chief, 'let it compact again', { calls: [{ name: 'robot_settings_set', args: { robot_id: id, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 30000 } }] }, { text: 'Done.' })
     expect(await settings(id)).toMatchObject({ cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 30000 })
   })

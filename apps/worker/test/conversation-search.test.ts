@@ -21,7 +21,6 @@ async function activeRobot(mode: 'fts5' | 'like'): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   await testRobot(body.id).activateForTest()
   if (mode === 'like') expect(await testRobot(body.id).searchWithoutFullTextForTest()).toBe('like')
   else expect(await testRobot(body.id).searchModeForTest()).toBe('fts5')

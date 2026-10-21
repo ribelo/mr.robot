@@ -20,7 +20,7 @@ async function shopper(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['browser'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['browser'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   browserLog.length = 0
   return body.id
@@ -52,7 +52,8 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
     expect(typed).toContain('value="••••"')
     expect(clicked).toContain('Hello, signed-in customer')
     expect(stale).toContain('call browser_observe')
-    expect(shot).toContain('Screenshot taken')
+    // A program receives the screenshot as its stored attachment.
+    expect(JSON.parse(shot!)).toMatchObject({ image: { attachmentId: expect.stringMatching(/^screen:/) } })
   })
 
   it('keeps the login across a crash and a new browser session, and closes the browser after each Turn', async () => {
@@ -110,7 +111,7 @@ describe('the browser (robot-l9te, robot-t0vc)', () => {
     await settle(id)
     const items = (await api<{ items: Array<{ kind: string; text?: string }> }>(ANNA, `/api/robots/${id}/conversation`)).body.items
     expect(items).toContainEqual(expect.objectContaining({ kind: 'notice', text: 'Notification on screen: Order 1042: Your parcel is out for delivery' }))
-    expect(items.at(-1)).toMatchObject({ kind: 'reply', text: 'Your parcel is on its way.' })
+    expect(items.filter((item) => item.kind !== 'activity').at(-1)).toMatchObject({ kind: 'reply', text: 'Your parcel is on its way.' })
     expect(browserLog).toContain('attach')
 
     await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { wakeOnScreenNotifications: false } })

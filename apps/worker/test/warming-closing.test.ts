@@ -6,21 +6,13 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RobotSummary } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { programmed, requests, scriptedProviders, scripts, type StubReply } from './stub-llm.ts'
+import { requests, scriptedProviders, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const MINUTE = 60_000
 
-/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
-const MODES = [['code mode', true], ['direct calls', false]] as const
-let codeMode = true
-
-afterEach(() => {
-  programmed.on = false
-})
 
 beforeEach(async () => {
-  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -30,7 +22,7 @@ beforeEach(async () => {
 
 async function mrRobot(): Promise<string> {
   const id = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((robot) => robot.kind === 'mr-robot')!.id
-  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { idleCompactionFloorTokens: 0, codeMode } })
+  await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { idleCompactionFloorTokens: 0 } })
   return id
 }
 
@@ -48,15 +40,14 @@ async function alarm(id: string): Promise<void> {
 const compactions = (id: string) => (requests.get(id) ?? []).filter((request) => request.purpose === 'compaction').length
 const chapters = async (id: string) => (await testRobot(id).chaptersForTest()).length
 
-describe.each(MODES)('warming, then closing (dm-2ilu, dm-zyxz), %s', (_mode, code) => {
+describe('warming, then closing (dm-2ilu, dm-zyxz)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it('Mr. Robot warms three times, then closes the chapter at 216 minutes; a Wake-up before cancels the plan', async () => {
     scriptedProviders.add('anthropic')
     const id = await mrRobot()
-    await env.ROBOT.getByName(id).updateSettings({ model: { provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'off' }, codeMode })
+    await env.ROBOT.getByName(id).updateSettings({ model: { provider: 'anthropic', model: 'claude-sonnet-4-5', effort: 'off' } })
     const start = Date.now()
     await say(id, 'what is on today?', { say: 'Your dentist at 3.' })
     const plan = await testRobot(id).idlePlanForTest()
@@ -84,9 +75,8 @@ describe.each(MODES)('warming, then closing (dm-2ilu, dm-zyxz), %s', (_mode, cod
   }, 60_000)
 })
 
-describe.each(MODES)('the dream-hour close (dm-76yv), %s', (_mode, code) => {
+describe('the dream-hour close (dm-76yv)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it('plans the next 03:00 in the Robot\'s zone, closes an open chapter then, and leaves a closed one alone', async () => {

@@ -45,9 +45,10 @@ export function withSpaceValues(value: unknown, key = ''): unknown {
   return value === 'home' && ['sharing', 'visibility', 'scope'].includes(key) ? 'space' : value
 }
 
-export function decodeBody<S extends Schema.Top>(request: Request, schema: S): Effect.Effect<S['Type'], ApiError, S['DecodingServices']> {
+/** strict: a key the schema does not name is refused, not dropped (a removed setting answers 400). */
+export function decodeBody<S extends Schema.Top>(request: Request, schema: S, strict = false): Effect.Effect<S['Type'], ApiError, S['DecodingServices']> {
   return Effect.tryPromise({ try: () => request.json(), catch: () => badRequest('expected a JSON body') }).pipe(
-    Effect.flatMap((body) => Schema.decodeUnknownEffect(schema)(withSpaceValues(body)).pipe(Effect.mapError((error) => badRequest(String(error))))),
+    Effect.flatMap((body) => Schema.decodeUnknownEffect(schema)(withSpaceValues(body), strict ? { onExcessProperty: 'error' } : {}).pipe(Effect.mapError((error) => badRequest(String(error))))),
   )
 }
 

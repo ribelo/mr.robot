@@ -101,22 +101,30 @@ function tailEvents(store: RobotStore, sessionId: string, from: number): Readonl
     .reverse().map((row) => JSON.parse(row.event) as { type: string; data: unknown })
 }
 
-/** The tool running now: the latest call without a result (a code program's latest inner call wins). */
+/**
+ * The tool running now: the latest call without a result. In a program, the latest inner call started and not settled wins, then the
+ * latest settled one.
+ */
 export function runningTool(events: ReadonlyArray<{ type: string; data: unknown }>): string | undefined {
   const open = new Map<string, string>()
+  const started = new Map<string, string>()
   let inner: string | undefined
   for (const event of events) {
     const data = event.data as Record<string, unknown>
     if (event.type === 'tool/call') open.set(String(data['callId']), String(data['name']))
-    else if (event.type === 'tool/ptc-dispatch') inner = String(data['name'])
-    else if (event.type === 'tool/result') {
+    else if (event.type === 'tool/ptc-dispatch-start') started.set(String(data['subCallId']), String(data['name']))
+    else if (event.type === 'tool/ptc-dispatch') {
+      started.delete(String(data['subCallId']))
+      inner = String(data['name'])
+    } else if (event.type === 'tool/result') {
+      started.clear()
       const message = data['message'] as { toolCallId?: string } | undefined
       open.delete(String(message?.toolCallId))
       inner = undefined
     }
   }
   const last = [...open.values()].at(-1)
-  return last === undefined ? undefined : last === 'run_code' ? (inner ?? 'code') : last
+  return last === undefined ? undefined : last === 'run_code' ? ([...started.values()].at(-1) ?? inner ?? 'code') : last
 }
 
 /** What a stored row shows now (v1.19): an Ask, a Thread and a Subagent read as they are. */
@@ -367,13 +375,27 @@ export const toolCalls = (request: ToolCallsRequest) => Effect.gen(function* () 
       ? (yield* logOf(found.sessionId)).filter((event) => event.seq >= from && event.seq <= to)
       : store.sql.exec<{ event: string }>('SELECT event FROM session_event WHERE session_id = ? AND seq BETWEEN ? AND ? ORDER BY seq', found.sessionId, from, to).toArray().map((row) => JSON.parse(row.event) as { seq: number; type: string; data: Record<string, unknown> })
     const started = new Map<string, { name: string; args: string }>()
+    const pretty = (raw: unknown) => {
+      const args = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {})
+      try { return JSON.stringify(JSON.parse(args), null, 2) } catch { return args }
+    }
+    const add = (detail: ToolCallDetail) => {
+      if (used + detail.args.length + detail.result.length > CALLS_TEXT_MAX) {
+        truncated = true
+        return false
+      }
+      used += detail.args.length + detail.result.length
+      calls.push(detail)
+      return true
+    }
     for (const event of events) {
       const data = event.data as Record<string, unknown>
-      if (event.type === 'tool/call' && wanted.has(String(data['callId']))) {
-        const raw = data['arguments']
-        let args = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {})
-        try { args = JSON.stringify(JSON.parse(args), null, 2) } catch { /* as written */ }
-        started.set(String(data['callId']), { name: String(data['name']), args })
+      if (event.type === 'tool/call' && wanted.has(String(data['callId']))) started.set(String(data['callId']), { name: String(data['name']), args: pretty(data['arguments']) })
+      // A call a program made (v1.22, code mode only): rendered in its program's card, as a direct call was.
+      if (event.type === 'tool/ptc-dispatch' && started.has(String(data['rootCallId']))) {
+        const detail: ToolCallDetail = { itemId: item.id, id: String(data['subCallId']), program: String(data['rootCallId']), name: String(data['name']), args: clipped(pretty(data['arguments'])), result: clipped(dispatchText(data['content'])), error: data['isError'] === true }
+        if (!add(detail)) break
+        continue
       }
       if (event.type !== 'tool/result') continue
       const message = data['message'] as { toolCallId?: string; isError?: boolean; content?: Array<{ type: string; text?: string }> } | undefined
@@ -383,16 +405,18 @@ export const toolCalls = (request: ToolCallsRequest) => Effect.gen(function* () 
       started.delete(id)
       const result = (message?.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('') || String((data['error'] as { message?: string } | undefined)?.message ?? '')
       const detail: ToolCallDetail = { itemId: item.id, id, name: call.name, args: clipped(call.args), result: clipped(result), error: message?.isError === true || data['error'] !== undefined }
-      if (used + detail.args.length + detail.result.length > CALLS_TEXT_MAX) {
-        truncated = true
-        break
-      }
-      used += detail.args.length + detail.result.length
-      calls.push(detail)
+      if (!add(detail)) break
     }
   }
   return { calls, truncated } as ToolCallDetails
 })
+
+/** The text of a program's call result as the log keeps it: content blocks, a string, or a value. */
+function dispatchText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map((block) => (typeof block === 'object' && block !== null && (block as { type?: unknown }).type === 'text' ? String((block as { text?: unknown }).text ?? '') : '')).join('')
+  return content === undefined ? '' : JSON.stringify(content)
+}
 
 /** Text search over the live Conversation, newest first, paged (cd-ggem); snippets are masked like the chat. */
 export const searchConversation = (query: string, page: number) => Effect.gen(function* () {

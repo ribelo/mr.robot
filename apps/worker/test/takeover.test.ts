@@ -42,7 +42,7 @@ async function shopperAtLogin(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, sharing: 'space', grants: { tools: ['browser'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { sharing: 'space', grants: { tools: ['browser'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   scripts.set(body.id, [
     { calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] },
@@ -178,7 +178,7 @@ describe('live view and takeover', () => {
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['browser'], skills: [], recipients: [], secrets: [] } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['browser'], skills: [], recipients: [], secrets: [] } } })
     await testRobot(body.id).activateForTest()
     scripts.set(body.id, [{ calls: [{ name: 'browser_open', args: { url: 'https://shop.test/login' } }] }, { text: 'Seen.' }])
     await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'look' } })

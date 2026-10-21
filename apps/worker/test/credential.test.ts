@@ -29,7 +29,7 @@ async function activeRobot(settings: Record<string, unknown> = {}): Promise<stri
   scripts.set('*', [{ text: '' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: ['secrets'], skills: [], recipients: [], secrets: [] }, ...settings } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: ['secrets'], skills: [], recipients: [], secrets: [] }, ...settings } })
   await testRobot(body.id).activateForTest()
   requests.delete(body.id)
   return body.id

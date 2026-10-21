@@ -18,7 +18,7 @@ async function robot(name: string, tools: string[] = ['files', 'tasks']): Promis
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, identity: { name }, grants: { tools, skills: [], recipients: [], secrets: [], hosts: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { identity: { name }, grants: { tools, skills: [], recipients: [], secrets: [], hosts: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }

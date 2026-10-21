@@ -21,7 +21,7 @@ async function robot(contextBudget: number): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, contextBudget, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { contextBudget, grants: { tools: ['files'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   await env.FILES.put(`robots/${body.id}/data/big.txt`, BIG)
   return body.id
@@ -53,7 +53,8 @@ describe('oversized tool results spill to the Workspace (ao-hf02, ao-5lzl, ao-an
     expect(seen).toContain('Full formatted result stored at: /workspace/spill/')
     expect(seen).toContain('Use read with offset/limit, or grep this path')
     const path = spilledPath(seen)!
-    expect(path).toMatch(/^spill\/[^/]+\/[^/]+-grep\.txt$/)
+    // The program that called grep returned its result: the spill is the program's.
+    expect(path).toMatch(/^spill\/[^/]+\/[^/]+-run_code\.txt$/)
 
     // The complete result is a Workspace file: read takes a line range of it, grep finds a line inside it.
     const whole = await env.FILES.get(`robots/${id}/${path}`)

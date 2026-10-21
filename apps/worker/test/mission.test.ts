@@ -21,7 +21,7 @@ async function activeRobot(as: string, name: string): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(as, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, identity: { name, title: '', description: '', avatarColor: '#f4a03a' } } })
+  await api(as, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { identity: { name, title: '', description: '', avatarColor: '#f4a03a' } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }

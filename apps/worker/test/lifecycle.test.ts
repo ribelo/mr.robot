@@ -48,7 +48,7 @@ describe('creating a Robot', () => {
     const list = await robots(ANNA)
     expect(list.find((robot) => robot.id === id)).toMatchObject({ status: 'setup', sharing: 'private' })
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'Hi! What should I do for you?' })
+    expect(conversation.items.filter((item) => item.kind !== 'activity').at(-1)).toMatchObject({ kind: 'reply', text: 'Hi! What should I do for you?' })
   })
 
   it('in setup may only ask, propose and write its own persona: no world-facing tools (robot-cobv)', async () => {
@@ -106,7 +106,7 @@ describe('sharing and lifecycle', () => {
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'Are you there?' } })
     await settle(id)
     let conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.at(-1)).toMatchObject({ kind: 'reply', text: 'Hi! What should I do for you?' })
+    expect(conversation.items.filter((item) => item.kind !== 'activity').at(-1)).toMatchObject({ kind: 'reply', text: 'Hi! What should I do for you?' })
     expect((await robots(ANNA)).find((robot) => robot.id === id)?.fleetState).toBe('paused')
 
     await api(ANNA, `/api/robots/${id}/resume`, { body: {} })

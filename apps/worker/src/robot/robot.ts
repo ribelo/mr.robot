@@ -617,7 +617,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
     sections.push({ name: 'Memory (first message of the context)', text: renderBaseline(await this.memoryFiles(), MEMORY_BYTES, sharedFileEdit(config.kind, config.status !== 'setup')) })
     return {
       sections: sections.map((section) => ({ ...section, text: this.mask(section.text) })),
-      tools: config.codeMode && config.status !== 'setup' ? ['run_code (code mode), calling:', ...this.toolNames()] : this.toolNames(),
+      tools: ['run_code (code mode), calling:', ...this.toolNames()],
       // The platform skills first (v1.15 ticket 12, gb-dzf6), then the Space skills granted.
       skills: config.status === 'setup' ? [] : [...(this.capabilityInput().platformSkills ?? []).map((skill) => `${skill.name} (platform): ${skill.description}`), ...usableNames(this.store.effectiveGrants().skills)],
     }
@@ -2247,7 +2247,7 @@ export class Robot extends DurableObject<Env> implements RobotHost, WorkspaceHos
       mounts,
       spill: { workspace: this.workspace, fileTools: this.workspaceUsable() },
       extraAdapters: await this.subagentAdapters(config),
-      ...(config.codeMode && config.status !== 'setup' ? { ptcRuntime: ptcPlugin(this.env.LOADER) } : {}),
+      ptcRuntime: ptcPlugin(this.env.LOADER),
     }))).catch(async (error: unknown) => {
       await Effect.runPromise(Scope.close(scope, Exit.void))
       throw error

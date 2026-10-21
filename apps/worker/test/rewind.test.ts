@@ -24,7 +24,6 @@ async function robotWithHistory(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   await testRobot(body.id).activateForTest()
   scripts.set(body.id, [
     { say: 'Noted: blue.' },
@@ -53,7 +52,7 @@ describe('the Trajectory and Rewind', () => {
     const id = await robotWithHistory()
     const { events } = await trajectory(id)
     expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index))
-    expect(events.some((event) => event.type === 'tool/call' && JSON.parse(event.data).name === 'react')).toBe(true)
+    expect(events.some((event) => event.type === 'tool/ptc-dispatch' && JSON.parse(event.data).name === 'react')).toBe(true)
   })
 
   it('rewinds in the live chapter: a new chapter of real history, no note in it, the label on the next Wake-up (ec-i74p, ec-utsf)', async () => {
@@ -118,7 +117,6 @@ describe('the Trajectory and Rewind', () => {
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     const id = body.id
     await settle(id)
-    await api(ANNA, `/api/robots/${id}/settings`, { method: 'PATCH', body: { codeMode: false } })
     await testRobot(id).activateForTest()
     scripts.set(id, [{ text: 'First answer.' }, { text: 'Second answer.' }, { text: 'Answer after the rewind.' }])
     await api(ANNA, `/api/robots/${id}/messages`, { body: { text: 'first question' } })

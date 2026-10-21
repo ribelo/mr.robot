@@ -20,7 +20,7 @@ import { BudgetedAdapter } from './budget.ts'
 import { compactionConfig, robotCompaction } from './compaction.ts'
 import { RobotWorkingDirectory } from './seams.ts'
 import { SqliteSessionLog } from './session-log.ts'
-import { fenced, isExternal } from './tools/external.ts'
+import { fenced, fenceText, isExternal } from './tools/external.ts'
 import type { StepFence } from './platform-step.ts'
 import type { Mount } from '../plugins/define.ts'
 import { maxInlineTokens, WorkspaceSpillStore, type WorkspaceSpillConfig } from '../workspace/spill.ts'
@@ -52,8 +52,8 @@ export interface CompositionInput {
   readonly prompt: ReadonlyArray<{ readonly name: string; readonly text: () => string }>
   /** The capability plugins its grants allow (pl-rsoy); nothing else registers tools (robot-f9ln). */
   readonly mounts: readonly Mount[]
-  /** Code mode (robot-5ewr): plugin that provides ctx.ptcRuntime, or undefined for direct tool calls. */
-  readonly ptcRuntime?: (ctx: Context) => Promise<void>
+  /** Code mode (robot-5ewr), the one mode (v1.22): the plugin that provides ctx.ptcRuntime. */
+  readonly ptcRuntime: (ctx: Context) => Promise<void>
   /** Every ordinary model request, as sent (cache warming replays the last one, ao-jlr0). */
   readonly onRequest?: (options: GenerateOptions) => void
   /** Where an oversized tool result is kept whole (ao-hf02); the inline budget follows the context budget. */
@@ -112,7 +112,9 @@ export async function compose(input: CompositionInput): Promise<Composition> {
     })
     // A tool registers through the gate of the mount being applied, also when a DSH plugin of its seams registers it.
     let gate: ((tool: ToolDefinition) => ToolDefinition) | undefined
-    await ctx.plugin(gatedToolRuntime(() => gate), {})
+    const external = new Set<string>()
+    await ctx.plugin(gatedToolRuntime(() => gate, external), {})
+    fenceProgramResults(ctx, external)
     // While a platform step runs, a call of a tool it does not allow is denied before the tool body (platform-step.ts).
     const fence = input.fence
     if (fence !== undefined) ctx.tools.guard((execution) => fence.refusal(execution.name, (execution.arguments ?? {}) as Readonly<Record<string, unknown>>))
@@ -125,7 +127,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
         gate = undefined
       }
     }
-    if (input.ptcRuntime !== undefined) await input.ptcRuntime(ctx)
+    await input.ptcRuntime(ctx)
     await ctx.plugin(WorkspaceSpillStore, input.spill)
     await ctx.plugin(SpillPolicy, { maxInlineTokens: maxInlineTokens(input.contextBudget) })
     await ctx.plugin(robotCompaction(input.compactionInstruction, input.onCompacted, input.beforeCompaction), compactionConfig(input.contextBudget, input.modelWindow))
@@ -145,7 +147,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
         // Literal text: a name or a file with "{{" in it must not be read as a DSH prompt variable.
         agentCtx.systemPrompt.section({ name: `robot:${section.name}`, order: index, interpolate: false, text: () => section.text() })
       }
-      if (input.ptcRuntime !== undefined) agentCtx.tools.presentAs('ptc')
+      agentCtx.tools.presentAs('ptc')
     }
     const exists = (await ctx.sessionPersistence.stat(id)) !== undefined
     // A chapter seeded by a compaction or a Rewind is stored whole before its first Turn (v1.19): it is resumed like any other.
@@ -162,7 +164,7 @@ export async function compose(input: CompositionInput): Promise<Composition> {
         }
         const deny = spec.deny.filter((name) => known.has(name))
         if (deny.length > 0) agentCtx.tools.restrict({ deny })
-        if (input.ptcRuntime !== undefined) agentCtx.tools.presentAs('ptc')
+        agentCtx.tools.presentAs('ptc')
       }
       const childId = SessionId(spec.sessionId)
       const made = resume
@@ -197,19 +199,46 @@ export async function compose(input: CompositionInput): Promise<Composition> {
  * (external.ts), then the gate current at that moment wraps it (the ask-per-call wrapper of the mount being applied, sk-hx8j).
  * Registrations outside a mount get no gate.
  */
-function gatedToolRuntime(current: () => ((tool: ToolDefinition) => ToolDefinition) | undefined): typeof ToolRuntime {
+function gatedToolRuntime(current: () => ((tool: ToolDefinition) => ToolDefinition) | undefined, external: Set<string>): typeof ToolRuntime {
   return class GatedToolRuntime extends ToolRuntime {
     override register(definition: ToolDefinition): () => void {
+      if (isExternal(definition)) external.add(definition.name)
       const base = isExternal(definition) ? fenced(definition) : definition
       return super.register(current()?.(base) ?? base)
     }
   }
 }
 
+interface PostExecution { readonly name: string; readonly callId: string; readonly rootCallId?: string; readonly parent?: unknown }
+interface PostResult { readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }> }
+type PostDecision = { readonly kind: string; readonly content?: PostResult['content'] }
+
+/**
+ * The external fence in a program (v1.22, code mode is the only mode): a program receives an external tool's value, not its fenced
+ * text, and may return any part of it. So the text result of a program that called an external tool is fenced whole, its source
+ * naming the external tools it called; a closing marker inside is made harmless as for a single call.
+ */
+function fenceProgramResults(ctx: Context, external: ReadonlySet<string>): void {
+  const called = new Map<string, Set<string>>()
+  const on = ctx.on.bind(ctx) as unknown as (event: string, listener: (exec: PostExecution, result: PostResult, next: () => Promise<PostDecision>) => Promise<PostDecision>) => void
+  on('tools/post-execute', async (exec, result, next) => {
+    const decision = await next()
+    if (exec.parent !== undefined) {
+      if (external.has(exec.name) && exec.rootCallId !== undefined) called.set(exec.rootCallId, new Set([...(called.get(exec.rootCallId) ?? []), exec.name]))
+      return decision
+    }
+    const sources = called.get(exec.callId)
+    called.delete(exec.callId)
+    if (sources === undefined || decision.kind === 'block') return decision
+    const content = decision.content ?? result.content ?? []
+    return { ...decision, content: content.map((block) => (block.type === 'text' ? { ...block, text: fenceText([...sources].sort().join(','), block.text ?? '') } : block)) }
+  })
+}
+
 /**
  * The prompt allow-list (v1.11, sk-9ekj, sk-xs60): only sections the product wrote are rendered. These are
  * the Robot's own sections (robot:*), the rules of its capability plugins (mr-robot:*, plugins/define.ts)
- * and, in code mode, DSH's statement that only run_code is called and the SDK it declares. Every other
+ * and DSH's statement that only run_code is called and the SDK it declares. Every other
  * section a DSH plugin registers ("not shell commands like cat", the schedule plugin's text) is dropped.
  */
 function isProductSection(name: string): boolean {

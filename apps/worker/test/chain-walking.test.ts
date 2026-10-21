@@ -53,7 +53,7 @@ async function chainRobot(): Promise<{ id: string; first: string; second: string
   await settle(body.id)
   await testRobot(body.id).activateForTest()
   const entry = (account: string) => ({ account, owner: anna.id, provider: 'openrouter', model: 'z/model-a', effort: 'off' })
-  expect((await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, chain: [entry(first), entry(second)] } })).status).toBe(200)
+  expect((await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { chain: [entry(first), entry(second)] } })).status).toBe(200)
   return { id: body.id, first, second, anna }
 }
 

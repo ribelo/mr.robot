@@ -62,10 +62,12 @@ function title(call: ToolCallView): string {
   return `${label}${detail.length > 80 ? detail.slice(0, 80) + '…' : detail}${call.name === 'copy' && !call.error ? copyTook(call.result) : ''}${call.error ? ' (failed)' : ''}`
 }
 
-function ToolCard({ call, initiallyOpen, detail, code }: { call: ToolCallView; initiallyOpen: boolean; detail?: ToolCallDetail | undefined; code: boolean }) {
+function ToolCard({ call, initiallyOpen, detail, made, code }: { call: ToolCallView; initiallyOpen: boolean; detail?: ToolCallDetail | undefined; made: readonly ToolCallDetail[]; code: boolean }) {
   const [open, setOpen] = useState(initiallyOpen)
   // At Code (cw-sc3z) the call reads as code: the full call from the log when it came, else the clipped one, through the shared renderers.
-  const rendered = code ? codeCall(detail ?? call) : null
+  // A program's card shows the calls it made, each through its renderer, when any of them has one (v1.22).
+  const inner = code ? made.flatMap((entry) => { const shown = codeCall(entry); return shown === null ? [] : [<div key={entry.id} className="code-call-inner">{shown}</div>] }) : []
+  const rendered = inner.length > 0 ? <>{inner}</> : code ? codeCall(detail ?? call) : null
   return (
     <DisclosureRow className="tool-card" icon={toolIcon(call.name)} title={title(call)} open={open} expandable expandOnRowClick previewChevron onToggle={() => setOpen(!open)}>
       {rendered !== null ? <div className="tool-card-body">{rendered}</div> : <div className="tool-card-body">
@@ -83,7 +85,8 @@ function ToolCard({ call, initiallyOpen, detail, code }: { call: ToolCallView; i
 
 /** One step's tool calls as DSH tool cards (Standard: collapsed; Verbose and Code: open) (pl-etps, cw-sc3z). */
 export function ToolCards({ calls, level, details }: { calls: readonly ToolCallView[]; level: WorkDetails; details?: ReadonlyMap<string, ToolCallDetail> | undefined }) {
-  return <div className="tool-cards">{calls.map((call) => <ToolCard key={call.id} call={call} initiallyOpen={level === 'verbose' || level === 'code'} code={level === 'code'} detail={details?.get(call.id)} />)}</div>
+  const made = (program: string) => [...(details?.values() ?? [])].filter((detail) => detail.program === program)
+  return <div className="tool-cards">{calls.map((call) => <ToolCard key={call.id} call={call} initiallyOpen={level === 'verbose' || level === 'code'} code={level === 'code'} detail={details?.get(call.id)} made={call.name === 'run_code' ? made(call.id) : []} />)}</div>
 }
 
 /** The model's thinking, as the DSH conversation's Think row: collapsed at Detailed, open at Verbose. */

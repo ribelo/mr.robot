@@ -541,7 +541,6 @@ export const RobotSettings = Schema.Struct({
   /** The ordered model chain (pa-mho0); `model` is its active entry. */
   chain: Schema.Array(ChainEntry),
   contextBudget: Schema.Number,
-  codeMode: Schema.Boolean,
   compactionInstruction: Schema.String,
   grants: GrantSet,
   notifications: NotificationSettings,
@@ -604,7 +603,6 @@ export const DeputySettingsPatch = Schema.Struct({
   model: Schema.optional(Schema.Struct({ provider: Schema.String, model: Schema.String })),
   chain: Schema.optional(Schema.Array(ChainEntry)),
   thinking: Schema.optional(ThinkingEffort),
-  codeMode: Schema.optional(Schema.Boolean),
   contextBudget: Schema.optional(Schema.Number),
   compactionInstruction: Schema.optional(Schema.String),
   discordChannel: Schema.optional(Schema.NullOr(Schema.String)),
@@ -632,7 +630,6 @@ export const SettingsPatch = Schema.Struct({
   model: Schema.optional(ModelChoice),
   chain: Schema.optional(Schema.Array(ChainEntry)),
   contextBudget: Schema.optional(Schema.Number),
-  codeMode: Schema.optional(Schema.Boolean),
   wakeOnScreenNotifications: Schema.optional(Schema.Boolean),
   browserBackend: Schema.optional(Schema.NullOr(BrowserBackend)),
   compactionInstruction: Schema.optional(Schema.String),
@@ -1286,7 +1283,11 @@ export const ToolCallView = Schema.Struct({
 export type ToolCallView = typeof ToolCallView.Type
 
 /** One call read in full from the chapter log for the Code view (v1.21, cw-sc3z): its arguments' JSON and the result's text, masked. */
-export const ToolCallDetail = Schema.Struct({ itemId: Schema.String, id: Schema.String, name: Schema.String, args: Schema.String, result: Schema.String, error: Schema.Boolean })
+export const ToolCallDetail = Schema.Struct({
+  itemId: Schema.String, id: Schema.String, name: Schema.String, args: Schema.String, result: Schema.String, error: Schema.Boolean,
+  /** v1.22: a call a program made, by the program's call id; the Code view renders it inside that program's card. */
+  program: Schema.optional(Schema.String),
+})
 export type ToolCallDetail = typeof ToolCallDetail.Type
 
 /** The page's calls the Code view asks for: each activity item with the calls it shows. */

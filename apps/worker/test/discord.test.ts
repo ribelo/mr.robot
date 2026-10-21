@@ -255,7 +255,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: [], skills: [], recipients: [], secrets: [], connections: [bot.body.id] } } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: [], skills: [], recipients: [], secrets: [], connections: [bot.body.id] } } })
     await testRobot(body.id).activateForTest()
     scripts.set(body.id, [{ calls: [{ name: 'discord_accounts', args: {} }] }, { text: 'Listed.' }])
     await api(ANNA, `/api/robots/${body.id}/messages`, { body: { text: 'which bot do you use?' } })
@@ -278,7 +278,7 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     scripts.set('*', [{ text: 'Hello.' }])
     const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
     await settle(body.id)
-    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, discordChannel: 'C-robot', grants: notifyGrant, notifications: { enabled: true, members: [], channels: ['pwa'] }, ...settings } })
+    await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { discordChannel: 'C-robot', grants: notifyGrant, notifications: { enabled: true, members: [], channels: ['pwa'] }, ...settings } })
     await testRobot(body.id).activateForTest()
     connectorFixtures.calls = []
     return body.id
@@ -376,7 +376,6 @@ describe('Discord as a channel of Mr. Robot (cn-csae, cn-65gg, cn-y1ac)', () => 
     const robots = (await api<Array<{ id: string; kind: string }>>(ANNA, '/api/robots')).body
     const mrRobot = robots.find((robot) => robot.kind === 'mr-robot')!.id
     expect((await api<RobotPanel>(ANNA, `/api/robots/${mrRobot}/panel`)).body.settings.discordChannel).toBeNull()
-    await api(ANNA, `/api/robots/${mrRobot}/settings`, { method: 'PATCH', body: { codeMode: false } })
     scripts.set(mrRobot, [{ say: 'Hi Anna, on it.' }])
     expect(await env.SPACE.getByName('space').discordReceived({ id: 'M-dm', channelId: 'D-anna', guildId: null, authorId: 'U-anna', authorName: 'Anna', text: 'hello from my phone', direct: true }, annaId)).toBe(mrRobot)
     await settle(mrRobot)

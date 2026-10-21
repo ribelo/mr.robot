@@ -7,21 +7,13 @@ import { env, reset, runDurableObjectAlarm } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Conversation, FileHistoryView, Trajectory } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
+import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const NOTE = 'Compaction is about to replace your context with a summary.'
 
-/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
-const MODES = [['code mode', true], ['direct calls', false]] as const
-let codeMode = true
-
-afterEach(() => {
-  programmed.on = false
-})
 
 beforeEach(async () => {
-  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -33,7 +25,7 @@ async function staff(settings: Record<string, unknown> = {}): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, ...settings, grants: { tools: ['files', 'box'], skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { ...settings, grants: { tools: ['files', 'box'], skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -51,9 +43,8 @@ const allEvents = async (id: string) => {
   return [...older.flat(), ...live.events]
 }
 
-describe.each(MODES)('the snapshot in a Turn, %s (dm-kg1p, dm-77dg, dm-r6km, dm-pifl)', (_mode, code) => {
+describe('the snapshot in a Turn (dm-kg1p, dm-77dg, dm-r6km, dm-pifl)', () => {
   beforeEach(() => {
-    codeMode = code
   })
   it('runs three steps with the Workspace file tools only before a mid-Turn compaction, then the compaction and the Turn go on', async () => {
     const id = await staff({ contextBudget: 8000 })
@@ -96,9 +87,8 @@ describe.each(MODES)('the snapshot in a Turn, %s (dm-kg1p, dm-77dg, dm-r6km, dm-
   }, 60_000)
 })
 
-describe.each(MODES)('the snapshot hands the Turn back, %s (v1.20.1)', (_mode, code) => {
+describe('the snapshot hands the Turn back (v1.20.1)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it('a Turn that ends inside its snapshot says through the safety net, and the compaction follows the snapshot', async () => {
@@ -123,9 +113,8 @@ describe.each(MODES)('the snapshot hands the Turn back, %s (v1.20.1)', (_mode, c
   }, 60_000)
 })
 
-describe.each(MODES)('the snapshot while idle, %s (dm-kg1p, dm-tjlb)', (_mode, code) => {
+describe('the snapshot while idle (dm-kg1p, dm-tjlb)', () => {
   beforeEach(() => {
-    codeMode = code
   })
   async function idleMoment(id: string): Promise<void> {
     await testRobot(id).idleDueForTest()

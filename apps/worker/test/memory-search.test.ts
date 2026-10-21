@@ -6,21 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { FileHistoryView } from '@mr-robot/protocol'
 import { api, settle, stubModels, testRobot } from './api.ts'
-import { programmed, requests, scripts, type StubReply } from './stub-llm.ts'
+import { requests, scripts, type StubReply } from './stub-llm.ts'
 
 const ANNA = 'anna@example.com'
 const STUB = { provider: 'stub', model: 'stub' }
 
-/** Every v1.20 test runs in code mode first, then with direct tool calls (v1.20.1). */
-const MODES = [['code mode', true], ['direct calls', false]] as const
-let codeMode = true
-
-afterEach(() => {
-  programmed.on = false
-})
 
 beforeEach(async () => {
-  programmed.on = true
   await reset()
   scripts.clear()
   requests.clear()
@@ -32,7 +24,7 @@ async function staff(tools: Record<string, string> = {}): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode, grants: { tools: { files: 'allow', ...tools }, skills: [], recipients: [], secrets: [] }, subagentModels: [STUB] } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow', ...tools }, skills: [], recipients: [], secrets: [] }, subagentModels: [STUB] } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -56,9 +48,8 @@ async function search(id: string, query: string): Promise<Match[]> {
   return (Array.isArray(parsed) ? parsed[0]! : parsed).matches
 }
 
-describe.each(MODES)('daily notes leave the context (dm-cl1p, dm-vh11), %s', (_mode, code) => {
+describe('daily notes leave the context (dm-cl1p, dm-vh11)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it('keeps the notes out of the memory message and tells the Robot to search', async () => {
@@ -75,9 +66,8 @@ describe.each(MODES)('daily notes leave the context (dm-cl1p, dm-vh11), %s', (_m
   })
 })
 
-describe.each(MODES)('memory_search (dm-hmet, dm-yn3q), %s', (_mode, code) => {
+describe('memory_search (dm-hmet, dm-yn3q)', () => {
   beforeEach(() => {
-    codeMode = code
   })
 
   it('ranks paragraphs over the indexed set with path, lines, date and snippet, and follows every writer', async () => {

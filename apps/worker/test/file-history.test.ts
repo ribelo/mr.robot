@@ -23,7 +23,7 @@ async function robot(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false, grants: { tools: { files: 'allow' }, skills: [], recipients: [], secrets: [] } } })
+  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { grants: { tools: { files: 'allow' }, skills: [], recipients: [], secrets: [] } } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -85,7 +85,6 @@ describe('file history of Member files (rm-d68k, rm-cvl8)', () => {
     const id = await robot()
     await api(ANNA, '/api/me/files/USER.md', { method: 'PUT', body: { content: '# USER.md\nCall me Anna.' } })
     const mr = (await api<RobotSummary[]>(ANNA, '/api/robots')).body.find((entry) => entry.kind === 'mr-robot')!.id
-    await api(ANNA, `/api/robots/${mr}/settings`, { method: 'PATCH', body: { codeMode: false } })
     await turn(mr, 'remember coffee', [{ calls: [{ name: 'memory_write_shared', args: { file: 'USER.md', content: '# USER.md\nLikes coffee.' } }] }, { say: 'Saved.' }])
     const listed = (await api<FileHistoryView>(ANNA, '/api/me/files/USER.md/history')).body
     expect(listed.current?.by).toBe('Mr. Robot')

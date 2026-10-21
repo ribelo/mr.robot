@@ -18,7 +18,7 @@ const panel = (workspace: RobotPanel['settings']['workspace'] = null): RobotPane
   summary: { id: 'r-1', ownerId: 'm-1', ownerName: 'Anna', kind: 'robot', sharing: 'private', status: 'active', fleetState: 'sleeping', turn: null, lastWakeup: null, identity, lastLine: '', lastAt: 0, unread: false },
   settings: {
     identity, sharing: 'private', model: { provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }, chain: [{ account: '', owner: '', provider: 'deepseek', model: 'deepseek-flash', effort: 'high' }], contextBudget: 128000,
-    codeMode: true, wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: { ...emptyGrants, hosts: { 'h-desk:files': 'allow' } },
+    wakeOnScreenNotifications: false, browserBackend: null, compactionInstruction: '', grants: { ...emptyGrants, hosts: { 'h-desk:files': 'allow' } },
     notifications: { enabled: true, members: [], channels: ['pwa'] }, spendLimit: { kind: 'space' }, spaceSpendLimit: { kind: 'none' }, discordChannel: null, discordProactive: true, cacheWarming: false, idleCompaction: true, idleCompactionFloorTokens: 20000, autoReview: false, reviewer: null, spaceReviewer: null, subagentModels: [],
     workspace,
   },

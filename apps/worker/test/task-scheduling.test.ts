@@ -21,7 +21,6 @@ async function activeRobot(): Promise<string> {
   scripts.set('*', [{ text: 'Hello.' }])
   const { body } = await api<{ id: string }>(ANNA, '/api/robots', { body: {} })
   await settle(body.id)
-  await api(ANNA, `/api/robots/${body.id}/settings`, { method: 'PATCH', body: { codeMode: false } })
   await testRobot(body.id).activateForTest()
   return body.id
 }
@@ -48,7 +47,7 @@ describe('The Space fires Tasks; the Robot keeps one moment (v1.13 ticket 02)', 
     expect(last).toContain(`Task \\"Send the report\\" (${task.id}) is due`)
     expect(last).toContain('Mail the weekly report to Anna.')
     const conversation = (await api<Conversation>(ANNA, `/api/robots/${id}/conversation`)).body
-    expect(conversation.items.slice(-2)).toEqual([
+    expect(conversation.items.filter((item) => item.kind !== 'activity').slice(-2)).toEqual([
       expect.objectContaining({ kind: 'task', action: 'ran', taskId: task.id, title: 'Send the report' }),
       expect.objectContaining({ kind: 'reply', text: 'Report sent.' }),
     ])

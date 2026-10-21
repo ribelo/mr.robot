@@ -93,7 +93,7 @@ export interface ChatFold {
   /** Tool calls whose result has not come yet. */
   readonly calls: Readonly<Record<string, { readonly name: string; readonly args: Record<string, unknown> }>>
   /** Code mode: the inner calls of a program whose result has not come yet. */
-  readonly inner: Readonly<Record<string, ReadonlyArray<{ readonly name: string; readonly args: Record<string, unknown> }>>>
+  readonly inner: Readonly<Record<string, ReadonlyArray<{ readonly name: string; readonly args: Record<string, unknown>; /** v1.22: the id and title its result named (a Task it created). */ readonly made?: { readonly id?: string; readonly title?: string } }>>>
   /** The owner's last message, which a react marks. */
   readonly lastMember: number | null
   /** The last row Compact shows, and the last row Standard and above show: a step's activity merges into it. */
@@ -245,7 +245,7 @@ export function foldEvent(start: ChatFold, event: SessionEvent, rows: ChatRows, 
     case 'tool/ptc-dispatch': {
       // Code mode: the program's inner calls, shown once the program succeeds.
       const root = String(data['rootCallId'])
-      fold = { ...fold, inner: { ...fold.inner, [root]: [...(fold.inner[root] ?? []), { name: String(data['name']), args: (data['arguments'] ?? {}) as Record<string, unknown> }] } }
+      fold = { ...fold, inner: { ...fold.inner, [root]: [...(fold.inner[root] ?? []), { name: String(data['name']), args: (data['arguments'] ?? {}) as Record<string, unknown>, ...madeBy(data) }] } }
       break
     }
     case 'tool/result': {
@@ -283,7 +283,7 @@ export function foldEvent(start: ChatFold, event: SessionEvent, rows: ChatRows, 
         const innerTask = taskAction(entry.name, entry.args)
         const innerAction = routineAction(entry.name, entry.args)
         if (innerTask !== undefined) {
-          put({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerTask, taskId: typeof entry.args['task_id'] === 'string' ? entry.args['task_id'] : null, title: String(entry.args['title'] ?? 'a Task') })
+          put({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerTask, taskId: typeof entry.args['task_id'] === 'string' ? entry.args['task_id'] : entry.made?.id ?? null, title: String(entry.args['title'] ?? entry.made?.title ?? 'a Task') })
         } else if (innerAction !== undefined) {
           put({ kind: 'task', id: message.id + '-' + String(index), seq: event.seq, at: event.time, action: innerAction, taskId: typeof entry.args['id'] === 'string' ? entry.args['id'] : null, title: String(entry.args['title'] ?? entry.args['name'] ?? 'a Task') })
         } else if (entry.name === 'react') react(String(entry.args['emoji'] ?? '👍'))
@@ -483,6 +483,15 @@ function parseArgs(value: unknown): Record<string, unknown> {
 
 function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text
+}
+
+/** What a program's call made, read from its logged result: an id and a title (a Task the program created gets its card's link). */
+function madeBy(data: Record<string, unknown>): { made?: { id?: string; title?: string } } {
+  if (data['isError'] === true) return {}
+  const content = data['content']
+  const result = parseResult({ id: '', content: (Array.isArray(content) ? content : typeof content === 'string' ? [{ type: 'text', text: content }] : []) as readonly ContentBlock[] })
+  const made = { ...(typeof result['id'] === 'string' ? { id: result['id'] } : {}), ...(typeof result['title'] === 'string' ? { title: result['title'] } : {}) }
+  return Object.keys(made).length === 0 ? {} : { made }
 }
 
 function parseResult(message: MessageLike): Record<string, unknown> {
